@@ -24,7 +24,7 @@ use ratatui::backend::CrosstermBackend;
 
 use crate::app::{App, AppEffect};
 use crate::git::Repository;
-use crate::git::worker::GitWorker;
+use crate::git::worker::{GitWorker, SendOutcome};
 use crate::watch::RepoWatcher;
 
 #[derive(Debug, Parser)]
@@ -128,9 +128,31 @@ fn dispatch_effects(worker: &GitWorker, effects: Vec<AppEffect>) -> bool {
     let mut running = true;
     for effect in effects {
         match effect {
-            AppEffect::Git(command) => {
-                let _ = worker.try_send(*command);
-            }
+            AppEffect::Git(command) => match worker.try_send(*command) {
+                SendOutcome::Queued => {}
+                SendOutcome::Full(command) => {
+                    // Never silently drop a destructive or user-requested mutation.
+                    // The queue is small and this path is exceptional, so a blocking
+                    // retry is preferable to presenting an operation that never ran.
+                    if matches!(*command, crate::git::worker::WorkerCommand::Operate { .. }) {
+                        let mut pending = *command;
+                        loop {
+                            match worker.try_send(pending) {
+                                SendOutcome::Queued => break,
+                                SendOutcome::Full(command) => {
+                                    pending = *command;
+                                    std::thread::sleep(Duration::from_millis(2));
+                                }
+                                SendOutcome::Disconnected => {
+                                    running = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                SendOutcome::Disconnected => running = false,
+            },
             AppEffect::Quit => running = false,
         }
     }
