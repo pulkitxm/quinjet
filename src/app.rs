@@ -300,6 +300,7 @@ pub enum PaletteCommand {
     StashPop,
     Branches,
     ToggleDiffLayout,
+    ToggleAllFiles,
     ShowChanges,
     ShowHistory,
     Help,
@@ -307,7 +308,7 @@ pub enum PaletteCommand {
 }
 
 impl PaletteCommand {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::Refresh,
         Self::StageAll,
         Self::UnstageAll,
@@ -321,6 +322,7 @@ impl PaletteCommand {
         Self::StashPop,
         Self::Branches,
         Self::ToggleDiffLayout,
+        Self::ToggleAllFiles,
         Self::ShowChanges,
         Self::ShowHistory,
         Self::Help,
@@ -342,6 +344,7 @@ impl PaletteCommand {
             Self::StashPop => "Pop Latest Stash",
             Self::Branches => "Switch Branch…",
             Self::ToggleDiffLayout => "Toggle Unified / Side-by-Side Diff",
+            Self::ToggleAllFiles => "Collapse / Expand All Files",
             Self::ShowChanges => "Show Changes",
             Self::ShowHistory => "Show Commit History",
             Self::Help => "Keyboard Shortcuts",
@@ -352,8 +355,21 @@ impl PaletteCommand {
 
 #[derive(Debug, Clone)]
 pub enum SidebarHit {
+    ChangeGroup(ChangeArea),
     Change(usize),
     Commit(usize),
+}
+
+#[derive(Debug, Clone)]
+pub struct ContentFileHit {
+    pub area: Rect,
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChangeTarget {
+    Group(ChangeArea),
+    Change(usize),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -366,6 +382,7 @@ pub struct UiGeometry {
     pub content: Rect,
     pub diff_divider: Option<Rect>,
     pub sidebar_hits: Vec<(u16, SidebarHit)>,
+    pub content_file_hits: Vec<ContentFileHit>,
 }
 
 #[derive(Debug)]
@@ -383,14 +400,20 @@ pub struct App {
     pub status: RepoStatus,
     pub history: Vec<Commit>,
     pub document: DiffDocument,
+    pub selected_change_group: Option<ChangeArea>,
+    pub selected_preview_file: Option<PathBuf>,
+    pub preview_file_cursor: usize,
+    pub collapsed_preview_files: std::collections::HashSet<PathBuf>,
     pub change_cursor: usize,
     pub history_cursor: usize,
     pub sidebar_offset: usize,
     pub content_scroll: usize,
     pub horizontal_scroll: usize,
     pub sidebar_width: u16,
+    pub sidebar_hidden: bool,
     pub diff_split_percent: u16,
     pub expanded_diff: bool,
+    pub files_collapsed: bool,
     pub resize_target: Option<ResizeTarget>,
     pub filter: String,
     pub modal: Option<Modal>,
@@ -423,14 +446,20 @@ impl App {
             status: RepoStatus::default(),
             history: Vec::new(),
             document: DiffDocument::empty("Working Tree", "Loading changes…"),
+            selected_change_group: Some(ChangeArea::Unstaged),
+            selected_preview_file: None,
+            preview_file_cursor: 0,
+            collapsed_preview_files: std::collections::HashSet::new(),
             change_cursor: 0,
             history_cursor: 0,
             sidebar_offset: 0,
             content_scroll: 0,
             horizontal_scroll: 0,
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
+            sidebar_hidden: false,
             diff_split_percent: DEFAULT_DIFF_SPLIT_PERCENT,
             expanded_diff: false,
+            files_collapsed: false,
             resize_target: None,
             filter: String::new(),
             modal: None,
@@ -499,6 +528,125 @@ impl App {
             .and_then(|index| self.status.changes.get(*index))
     }
 
+    pub fn selected_group_changes(&self) -> Vec<Change> {
+        let Some(group) = self.selected_change_group else {
+            return Vec::new();
+        };
+        self.visible_change_indices()
+            .into_iter()
+            .filter_map(|index| self.status.changes.get(index))
+            .filter(|change| change.area == group)
+            .cloned()
+            .collect()
+    }
+
+    fn change_targets(&self) -> Vec<ChangeTarget> {
+        let visible = self.visible_change_indices();
+        let mut targets = Vec::new();
+        for area in [
+            ChangeArea::Conflict,
+            ChangeArea::Staged,
+            ChangeArea::Unstaged,
+        ] {
+            if visible
+                .iter()
+                .any(|index| self.status.changes[*index].area == area)
+            {
+                targets.push(ChangeTarget::Group(area));
+                targets.extend(
+                    visible
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, index)| self.status.changes[**index].area == area)
+                        .map(|(cursor, _)| ChangeTarget::Change(cursor)),
+                );
+            }
+        }
+        targets
+    }
+
+    fn selected_change_target(&self) -> Option<ChangeTarget> {
+        self.selected_change_group
+            .map(ChangeTarget::Group)
+            .or(Some(ChangeTarget::Change(self.change_cursor)))
+            .filter(|target| self.change_targets().contains(target))
+    }
+
+    pub fn preview_file_selected(&self, path: &str) -> bool {
+        self.selected_preview_file
+            .as_deref()
+            .is_some_and(|selected| selected.to_string_lossy() == path)
+    }
+
+    pub fn preview_file_collapsed(&self, path: &str) -> bool {
+        self.files_collapsed || self.collapsed_preview_files.contains(Path::new(path))
+    }
+
+    fn toggle_preview_file(&mut self, path: PathBuf) {
+        if self.files_collapsed {
+            self.files_collapsed = false;
+            self.collapsed_preview_files = self.preview_file_paths().into_iter().collect();
+        }
+        if !self.collapsed_preview_files.remove(&path) {
+            self.collapsed_preview_files.insert(path.clone());
+        }
+        self.selected_preview_file = Some(path.clone());
+        self.preview_file_cursor = self
+            .preview_file_paths()
+            .iter()
+            .position(|candidate| candidate == &path)
+            .unwrap_or_default();
+    }
+
+    fn preview_file_paths(&self) -> Vec<PathBuf> {
+        self.document
+            .lines
+            .iter()
+            .filter(|line| line.kind == DiffLineKind::FileHeader)
+            .filter_map(|line| line.spans.first())
+            .map(|span| PathBuf::from(span.text.split("  · ").next().unwrap_or(span.text.as_str())))
+            .collect()
+    }
+
+    fn navigate_preview_file(&mut self, amount: isize) {
+        let paths = self.preview_file_paths();
+        if paths.is_empty() {
+            return;
+        }
+        let current = self
+            .selected_preview_file
+            .as_ref()
+            .and_then(|selected| paths.iter().position(|path| path == selected))
+            .unwrap_or_else(|| self.preview_file_cursor.min(paths.len() - 1));
+        self.preview_file_cursor = if amount < 0 {
+            current.saturating_sub(amount.unsigned_abs())
+        } else {
+            (current + amount as usize).min(paths.len() - 1)
+        };
+        self.selected_preview_file = Some(paths[self.preview_file_cursor].clone());
+        if let Some(line_index) = self.document.lines.iter().position(|line| {
+            line.kind == DiffLineKind::FileHeader
+                && line.spans.first().is_some_and(|span| {
+                    span.text
+                        .split("  · ")
+                        .next()
+                        .is_some_and(|path| Path::new(path) == paths[self.preview_file_cursor])
+                })
+        }) {
+            self.content_scroll = line_index;
+        }
+    }
+
+    fn select_change_target(&mut self, target: ChangeTarget) {
+        match target {
+            ChangeTarget::Group(area) => self.selected_change_group = Some(area),
+            ChangeTarget::Change(cursor) => {
+                self.selected_change_group = None;
+                self.change_cursor = cursor;
+            }
+        }
+    }
+
     pub fn selected_commit(&self) -> Option<&Commit> {
         let visible = self.visible_commit_indices();
         visible
@@ -563,11 +711,8 @@ impl App {
             }
             KeyCode::Char('1') => self.switch_view(View::Changes),
             KeyCode::Char('2') => self.switch_view(View::History),
-            KeyCode::Tab | KeyCode::BackTab => {
-                self.focus = match self.focus {
-                    Focus::Sidebar => Focus::Content,
-                    Focus::Content => Focus::Sidebar,
-                };
+            KeyCode::Tab | KeyCode::BackTab if !self.sidebar_hidden => {
+                self.toggle_focus();
             }
             KeyCode::Char('r') => self.request_refresh(&mut effects),
             KeyCode::Char('/') => {
@@ -580,6 +725,11 @@ impl App {
                 });
             }
             KeyCode::Char('v') => self.toggle_diff_layout(),
+            KeyCode::Char('e') => {
+                self.files_collapsed = !self.files_collapsed;
+                self.collapsed_preview_files.clear();
+                self.content_scroll = 0;
+            }
             KeyCode::Char('t') | KeyCode::Char('T') => {
                 self.expanded_diff = !self.expanded_diff;
                 self.content_scroll = 0;
@@ -598,13 +748,21 @@ impl App {
             KeyCode::Char('U') if self.view == View::Changes => {
                 self.queue_operation(GitOperation::UnstageAll, &mut effects);
             }
-            KeyCode::Char('s') | KeyCode::Char(' ') if self.view == View::Changes => {
+            KeyCode::Char('s') | KeyCode::Char(' ')
+                if self.view == View::Changes && self.selected_change_group.is_none() =>
+            {
                 self.toggle_stage_selected(&mut effects);
             }
-            KeyCode::Char('u') if self.view == View::Changes => {
+            KeyCode::Char('u')
+                if self.view == View::Changes && self.selected_change_group.is_none() =>
+            {
                 self.unstage_selected(&mut effects);
             }
-            KeyCode::Char('x') if self.view == View::Changes => self.confirm_discard(),
+            KeyCode::Char('x')
+                if self.view == View::Changes && self.selected_change_group.is_none() =>
+            {
+                self.confirm_discard();
+            }
             KeyCode::Char('C') if self.view == View::History => self.confirm_cherry_pick(),
             KeyCode::Char('R') if self.view == View::History => self.confirm_revert(),
             KeyCode::Char('n') if self.view == View::History => self.prompt_branch_at_commit(),
@@ -614,7 +772,7 @@ impl App {
                 self.queue_operation(GitOperation::Pull, &mut effects);
             }
             KeyCode::Char('y') => self.queue_operation(GitOperation::Sync, &mut effects),
-            KeyCode::Enter => self.focus = Focus::Content,
+            KeyCode::Enter if !self.sidebar_hidden => self.toggle_focus(),
             KeyCode::Esc => {
                 if !self.filter.is_empty() {
                     self.filter.clear();
@@ -642,6 +800,15 @@ impl App {
                 }
             }
             KeyCode::Char('G') => self.go_to_edge(true, now),
+            KeyCode::Char('z') => {
+                self.sidebar_hidden = !self.sidebar_hidden;
+                self.focus = if self.sidebar_hidden {
+                    Focus::Content
+                } else {
+                    Focus::Sidebar
+                };
+                self.resize_target = None;
+            }
             KeyCode::Char('[') => self.jump_hunk(false),
             KeyCode::Char(']') => self.jump_hunk(true),
             KeyCode::Left | KeyCode::Char('h') if self.focus == Focus::Content => {
@@ -714,12 +881,17 @@ impl App {
                         .cloned()
                     {
                         match hit {
+                            SidebarHit::ChangeGroup(group) => {
+                                self.selected_change_group = Some(group);
+                                self.schedule_preview(now);
+                            }
                             SidebarHit::Change(index) => {
                                 if let Some(cursor) = self
                                     .visible_change_indices()
                                     .iter()
                                     .position(|visible| *visible == index)
                                 {
+                                    self.selected_change_group = None;
                                     self.change_cursor = cursor;
                                     self.schedule_preview(now);
                                 }
@@ -742,6 +914,15 @@ impl App {
                     .contains((event.column, event.row).into())
                 {
                     self.focus = Focus::Content;
+                    if let Some(path) = self
+                        .geometry
+                        .content_file_hits
+                        .iter()
+                        .find(|hit| hit.area.contains((event.column, event.row).into()))
+                        .map(|hit| hit.path.clone())
+                    {
+                        self.toggle_preview_file(path);
+                    }
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) => match self.resize_target {
@@ -831,7 +1012,11 @@ impl App {
                 self.refreshing = false;
                 match result {
                     Ok(status) => {
-                        let selected = self.selected_change().cloned();
+                        let selected = self
+                            .selected_change_group
+                            .is_none()
+                            .then(|| self.selected_change().cloned())
+                            .flatten();
                         let branch_changed = self.status.branch.head != status.branch.head
                             || self.status.branch.oid != status.branch.oid;
                         self.status = status;
@@ -841,7 +1026,11 @@ impl App {
                             self.request_history(true, &mut effects);
                         }
                         if self.view == View::Changes {
-                            self.schedule_preview(now);
+                            // A status result is authoritative and already arrives off the UI
+                            // thread. Queue its preview immediately instead of adding another
+                            // debounce delay; navigation still uses debounced previews.
+                            self.preview_due = None;
+                            self.request_preview(&mut effects);
                         }
                     }
                     Err(error) => self.show_toast(error, ToastLevel::Error, now),
@@ -860,6 +1049,9 @@ impl App {
                 match result {
                     Ok(document) => {
                         self.document = document;
+                        self.selected_preview_file = None;
+                        self.preview_file_cursor = 0;
+                        self.collapsed_preview_files.clear();
                         self.content_scroll = 0;
                         self.horizontal_scroll = 0;
                     }
@@ -1183,6 +1375,11 @@ impl App {
             PaletteCommand::StashPop => self.queue_operation(GitOperation::StashPop, effects),
             PaletteCommand::Branches => self.open_branches(effects),
             PaletteCommand::ToggleDiffLayout => self.toggle_diff_layout(),
+            PaletteCommand::ToggleAllFiles => {
+                self.files_collapsed = !self.files_collapsed;
+                self.collapsed_preview_files.clear();
+                self.content_scroll = 0;
+            }
             PaletteCommand::ShowChanges => self.switch_view(View::Changes),
             PaletteCommand::ShowHistory => self.switch_view(View::History),
             PaletteCommand::Help => self.modal = Some(Modal::Help { scroll: 0 }),
@@ -1236,6 +1433,13 @@ impl App {
         self.schedule_preview(Instant::now());
     }
 
+    fn toggle_focus(&mut self) {
+        self.focus = match self.focus {
+            Focus::Sidebar => Focus::Content,
+            Focus::Content => Focus::Sidebar,
+        };
+    }
+
     fn toggle_diff_layout(&mut self) {
         self.diff_layout = match self.diff_layout {
             DiffLayout::Unified => DiffLayout::SideBySide,
@@ -1247,7 +1451,9 @@ impl App {
 
     fn navigate(&mut self, amount: isize, now: Instant) {
         if self.focus == Focus::Content {
-            if amount < 0 {
+            if self.files_collapsed {
+                self.navigate_preview_file(amount);
+            } else if amount < 0 {
                 self.content_scroll = self.content_scroll.saturating_sub(amount.unsigned_abs());
             } else {
                 self.content_scroll = self.content_scroll.saturating_add(amount as usize);
@@ -1255,23 +1461,35 @@ impl App {
             return;
         }
 
-        let length = match self.view {
-            View::Changes => self.visible_change_indices().len(),
-            View::History => self.visible_commit_indices().len(),
-        };
-        let cursor = match self.view {
-            View::Changes => &mut self.change_cursor,
-            View::History => &mut self.history_cursor,
-        };
-        if length == 0 {
-            *cursor = 0;
-            return;
-        }
-        *cursor = if amount < 0 {
-            cursor.saturating_sub(amount.unsigned_abs())
+        if self.view == View::Changes {
+            let targets = self.change_targets();
+            if targets.is_empty() {
+                self.selected_change_group = Some(ChangeArea::Unstaged);
+                self.change_cursor = 0;
+                return;
+            }
+            let current = self
+                .selected_change_target()
+                .and_then(|target| targets.iter().position(|candidate| *candidate == target))
+                .unwrap_or_default();
+            let next = if amount < 0 {
+                current.saturating_sub(amount.unsigned_abs())
+            } else {
+                (current + amount as usize).min(targets.len() - 1)
+            };
+            self.select_change_target(targets[next]);
         } else {
-            (*cursor + amount as usize).min(length - 1)
-        };
+            let length = self.visible_commit_indices().len();
+            if length == 0 {
+                self.history_cursor = 0;
+                return;
+            }
+            self.history_cursor = if amount < 0 {
+                self.history_cursor.saturating_sub(amount.unsigned_abs())
+            } else {
+                (self.history_cursor + amount as usize).min(length - 1)
+            };
+        }
         self.schedule_preview(now);
     }
 
@@ -1300,8 +1518,10 @@ impl App {
         }
         match self.view {
             View::Changes => {
-                let length = self.visible_change_indices().len();
-                self.change_cursor = if end { length.saturating_sub(1) } else { 0 };
+                let targets = self.change_targets();
+                if let Some(target) = if end { targets.last() } else { targets.first() } {
+                    self.select_change_target(*target);
+                }
             }
             View::History => {
                 let length = self.visible_commit_indices().len();
@@ -1346,6 +1566,9 @@ impl App {
     }
 
     fn toggle_stage_selected(&mut self, effects: &mut Vec<AppEffect>) {
+        if self.selected_change_group.is_some() {
+            return;
+        }
         let Some(change) = self.selected_change().cloned() else {
             return;
         };
@@ -1361,6 +1584,9 @@ impl App {
     }
 
     fn unstage_selected(&mut self, effects: &mut Vec<AppEffect>) {
+        if self.selected_change_group.is_some() {
+            return;
+        }
         let Some(change) = self.selected_change().cloned() else {
             return;
         };
@@ -1370,6 +1596,9 @@ impl App {
     }
 
     fn confirm_discard(&mut self) {
+        if self.selected_change_group.is_some() {
+            return;
+        }
         let Some(change) = self.selected_change().cloned() else {
             return;
         };
@@ -1484,14 +1713,12 @@ impl App {
         let generation = self.diff_generation;
         match self.view {
             View::Changes => {
-                if let Some(change) = self.selected_change().cloned() {
-                    self.document_loading = true;
-                    effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadDiff {
-                        generation,
-                        change,
-                        expanded: self.expanded_diff,
-                    })));
+                let changes = if self.selected_change_group.is_some() {
+                    self.selected_group_changes()
                 } else {
+                    self.selected_change().cloned().into_iter().collect()
+                };
+                if changes.is_empty() {
                     self.document_loading = false;
                     self.document = DiffDocument::empty(
                         "Working Tree",
@@ -1501,6 +1728,13 @@ impl App {
                             "No changes match the current filter"
                         },
                     );
+                } else {
+                    self.document_loading = true;
+                    effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadDiff {
+                        generation,
+                        changes,
+                        expanded: self.expanded_diff,
+                    })));
                 }
             }
             View::History => {
@@ -1508,7 +1742,7 @@ impl App {
                     self.document_loading = true;
                     effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadCommit {
                         generation,
-                        commit,
+                        commit: Box::new(commit),
                     })));
                     let visible_len = self.visible_commit_indices().len();
                     if self.history_cursor + 20 >= visible_len
@@ -1538,6 +1772,10 @@ impl App {
     }
 
     fn normalize_selection(&mut self) {
+        let targets = self.change_targets();
+        if !targets.is_empty() && self.selected_change_target().is_none() {
+            self.select_change_target(targets[0]);
+        }
         self.change_cursor = self
             .change_cursor
             .min(self.visible_change_indices().len().saturating_sub(1));
@@ -1549,15 +1787,28 @@ impl App {
 
     fn restore_change_selection(&mut self, selected: Option<&Change>) {
         let visible = self.visible_change_indices();
-        self.change_cursor = selected
-            .and_then(|selected| {
-                visible.iter().position(|index| {
-                    self.status.changes.get(*index).is_some_and(|change| {
-                        change.path == selected.path && change.area == selected.area
-                    })
+        if let Some(selected) = selected {
+            if let Some(cursor) = visible.iter().position(|index| {
+                self.status.changes.get(*index).is_some_and(|change| {
+                    change.path == selected.path && change.area == selected.area
                 })
-            })
-            .unwrap_or_else(|| self.change_cursor.min(visible.len().saturating_sub(1)));
+            }) {
+                self.selected_change_group = None;
+                self.change_cursor = cursor;
+                return;
+            }
+        }
+        if self.selected_change_target().is_none() {
+            if visible
+                .iter()
+                .any(|index| self.status.changes[*index].area == ChangeArea::Unstaged)
+            {
+                self.selected_change_group = Some(ChangeArea::Unstaged);
+            } else if let Some(target) = self.change_targets().first().copied() {
+                self.select_change_target(target);
+            }
+        }
+        self.change_cursor = self.change_cursor.min(visible.len().saturating_sub(1));
     }
 
     fn show_toast(&mut self, message: String, level: ToastLevel, now: Instant) {
@@ -1662,6 +1913,7 @@ mod tests {
                 },
             ],
         };
+        app.selected_change_group = None;
         app
     }
 
@@ -1714,6 +1966,71 @@ mod tests {
         assert_eq!(
             app.selected_change().unwrap().path,
             PathBuf::from("README.md")
+        );
+    }
+
+    #[test]
+    fn enter_toggles_focus_between_sidebar_and_content() {
+        let mut app = app_with_changes();
+        let now = Instant::now();
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+        assert_eq!(app.focus, Focus::Content);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+        assert_eq!(app.focus, Focus::Sidebar);
+    }
+
+    #[test]
+    fn z_hides_and_restores_sidebar_without_replacing_hunk_shortcuts() {
+        let mut app = app_with_changes();
+        let now = Instant::now();
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE), now);
+        assert!(app.sidebar_hidden);
+        assert_eq!(app.focus, Focus::Content);
+        app.handle_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE), now);
+        assert!(!app.sidebar_hidden);
+        assert_eq!(app.focus, Focus::Sidebar);
+    }
+
+    #[test]
+    fn navigating_changes_includes_selectable_group_headers() {
+        let mut app = app_with_changes();
+        let now = Instant::now();
+        app.selected_change_group = Some(ChangeArea::Staged);
+
+        app.navigate(1, now);
+        assert!(app.selected_change_group.is_none());
+        assert_eq!(app.selected_change().unwrap().area, ChangeArea::Staged);
+        app.navigate(1, now);
+        assert_eq!(app.selected_change_group, Some(ChangeArea::Unstaged));
+        assert_eq!(app.selected_group_changes().len(), 1);
+    }
+
+    #[test]
+    fn clicking_a_file_header_toggles_only_that_file() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.geometry.content = Rect::new(20, 4, 80, 20);
+        app.geometry.content_file_hits = vec![ContentFileHit {
+            area: Rect::new(20, 8, 80, 1),
+            path: PathBuf::from("src/main.rs"),
+        }];
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 24,
+            row: 8,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        app.handle_mouse(click, Instant::now());
+        assert!(
+            app.collapsed_preview_files
+                .contains(Path::new("src/main.rs"))
+        );
+        app.handle_mouse(click, Instant::now());
+        assert!(
+            !app.collapsed_preview_files
+                .contains(Path::new("src/main.rs"))
         );
     }
 

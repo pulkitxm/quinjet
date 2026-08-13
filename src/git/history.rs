@@ -6,6 +6,9 @@ pub struct Commit {
     pub author: String,
     pub author_email: String,
     pub authored_at: String,
+    pub committer: String,
+    pub committer_email: String,
+    pub committed_at: String,
     pub relative_date: String,
     pub subject: String,
     pub decorations: Vec<String>,
@@ -13,7 +16,8 @@ pub struct Commit {
 
 /// The format passed to `git log`. Unit and record separators avoid ambiguity with
 /// spaces, tabs, and most text that can occur in names or commit subjects.
-pub const LOG_FORMAT: &str = "%H%x1f%h%x1f%P%x1f%aN%x1f%aE%x1f%aI%x1f%ar%x1f%s%x1f%D%x1e";
+pub const LOG_FORMAT: &str =
+    "%H%x1f%h%x1f%P%x1f%aN%x1f%aE%x1f%aI%x1f%cN%x1f%cE%x1f%cI%x1f%ar%x1f%s%x1f%D%x1e";
 
 pub fn parse_log(output: &[u8]) -> Vec<Commit> {
     output
@@ -28,7 +32,7 @@ fn parse_record(record: &[u8]) -> Option<Commit> {
         return None;
     }
     let fields: Vec<&[u8]> = record.split(|byte| *byte == 0x1f).collect();
-    if fields.len() < 9 {
+    if fields.len() < 12 {
         return None;
     }
 
@@ -42,9 +46,12 @@ fn parse_record(record: &[u8]) -> Option<Commit> {
         author: text(fields[3]),
         author_email: text(fields[4]),
         authored_at: text(fields[5]),
-        relative_date: text(fields[6]),
-        subject: text(fields[7]),
-        decorations: text(fields[8])
+        committer: text(fields[6]),
+        committer_email: text(fields[7]),
+        committed_at: text(fields[8]),
+        relative_date: text(fields[9]),
+        subject: text(fields[10]),
+        decorations: text(fields[11])
             .split(',')
             .map(str::trim)
             .filter(|value| !value.is_empty())
@@ -73,12 +80,14 @@ mod tests {
 
     #[test]
     fn parses_log_records_and_decorations() {
-        let output = b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\x1faaaaaaa\x1fbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb cccccccccccccccccccccccccccccccccccccccc\x1fAda Lovelace\x1fada@example.com\x1f2026-01-02T03:04:05Z\x1f2 hours ago\x1fMerge a fast thing\x1fHEAD -> main, origin/main, tag: v1\x1e\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\x1fbbbbbbb\x1f\x1fGrace Hopper\x1fgrace@example.com\x1f2026-01-01T00:00:00Z\x1fyesterday\x1fInitial commit\x1f\x1e";
+        let output = b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\x1faaaaaaa\x1fbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb cccccccccccccccccccccccccccccccccccccccc\x1fAda Lovelace\x1fada@example.com\x1f2026-01-02T03:04:05Z\x1fLinus Torvalds\x1flinus@example.com\x1f2026-01-02T04:05:06Z\x1f2 hours ago\x1fMerge a fast thing\x1fHEAD -> main, origin/main, tag: v1\x1e\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\x1fbbbbbbb\x1f\x1fGrace Hopper\x1fgrace@example.com\x1f2026-01-01T00:00:00Z\x1fGrace Hopper\x1fgrace@example.com\x1f2026-01-01T00:00:01Z\x1fyesterday\x1fInitial commit\x1f\x1e";
 
         let commits = parse_log(output);
 
         assert_eq!(commits.len(), 2);
         assert_eq!(commits[0].author, "Ada Lovelace");
+        assert_eq!(commits[0].committer, "Linus Torvalds");
+        assert_eq!(commits[0].committed_at, "2026-01-02T04:05:06Z");
         assert_eq!(commits[0].parent_ids.len(), 2);
         assert_eq!(
             commits[0].decorations,

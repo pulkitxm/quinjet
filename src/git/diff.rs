@@ -7,6 +7,8 @@ use syntect::parsing::{SyntaxReference, SyntaxSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiffLineKind {
+    FileHeader,
+    FileFooter,
     HunkHeader,
     Context,
     Added,
@@ -42,10 +44,29 @@ pub struct DiffLine {
 }
 
 impl DiffLine {
-    #[cfg(test)]
     pub fn text(&self) -> String {
-        self.spans.iter().map(|span| span.text.as_str()).collect()
+        if self.kind == DiffLineKind::FileHeader {
+            self.spans
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" ")
+        } else {
+            self.spans.iter().map(|span| span.text.as_str()).collect()
+        }
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CommitDetails {
+    pub id: String,
+    pub subject: String,
+    pub author: String,
+    pub author_email: String,
+    pub authored_at: String,
+    pub committer: String,
+    pub committer_email: String,
+    pub committed_at: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -53,6 +74,7 @@ pub struct DiffDocument {
     pub title: String,
     pub lines: Vec<DiffLine>,
     pub truncated: bool,
+    pub commit_details: Option<CommitDetails>,
 }
 
 impl DiffDocument {
@@ -66,7 +88,29 @@ impl DiffDocument {
                 spans: vec![HighlightSpan::plain(message)],
             }],
             truncated: false,
+            commit_details: None,
         }
+    }
+
+    pub fn file_count(&self) -> usize {
+        self.lines
+            .iter()
+            .filter(|line| line.kind == DiffLineKind::FileHeader)
+            .count()
+    }
+
+    pub fn addition_count(&self) -> usize {
+        self.lines
+            .iter()
+            .filter(|line| line.kind == DiffLineKind::Added)
+            .count()
+    }
+
+    pub fn deletion_count(&self) -> usize {
+        self.lines
+            .iter()
+            .filter(|line| line.kind == DiffLineKind::Removed)
+            .count()
     }
 }
 
@@ -112,28 +156,102 @@ pub fn parse_diff(
     let mut new_highlighter = HighlightLines::new(syntax, &assets.theme);
     let mut old_line = None;
     let mut new_line = None;
+    let mut current_file: Option<FileBuilder> = None;
+    let mut files = Vec::new();
     let mut lines = Vec::new();
 
     for raw_line in String::from_utf8_lossy(raw).lines() {
-        if let Some(path) = raw_line.strip_prefix("+++ b/") {
-            active_path = Some(PathBuf::from(path));
+        if let Some(header) = raw_line.strip_prefix("diff --git ") {
+            if let Some(file) = current_file.take() {
+                files.push(file);
+            }
+            let (old_path, new_path) = diff_header_paths(header);
+            current_file = Some(FileBuilder::new(old_path, new_path, path_hint));
+            active_path = current_file.as_ref().and_then(FileBuilder::syntax_path);
+            syntax = syntax_for_path(&assets.syntaxes, active_path.as_deref());
+            old_highlighter = HighlightLines::new(syntax, &assets.theme);
+            new_highlighter = HighlightLines::new(syntax, &assets.theme);
+            old_line = None;
+            new_line = None;
+            continue;
+        }
+        if let Some(path) = raw_line
+            .strip_prefix("diff --cc ")
+            .or_else(|| raw_line.strip_prefix("diff --combined "))
+        {
+            if let Some(file) = current_file.take() {
+                files.push(file);
+            }
+            let path = Some(PathBuf::from(decode_git_path(path)));
+            current_file = Some(FileBuilder::new(path.clone(), path, path_hint));
+            active_path = current_file.as_ref().and_then(FileBuilder::syntax_path);
+            syntax = syntax_for_path(&assets.syntaxes, active_path.as_deref());
+            old_highlighter = HighlightLines::new(syntax, &assets.theme);
+            new_highlighter = HighlightLines::new(syntax, &assets.theme);
+            old_line = None;
+            new_line = None;
+            continue;
+        }
+
+        // Ignore commit headers and other preamble. A commit summary is rendered in
+        // its own pane; only rows belonging to an actual file enter the diff model.
+        if current_file.is_none() {
+            continue;
+        }
+
+        if raw_line.starts_with("index ") || raw_line.starts_with("similarity index ") {
+            continue;
+        }
+        if raw_line.starts_with("new file mode ") {
+            file_mut(&mut current_file, path_hint).status = Some("added");
+            continue;
+        }
+        if raw_line.starts_with("deleted file mode ") {
+            file_mut(&mut current_file, path_hint).status = Some("deleted");
+            continue;
+        }
+        if let Some(path) = raw_line.strip_prefix("rename from ") {
+            let file = file_mut(&mut current_file, path_hint);
+            file.old_path = Some(PathBuf::from(decode_git_path(path)));
+            file.status = Some("renamed");
+            continue;
+        }
+        if let Some(path) = raw_line.strip_prefix("rename to ") {
+            let file = file_mut(&mut current_file, path_hint);
+            file.new_path = Some(PathBuf::from(decode_git_path(path)));
+            file.status = Some("renamed");
+            continue;
+        }
+        if let Some(path) = raw_line.strip_prefix("--- ") {
+            file_mut(&mut current_file, path_hint).old_path = patch_path(path, "a/");
+            continue;
+        }
+        if let Some(path) = raw_line.strip_prefix("+++ ") {
+            let new_path = patch_path(path, "b/");
+            file_mut(&mut current_file, path_hint).new_path = new_path.clone();
+            active_path =
+                new_path.or_else(|| current_file.as_ref().and_then(|file| file.old_path.clone()));
             syntax = syntax_for_path(&assets.syntaxes, active_path.as_deref());
             old_highlighter = HighlightLines::new(syntax, &assets.theme);
             new_highlighter = HighlightLines::new(syntax, &assets.theme);
             continue;
         }
-
-        // File headers are Git transport metadata rather than source. The selected
-        // filename already appears in the pane title, so keep the preview code-only.
-        if raw_line.starts_with("diff --git ")
-            || raw_line.starts_with("index ")
-            || raw_line.starts_with("--- ")
-            || raw_line.starts_with("new file mode ")
-            || raw_line.starts_with("deleted file mode ")
-            || raw_line.starts_with("similarity index ")
-            || raw_line.starts_with("rename from ")
-            || raw_line.starts_with("rename to ")
-        {
+        if raw_line.starts_with("old mode ") || raw_line.starts_with("new mode ") {
+            file_mut(&mut current_file, path_hint)
+                .lines
+                .push(meta_line(DiffLineKind::Meta, raw_line));
+            continue;
+        }
+        if raw_line.starts_with("Binary files ") || raw_line == "GIT binary patch" {
+            let file = file_mut(&mut current_file, path_hint);
+            file.binary = true;
+            file.lines.push(meta_line(DiffLineKind::Meta, raw_line));
+            continue;
+        }
+        if current_file.as_ref().is_some_and(|file| file.binary) {
+            file_mut(&mut current_file, path_hint)
+                .lines
+                .push(meta_line(DiffLineKind::Meta, raw_line));
             continue;
         }
 
@@ -141,27 +259,35 @@ pub fn parse_diff(
             let (old_start, new_start) = parse_hunk_starts(raw_line);
             old_line = old_start;
             new_line = new_start;
-            lines.push(meta_line(DiffLineKind::HunkHeader, raw_line));
+            file_mut(&mut current_file, path_hint)
+                .lines
+                .push(meta_line(DiffLineKind::HunkHeader, raw_line));
             continue;
         }
 
         if let Some(content) = raw_line.strip_prefix('+') {
             let number = new_line;
             new_line = new_line.map(|line| line + 1);
-            lines.push(DiffLine {
+            let spans = highlight(&mut new_highlighter, content, &assets.syntaxes);
+            let file = file_mut(&mut current_file, path_hint);
+            file.additions += 1;
+            file.lines.push(DiffLine {
                 kind: DiffLineKind::Added,
                 old_line: None,
                 new_line: number,
-                spans: highlight(&mut new_highlighter, content, &assets.syntaxes),
+                spans,
             });
         } else if let Some(content) = raw_line.strip_prefix('-') {
             let number = old_line;
             old_line = old_line.map(|line| line + 1);
-            lines.push(DiffLine {
+            let spans = highlight(&mut old_highlighter, content, &assets.syntaxes);
+            let file = file_mut(&mut current_file, path_hint);
+            file.deletions += 1;
+            file.lines.push(DiffLine {
                 kind: DiffLineKind::Removed,
                 old_line: number,
                 new_line: None,
-                spans: highlight(&mut old_highlighter, content, &assets.syntaxes),
+                spans,
             });
         } else if let Some(content) = raw_line.strip_prefix(' ') {
             let old_number = old_line;
@@ -172,17 +298,32 @@ pub fn parse_diff(
             // Advance the old parser too. Its spans are normally identical, while its
             // state can differ after a replacement block.
             let _ = old_highlighter.highlight_line(content, &assets.syntaxes);
-            lines.push(DiffLine {
+            file_mut(&mut current_file, path_hint).lines.push(DiffLine {
                 kind: DiffLineKind::Context,
                 old_line: old_number,
                 new_line: new_number,
                 spans,
             });
-        } else {
-            lines.push(meta_line(DiffLineKind::Meta, raw_line));
+        } else if !raw_line.is_empty() {
+            file_mut(&mut current_file, path_hint)
+                .lines
+                .push(meta_line(DiffLineKind::Meta, raw_line));
         }
     }
 
+    if let Some(file) = current_file.take() {
+        files.push(file);
+    }
+    // GitHub's path sort follows Git's canonical, case-sensitive ordering of the
+    // complete repository-relative path. Sorting the full path (rather than only the
+    // basename) keeps nested files in the same order as GitHub's changed-files view.
+    files.sort_by_cached_key(FileBuilder::sort_path);
+    for file in files {
+        flush_file(file, &mut lines);
+    }
+    if lines.is_empty() {
+        return DiffDocument::empty(title, "No file changes to display");
+    }
     if truncated {
         lines.push(meta_line(
             DiffLineKind::Meta,
@@ -194,7 +335,146 @@ pub fn parse_diff(
         title,
         lines,
         truncated,
+        commit_details: None,
     }
+}
+
+#[derive(Default)]
+struct FileBuilder {
+    old_path: Option<PathBuf>,
+    new_path: Option<PathBuf>,
+    status: Option<&'static str>,
+    lines: Vec<DiffLine>,
+    additions: usize,
+    deletions: usize,
+    binary: bool,
+}
+
+impl FileBuilder {
+    fn new(old_path: Option<PathBuf>, new_path: Option<PathBuf>, path_hint: Option<&Path>) -> Self {
+        let fallback = path_hint.map(Path::to_path_buf);
+        Self {
+            old_path: old_path.or_else(|| fallback.clone()),
+            new_path: new_path.or(fallback),
+            ..Self::default()
+        }
+    }
+
+    fn syntax_path(&self) -> Option<PathBuf> {
+        self.new_path.clone().or_else(|| self.old_path.clone())
+    }
+
+    fn sort_path(&self) -> String {
+        self.new_path
+            .as_ref()
+            .or(self.old_path.as_ref())
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default()
+    }
+
+    fn display_path(&self) -> String {
+        match (&self.old_path, &self.new_path) {
+            (Some(old), Some(new)) if old != new => {
+                format!("{} → {}", old.display(), new.display())
+            }
+            (_, Some(path)) | (Some(path), None) => path.display().to_string(),
+            (None, None) => "Changed file".to_owned(),
+        }
+    }
+}
+
+fn file_mut<'a>(
+    current: &'a mut Option<FileBuilder>,
+    path_hint: Option<&Path>,
+) -> &'a mut FileBuilder {
+    current.get_or_insert_with(|| FileBuilder::new(None, None, path_hint))
+}
+
+fn flush_file(mut file: FileBuilder, output: &mut Vec<DiffLine>) {
+    if file.lines.is_empty() {
+        file.lines.push(meta_line(
+            DiffLineKind::Meta,
+            if file.status == Some("renamed") {
+                "File renamed without content changes"
+            } else {
+                "No textual changes to display"
+            },
+        ));
+    }
+
+    let status = file
+        .status
+        .map(|status| format!("  · {status}"))
+        .unwrap_or_default();
+    output.push(DiffLine {
+        kind: DiffLineKind::FileHeader,
+        old_line: None,
+        new_line: None,
+        spans: vec![
+            HighlightSpan::plain(format!("{}{}", file.display_path(), status)),
+            HighlightSpan::plain(format!("+{}", file.additions)),
+            HighlightSpan::plain(format!("-{}", file.deletions)),
+        ],
+    });
+    output.append(&mut file.lines);
+    output.push(meta_line(DiffLineKind::FileFooter, ""));
+}
+
+fn diff_header_paths(header: &str) -> (Option<PathBuf>, Option<PathBuf>) {
+    let Some(separator) = header.rfind(" b/").or_else(|| header.rfind(" \"b/")) else {
+        return (None, None);
+    };
+    let old = patch_path(&header[..separator], "a/");
+    let new = patch_path(&header[separator + 1..], "b/");
+    (old, new)
+}
+
+fn patch_path(value: &str, prefix: &str) -> Option<PathBuf> {
+    let value = value.trim_end_matches('\t');
+    if value == "/dev/null" {
+        return None;
+    }
+    let decoded = decode_git_path(value);
+    let path = decoded.strip_prefix(prefix).unwrap_or(&decoded);
+    Some(PathBuf::from(path))
+}
+
+fn decode_git_path(value: &str) -> String {
+    let Some(quoted) = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+    else {
+        return value.to_owned();
+    };
+    let mut output = Vec::with_capacity(quoted.len());
+    let mut bytes = quoted.bytes().peekable();
+    while let Some(byte) = bytes.next() {
+        if byte != b'\\' {
+            output.push(byte);
+            continue;
+        }
+        match bytes.next() {
+            Some(b'n') => output.push(b'\n'),
+            Some(b'r') => output.push(b'\r'),
+            Some(b't') => output.push(b'\t'),
+            Some(b'\\') => output.push(b'\\'),
+            Some(b'"') => output.push(b'"'),
+            Some(first @ b'0'..=b'7') => {
+                let mut value = first - b'0';
+                for _ in 0..2 {
+                    let Some(next @ b'0'..=b'7') = bytes.peek().copied() else {
+                        break;
+                    };
+                    bytes.next();
+                    value = value.saturating_mul(8).saturating_add(next - b'0');
+                }
+                output.push(value);
+            }
+            Some(other) => output.push(other),
+            None => output.push(b'\\'),
+        }
+    }
+    String::from_utf8_lossy(&output).into_owned()
 }
 
 fn syntax_for_path<'a>(syntaxes: &'a SyntaxSet, path: Option<&Path>) -> &'a SyntaxReference {
@@ -291,17 +571,77 @@ mod tests {
         let raw = b"diff --git a/widget.tsx b/widget.tsx\nindex aaaaaaa..bbbbbbb 100644\n--- a/widget.tsx\n+++ b/widget.tsx\n@@ -1 +1 @@\n-const oldValue: number = 1;\n+const newValue: number = 2;\n";
         let document = parse_diff(raw, "widget.tsx", Some(Path::new("widget.tsx")), false);
 
-        assert_eq!(document.lines.len(), 3);
-        assert_eq!(document.lines[0].kind, DiffLineKind::HunkHeader);
-        assert!(document.lines[2].spans.len() > 1);
+        assert_eq!(document.lines.len(), 5);
+        assert_eq!(document.lines[0].kind, DiffLineKind::FileHeader);
+        assert!(document.lines[0].text().starts_with("widget.tsx"));
+        assert_eq!(document.lines[1].kind, DiffLineKind::HunkHeader);
+        assert!(document.lines[3].spans.len() > 1);
         assert!(
-            document.lines[2]
+            document.lines[3]
                 .spans
                 .iter()
                 .filter_map(|span| span.foreground)
                 .collect::<std::collections::HashSet<_>>()
                 .len()
                 > 1
+        );
+        assert_eq!(document.lines[4].kind, DiffLineKind::FileFooter);
+    }
+
+    #[test]
+    fn groups_commit_patch_into_named_file_sections_and_drops_preamble() {
+        let raw = b"commit abcdef\nAuthor: Ada\n\ndiff --git a/one.rs b/one.rs\n--- a/one.rs\n+++ b/one.rs\n@@ -1 +1 @@\n-old\n+new\ndiff --git a/docs/two.md b/docs/two.md\nnew file mode 100644\n--- /dev/null\n+++ b/docs/two.md\n@@ -0,0 +1 @@\n+hello\n";
+
+        let document = parse_diff(raw, "commit", None, false);
+        let headers: Vec<_> = document
+            .lines
+            .iter()
+            .filter(|line| line.kind == DiffLineKind::FileHeader)
+            .map(DiffLine::text)
+            .collect();
+
+        assert_eq!(document.file_count(), 2);
+        assert_eq!(document.addition_count(), 2);
+        assert_eq!(document.deletion_count(), 1);
+        assert_eq!(headers[0], "docs/two.md  · added +1 -0");
+        assert_eq!(headers[1], "one.rs +1 -1");
+        assert!(!document.lines.iter().any(|line| {
+            let text = line.text();
+            text.starts_with("commit ")
+                || text.starts_with("Author:")
+                || text.starts_with("diff --git")
+        }));
+    }
+
+    #[test]
+    fn sorts_files_by_case_sensitive_full_repository_path() {
+        let mut files = [
+            "src/ui/mod.rs",
+            "README.md",
+            "src/app.rs",
+            ".github/workflows/ci.yml",
+            "Cargo.toml",
+            ".github/ISSUE_TEMPLATE/bug.yml",
+            "CODE_OF_CONDUCT.md",
+            ".github/labeler.yml",
+        ]
+        .map(|path| FileBuilder::new(None, Some(PathBuf::from(path)), None));
+
+        files.sort_by_cached_key(FileBuilder::sort_path);
+        let paths: Vec<_> = files.iter().map(FileBuilder::sort_path).collect();
+
+        assert_eq!(
+            paths,
+            vec![
+                ".github/ISSUE_TEMPLATE/bug.yml",
+                ".github/labeler.yml",
+                ".github/workflows/ci.yml",
+                "CODE_OF_CONDUCT.md",
+                "Cargo.toml",
+                "README.md",
+                "src/app.rs",
+                "src/ui/mod.rs",
+            ]
         );
     }
 }
