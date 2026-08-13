@@ -985,7 +985,9 @@ fn repository_from_remote_url(url: &str) -> Option<GitHubRepository> {
         return None;
     }
     let (host, path) = rest.split_once('/')?;
-    if host.is_empty() || path.is_empty() {
+    if !host.eq_ignore_ascii_case("github.com") || path.is_empty() {
+        // Enterprise and non-GitHub hosts still go through `gh repo view`, which
+        // validates the configured host instead of guessing from a generic URL.
         return None;
     }
     let mut components = path.trim_matches('/').split('/');
@@ -1842,12 +1844,11 @@ mod tests {
                 remotes: Vec::new(),
             })
         );
-        assert_eq!(
-            repository_from_remote_url("git@github.example.com:acme/widget.git")
-                .unwrap()
-                .url,
-            "https://github.example.com/acme/widget"
+        assert!(
+            repository_from_remote_url("git@github.example.com:acme/widget.git").is_none(),
+            "enterprise hosts must still be validated through gh"
         );
+        assert!(repository_from_remote_url("https://gitlab.com/acme/widget.git").is_none());
         assert!(repository_from_remote_url("file:///tmp/widget.git").is_none());
         assert!(repository_from_remote_url("https://github.com/acme/widget/extra").is_none());
     }
