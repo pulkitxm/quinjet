@@ -1,3 +1,193 @@
-fn main() {
-    println!("Hello, world!");
+mod app;
+mod git;
+mod ui;
+mod watch;
+
+use std::io::{self, IsTerminal};
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+use anyhow::{Context, Result};
+use clap::Parser;
+use crossbeam_channel::{Receiver, tick};
+use crossterm::event::{
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyEventKind, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
+};
+use crossterm::execute;
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
+
+use crate::app::{App, AppEffect};
+use crate::git::Repository;
+use crate::git::worker::GitWorker;
+use crate::watch::RepoWatcher;
+
+#[derive(Debug, Parser)]
+#[command(name = "quinjet", version, about)]
+struct Cli {
+    /// Git repository to open
+    #[arg(default_value = ".")]
+    path: PathBuf,
+
+    /// Disable mouse capture (all features remain keyboard-accessible)
+    #[arg(long)]
+    no_mouse: bool,
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        anyhow::bail!("Quinjet requires an interactive terminal");
+    }
+
+    let repository = Repository::discover(&cli.path)?;
+    let worker = GitWorker::start(repository.clone());
+    let watcher = RepoWatcher::new(repository.root()).ok();
+    let mut app = App::new(repository.root(), repository.name());
+    let mut terminal = TerminalGuard::enter(!cli.no_mouse)?;
+    let render_tick = tick(Duration::from_millis(16));
+    let periodic_refresh = tick(Duration::from_secs(10));
+    let mut dirty = true;
+    let mut running = true;
+
+    running &= dispatch_effects(&worker, app.initial_effects());
+    while running {
+        if dirty {
+            terminal
+                .terminal
+                .draw(|frame| ui::draw(frame, &mut app))
+                .context("failed to render Quinjet")?;
+            dirty = false;
+        }
+
+        while let Ok(worker_event) = worker.events().try_recv() {
+            let effects = app.handle_worker_event(worker_event, Instant::now());
+            running &= dispatch_effects(&worker, effects);
+            dirty = true;
+        }
+
+        if watcher_changed(watcher.as_ref().map(RepoWatcher::changes)) {
+            let mut effects = Vec::new();
+            app.filesystem_changed(&mut effects);
+            running &= dispatch_effects(&worker, effects);
+            dirty = true;
+        }
+
+        if render_tick.try_recv().is_ok() {
+            let effects = app.tick(Instant::now());
+            if !effects.is_empty() || app.busy.is_some() || app.refreshing || app.document_loading {
+                running &= dispatch_effects(&worker, effects);
+                dirty = true;
+            }
+        }
+        if periodic_refresh.try_recv().is_ok() {
+            let mut effects = Vec::new();
+            app.periodic_refresh(&mut effects);
+            running &= dispatch_effects(&worker, effects);
+            dirty = true;
+        }
+
+        if event::poll(Duration::from_millis(8)).context("failed to poll terminal events")? {
+            let effects = match event::read().context("failed to read terminal event")? {
+                Event::Key(key) if key.kind != KeyEventKind::Release => {
+                    app.handle_key(key, Instant::now())
+                }
+                Event::Mouse(mouse) => app.handle_mouse(mouse, Instant::now()),
+                Event::Paste(text) => {
+                    app.handle_paste(&text);
+                    Vec::new()
+                }
+                Event::Resize(_, _) => Vec::new(),
+                _ => Vec::new(),
+            };
+            running &= dispatch_effects(&worker, effects);
+            dirty = true;
+        }
+    }
+
+    Ok(())
+}
+
+fn watcher_changed(receiver: Option<&Receiver<()>>) -> bool {
+    let Some(receiver) = receiver else {
+        return false;
+    };
+    let mut changed = false;
+    while receiver.try_recv().is_ok() {
+        changed = true;
+    }
+    changed
+}
+
+fn dispatch_effects(worker: &GitWorker, effects: Vec<AppEffect>) -> bool {
+    let mut running = true;
+    for effect in effects {
+        match effect {
+            AppEffect::Git(command) => {
+                let _ = worker.try_send(*command);
+            }
+            AppEffect::Quit => running = false,
+        }
+    }
+    running
+}
+
+struct TerminalGuard {
+    terminal: Terminal<CrosstermBackend<io::Stdout>>,
+    mouse: bool,
+    keyboard_enhancements: bool,
+}
+
+impl TerminalGuard {
+    fn enter(mouse: bool) -> Result<Self> {
+        enable_raw_mode().context("failed to enable terminal raw mode")?;
+        let mut stdout = io::stdout();
+        execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)
+            .context("failed to enter alternate screen")?;
+        if mouse {
+            execute!(stdout, EnableMouseCapture).context("failed to enable mouse capture")?;
+        }
+        let keyboard_enhancements =
+            crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
+        if keyboard_enhancements {
+            let _ = execute!(
+                stdout,
+                PushKeyboardEnhancementFlags(
+                    KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                        | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                )
+            );
+        }
+        let backend = CrosstermBackend::new(stdout);
+        let mut terminal = Terminal::new(backend).context("failed to initialize terminal")?;
+        terminal.clear().context("failed to clear terminal")?;
+        Ok(Self {
+            terminal,
+            mouse,
+            keyboard_enhancements,
+        })
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        if self.keyboard_enhancements {
+            let _ = execute!(self.terminal.backend_mut(), PopKeyboardEnhancementFlags);
+        }
+        if self.mouse {
+            let _ = execute!(self.terminal.backend_mut(), DisableMouseCapture);
+        }
+        let _ = execute!(
+            self.terminal.backend_mut(),
+            DisableBracketedPaste,
+            LeaveAlternateScreen
+        );
+        let _ = self.terminal.show_cursor();
+    }
 }

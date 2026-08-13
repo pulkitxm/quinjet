@@ -2,5 +2,26 @@
 name = "quinjet"
 version = "0.1.0"
 edition = "2024"
+description = "A fast, keyboard-first Git source-control interface for the terminal"
+repository = "https://github.com/pulkitxm/quinjet"
+license = "MIT"
+rust-version = "1.85"
 
 [dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+crossbeam-channel = "0.5"
+crossterm = "0.28"
+notify = "8.0"
+ratatui = "0.29"
+syntect = { version = "5.2", default-features = false, features = ["default-fancy"] }
+unicode-width = "0.2"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+panic = "abort"
+strip = "symbols"
+
+[profile.dev]
+debug = 1
