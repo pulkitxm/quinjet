@@ -96,7 +96,7 @@ History starts at the currently checked-out branch instead of mixing every ref i
 
 Press `3` to open Pull Requests. Quinjet resolves the repository's distinct fetch **and** push URLs through `gh`, selects one repository, and progressively fetches **all open, merged, and closed PRs** in bounded 50-record GraphQL batches. The first batch appears immediately; skeleton rows, fetched/total counts, and a percentage show the remaining work while later batches fill the local snapshot. Press `o` to choose the base repository and `←` / `→` to move through local 25-row pages without another network request. The bottom `PR #` field accepts digits only; press `/`, enter a number, and press Enter for an exact lookup scoped to that selected repository.
 
-Quinjet supports fork setups such as `origin` pointing to your fork and `upstream` to the base, separate push URLs, deleted fork heads exposed through GitHub's PR ref, and GitHub Enterprise hosts configured in `gh`. Selected metadata is enriched with immutable base/head OIDs. PR patches are **not** downloaded with `gh pr diff`: Quinjet creates a disposable bare repository, shallow-fetches fixed internal base/head refs with partial-clone filtering, deepens only as needed to find the merge base, and renders 20 changed files at a time. Use `,` / `.` for changed-file pages. The opened repository is never checked out or given temporary branches/refs.
+Quinjet supports fork setups such as `origin` pointing to your fork and `upstream` to the base, separate push URLs, deleted fork heads exposed through GitHub's PR ref, and GitHub Enterprise hosts configured in `gh`. Selected metadata includes immutable base/head OIDs. PR patches are **not** downloaded with `gh pr diff`: when both OIDs already exist locally, Quinjet diffs them directly with no network request; otherwise it creates a disposable bare repository, shallow-fetches fixed internal base/head refs with partial-clone filtering, and deepens only as needed to find the merge base. It renders 20 changed files at a time. Use `,` / `.` for changed-file pages. The opened repository is never checked out or given temporary branches/refs.
 
 Successful `gh` repository, PR-batch, and exact-PR responses are cached atomically with short TTLs. The cache is bounded to 32 MiB / 256 entries and stores metadata only—not credentials, Git objects, or patches. It lives under `$XDG_CACHE_HOME/quinjet/github` (or `~/.cache/quinjet/github`), `~/Library/Caches/quinjet/github` on macOS, and `%LOCALAPPDATA%\quinjet\cache\github` on Windows. Set `QUINJET_CACHE_DIR` to choose a different root. Cache directories/files use private permissions where supported; `r` bypasses fresh cache entries, while a stale entry can keep the view useful during a transient `gh` failure.
 
@@ -139,14 +139,14 @@ Text fields support Unicode-safe editing plus familiar terminal and macOS motion
 ## Performance and Safety
 
 - Rendering and key handling never invoke Git directly.
-- A coalescing worker mailbox replaces obsolete read requests.
+- Fixed, coalescing mailboxes replace obsolete reads; local previews, PR/network previews, and background metadata run independently so one slow request cannot block tab switching.
 - Filesystem event storms collapse into authoritative status snapshots.
 - Preview requests carry generations so stale replies are ignored.
 - History is paginated for one explicit branch revision; choosing another branch is read-only.
 - PR discovery loads one selected repository progressively in 50-record cursor batches, caps the snapshot at 10,000 PRs, and exposes it in local 25-row pages. Exact lookup accepts only a positive integer and always includes the canonical base-repository URL.
 - Pull-request discovery inspects at most 32 Git remotes, 64 configured fetch/push URL entries (32 distinct URLs), and 16 GitHub repositories.
 - PR changed paths are capped at 4,096 / 2 MiB, patches at 8 MiB, and each preview fetches at most 20 files. Potentially large subprocess stdout is streamed and the child is terminated at the cap.
-- PR Git history deepens only to 4,096 commits in a disposable bare repository. No checkout, worktree mutation, or persistent source-repository ref is used.
+- PR previews use locally available immutable OIDs first. Missing Git history deepens only to 4,096 commits in a disposable bare repository. No checkout, worktree mutation, or persistent source-repository ref is used.
 - Cached `gh` metadata is bounded to 32 MiB and 256 entries; fresh batch entries live for 60 seconds and exact PR entries for five minutes.
 - Git and `gh` receive argument arrays directly, never shell-concatenated commands; embedded remote credentials are stripped before URLs become `gh` arguments.
 - Destructive operations are confirmed where appropriate.

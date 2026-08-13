@@ -161,25 +161,71 @@ struct SharedMailbox {
     ready: Condvar,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorkerLane {
+    Background,
+    LocalPreview,
+    PullRequestPreview,
+}
+
+fn worker_lane(command: &WorkerCommand) -> WorkerLane {
+    match command {
+        WorkerCommand::LoadDiff { .. } | WorkerCommand::LoadCommit { .. } => {
+            WorkerLane::LocalPreview
+        }
+        WorkerCommand::LoadPullRequest { .. } => WorkerLane::PullRequestPreview,
+        _ => WorkerLane::Background,
+    }
+}
+
 pub struct GitWorker {
     mailbox: Arc<SharedMailbox>,
+    local_preview_mailbox: Arc<SharedMailbox>,
+    pull_request_preview_mailbox: Arc<SharedMailbox>,
     events: Receiver<WorkerEvent>,
 }
 
 impl GitWorker {
     pub fn start(repository: Repository) -> Self {
-        let mailbox = Arc::new(SharedMailbox {
-            state: Mutex::new(Mailbox::default()),
-            ready: Condvar::new(),
-        });
+        let mailbox = new_mailbox();
+        let local_preview_mailbox = new_mailbox();
+        let pull_request_preview_mailbox = new_mailbox();
         let worker_mailbox = Arc::clone(&mailbox);
+        let worker_local_preview_mailbox = Arc::clone(&local_preview_mailbox);
+        let worker_pull_request_preview_mailbox = Arc::clone(&pull_request_preview_mailbox);
+        let local_preview_repository = repository.clone_for_worker();
+        let pull_request_preview_repository = repository.clone_for_worker();
         let (event_tx, event_rx) = unbounded();
+        let local_preview_events = event_tx.clone();
+        let pull_request_preview_events = event_tx.clone();
         thread::Builder::new()
             .name("quinjet-git".to_owned())
             .spawn(move || run_worker(repository, worker_mailbox, event_tx))
             .expect("failed to start Git worker");
+        thread::Builder::new()
+            .name("quinjet-preview".to_owned())
+            .spawn(move || {
+                run_worker(
+                    local_preview_repository,
+                    worker_local_preview_mailbox,
+                    local_preview_events,
+                )
+            })
+            .expect("failed to start local preview worker");
+        thread::Builder::new()
+            .name("quinjet-pr-preview".to_owned())
+            .spawn(move || {
+                run_worker(
+                    pull_request_preview_repository,
+                    worker_pull_request_preview_mailbox,
+                    pull_request_preview_events,
+                )
+            })
+            .expect("failed to start pull-request preview worker");
         Self {
             mailbox,
+            local_preview_mailbox,
+            pull_request_preview_mailbox,
             events: event_rx,
         }
     }
@@ -188,7 +234,12 @@ impl GitWorker {
     /// mailbox slots and replace obsolete requests; repository mutations remain an
     /// ordered queue and are additionally serialized by the app's busy state.
     pub fn send(&self, command: WorkerCommand) -> bool {
-        let Ok(mut mailbox) = self.mailbox.state.lock() else {
+        let target = match worker_lane(&command) {
+            WorkerLane::LocalPreview => &self.local_preview_mailbox,
+            WorkerLane::PullRequestPreview => &self.pull_request_preview_mailbox,
+            WorkerLane::Background => &self.mailbox,
+        };
+        let Ok(mut mailbox) = target.state.lock() else {
             return false;
         };
         if mailbox.shutdown {
@@ -196,7 +247,7 @@ impl GitWorker {
         }
         mailbox.push(command);
         drop(mailbox);
-        self.mailbox.ready.notify_one();
+        target.ready.notify_one();
         true
     }
 
@@ -207,13 +258,26 @@ impl GitWorker {
 
 impl Drop for GitWorker {
     fn drop(&mut self) {
-        let Ok(mut mailbox) = self.mailbox.state.lock() else {
-            return;
-        };
-        mailbox.push(WorkerCommand::Shutdown);
-        drop(mailbox);
-        self.mailbox.ready.notify_one();
+        shutdown_mailbox(&self.mailbox);
+        shutdown_mailbox(&self.local_preview_mailbox);
+        shutdown_mailbox(&self.pull_request_preview_mailbox);
     }
+}
+
+fn new_mailbox() -> Arc<SharedMailbox> {
+    Arc::new(SharedMailbox {
+        state: Mutex::new(Mailbox::default()),
+        ready: Condvar::new(),
+    })
+}
+
+fn shutdown_mailbox(mailbox: &SharedMailbox) {
+    let Ok(mut state) = mailbox.state.lock() else {
+        return;
+    };
+    state.push(WorkerCommand::Shutdown);
+    drop(state);
+    mailbox.ready.notify_one();
 }
 
 fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sender<WorkerEvent>) {
@@ -414,6 +478,52 @@ mod tests {
             Some(WorkerCommand::LoadHistory { generation: 1, .. })
         ));
         assert!(mailbox.pop().is_none());
+    }
+
+    #[test]
+    fn local_previews_are_routed_away_from_slow_metadata_and_pr_work() {
+        let local_preview = WorkerCommand::LoadDiff {
+            generation: 2,
+            changes: Vec::new(),
+            expanded: false,
+        };
+        assert_eq!(worker_lane(&local_preview), WorkerLane::LocalPreview);
+
+        let request = PullRequest {
+            number: 1,
+            title: String::new(),
+            author: String::new(),
+            state: "OPEN".to_owned(),
+            is_draft: false,
+            updated_at: String::new(),
+            url: String::new(),
+            base_ref: "main".to_owned(),
+            base_oid: String::new(),
+            head_ref: "topic".to_owned(),
+            head_oid: String::new(),
+            base_repository: super::super::github::GitHubRepository {
+                name_with_owner: "acme/widget".to_owned(),
+                url: "https://github.com/acme/widget".to_owned(),
+                remotes: Vec::new(),
+            },
+            head_repository: None,
+            head_remotes: Vec::new(),
+            is_cross_repository: false,
+            additions: 0,
+            deletions: 0,
+            changed_files: 0,
+        };
+        let pr_preview = WorkerCommand::LoadPullRequest {
+            generation: 3,
+            pull_request: Box::new(request),
+            file_page: 1,
+            file_page_size: 20,
+        };
+        assert_eq!(worker_lane(&pr_preview), WorkerLane::PullRequestPreview);
+        assert_eq!(
+            worker_lane(&WorkerCommand::Refresh { generation: 4 }),
+            WorkerLane::Background
+        );
     }
 
     #[test]

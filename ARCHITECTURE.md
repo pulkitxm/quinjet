@@ -36,12 +36,12 @@ filesystem watcher (coalesced signal)
 
 1. The UI thread mutates only in-memory state and renders visible rows.
 2. Every preview, status, history, branch, and pull-request request carries a generation; stale replies are ignored.
-3. The worker mailbox has fixed coalescing slots for status, history, branch, pull-request-batch/lookup, and preview reads, so key repeat cannot allocate unbounded work; ordered user mutations are serialized by app state.
+3. Fixed coalescing mailboxes isolate status/history/metadata, local change/commit previews, and potentially network-bound PR previews. Key repeat remains constant-space, slow GitHub work cannot block tab switches, and ordered user mutations are serialized by app state.
 4. Watcher signals are lossy by design: one full status snapshot subsumes all preceding file events.
 5. Git/PR patch output is capped at 8 MiB. PR metadata is capped at 2 MiB, GraphQL batches at 50 records, the progressive snapshot at 10,000 PRs, local pages at 25 rows, changed paths at 2 MiB / 4,096 entries, file pages at 20 paths, repository discovery at 16 identities, and adaptive history fetches at 4,096 commits.
 6. Potentially large PR subprocess output is read through capped pipes. Crossing a cap kills the child rather than first allocating all output and truncating afterward.
 7. Git and GitHub CLI receive argv directly, never via a shell. Every list/lookup request carries its canonical base-repository identity, avoiding ambient-remote ambiguity.
-8. PR patches come from fixed refs in a unique bare repository under the cache/temp root. Base and GitHub PR-head refs are shallow/partial fetched, the merge base is deepened adaptively, selected paths are diffed, and `Drop` removes the repository. The opened repository receives no checkout, branch, ref, index, or worktree mutation.
+8. PR patches first use immutable base/head OIDs already present in the opened repository, which makes local-branch PR previews network-free. Missing objects fall back to fixed refs in a unique bare repository under the cache/temp root: base and GitHub PR-head refs are shallow/partial fetched, the merge base is deepened adaptively, selected paths are diffed, and `Drop` removes the repository. The opened repository receives no checkout, branch, ref, index, or worktree mutation.
 9. Successful raw `gh` metadata responses are atomically cached under the per-user Quinjet cache root. TTL reads, stale-on-error fallback, private Unix modes, a 32 MiB / 256-entry prune limit, and `QUINJET_CACHE_DIR` keep it useful and bounded. Diffs and credentials are never cached.
 10. Read operations set `GIT_OPTIONAL_LOCKS=0`; `gh` runs with prompts, paging, color, and update checks disabled on the worker thread.
 

@@ -1968,13 +1968,32 @@ impl App {
         self.sidebar_offset = 0;
         self.content_scroll = 0;
         self.horizontal_scroll = 0;
+        self.invalidate_preview();
+        self.document = self.loading_document_for_view(view);
         if view == View::PullRequests && !self.pull_requests_loaded {
-            self.invalidate_preview();
-            self.document =
-                DiffDocument::empty("Pull Requests", "Loading a bounded pull-request page…");
             self.request_pull_requests(false, effects);
         } else {
-            self.schedule_preview(Instant::now());
+            self.preview_due = Some(Instant::now() + PREVIEW_DEBOUNCE);
+        }
+    }
+
+    fn loading_document_for_view(&self, view: View) -> DiffDocument {
+        match view {
+            View::Changes => DiffDocument::empty("Working Tree", "Loading selected changes…"),
+            View::History => {
+                let title = self.selected_commit().map_or_else(
+                    || "Commit History".to_owned(),
+                    |commit| format!("{} — {}", commit.short_id, commit.subject),
+                );
+                DiffDocument::empty(title, "Loading commit preview…")
+            }
+            View::PullRequests => {
+                let title = self.selected_pull_request().map_or_else(
+                    || "Pull Requests".to_owned(),
+                    |pull_request| format!("PR #{} — {}", pull_request.number, pull_request.title),
+                );
+                DiffDocument::empty(title, "Loading pull-request preview…")
+            }
         }
     }
 
@@ -2615,6 +2634,7 @@ impl App {
 
     fn schedule_preview(&mut self, now: Instant) {
         self.invalidate_preview();
+        self.document = self.loading_document_for_view(self.view);
         self.preview_due = Some(now + PREVIEW_DEBOUNCE);
     }
 
@@ -3048,7 +3068,66 @@ mod tests {
 
         assert!(effects.is_empty());
         assert_eq!(app.diff_generation, 8);
-        assert_eq!(app.document.title, "Current");
+        assert_eq!(app.document.title, "Working Tree");
+        assert_eq!(app.document.lines[0].text(), "Loading selected changes…");
+    }
+
+    #[test]
+    fn switching_views_replaces_stale_preview_before_async_work_completes() {
+        let mut app = App::new("/tmp/repo", "repo");
+        let now = Instant::now();
+        app.pull_requests_loaded = true;
+        app.pull_requests
+            .push(pull_request(6, "Slow preview", "acme/widget"));
+        app.view = View::PullRequests;
+        app.document = DiffDocument::empty("PR #6", "stale PR contents");
+        app.history.push(Commit {
+            id: "a".repeat(40),
+            short_id: "aaaaaaa".to_owned(),
+            parent_ids: Vec::new(),
+            author: String::new(),
+            author_email: String::new(),
+            authored_at: String::new(),
+            committer: String::new(),
+            committer_email: String::new(),
+            committed_at: String::new(),
+            relative_date: String::new(),
+            subject: "Selected history commit".to_owned(),
+            decorations: Vec::new(),
+        });
+
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE), now);
+
+        assert!(effects.is_empty());
+        assert_eq!(app.view, View::History);
+        assert_eq!(app.document.title, "aaaaaaa — Selected history commit");
+        assert_eq!(app.document.lines[0].text(), "Loading commit preview…");
+        assert!(app.preview_due.is_some());
+    }
+
+    #[test]
+    fn switching_views_invalidates_an_in_flight_pull_request_preview() {
+        let mut app = App::new("/tmp/repo", "repo");
+        let now = Instant::now();
+        app.view = View::PullRequests;
+        app.pull_requests_loaded = true;
+        app.pull_requests
+            .push(pull_request(6, "Slow preview", "acme/widget"));
+        app.diff_generation = 9;
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE), now);
+        let effects = app.handle_worker_event(
+            WorkerEvent::PullRequestDiff {
+                generation: 9,
+                result: Ok(DiffDocument::empty("PR #6", "stale PR contents")),
+            },
+            now,
+        );
+
+        assert!(effects.is_empty());
+        assert_eq!(app.view, View::History);
+        assert_eq!(app.document.title, "Commit History");
+        assert_ne!(app.document.lines[0].text(), "stale PR contents");
     }
 
     #[test]
