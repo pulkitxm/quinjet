@@ -1,11 +1,17 @@
 [package]
 name = "quinjet"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
-description = "A fast, keyboard-first Git source-control interface for the terminal"
+description = "A fast, live, keyboard-first Git source-control interface for the terminal"
 repository = "https://github.com/pulkitxm/quinjet"
+homepage = "https://github.com/pulkitxm/quinjet"
+documentation = "https://github.com/pulkitxm/quinjet#readme"
+readme = "README.md"
 license = "MIT"
 rust-version = "1.85"
+keywords = ["git", "tui", "terminal", "source-control", "diff"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = ["extras/", ".github/", ".agents/"]
 
 [dependencies]
 anyhow = "1.0"
