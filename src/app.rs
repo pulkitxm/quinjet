@@ -273,7 +273,6 @@ pub struct App {
     pub history_complete: bool,
     pub last_refresh: Option<Instant>,
     pub geometry: UiGeometry,
-    pub frame_count: u64,
     status_generation: u64,
     diff_generation: u64,
     history_generation: u64,
@@ -310,7 +309,6 @@ impl App {
             history_complete: false,
             last_refresh: None,
             geometry: UiGeometry::default(),
-            frame_count: 0,
             status_generation: 0,
             diff_generation: 0,
             history_generation: 0,
@@ -632,7 +630,6 @@ impl App {
     }
 
     pub fn tick(&mut self, now: Instant) -> Vec<AppEffect> {
-        self.frame_count = self.frame_count.wrapping_add(1);
         if self
             .toast
             .as_ref()

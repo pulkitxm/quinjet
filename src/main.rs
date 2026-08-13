@@ -80,7 +80,7 @@ fn main() -> Result<()> {
 
         if render_tick.try_recv().is_ok() {
             let effects = app.tick(Instant::now());
-            if !effects.is_empty() || app.busy.is_some() || app.refreshing || app.document_loading {
+            if !effects.is_empty() {
                 running &= dispatch_effects(&worker, effects);
                 dirty = true;
             }
