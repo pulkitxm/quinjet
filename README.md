@@ -16,12 +16,15 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 - Syntax highlighting for TypeScript/TSX, Rust, Python, Go, JavaScript, and hundreds of other formats
 - Unified and draggable side-by-side diff panes
 - Compact change hunks by default; `t` expands the selected file to full context
-- Paginated commit history with one commit-details card and a titled diff pane for every changed file
+- Paginated, branch-scoped commit history with a view-only local/remote branch picker that never checks out
+- Progressive all-state GitHub pull-request loading, local 25-row pages, repository-scoped numeric lookup, and changed-file diff pages
+- Disposable local PR fetches across multiple fetch/push remotes and forks—no checkout or persistent refs
 - Commit, amend, stash, fetch, pull, push, sync, cherry-pick, and revert
-- Branch switching, creation, deletion, and creation at a selected commit
+- Local branch switching, creation, rename, deletion, and creation at a selected commit
 - Natural mouse scrolling, clickable rows, and draggable pane dividers
 - Keyboard-first filtering, command palette, modal text editing, and accessibility help
-- Coalesced background Git work, stale-result rejection, and bounded diff output
+- Persistent collapse/expand preference while moving among changes, commits, PRs, and views
+- Coalesced background Git work, stale-result rejection, bounded output, and a private metadata cache
 
 ## Installation
 
@@ -63,7 +66,7 @@ From the latest source:
 cargo install --git https://github.com/pulkitxm/quinjet --locked
 ```
 
-Git is required at runtime. A terminal with true-color support is recommended.
+Git is required at runtime. A terminal with true-color support is recommended. The Pull Requests view additionally requires the [GitHub CLI](https://cli.github.com/) with an authenticated account (`gh auth login`). All non-GitHub features remain available without `gh`.
 
 ## Usage
 
@@ -85,6 +88,20 @@ Mouse capture can be disabled without losing functionality:
 quinjet --no-mouse
 ```
 
+### History branches
+
+History starts at the currently checked-out branch instead of mixing every ref into one log. In the History view, press `b` to choose any local or remote-tracking branch. This changes only the revision passed to `git log`; Quinjet does not run `git switch`, move `HEAD`, touch the index/worktree, or create a temporary ref. The checked-out branch remains visible in the top bar while the viewed branch appears in the History panel title. Press `B` when you explicitly want the checkout branch picker.
+
+### Pull requests, remotes, and cache
+
+Press `3` to open Pull Requests. Quinjet derives standard `github.com` fetch/push repository identities locally, starts PR metadata prefetch in the background at launch, selects one repository, and progressively fetches **all open, merged, and closed PRs** in bounded 50-record GraphQL batches. The first batch appears immediately; skeleton rows, fetched/total counts, and a percentage show the remaining work while later batches fill the local snapshot. Press `o` to choose the base repository and `←` / `→` to move through local 25-row pages without another network request. The bottom `PR #` field accepts digits only; press `/`, enter a number, and press Enter for an exact lookup scoped to that selected repository.
+
+Quinjet supports fork setups such as `origin` pointing to your fork and `upstream` to the base, separate push URLs, deleted fork heads exposed through GitHub's PR ref, and GitHub Enterprise hosts configured in `gh`. Selected metadata includes immutable base/head OIDs. PR patches are **not** downloaded with `gh pr diff`: when both OIDs already exist locally, Quinjet diffs them directly with no network request; otherwise it creates a disposable bare repository, shallow-fetches fixed internal base/head refs with partial-clone filtering, and deepens only as needed to find the merge base. It renders 20 changed files at a time. The preview card labels line counts for the current **Page** separately from the whole **PR total**, so the visible file-row counts reconcile with the page subtotal rather than appearing to represent all files. Use `,` / `.` for changed-file pages. The opened repository is never checked out or given temporary branches/refs.
+
+Successful `gh` repository, PR-batch, and exact-PR responses are cached atomically with short TTLs. The cache is bounded to 32 MiB / 256 entries and stores metadata only—not credentials, Git objects, or patches. It lives under `$XDG_CACHE_HOME/quinjet/github` (or `~/.cache/quinjet/github`), `~/Library/Caches/quinjet/github` on macOS, and `%LOCALAPPDATA%\quinjet\cache\github` on Windows. Set `QUINJET_CACHE_DIR` to choose a different root. Cache directories/files use private permissions where supported; `r` bypasses fresh cache entries, while a stale entry can keep the view useful during a transient `gh` failure.
+
+Branch rename is local and deliberately does not delete or create remote branches. Open the checkout branch picker with `b` outside History (or `B` anywhere), select a branch, and press `F2` or `Ctrl+R`; its existing upstream configuration is preserved by Git.
+
 ## Keyboard
 
 The UI intentionally stays uncluttered; press `?` for the complete shortcut reference.
@@ -95,15 +112,21 @@ The UI intentionally stays uncluttered; press `?` for the complete shortcut refe
 | Mouse wheel | Naturally scroll the pane under the pointer |
 | `Tab` / `Enter` | Toggle sidebar/preview focus |
 | `z` | Hide/show the sidebar |
-| `e` | Collapse/expand every file diff |
-| `1` / `2` | Changes/history |
+| `e` / `E` | Collapse/expand every file diff; keep that preference across selections/views |
+| `1` / `2` / `3` | Changes/history/pull requests (all states) |
 | `s` or `Space` | Toggle stage/unstage for the selected file |
 | `a` / `U` | Stage all/unstage all |
 | `c` | Open commit editor; `Ctrl+Enter` submits |
 | `t` | Toggle compact hunks/full-file context |
 | `v` | Toggle unified/side-by-side diff |
 | `x` | Discard selected change after confirmation |
-| `/` | Filter the active list |
+| `b` in History | View another local/remote branch without checkout |
+| `b` elsewhere / `B` | Checkout branch picker; `F2`/`Ctrl+R` renames a local branch |
+| `o` in Pull Requests | Select the repository whose PRs are shown |
+| `←` / `→` in Pull Requests | Previous/next 25-item PR page |
+| `,` / `.` in Pull Requests | Previous/next 20-file diff page |
+| `r` | Refresh status; bypass PR metadata cache in the PR view |
+| `/` | Filter changes/history, or focus exact numeric PR lookup |
 | `[` / `]` | Previous/next diff hunk |
 | `:` or `Ctrl+P` | Command palette |
 | `?` | Shortcut help |
@@ -116,11 +139,16 @@ Text fields support Unicode-safe editing plus familiar terminal and macOS motion
 ## Performance and Safety
 
 - Rendering and key handling never invoke Git directly.
-- A coalescing worker mailbox replaces obsolete read requests.
+- Fixed, coalescing mailboxes replace obsolete reads; local previews, PR/network previews, and background metadata run independently so one slow request cannot block tab switching.
 - Filesystem event storms collapse into authoritative status snapshots.
 - Preview requests carry generations so stale replies are ignored.
-- History is paginated and diff output is bounded.
-- Git receives argument arrays directly, never shell-concatenated commands.
+- History is paginated for one explicit branch revision; choosing another branch is read-only.
+- PR discovery loads one selected repository progressively in 50-record cursor batches, caps the snapshot at 10,000 PRs, and exposes it in local 25-row pages. Exact lookup accepts only a positive integer and always includes the canonical base-repository URL.
+- Pull-request discovery inspects at most 32 Git remotes, 64 configured fetch/push URL entries (32 distinct URLs), and 16 GitHub repositories.
+- PR changed paths are capped at 4,096 / 2 MiB, patches at 8 MiB, and each preview fetches at most 20 files. Potentially large subprocess stdout is streamed and the child is terminated at the cap.
+- PR previews use locally available immutable OIDs first. Missing Git history deepens only to 4,096 commits in a disposable bare repository. No checkout, worktree mutation, or persistent source-repository ref is used.
+- Cached `gh` metadata is bounded to 32 MiB and 256 entries; fresh batch entries live for 60 seconds and exact PR entries for five minutes.
+- Git and `gh` receive argument arrays directly, never shell-concatenated commands; embedded remote credentials are stripped before URLs become `gh` arguments.
 - Destructive operations are confirmed where appropriate.
 - Hooks, credentials, signing, filters, and repository semantics remain delegated to the installed Git CLI.
 
