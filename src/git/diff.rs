@@ -7,7 +7,6 @@ use syntect::parsing::{SyntaxReference, SyntaxSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiffLineKind {
-    FileHeader,
     HunkHeader,
     Context,
     Added,
@@ -80,7 +79,7 @@ static HIGHLIGHT_ASSETS: OnceLock<HighlightAssets> = OnceLock::new();
 
 fn highlight_assets() -> &'static HighlightAssets {
     HIGHLIGHT_ASSETS.get_or_init(|| {
-        let syntaxes = SyntaxSet::load_defaults_newlines();
+        let syntaxes = two_face::syntax::extra_newlines();
         let themes = ThemeSet::load_defaults();
         let theme = themes
             .themes
@@ -121,10 +120,11 @@ pub fn parse_diff(
             syntax = syntax_for_path(&assets.syntaxes, active_path.as_deref());
             old_highlighter = HighlightLines::new(syntax, &assets.theme);
             new_highlighter = HighlightLines::new(syntax, &assets.theme);
-            lines.push(meta_line(DiffLineKind::FileHeader, raw_line));
             continue;
         }
 
+        // File headers are Git transport metadata rather than source. The selected
+        // filename already appears in the pane title, so keep the preview code-only.
         if raw_line.starts_with("diff --git ")
             || raw_line.starts_with("index ")
             || raw_line.starts_with("--- ")
@@ -134,7 +134,6 @@ pub fn parse_diff(
             || raw_line.starts_with("rename from ")
             || raw_line.starts_with("rename to ")
         {
-            lines.push(meta_line(DiffLineKind::FileHeader, raw_line));
             continue;
         }
 

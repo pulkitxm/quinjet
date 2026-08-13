@@ -13,6 +13,12 @@ use crate::git::{Branch, ConflictChoice, GitOperation};
 const PREVIEW_DEBOUNCE: Duration = Duration::from_millis(45);
 const TOAST_DURATION: Duration = Duration::from_secs(4);
 const HISTORY_PAGE_SIZE: usize = 300;
+const DEFAULT_SIDEBAR_WIDTH: u16 = 42;
+const MIN_SIDEBAR_WIDTH: u16 = 22;
+const MIN_CONTENT_WIDTH: u16 = 32;
+const DEFAULT_DIFF_SPLIT_PERCENT: u16 = 50;
+const MIN_DIFF_SPLIT_PERCENT: u16 = 20;
+const MAX_DIFF_SPLIT_PERCENT: u16 = 80;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
@@ -44,6 +50,12 @@ pub struct Toast {
     pub message: String,
     pub level: ToastLevel,
     expires_at: Instant,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResizeTarget {
+    Sidebar,
+    Diff,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -119,6 +131,117 @@ impl TextBuffer {
         self.cursor = self.value[self.cursor..]
             .find('\n')
             .map_or(self.value.len(), |index| self.cursor + index);
+    }
+
+    pub fn document_start(&mut self) {
+        self.cursor = 0;
+    }
+
+    pub fn document_end(&mut self) {
+        self.cursor = self.value.len();
+    }
+
+    pub fn delete_word_backward(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let mut start = self.cursor;
+        while let Some((index, character)) = previous_character(&self.value, start) {
+            if !character.is_whitespace() {
+                break;
+            }
+            start = index;
+        }
+        while let Some((index, character)) = previous_character(&self.value, start) {
+            if !is_word_character(character) {
+                break;
+            }
+            start = index;
+        }
+        if start == self.cursor {
+            if let Some((index, _)) = previous_character(&self.value, start) {
+                start = index;
+            }
+        }
+        self.value.drain(start..self.cursor);
+        self.cursor = start;
+    }
+
+    pub fn delete_word_forward(&mut self) {
+        if self.cursor >= self.value.len() {
+            return;
+        }
+        let mut end = self.cursor;
+        while let Some((next, character)) = next_character(&self.value, end) {
+            if !character.is_whitespace() {
+                break;
+            }
+            end = next;
+        }
+        while let Some((next, character)) = next_character(&self.value, end) {
+            if !is_word_character(character) {
+                break;
+            }
+            end = next;
+        }
+        if end == self.cursor {
+            if let Some((next, _)) = next_character(&self.value, end) {
+                end = next;
+            }
+        }
+        self.value.drain(self.cursor..end);
+    }
+
+    pub fn delete_to_line_start(&mut self) {
+        let start = self.value[..self.cursor]
+            .rfind('\n')
+            .map_or(0, |index| index + 1);
+        self.value.drain(start..self.cursor);
+        self.cursor = start;
+    }
+
+    pub fn delete_to_line_end(&mut self) {
+        let end = self.value[self.cursor..]
+            .find('\n')
+            .map_or(self.value.len(), |index| self.cursor + index);
+        self.value.drain(self.cursor..end);
+    }
+
+    pub fn move_word_left(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let mut cursor = self.cursor;
+        while let Some((index, character)) = previous_character(&self.value, cursor) {
+            if !character.is_whitespace() {
+                break;
+            }
+            cursor = index;
+        }
+        while let Some((index, character)) = previous_character(&self.value, cursor) {
+            if !is_word_character(character) {
+                break;
+            }
+            cursor = index;
+        }
+        self.cursor = cursor;
+    }
+
+    pub fn move_word_right(&mut self) {
+        let mut cursor = self.cursor;
+        while let Some((next, character)) = next_character(&self.value, cursor) {
+            if !is_word_character(character) {
+                break;
+            }
+            cursor = next;
+        }
+        while let Some((next, character)) = next_character(&self.value, cursor) {
+            if !character.is_whitespace() {
+                break;
+            }
+            cursor = next;
+        }
+        self.cursor = cursor;
     }
 }
 
@@ -231,15 +354,17 @@ impl PaletteCommand {
 pub enum SidebarHit {
     Change(usize),
     Commit(usize),
-    CommitInput,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct UiGeometry {
     pub changes_tab: Rect,
     pub history_tab: Rect,
+    pub main: Rect,
     pub sidebar: Rect,
+    pub sidebar_divider: Rect,
     pub content: Rect,
+    pub diff_divider: Option<Rect>,
     pub sidebar_hits: Vec<(u16, SidebarHit)>,
 }
 
@@ -263,6 +388,10 @@ pub struct App {
     pub sidebar_offset: usize,
     pub content_scroll: usize,
     pub horizontal_scroll: usize,
+    pub sidebar_width: u16,
+    pub diff_split_percent: u16,
+    pub expanded_diff: bool,
+    pub resize_target: Option<ResizeTarget>,
     pub filter: String,
     pub modal: Option<Modal>,
     pub toast: Option<Toast>,
@@ -299,6 +428,10 @@ impl App {
             sidebar_offset: 0,
             content_scroll: 0,
             horizontal_scroll: 0,
+            sidebar_width: DEFAULT_SIDEBAR_WIDTH,
+            diff_split_percent: DEFAULT_DIFF_SPLIT_PERCENT,
+            expanded_diff: false,
+            resize_target: None,
             filter: String::new(),
             modal: None,
             toast: None,
@@ -447,6 +580,11 @@ impl App {
                 });
             }
             KeyCode::Char('v') => self.toggle_diff_layout(),
+            KeyCode::Char('t') | KeyCode::Char('T') => {
+                self.expanded_diff = !self.expanded_diff;
+                self.content_scroll = 0;
+                self.request_preview(&mut effects);
+            }
             KeyCode::Char('b') => self.open_branches(&mut effects),
             KeyCode::Char('c') if self.view == View::Changes => {
                 self.modal = Some(Modal::Commit {
@@ -460,8 +598,8 @@ impl App {
             KeyCode::Char('U') if self.view == View::Changes => {
                 self.queue_operation(GitOperation::UnstageAll, &mut effects);
             }
-            KeyCode::Char('s') if self.view == View::Changes => {
-                self.stage_selected(&mut effects);
+            KeyCode::Char('s') | KeyCode::Char(' ') if self.view == View::Changes => {
+                self.toggle_stage_selected(&mut effects);
             }
             KeyCode::Char('u') if self.view == View::Changes => {
                 self.unstage_selected(&mut effects);
@@ -538,6 +676,20 @@ impl App {
             MouseEventKind::Down(MouseButton::Left) => {
                 if self
                     .geometry
+                    .sidebar_divider
+                    .contains((event.column, event.row).into())
+                {
+                    self.resize_target = Some(ResizeTarget::Sidebar);
+                    self.resize_sidebar(event.column);
+                } else if self
+                    .geometry
+                    .diff_divider
+                    .is_some_and(|divider| divider.contains((event.column, event.row).into()))
+                {
+                    self.resize_target = Some(ResizeTarget::Diff);
+                    self.resize_diff(event.column);
+                } else if self
+                    .geometry
                     .changes_tab
                     .contains((event.column, event.row).into())
                 {
@@ -582,12 +734,6 @@ impl App {
                                     self.schedule_preview(now);
                                 }
                             }
-                            SidebarHit::CommitInput => {
-                                self.modal = Some(Modal::Commit {
-                                    input: TextBuffer::default(),
-                                    amend: false,
-                                });
-                            }
                         }
                     }
                 } else if self
@@ -598,6 +744,12 @@ impl App {
                     self.focus = Focus::Content;
                 }
             }
+            MouseEventKind::Drag(MouseButton::Left) => match self.resize_target {
+                Some(ResizeTarget::Sidebar) => self.resize_sidebar(event.column),
+                Some(ResizeTarget::Diff) => self.resize_diff(event.column),
+                None => {}
+            },
+            MouseEventKind::Up(MouseButton::Left) => self.resize_target = None,
             MouseEventKind::ScrollDown => {
                 if self
                     .geometry
@@ -605,10 +757,10 @@ impl App {
                     .contains((event.column, event.row).into())
                 {
                     self.focus = Focus::Sidebar;
-                    self.navigate(3, now);
+                    self.navigate(1, now);
                 } else {
                     self.focus = Focus::Content;
-                    self.content_scroll = self.content_scroll.saturating_add(3);
+                    self.content_scroll = self.content_scroll.saturating_add(2);
                 }
             }
             MouseEventKind::ScrollUp => {
@@ -618,11 +770,17 @@ impl App {
                     .contains((event.column, event.row).into())
                 {
                     self.focus = Focus::Sidebar;
-                    self.navigate(-3, now);
+                    self.navigate(-1, now);
                 } else {
                     self.focus = Focus::Content;
-                    self.content_scroll = self.content_scroll.saturating_sub(3);
+                    self.content_scroll = self.content_scroll.saturating_sub(2);
                 }
+            }
+            MouseEventKind::ScrollLeft => {
+                self.horizontal_scroll = self.horizontal_scroll.saturating_sub(3);
+            }
+            MouseEventKind::ScrollRight => {
+                self.horizontal_scroll = self.horizontal_scroll.saturating_add(3);
             }
             _ => {}
         }
@@ -1045,6 +1203,27 @@ impl App {
         }
     }
 
+    fn resize_sidebar(&mut self, column: u16) {
+        let main = self.geometry.main;
+        let maximum = main
+            .width
+            .saturating_sub(MIN_CONTENT_WIDTH)
+            .max(MIN_SIDEBAR_WIDTH);
+        self.sidebar_width = column
+            .saturating_sub(main.x)
+            .clamp(MIN_SIDEBAR_WIDTH, maximum);
+    }
+
+    fn resize_diff(&mut self, column: u16) {
+        let content = self.geometry.content;
+        if content.width == 0 {
+            return;
+        }
+        let relative = column.saturating_sub(content.x).min(content.width);
+        self.diff_split_percent = (relative.saturating_mul(100) / content.width)
+            .clamp(MIN_DIFF_SPLIT_PERCENT, MAX_DIFF_SPLIT_PERCENT);
+    }
+
     fn switch_view(&mut self, view: View) {
         if self.view == view {
             return;
@@ -1166,7 +1345,7 @@ impl App {
         }
     }
 
-    fn stage_selected(&mut self, effects: &mut Vec<AppEffect>) {
+    fn toggle_stage_selected(&mut self, effects: &mut Vec<AppEffect>) {
         let Some(change) = self.selected_change().cloned() else {
             return;
         };
@@ -1175,7 +1354,9 @@ impl App {
                 self.queue_operation(GitOperation::Stage(vec![change.path]), effects);
             }
             ChangeArea::Conflict => self.modal = Some(Modal::Conflict { change }),
-            ChangeArea::Staged => {}
+            ChangeArea::Staged => {
+                self.queue_operation(GitOperation::Unstage(vec![change.path]), effects);
+            }
         }
     }
 
@@ -1308,6 +1489,7 @@ impl App {
                     effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadDiff {
                         generation,
                         change,
+                        expanded: self.expanded_diff,
                     })));
                 } else {
                     self.document_loading = false;
@@ -1388,11 +1570,47 @@ impl App {
 }
 
 fn edit_text(input: &mut TextBuffer, key: KeyEvent, multiline: bool) {
+    let word_modifier = key
+        .modifiers
+        .intersects(KeyModifiers::ALT | KeyModifiers::CONTROL);
+    let command_modifier = key
+        .modifiers
+        .intersects(KeyModifiers::SUPER | KeyModifiers::META | KeyModifiers::HYPER);
+
     match key.code {
+        KeyCode::Backspace if command_modifier => input.delete_to_line_start(),
+        KeyCode::Delete if command_modifier => input.delete_to_line_end(),
+        KeyCode::Backspace if word_modifier => input.delete_word_backward(),
+        KeyCode::Delete if word_modifier => input.delete_word_forward(),
+        KeyCode::Left if command_modifier => input.home(),
+        KeyCode::Right if command_modifier => input.end(),
+        KeyCode::Left if word_modifier => input.move_word_left(),
+        KeyCode::Right if word_modifier => input.move_word_right(),
+        KeyCode::Home if command_modifier => input.document_start(),
+        KeyCode::End if command_modifier => input.document_end(),
+        KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            input.document_start();
+        }
+        KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => input.end(),
+        KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => input.move_left(),
+        KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => input.move_right(),
+        KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            input.delete_word_backward();
+        }
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            input.delete_to_line_start();
+        }
+        KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            input.delete_to_line_end();
+        }
         KeyCode::Char(character)
-            if !key
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            if !key.modifiers.intersects(
+                KeyModifiers::CONTROL
+                    | KeyModifiers::ALT
+                    | KeyModifiers::SUPER
+                    | KeyModifiers::META
+                    | KeyModifiers::HYPER,
+            ) =>
         {
             input.insert(character);
         }
@@ -1405,6 +1623,19 @@ fn edit_text(input: &mut TextBuffer, key: KeyEvent, multiline: bool) {
         KeyCode::Enter if multiline => input.insert('\n'),
         _ => {}
     }
+}
+
+fn previous_character(value: &str, cursor: usize) -> Option<(usize, char)> {
+    value.get(..cursor)?.char_indices().next_back()
+}
+
+fn next_character(value: &str, cursor: usize) -> Option<(usize, char)> {
+    let character = value.get(cursor..)?.chars().next()?;
+    Some((cursor + character.len_utf8(), character))
+}
+
+fn is_word_character(character: char) -> bool {
+    character.is_alphanumeric() || character == '_'
 }
 
 #[cfg(test)]
@@ -1442,6 +1673,37 @@ mod tests {
         assert_eq!(buffer.value, "ab");
         buffer.insert('é');
         assert_eq!(buffer.value, "aéb");
+    }
+
+    #[test]
+    fn text_buffer_supports_word_and_line_deletion() {
+        let mut buffer = TextBuffer::new("first second\nthird word");
+        buffer.delete_word_backward();
+        assert_eq!(buffer.value, "first second\nthird ");
+        buffer.delete_to_line_start();
+        assert_eq!(buffer.value, "first second\n");
+        buffer.document_start();
+        buffer.delete_word_forward();
+        assert_eq!(buffer.value, " second\n");
+        buffer.document_end();
+        buffer.delete_to_line_start();
+        assert_eq!(buffer.value, " second\n");
+    }
+
+    #[test]
+    fn pane_resize_is_clamped_to_usable_bounds() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.geometry.main = Rect::new(5, 3, 120, 30);
+        app.geometry.content = Rect::new(48, 3, 77, 30);
+
+        app.resize_sidebar(120);
+        assert_eq!(app.sidebar_width, 88);
+        app.resize_sidebar(6);
+        assert_eq!(app.sidebar_width, 22);
+        app.resize_diff(49);
+        assert_eq!(app.diff_split_percent, 20);
+        app.resize_diff(124);
+        assert_eq!(app.diff_split_percent, 80);
     }
 
     #[test]

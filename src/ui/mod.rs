@@ -72,20 +72,29 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let tabs = vertical[0];
     let main = vertical[1];
     let footer = vertical[2];
-    let sidebar_width = ((main.width as f32 * 0.34) as u16).clamp(30, 52);
-    let columns =
-        Layout::horizontal([Constraint::Length(sidebar_width), Constraint::Min(40)]).split(main);
+    let maximum_sidebar = main.width.saturating_sub(32).max(22);
+    app.sidebar_width = app.sidebar_width.clamp(22, maximum_sidebar);
+    let columns = Layout::horizontal([
+        Constraint::Length(app.sidebar_width),
+        Constraint::Length(1),
+        Constraint::Min(31),
+    ])
+    .split(main);
 
     let (changes_tab, history_tab) = draw_tabs(frame, tabs, app, &theme);
     let sidebar_hits = draw_sidebar(frame, columns[0], app, &theme);
-    draw_content(frame, columns[1], app, &theme);
+    draw_main_divider(frame, columns[1], app.resize_target.is_some(), &theme);
+    let diff_divider = draw_content(frame, columns[2], app, &theme);
     draw_footer(frame, footer, app, &theme);
 
     app.geometry = UiGeometry {
         changes_tab,
         history_tab,
+        main,
         sidebar: columns[0],
-        content: columns[1],
+        sidebar_divider: columns[1],
+        content: columns[2],
+        diff_divider,
         sidebar_hits,
     };
 
@@ -94,6 +103,20 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     }
     if let Some(toast) = app.toast.as_ref() {
         draw_toast(frame, toast.message.as_str(), toast.level, &theme);
+    }
+}
+
+fn draw_main_divider(frame: &mut Frame<'_>, area: Rect, dragging: bool, theme: &Theme) {
+    let color = if dragging {
+        theme.border_focus
+    } else {
+        theme.border
+    };
+    for row in area.y..area.bottom() {
+        frame.render_widget(
+            Paragraph::new("│").style(Style::default().fg(color).bg(theme.background)),
+            Rect::new(area.x, row, 1, 1),
+        );
     }
 }
 
@@ -154,14 +177,14 @@ fn draw_tabs(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) -> (Re
     draw_tab(
         frame,
         header[0],
-        "  Changes  [1]",
+        "    Changes    ",
         app.view == View::Changes,
         theme,
     );
     draw_tab(
         frame,
         header[1],
-        "  History  [2]",
+        "    History    ",
         app.view == View::History,
         theme,
     );
@@ -256,32 +279,10 @@ fn draw_changes_sidebar(
         return Vec::new();
     }
 
-    let commit_height = 3.min(inner.height);
-    let regions =
-        Layout::vertical([Constraint::Length(commit_height), Constraint::Min(1)]).split(inner);
-    frame.render_widget(
-        Paragraph::new(vec![
-            Line::from(vec![
-                Span::styled(" Commit message", Style::default().fg(theme.muted)),
-                Span::styled("  [c]", Style::default().fg(theme.accent)),
-            ]),
-            Line::from(Span::styled(
-                " Press c, type message, Ctrl+Enter",
-                Style::default().fg(theme.muted),
-            )),
-        ])
-        .style(Style::default().bg(theme.panel_alt))
-        .block(
-            Block::default()
-                .borders(Borders::BOTTOM)
-                .border_style(Style::default().fg(theme.border)),
-        ),
-        regions[0],
-    );
-
+    let list_area = inner;
     let visible = app.visible_change_indices();
     let row_count = change_row_count(app, &visible);
-    let height = regions[1].height as usize;
+    let height = list_area.height as usize;
     ensure_offset(
         &mut app.sidebar_offset,
         app.change_cursor,
@@ -289,10 +290,10 @@ fn draw_changes_sidebar(
         row_count,
     );
     let rows = build_change_rows(app, &visible);
-    let mut hits = vec![(regions[0].y, SidebarHit::CommitInput)];
+    let mut hits = Vec::new();
     let end = (app.sidebar_offset + height).min(rows.len());
     for (y, row) in
-        (regions[1].y..regions[1].bottom()).zip(rows.iter().take(end).skip(app.sidebar_offset))
+        (list_area.y..list_area.bottom()).zip(rows.iter().take(end).skip(app.sidebar_offset))
     {
         match row {
             ChangeRow::Header { area: group, count } => {
@@ -306,7 +307,7 @@ fn draw_changes_sidebar(
                         Span::styled(format!("  {count}"), Style::default().fg(theme.muted)),
                     ]))
                     .style(Style::default().bg(theme.panel_alt)),
-                    Rect::new(regions[1].x, y, regions[1].width, 1),
+                    Rect::new(list_area.x, y, list_area.width, 1),
                 );
             }
             ChangeRow::Change {
@@ -321,7 +322,7 @@ fn draw_changes_sidebar(
                     Style::default().bg(theme.panel)
                 };
                 let path = change.parent_path();
-                let available = regions[1].width.saturating_sub(8) as usize;
+                let available = list_area.width.saturating_sub(8) as usize;
                 let name = truncate_middle(
                     &change.file_name(),
                     available.saturating_sub(path.width() + 1),
@@ -350,7 +351,7 @@ fn draw_changes_sidebar(
                 ]);
                 frame.render_widget(
                     Paragraph::new(line).style(row_style),
-                    Rect::new(regions[1].x, y, regions[1].width.saturating_sub(4), 1),
+                    Rect::new(list_area.x, y, list_area.width.saturating_sub(4), 1),
                 );
                 let badge = format!(" {} ", change.status.code());
                 frame.render_widget(
@@ -364,7 +365,7 @@ fn draw_changes_sidebar(
                             })
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Rect::new(regions[1].right().saturating_sub(4), y, 4, 1),
+                    Rect::new(list_area.right().saturating_sub(4), y, 4, 1),
                 );
                 hits.push((y, SidebarHit::Change(*index)));
             }
@@ -385,7 +386,7 @@ fn draw_changes_sidebar(
                     theme.muted
                 }))
                 .wrap(Wrap { trim: false }),
-            regions[1],
+            list_area,
         );
     }
     hits
@@ -572,7 +573,7 @@ fn draw_history_sidebar(
     hits
 }
 
-fn draw_content(frame: &mut Frame<'_>, area: Rect, app: &mut App, theme: &Theme) {
+fn draw_content(frame: &mut Frame<'_>, area: Rect, app: &mut App, theme: &Theme) -> Option<Rect> {
     let title = format!(
         " {}{} ",
         truncate_middle(&app.document.title, area.width.saturating_sub(18) as usize),
@@ -586,29 +587,25 @@ fn draw_content(frame: &mut Frame<'_>, area: Rect, app: &mut App, theme: &Theme)
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {
-        return;
+        return None;
     }
 
-    let max_scroll = app
-        .document
-        .lines
-        .len()
-        .saturating_sub(inner.height as usize);
+    let side_by_side = app.diff_layout == DiffLayout::SideBySide && inner.width >= 72;
+    let visual_length = if side_by_side {
+        side_by_side_rows(&app.document).len()
+    } else {
+        app.document.lines.len()
+    };
+    let max_scroll = visual_length.saturating_sub(inner.height as usize);
     app.content_scroll = app.content_scroll.min(max_scroll);
-    match app.diff_layout {
-        DiffLayout::Unified => draw_unified_diff(frame, inner, app, theme),
-        DiffLayout::SideBySide if inner.width >= 92 => {
-            draw_side_by_side_diff(frame, inner, app, theme);
-        }
-        DiffLayout::SideBySide => draw_unified_diff(frame, inner, app, theme),
-    }
-    draw_scrollbar(
-        frame,
-        inner,
-        app.content_scroll,
-        app.document.lines.len(),
-        theme,
-    );
+    let divider = if side_by_side {
+        Some(draw_side_by_side_diff(frame, inner, app, theme))
+    } else {
+        draw_unified_diff(frame, inner, app, theme);
+        None
+    };
+    draw_scrollbar(frame, inner, app.content_scroll, visual_length, theme);
+    divider
 }
 
 fn draw_unified_diff(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) {
@@ -646,17 +643,28 @@ fn draw_unified_diff(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme
     frame.render_widget(Paragraph::new(lines), area);
 }
 
-fn draw_side_by_side_diff(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) {
-    let columns =
-        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(area);
-    let left_area = columns[0];
-    let right_area = columns[1];
-    frame.render_widget(
-        Block::default()
-            .borders(Borders::RIGHT)
-            .border_style(Style::default().fg(theme.border)),
-        left_area,
+fn draw_side_by_side_diff(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) -> Rect {
+    let usable_width = area.width.saturating_sub(1);
+    let left_width = usable_width.saturating_mul(app.diff_split_percent) / 100;
+    let left_area = Rect::new(area.x, area.y, left_width, area.height);
+    let divider = Rect::new(left_area.right(), area.y, 1, area.height);
+    let right_area = Rect::new(
+        divider.right(),
+        area.y,
+        area.right().saturating_sub(divider.right()),
+        area.height,
     );
+    let divider_color = if app.resize_target == Some(crate::app::ResizeTarget::Diff) {
+        theme.border_focus
+    } else {
+        theme.border
+    };
+    for row in divider.y..divider.bottom() {
+        frame.render_widget(
+            Paragraph::new("│").style(Style::default().fg(divider_color).bg(theme.panel)),
+            Rect::new(divider.x, row, 1, 1),
+        );
+    }
 
     let rows = side_by_side_rows(&app.document);
     for (offset, row) in rows
@@ -683,6 +691,7 @@ fn draw_side_by_side_diff(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &
             theme,
         );
     }
+    divider
 }
 
 type DiffPair<'a> = (Option<&'a DiffLine>, Option<&'a DiffLine>);
@@ -816,7 +825,6 @@ fn marker_for(kind: DiffLineKind, theme: &Theme) -> (&'static str, Style) {
                 .fg(theme.accent)
                 .add_modifier(Modifier::BOLD),
         ),
-        DiffLineKind::FileHeader => ("▸ ", Style::default().fg(theme.modified)),
         DiffLineKind::Context => ("  ", Style::default().fg(theme.muted)),
         DiffLineKind::Meta => ("  ", Style::default().fg(theme.muted)),
     }
@@ -836,7 +844,6 @@ fn line_foreground(kind: DiffLineKind, theme: &Theme) -> Color {
         DiffLineKind::Added => theme.added,
         DiffLineKind::Removed => theme.removed,
         DiffLineKind::HunkHeader => theme.accent,
-        DiffLineKind::FileHeader => theme.modified,
         _ => theme.text,
     }
 }
@@ -899,15 +906,6 @@ fn draw_footer(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) {
             ),
         ])
     };
-    let right = match app.view {
-        View::Changes => " s stage  u unstage  c commit  b branch  ? help ",
-        View::History => " C cherry-pick  R revert  n branch  ? help ",
-    };
-    let regions = Layout::horizontal([
-        Constraint::Min(20),
-        Constraint::Length(right.width() as u16),
-    ])
-    .split(area);
     frame.render_widget(
         Paragraph::new(left)
             .style(Style::default().bg(theme.panel_alt))
@@ -916,18 +914,7 @@ fn draw_footer(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) {
                     .borders(Borders::TOP)
                     .border_style(Style::default().fg(theme.border)),
             ),
-        regions[0],
-    );
-    frame.render_widget(
-        Paragraph::new(right)
-            .alignment(Alignment::Right)
-            .style(Style::default().fg(theme.muted).bg(theme.panel_alt))
-            .block(
-                Block::default()
-                    .borders(Borders::TOP)
-                    .border_style(Style::default().fg(theme.border)),
-            ),
-        regions[1],
+        area,
     );
 }
 
