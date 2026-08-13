@@ -629,13 +629,15 @@ impl App {
         effects
     }
 
-    pub fn tick(&mut self, now: Instant) -> Vec<AppEffect> {
+    pub fn tick(&mut self, now: Instant) -> (Vec<AppEffect>, bool) {
+        let mut changed = false;
         if self
             .toast
             .as_ref()
             .is_some_and(|toast| now >= toast.expires_at)
         {
             self.toast = None;
+            changed = true;
         }
         if self
             .pending_g
@@ -648,8 +650,9 @@ impl App {
         if self.preview_due.is_some_and(|due| now >= due) {
             self.preview_due = None;
             self.request_preview(&mut effects);
+            changed = true;
         }
-        effects
+        (effects, changed)
     }
 
     pub fn filesystem_changed(&mut self, effects: &mut Vec<AppEffect>) {
