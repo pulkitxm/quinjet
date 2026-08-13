@@ -35,7 +35,7 @@ filesystem watcher (coalesced signal)
 
 1. The UI thread mutates only in-memory state and renders visible rows.
 2. Every preview/status/history request carries a generation; stale replies are ignored.
-3. The worker queue is bounded, so key repeat cannot allocate unbounded work.
+3. The worker mailbox has fixed coalescing slots for read work, so key repeat cannot allocate unbounded previews; ordered user mutations are serialized by app state.
 4. Watcher signals are lossy by design: one full status snapshot subsumes all preceding file events.
 5. Diff output is capped at 8 MiB and history is paginated.
 6. Git receives argv directly, never via a shell.

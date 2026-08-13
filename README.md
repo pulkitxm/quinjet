@@ -56,7 +56,7 @@ cargo run --release -- --no-mouse /path/to/repository
 ## Performance Model
 
 - Rendering and key handling never run Git commands directly.
-- A bounded worker queue executes Git operations off the UI thread.
+- A coalescing worker mailbox executes Git operations off the UI thread and replaces obsolete read requests.
 - Filesystem event storms collapse into authoritative status snapshots.
 - Preview requests are debounced and tagged with generations so stale results are ignored.
 - History is loaded in pages; diff output is capped before parsing/highlighting.
