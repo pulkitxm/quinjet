@@ -51,6 +51,7 @@ const HELP_LINES: &[(&str, &str)] = &[
     ("n", "Create branch at selected commit"),
     ("", ""),
     ("Pull Requests", ""),
+    ("3", "Progressively load all PR states with progress"),
     ("/", "Focus exact numeric PR lookup"),
     ("o", "Choose the base GitHub repository"),
     ("← / →", "Previous / next bounded PR page"),
@@ -671,20 +672,32 @@ fn draw_pull_requests_sidebar(
     } else {
         format!("  ⚠{}", app.pull_request_warnings.len())
     };
+    let loading = if app.pull_requests_loading {
+        format!("  · {}%", app.pull_request_load_percent())
+    } else {
+        String::new()
+    };
     let cache = if app.pull_request_from_cache {
         "  · cached"
     } else {
         ""
     };
-    let mode = app.pull_request_exact_number.map_or_else(
-        || format!("page {}", app.pull_request_page),
-        |number| format!("exact #{number}"),
-    );
-    let block = panel_block(
+    let title = if let Some(number) = app.pull_request_exact_number {
+        format!(" Pull Requests  exact #{number}{cache}{warning} ")
+    } else {
         format!(
-            " Pull Requests  {}  · {mode}{cache}{warning} ",
-            app.pull_requests.len()
-        ),
+            " PRs  {}/{}  · {}/{}{}{}{} ",
+            app.pull_request_fetched,
+            app.pull_request_total.max(app.pull_request_fetched),
+            app.pull_request_page,
+            app.pull_request_page_count(),
+            loading,
+            cache,
+            warning
+        )
+    };
+    let block = panel_block(
+        title,
         app.focus == Focus::Sidebar && app.modal.is_none(),
         theme,
     );
@@ -695,81 +708,9 @@ fn draw_pull_requests_sidebar(
     }
 
     let controls_height = inner.height.min(3);
-    let repository_name = app
-        .pull_request_repository
-        .as_ref()
-        .map(GitHubRepository::display_name)
-        .unwrap_or_else(|| "discovering repository…".to_owned());
-    let repository_line = format!(
-        " repo {}  [o]   {} page {} {} ",
-        repository_name,
-        if app.pull_request_has_previous {
-            "←"
-        } else {
-            "·"
-        },
-        app.pull_request_page,
-        if app.pull_request_has_next {
-            "→"
-        } else {
-            "·"
-        },
-    );
-    frame.render_widget(
-        Paragraph::new(truncate_middle(&repository_line, inner.width as usize))
-            .style(Style::default().fg(theme.text).bg(theme.panel_alt)),
-        Rect::new(inner.x, inner.y, inner.width, 1),
-    );
-    if controls_height >= 2 {
-        let lookup_area = Rect::new(inner.x, inner.y + 1, inner.width, 1);
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(" PR # ", Style::default().fg(theme.accent)),
-                Span::styled(
-                    app.pull_request_lookup.value.as_str(),
-                    Style::default().fg(theme.text),
-                ),
-                Span::styled(
-                    if app.pull_request_lookup_active {
-                        "   Enter lookup"
-                    } else {
-                        "   [/ exact lookup]"
-                    },
-                    Style::default().fg(theme.muted),
-                ),
-            ]))
-            .style(Style::default().bg(if app.pull_request_lookup_active {
-                theme.selected
-            } else {
-                theme.panel_alt
-            })),
-            lookup_area,
-        );
-        if app.pull_request_lookup_active {
-            set_text_cursor(
-                frame,
-                Rect::new(
-                    lookup_area.x + 6,
-                    lookup_area.y,
-                    lookup_area.width.saturating_sub(6),
-                    1,
-                ),
-                &app.pull_request_lookup,
-                false,
-            );
-        }
-    }
-    if controls_height >= 3 {
-        frame.render_widget(
-            Paragraph::new(" ←/→ pages   ,/. file pages   r refresh ")
-                .style(Style::default().fg(theme.muted).bg(theme.panel_alt)),
-            Rect::new(inner.x, inner.y + 2, inner.width, 1),
-        );
-    }
-
     let list_area = Rect::new(
         inner.x,
-        inner.y + controls_height,
+        inner.y,
         inner.width,
         inner.height.saturating_sub(controls_height),
     );
@@ -811,16 +752,20 @@ fn draw_pull_requests_sidebar(
                     Style::default().fg(theme.accent),
                 ),
                 Span::styled(
-                    if pull_request.is_draft {
-                        "◌ "
-                    } else {
-                        "● "
+                    match (pull_request.is_draft, pull_request.state.as_str()) {
+                        (true, _) => "◌ ",
+                        (_, "MERGED") => "◆ ",
+                        (_, "CLOSED") => "× ",
+                        _ => "● ",
                     },
-                    Style::default().fg(if pull_request.is_draft {
-                        theme.modified
-                    } else {
-                        theme.added
-                    }),
+                    Style::default().fg(
+                        match (pull_request.is_draft, pull_request.state.as_str()) {
+                            (true, _) => theme.modified,
+                            (_, "MERGED") => theme.accent,
+                            (_, "CLOSED") => theme.removed,
+                            _ => theme.added,
+                        },
+                    ),
                 ),
                 Span::styled(
                     title,
@@ -852,21 +797,109 @@ fn draw_pull_requests_sidebar(
         );
         hits.push((y, SidebarHit::PullRequest(*index)));
     }
-
+    if app.pull_requests_loading && list_area.height > visible.len() as u16 {
+        let skeleton_count = (list_area.height as usize - visible.len()).min(6);
+        for offset in 0..skeleton_count {
+            let y = list_area.y + visible.len() as u16 + offset as u16;
+            let width = list_area.width.saturating_sub(8 + (offset % 3) as u16 * 5);
+            frame.render_widget(
+                Paragraph::new(format!(
+                    "   ◌ {}",
+                    "─".repeat(width.saturating_sub(6) as usize)
+                ))
+                .style(Style::default().fg(theme.border).bg(theme.panel)),
+                Rect::new(list_area.x, y, list_area.width, 1),
+            );
+        }
+    }
     draw_scrollbar(frame, list_area, app.sidebar_offset, visible.len(), theme);
-    if visible.is_empty() && list_area.height > 0 {
-        let message = if app.pull_requests_loading {
-            "\n  Loading pull requests…"
-        } else if app.pull_request_exact_number.is_some() {
+    if visible.is_empty() && !app.pull_requests_loading && list_area.height > 0 {
+        let message = if app.pull_request_exact_number.is_some() {
             "\n  Pull request not found"
         } else {
-            "\n  No open pull requests on this page"
+            "\n  No pull requests in this repository"
         };
         frame.render_widget(
-            Paragraph::new(message)
-                .style(Style::default().fg(theme.muted))
-                .wrap(Wrap { trim: false }),
+            Paragraph::new(message).style(Style::default().fg(theme.muted)),
             list_area,
+        );
+    }
+
+    let controls_y = list_area.bottom();
+    let repository_name = app
+        .pull_request_repository
+        .as_ref()
+        .map(GitHubRepository::display_name)
+        .unwrap_or_else(|| "discovering repository…".to_owned());
+    if controls_height >= 1 {
+        let (open, merged, closed) = app.pull_request_state_counts();
+        frame.render_widget(
+            Paragraph::new(truncate_middle(
+                &format!(" repo {repository_name}  [o]  ●{open} ◆{merged} ×{closed}"),
+                inner.width as usize,
+            ))
+            .style(Style::default().fg(theme.text).bg(theme.panel_alt)),
+            Rect::new(inner.x, controls_y, inner.width, 1),
+        );
+    }
+    if controls_height >= 2 {
+        let lookup_area = Rect::new(inner.x, controls_y + 1, inner.width, 1);
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(" PR # ", Style::default().fg(theme.accent)),
+                Span::styled(
+                    app.pull_request_lookup.value.as_str(),
+                    Style::default().fg(theme.text),
+                ),
+                Span::styled(
+                    if app.pull_request_lookup_active {
+                        "  Enter lookup"
+                    } else {
+                        "  [/ lookup]"
+                    },
+                    Style::default().fg(theme.muted),
+                ),
+            ]))
+            .style(Style::default().bg(if app.pull_request_lookup_active {
+                theme.selected
+            } else {
+                theme.panel_alt
+            })),
+            lookup_area,
+        );
+        if app.pull_request_lookup_active {
+            set_text_cursor(
+                frame,
+                Rect::new(
+                    lookup_area.x + 6,
+                    lookup_area.y,
+                    lookup_area.width.saturating_sub(6),
+                    1,
+                ),
+                &app.pull_request_lookup,
+                false,
+            );
+        }
+    }
+    if controls_height >= 3 {
+        let progress = if app.pull_requests_loading {
+            format!(
+                "{}% {}/{}",
+                app.pull_request_load_percent(),
+                app.pull_request_fetched,
+                app.pull_request_total.max(app.pull_request_fetched)
+            )
+        } else {
+            "done".to_owned()
+        };
+        frame.render_widget(
+            Paragraph::new(format!(
+                " ←/→ {}/{}  ,/. files  r refresh  {progress}",
+                app.pull_request_page,
+                app.pull_request_page_count()
+            ))
+            .style(Style::default().fg(theme.muted).bg(theme.panel_alt)),
+            Rect::new(inner.x, controls_y + 2, inner.width, 1),
         );
     }
     hits
@@ -2546,7 +2579,7 @@ fn draw_pull_request_repositories(
     draw_modal_hint(
         frame,
         area,
-        "Enter select repository and load page 1   Esc close",
+        "Enter select repository and progressively load all PRs   Esc close",
         theme,
     );
 }
@@ -3003,6 +3036,34 @@ mod tests {
         app.focus = Focus::Content;
         app.pull_requests_loaded = true;
         app.pull_request_page = 2;
+        app.pull_request_total = 50;
+        app.pull_request_fetched = 50;
+        app.pull_requests = (1..=50)
+            .map(|number| crate::git::github::PullRequest {
+                number,
+                title: format!("PR {number}"),
+                author: "octocat".to_owned(),
+                state: "OPEN".to_owned(),
+                is_draft: false,
+                updated_at: String::new(),
+                url: format!("https://github.com/acme/widget/pull/{number}"),
+                base_ref: "main".to_owned(),
+                base_oid: String::new(),
+                head_ref: "topic".to_owned(),
+                head_oid: String::new(),
+                base_repository: GitHubRepository {
+                    name_with_owner: "acme/widget".to_owned(),
+                    url: "https://github.com/acme/widget".to_owned(),
+                    remotes: vec!["upstream".to_owned()],
+                },
+                head_repository: Some("acme/widget".to_owned()),
+                head_remotes: vec!["upstream".to_owned()],
+                is_cross_repository: false,
+                additions: 0,
+                deletions: 0,
+                changed_files: 0,
+            })
+            .collect();
         app.pull_request_repository = Some(GitHubRepository {
             name_with_owner: "acme/widget".to_owned(),
             url: "https://github.com/acme/widget".to_owned(),
@@ -3059,7 +3120,7 @@ mod tests {
         assert!(rendered.contains("Pull Requests"));
         assert!(rendered.contains("PR #"));
         assert!(rendered.contains("acme/widget"));
-        assert!(rendered.contains("page 2"));
+        assert!(rendered.contains("←/→ 2/2"));
         assert_eq!(rendered.matches("Pull request #42").count(), 1);
         assert!(rendered.contains("acme/widget:main"));
         assert!(rendered.contains("remote upstream"));
@@ -3068,6 +3129,63 @@ mod tests {
         assert!(rendered.contains("fork"));
         assert!(rendered.contains("src/rocket.rs"));
         assert!(!rendered.contains("@@"));
+    }
+
+    #[test]
+    fn pull_request_loading_renders_bottom_controls_progress_and_skeletons() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = App::new("/tmp/repo", "repo");
+        app.view = View::PullRequests;
+        app.pull_requests_loading = true;
+        app.pull_request_total = 100;
+        app.pull_request_fetched = 2;
+        app.pull_requests = (1..=2)
+            .map(|number| crate::git::github::PullRequest {
+                number,
+                title: format!("Pull request {number}"),
+                author: "ada".to_owned(),
+                state: "OPEN".to_owned(),
+                is_draft: false,
+                updated_at: String::new(),
+                url: format!("https://github.com/acme/widget/pull/{number}"),
+                base_ref: "main".to_owned(),
+                base_oid: String::new(),
+                head_ref: "topic".to_owned(),
+                head_oid: String::new(),
+                base_repository: GitHubRepository {
+                    name_with_owner: "acme/widget".to_owned(),
+                    url: "https://github.com/acme/widget".to_owned(),
+                    remotes: vec!["origin".to_owned()],
+                },
+                head_repository: Some("acme/widget".to_owned()),
+                head_remotes: vec!["origin".to_owned()],
+                is_cross_repository: false,
+                additions: 0,
+                deletions: 0,
+                changed_files: 0,
+            })
+            .collect();
+        app.pull_request_repository = app
+            .pull_requests
+            .first()
+            .map(|pull_request| pull_request.base_repository.clone());
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+        let bottom = (24..27)
+            .flat_map(|row| (0..42).map(move |column| buffer[(column, row)].symbol()))
+            .collect::<String>();
+
+        assert!(rendered.contains("2%"));
+        assert!(rendered.contains("2/100"));
+        assert!(rendered.contains("──"));
+        assert!(bottom.contains("repo acme/widget"));
+        assert!(bottom.contains("PR #"));
     }
 
     #[test]

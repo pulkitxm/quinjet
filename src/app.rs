@@ -7,7 +7,7 @@ use ratatui::layout::Rect;
 use crate::git::diff::{DiffDocument, DiffLineKind};
 use crate::git::github::{
     DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE, DEFAULT_PULL_REQUEST_PAGE_SIZE, GitHubRepository,
-    PullRequest,
+    MAX_PULL_REQUESTS, PullRequest,
 };
 use crate::git::history::Commit;
 use crate::git::status::{Change, ChangeArea, RepoStatus};
@@ -431,10 +431,15 @@ pub struct App {
     pub pull_request_repository: Option<GitHubRepository>,
     pub pull_request_warnings: Vec<String>,
     pub pull_request_page: usize,
-    pub pull_request_has_previous: bool,
-    pub pull_request_has_next: bool,
+    pub pull_request_total: usize,
+    pub pull_request_fetched: usize,
+    pub pull_request_has_more: bool,
+    pub pull_request_next_cursor: Option<String>,
     pub pull_request_exact_number: Option<u64>,
     pub pull_request_from_cache: bool,
+    pub history_branches: Vec<HistoryBranch>,
+    pub history_branches_loading: bool,
+    pub history_branches_loaded: bool,
     pub pull_request_lookup: TextBuffer,
     pub pull_request_lookup_active: bool,
     pub pull_request_file_page: usize,
@@ -497,10 +502,15 @@ impl App {
             pull_request_repository: None,
             pull_request_warnings: Vec::new(),
             pull_request_page: 1,
-            pull_request_has_previous: false,
-            pull_request_has_next: false,
+            pull_request_total: 0,
+            pull_request_fetched: 0,
+            pull_request_has_more: false,
+            pull_request_next_cursor: None,
             pull_request_exact_number: None,
             pull_request_from_cache: false,
+            history_branches: Vec::new(),
+            history_branches_loading: false,
+            history_branches_loaded: false,
             pull_request_lookup: TextBuffer::default(),
             pull_request_lookup_active: false,
             pull_request_file_page: 1,
@@ -552,6 +562,7 @@ impl App {
         let mut effects = Vec::new();
         self.request_refresh(&mut effects);
         self.request_history(true, &mut effects);
+        self.request_history_branches(&mut effects);
         effects
     }
 
@@ -588,9 +599,55 @@ impl App {
     }
 
     pub fn visible_pull_request_indices(&self) -> Vec<usize> {
-        // PR search is deliberately an exact, repository-scoped numeric lookup.
-        // Page rows are never populated by an unbounded client-side fuzzy search.
-        (0..self.pull_requests.len()).collect()
+        let start = self
+            .pull_request_page
+            .saturating_sub(1)
+            .saturating_mul(DEFAULT_PULL_REQUEST_PAGE_SIZE);
+        let end = start
+            .saturating_add(DEFAULT_PULL_REQUEST_PAGE_SIZE)
+            .min(self.pull_requests.len());
+        (start.min(end)..end).collect()
+    }
+
+    pub fn pull_request_page_count(&self) -> usize {
+        self.pull_requests
+            .len()
+            .max(1)
+            .div_ceil(DEFAULT_PULL_REQUEST_PAGE_SIZE)
+    }
+
+    pub fn pull_request_state_counts(&self) -> (usize, usize, usize) {
+        self.pull_requests
+            .iter()
+            .fold(
+                (0, 0, 0),
+                |(open, merged, closed), pull_request| match pull_request.state.as_str() {
+                    "MERGED" => (open, merged + 1, closed),
+                    "CLOSED" => (open, merged, closed + 1),
+                    _ => (open + 1, merged, closed),
+                },
+            )
+    }
+
+    pub fn pull_request_load_percent(&self) -> usize {
+        if self.pull_request_total == 0 {
+            if self.pull_requests_loading { 0 } else { 100 }
+        } else {
+            self.pull_request_fetched
+                .saturating_mul(100)
+                .checked_div(self.pull_request_total)
+                .unwrap_or_default()
+                .min(100)
+        }
+    }
+
+    fn normalize_pull_request_page(&mut self) {
+        self.pull_request_page = self
+            .pull_request_page
+            .clamp(1, self.pull_request_page_count());
+        self.pull_request_cursor = self
+            .pull_request_cursor
+            .min(self.visible_pull_request_indices().len().saturating_sub(1));
     }
 
     pub fn history_branch_label(&self) -> String {
@@ -924,6 +981,7 @@ impl App {
                 if self.view == View::PullRequests && self.pull_request_exact_number.is_some() {
                     self.pull_request_exact_number = None;
                     self.pull_request_lookup = TextBuffer::default();
+                    self.pull_request_page = 1;
                     self.request_pull_requests(false, &mut effects);
                 } else if !self.filter.is_empty() {
                     self.filter.clear();
@@ -1309,58 +1367,98 @@ impl App {
                     self.request_history(true, &mut effects);
                 }
             }
-            WorkerEvent::PullRequests { generation, result } => {
+            WorkerEvent::PullRequestBatch { generation, result } => {
+                if generation != self.pull_request_generation {
+                    return effects;
+                }
+                match result {
+                    Ok(batch) => {
+                        let first_batch = self.pull_request_next_cursor.is_none();
+                        if !batch.repositories.is_empty() {
+                            self.github_repositories = batch.repositories;
+                        }
+                        self.pull_request_repository = batch.selected_repository;
+                        if first_batch {
+                            self.pull_requests.clear();
+                            self.pull_request_warnings = batch.warnings;
+                            self.pull_request_from_cache = batch.from_cache;
+                        } else {
+                            self.pull_request_warnings.extend(batch.warnings);
+                            self.pull_request_from_cache &= batch.from_cache;
+                        }
+                        for pull_request in batch.pull_requests {
+                            if self.pull_requests.len() >= MAX_PULL_REQUESTS {
+                                break;
+                            }
+                            if let Some(existing) = self.pull_requests.iter_mut().find(|existing| {
+                                existing.number == pull_request.number
+                                    && existing.base_repository.url
+                                        == pull_request.base_repository.url
+                            }) {
+                                *existing = pull_request;
+                            } else {
+                                self.pull_requests.push(pull_request);
+                            }
+                        }
+                        self.pull_request_total = batch.total_count.min(MAX_PULL_REQUESTS);
+                        if batch.total_count > MAX_PULL_REQUESTS
+                            && !self
+                                .pull_request_warnings
+                                .iter()
+                                .any(|warning| warning.contains("first 10,000 pull requests"))
+                        {
+                            self.pull_request_warnings.push(
+                                "Showing the first 10,000 pull requests to keep memory bounded"
+                                    .to_owned(),
+                            );
+                        }
+                        self.pull_request_fetched = self.pull_requests.len();
+                        self.pull_request_has_more = batch.has_next_batch
+                            && self.pull_request_fetched < self.pull_request_total
+                            && self.pull_request_fetched < MAX_PULL_REQUESTS;
+                        self.pull_request_next_cursor = batch.next_cursor;
+                        if self.pull_request_has_more && self.pull_request_next_cursor.is_none() {
+                            self.pull_request_has_more = false;
+                            self.pull_request_warnings.push(
+                                "GitHub reported more pull requests without a continuation cursor"
+                                    .to_owned(),
+                            );
+                        }
+                        self.pull_requests_loaded = !self.pull_request_has_more;
+                        self.pull_requests_loading = self.pull_request_has_more;
+                        self.normalize_pull_request_page();
+                        if first_batch && self.view == View::PullRequests {
+                            self.schedule_preview(now);
+                        }
+                        if self.pull_request_has_more {
+                            self.request_next_pull_request_batch(false, &mut effects);
+                        }
+                    }
+                    Err(error) => {
+                        self.pull_requests_loading = false;
+                        self.pull_requests_loaded = !self.pull_requests.is_empty();
+                        if self.pull_requests.is_empty() {
+                            self.document = DiffDocument::empty("Pull Requests", error.clone());
+                        }
+                        self.show_toast(error, ToastLevel::Error, now);
+                    }
+                }
+            }
+            WorkerEvent::PullRequestLookup { generation, result } => {
                 if generation != self.pull_request_generation {
                     return effects;
                 }
                 self.pull_requests_loading = false;
-                self.pull_requests_loaded = true;
                 match result {
                     Ok(snapshot) => {
-                        let selected = self
-                            .selected_pull_request()
-                            .map(|pull_request| (pull_request.url.clone(), pull_request.number));
-                        if !snapshot.repositories.is_empty() {
-                            self.github_repositories = snapshot.repositories;
-                        }
                         self.pull_request_repository = snapshot.selected_repository;
                         self.pull_requests = snapshot.pull_requests;
                         self.pull_request_warnings = snapshot.warnings;
-                        if snapshot.exact_number.is_none() {
-                            self.pull_request_page = snapshot.page.max(1);
-                            self.pull_request_has_previous = snapshot.has_previous;
-                            self.pull_request_has_next = snapshot.has_next;
-                        } else {
-                            self.pull_request_has_previous = false;
-                            self.pull_request_has_next = false;
-                        }
                         self.pull_request_exact_number = snapshot.exact_number;
                         self.pull_request_from_cache = snapshot.from_cache;
+                        self.pull_request_page = 1;
+                        self.pull_request_cursor = 0;
                         self.pull_request_file_page = 1;
-                        self.pull_request_cursor = selected
-                            .and_then(|(url, number)| {
-                                self.visible_pull_request_indices()
-                                    .iter()
-                                    .position(|index| {
-                                        self.pull_requests.get(*index).is_some_and(|pull_request| {
-                                            pull_request.url == url && pull_request.number == number
-                                        })
-                                    })
-                            })
-                            .unwrap_or_default()
-                            .min(self.visible_pull_request_indices().len().saturating_sub(1));
-                        if let Some(first_warning) = self.pull_request_warnings.first() {
-                            let message = if self.pull_request_warnings.len() == 1 {
-                                first_warning.clone()
-                            } else {
-                                format!(
-                                    "{} (+{} more remote warnings)",
-                                    first_warning,
-                                    self.pull_request_warnings.len() - 1
-                                )
-                            };
-                            self.show_toast(message, ToastLevel::Info, now);
-                        }
                         if self.view == View::PullRequests {
                             self.schedule_preview(now);
                         }
@@ -1399,8 +1497,11 @@ impl App {
                 if generation != self.history_branch_generation {
                     return effects;
                 }
+                self.history_branches_loading = false;
                 match result {
                     Ok(items) => {
+                        self.history_branches_loaded = true;
+                        self.history_branches = items;
                         if let Some(Modal::HistoryBranches {
                             items: modal_items,
                             selected,
@@ -1408,7 +1509,8 @@ impl App {
                             ..
                         }) = self.modal.as_mut()
                         {
-                            *selected = items
+                            *selected = self
+                                .history_branches
                                 .iter()
                                 .position(|branch| {
                                     self.history_branch
@@ -1418,12 +1520,14 @@ impl App {
                                         })
                                 })
                                 .unwrap_or_default();
-                            *modal_items = items;
+                            modal_items.clone_from(&self.history_branches);
                             *loading = false;
                         }
                     }
                     Err(error) => {
-                        self.modal = None;
+                        if matches!(self.modal, Some(Modal::HistoryBranches { .. })) {
+                            self.modal = None;
+                        }
                         self.show_toast(error, ToastLevel::Error, now);
                     }
                 }
@@ -2134,16 +2238,34 @@ impl App {
     }
 
     fn open_history_branches(&mut self, effects: &mut Vec<AppEffect>) {
-        self.history_branch_generation = self.history_branch_generation.wrapping_add(1);
-        let generation = self.history_branch_generation;
         self.modal = Some(Modal::HistoryBranches {
-            items: Vec::new(),
-            selected: 0,
+            items: self.history_branches.clone(),
+            selected: self
+                .history_branches
+                .iter()
+                .position(|branch| {
+                    self.history_branch
+                        .as_ref()
+                        .map_or(branch.current, |selected| {
+                            selected.reference == branch.reference
+                        })
+                })
+                .unwrap_or_default(),
             query: TextBuffer::default(),
-            loading: true,
+            loading: self.history_branches_loading,
         });
+        if !self.history_branches_loaded && !self.history_branches_loading {
+            self.request_history_branches(effects);
+        }
+    }
+
+    fn request_history_branches(&mut self, effects: &mut Vec<AppEffect>) {
+        self.history_branch_generation = self.history_branch_generation.wrapping_add(1);
+        self.history_branches_loading = true;
         effects.push(AppEffect::Git(Box::new(
-            WorkerCommand::LoadHistoryBranches { generation },
+            WorkerCommand::LoadHistoryBranches {
+                generation: self.history_branch_generation,
+            },
         )));
     }
 
@@ -2233,24 +2355,20 @@ impl App {
         effects
     }
 
-    fn change_pull_request_page(&mut self, forward: bool, effects: &mut Vec<AppEffect>) {
+    fn change_pull_request_page(&mut self, forward: bool, _effects: &mut Vec<AppEffect>) {
+        if self.pull_request_exact_number.is_some() {
+            return;
+        }
+        let page_count = self.pull_request_page_count();
         if forward {
-            if !self.pull_request_has_next {
-                return;
-            }
-            self.pull_request_page = self.pull_request_page.saturating_add(1);
+            self.pull_request_page = (self.pull_request_page + 1).min(page_count);
         } else {
-            if !self.pull_request_has_previous {
-                return;
-            }
             self.pull_request_page = self.pull_request_page.saturating_sub(1).max(1);
         }
         self.pull_request_cursor = 0;
         self.pull_request_file_page = 1;
-        self.pull_request_lookup = TextBuffer::default();
-        self.pull_request_exact_number = None;
         self.sidebar_offset = 0;
-        self.request_pull_requests(false, effects);
+        self.schedule_preview(Instant::now());
     }
 
     fn change_pull_request_file_page(&mut self, forward: bool, effects: &mut Vec<AppEffect>) {
@@ -2286,6 +2404,9 @@ impl App {
 
     fn request_active_refresh(&mut self, effects: &mut Vec<AppEffect>) {
         self.request_refresh(effects);
+        if !self.history_branches_loading {
+            self.request_history_branches(effects);
+        }
         if self.view == View::PullRequests {
             if let Some(number) = self.pull_request_exact_number {
                 self.request_pull_request_lookup(number, true, effects);
@@ -2309,9 +2430,18 @@ impl App {
 
     fn request_pull_requests(&mut self, refresh: bool, effects: &mut Vec<AppEffect>) {
         self.pull_request_generation = self.pull_request_generation.wrapping_add(1);
+        self.invalidate_preview();
         self.pull_requests_loading = true;
+        self.pull_requests_loaded = false;
         self.pull_request_warnings.clear();
         self.pull_request_exact_number = None;
+        self.pull_request_next_cursor = None;
+        self.pull_request_has_more = true;
+        self.pull_request_total = 0;
+        self.pull_request_fetched = 0;
+        self.pull_requests.clear();
+        self.pull_request_cursor = 0;
+        self.sidebar_offset = 0;
         let repositories = if refresh {
             Vec::new()
         } else {
@@ -2321,8 +2451,17 @@ impl App {
             generation: self.pull_request_generation,
             repositories,
             repository: self.pull_request_repository.clone().map(Box::new),
-            page: self.pull_request_page,
-            page_size: DEFAULT_PULL_REQUEST_PAGE_SIZE,
+            cursor: None,
+            refresh,
+        })));
+    }
+
+    fn request_next_pull_request_batch(&mut self, refresh: bool, effects: &mut Vec<AppEffect>) {
+        effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadPullRequests {
+            generation: self.pull_request_generation,
+            repositories: self.github_repositories.clone(),
+            repository: self.pull_request_repository.clone().map(Box::new),
+            cursor: self.pull_request_next_cursor.clone(),
             refresh,
         })));
     }
@@ -2337,6 +2476,9 @@ impl App {
             return;
         };
         self.pull_request_generation = self.pull_request_generation.wrapping_add(1);
+        self.invalidate_preview();
+        self.pull_request_has_more = false;
+        self.pull_request_next_cursor = None;
         self.pull_requests_loading = true;
         self.pull_request_warnings.clear();
         effects.push(AppEffect::Git(Box::new(WorkerCommand::LookupPullRequest {
@@ -2425,6 +2567,22 @@ impl App {
             }
             View::PullRequests => {
                 if let Some(pull_request) = self.selected_pull_request().cloned() {
+                    let preview_required =
+                        self.document
+                            .pull_request_details
+                            .as_ref()
+                            .is_none_or(|details| {
+                                details.number != pull_request.number
+                                    || details.file_page != self.pull_request_file_page
+                                    || !self
+                                        .document
+                                        .title
+                                        .contains(&pull_request.base_repository.display_name())
+                            });
+                    if !preview_required {
+                        self.document_loading = false;
+                        return;
+                    }
                     self.document_loading = true;
                     effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadPullRequest {
                         generation,
@@ -2584,7 +2742,6 @@ fn is_word_character(character: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::git::github::PullRequestSnapshot;
     use crate::git::status::{BranchState, ChangeStatus};
 
     fn pull_request(number: u64, title: &str, repository: &str) -> PullRequest {
@@ -2768,7 +2925,7 @@ mod tests {
     }
 
     #[test]
-    fn pull_request_view_loads_lazily_and_queues_the_selected_diff() {
+    fn pull_request_view_streams_batches_and_queues_the_selected_diff() {
         let mut app = App::new("/tmp/repo", "repo");
         let now = Instant::now();
 
@@ -2778,27 +2935,28 @@ mod tests {
         assert!(app.pull_requests_loading);
         assert!(matches!(
             effects.as_slice(),
-            [AppEffect::Git(command)]
-                if matches!(command.as_ref(), WorkerCommand::LoadPullRequests { generation: 1, page: 1, page_size: DEFAULT_PULL_REQUEST_PAGE_SIZE, .. })
+            [AppEffect::Git(command)] if matches!(
+                command.as_ref(),
+                WorkerCommand::LoadPullRequests {
+                    generation: 1,
+                    cursor: None,
+                    ..
+                }
+            )
         ));
-        assert!(
-            app.document.lines[0]
-                .text()
-                .contains("Loading a bounded pull-request page")
-        );
 
         let request = pull_request(8, "Cross-fork update", "acme/widget");
         let repository = request.base_repository.clone();
         let effects = app.handle_worker_event(
-            WorkerEvent::PullRequests {
+            WorkerEvent::PullRequestBatch {
                 generation: 1,
-                result: Ok(PullRequestSnapshot {
+                result: Ok(crate::git::github::PullRequestBatch {
                     repositories: vec![repository.clone()],
                     selected_repository: Some(repository),
                     pull_requests: vec![request],
-                    page: 1,
-                    page_size: DEFAULT_PULL_REQUEST_PAGE_SIZE,
-                    ..PullRequestSnapshot::default()
+                    total_count: 1,
+                    fetched_count: 1,
+                    ..crate::git::github::PullRequestBatch::default()
                 }),
             },
             now,
@@ -2806,12 +2964,13 @@ mod tests {
         assert!(effects.is_empty());
         assert!(app.pull_requests_loaded);
         assert!(!app.pull_requests_loading);
+        assert_eq!(app.pull_request_load_percent(), 100);
 
         let (effects, _) = app.tick(now + PREVIEW_DEBOUNCE + Duration::from_millis(1));
         assert!(matches!(
             effects.as_slice(),
             [AppEffect::Git(command)]
-                if matches!(command.as_ref(), WorkerCommand::LoadPullRequest { generation: 3, pull_request, file_page: 1, file_page_size: DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE } if pull_request.number == 8)
+                if matches!(command.as_ref(), WorkerCommand::LoadPullRequest { generation, pull_request, file_page: 1, file_page_size: DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE } if *generation >= 3 && pull_request.number == 8)
         ));
         assert!(app.document_loading);
     }
@@ -2901,11 +3060,11 @@ mod tests {
             .push(pull_request(2, "Newest", "acme/widget"));
 
         let effects = app.handle_worker_event(
-            WorkerEvent::PullRequests {
+            WorkerEvent::PullRequestBatch {
                 generation: 1,
-                result: Ok(PullRequestSnapshot {
+                result: Ok(crate::git::github::PullRequestBatch {
                     pull_requests: vec![pull_request(1, "Stale", "acme/widget")],
-                    ..PullRequestSnapshot::default()
+                    ..crate::git::github::PullRequestBatch::default()
                 }),
             },
             Instant::now(),
@@ -2917,45 +3076,47 @@ mod tests {
     }
 
     #[test]
-    fn pull_request_reload_preserves_selection_by_repository_url_and_number() {
+    fn pull_request_batches_append_and_queue_the_next_cursor() {
         let mut app = App::new("/tmp/repo", "repo");
         app.view = View::PullRequests;
         app.pull_request_generation = 1;
         app.pull_requests_loading = true;
-        app.pull_requests = vec![
-            pull_request(1, "One", "acme/widget"),
-            pull_request(2, "Two", "acme/widget"),
-        ];
-        app.pull_request_cursor = 1;
-        let selected = app.pull_requests[1].clone();
+        let first = pull_request(2, "Two", "acme/widget");
+        let repository = first.base_repository.clone();
 
-        app.handle_worker_event(
-            WorkerEvent::PullRequests {
+        let effects = app.handle_worker_event(
+            WorkerEvent::PullRequestBatch {
                 generation: 1,
-                result: Ok(PullRequestSnapshot {
-                    repositories: vec![selected.base_repository.clone()],
-                    selected_repository: Some(selected.base_repository.clone()),
-                    pull_requests: vec![selected, pull_request(1, "One", "acme/widget")],
-                    warnings: vec!["fork remote unavailable".to_owned()],
-                    page: 1,
-                    page_size: DEFAULT_PULL_REQUEST_PAGE_SIZE,
-                    ..PullRequestSnapshot::default()
+                result: Ok(crate::git::github::PullRequestBatch {
+                    repositories: vec![repository.clone()],
+                    selected_repository: Some(repository.clone()),
+                    pull_requests: vec![first],
+                    warnings: vec!["cached repository identity".to_owned()],
+                    total_count: 3,
+                    fetched_count: 1,
+                    has_next_batch: true,
+                    next_cursor: Some("cursor-1".to_owned()),
+                    from_cache: true,
                 }),
             },
             Instant::now(),
         );
 
-        assert_eq!(app.pull_request_cursor, 0);
-        assert_eq!(app.selected_pull_request().unwrap().number, 2);
-        assert_eq!(app.pull_request_warnings.len(), 1);
-        assert_eq!(app.toast.as_ref().unwrap().level, ToastLevel::Info);
-        assert!(
-            app.toast
-                .as_ref()
-                .unwrap()
-                .message
-                .contains("fork remote unavailable")
-        );
+        assert_eq!(app.pull_request_fetched, 1);
+        assert_eq!(app.pull_request_total, 3);
+        assert_eq!(app.pull_request_load_percent(), 33);
+        assert!(app.pull_requests_loading);
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Git(command)] if matches!(
+                command.as_ref(),
+                WorkerCommand::LoadPullRequests {
+                    cursor: Some(cursor),
+                    repository: Some(selected),
+                    ..
+                } if cursor == "cursor-1" && selected.url == repository.url
+            )
+        ));
     }
 
     #[test]
@@ -2993,32 +3154,25 @@ mod tests {
     }
 
     #[test]
-    fn pull_request_pages_are_bounded_and_repository_scoped() {
+    fn pull_request_pages_use_the_progressively_loaded_local_snapshot() {
         let mut app = App::new("/tmp/repo", "repo");
         app.view = View::PullRequests;
-        app.pull_request_has_next = true;
-        let repository = pull_request(1, "One", "acme/widget").base_repository;
-        app.github_repositories = vec![repository.clone()];
-        app.pull_request_repository = Some(repository.clone());
+        app.pull_request_total = 60;
+        app.pull_requests = (1..=50)
+            .map(|number| pull_request(number, "PR", "acme/widget"))
+            .collect();
 
         let effects = app.handle_key(
             KeyEvent::new(KeyCode::Right, KeyModifiers::NONE),
             Instant::now(),
         );
 
+        assert!(effects.is_empty());
         assert_eq!(app.pull_request_page, 2);
-        assert!(matches!(
-            effects.as_slice(),
-            [AppEffect::Git(command)] if matches!(
-                command.as_ref(),
-                WorkerCommand::LoadPullRequests {
-                    page: 2,
-                    page_size: DEFAULT_PULL_REQUEST_PAGE_SIZE,
-                    repository: Some(selected),
-                    ..
-                } if selected.url == repository.url
-            )
-        ));
+        assert_eq!(
+            app.visible_pull_request_indices(),
+            (25..50).collect::<Vec<_>>()
+        );
     }
 
     #[test]

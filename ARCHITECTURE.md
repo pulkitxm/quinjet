@@ -26,7 +26,7 @@ filesystem watcher (coalesced signal)
 - `src/git/mod.rs`: safe argv construction, branch-scoped history reads, and user-facing Git operations.
 - `src/git/status.rs`: byte-oriented porcelain-v2 status parser.
 - `src/git/history.rs`: delimiter-safe history parser.
-- `src/git/github.rs`: bounded/cached `gh` metadata, repository-scoped pages and lookup, and disposable local PR fetch/diff generation.
+- `src/git/github.rs`: bounded/cached cursor batches for all PR states, repository-scoped lookup, and disposable local PR fetch/diff generation.
 - `src/git/diff.rs`: unified-diff model and syntax highlighting for working-tree, commit, and PR patches.
 - `src/git/worker.rs`: the non-blocking UI/Git boundary.
 - `src/watch.rs`: repository watcher and event-storm coalescing.
@@ -36,9 +36,9 @@ filesystem watcher (coalesced signal)
 
 1. The UI thread mutates only in-memory state and renders visible rows.
 2. Every preview, status, history, branch, and pull-request request carries a generation; stale replies are ignored.
-3. The worker mailbox has fixed coalescing slots for status, history, branch, pull-request-page/lookup, and preview reads, so key repeat cannot allocate unbounded work; ordered user mutations are serialized by app state.
+3. The worker mailbox has fixed coalescing slots for status, history, branch, pull-request-batch/lookup, and preview reads, so key repeat cannot allocate unbounded work; ordered user mutations are serialized by app state.
 4. Watcher signals are lossy by design: one full status snapshot subsumes all preceding file events.
-5. Git/PR patch output is capped at 8 MiB. PR metadata is capped at 2 MiB, changed paths at 2 MiB / 4,096 entries, list pages at 25 rows, file pages at 20 paths, repository discovery at 16 identities, and adaptive history fetches at 4,096 commits.
+5. Git/PR patch output is capped at 8 MiB. PR metadata is capped at 2 MiB, GraphQL batches at 50 records, the progressive snapshot at 10,000 PRs, local pages at 25 rows, changed paths at 2 MiB / 4,096 entries, file pages at 20 paths, repository discovery at 16 identities, and adaptive history fetches at 4,096 commits.
 6. Potentially large PR subprocess output is read through capped pipes. Crossing a cap kills the child rather than first allocating all output and truncating afterward.
 7. Git and GitHub CLI receive argv directly, never via a shell. Every list/lookup request carries its canonical base-repository identity, avoiding ambient-remote ambiguity.
 8. PR patches come from fixed refs in a unique bare repository under the cache/temp root. Base and GitHub PR-head refs are shallow/partial fetched, the merge base is deepened adaptively, selected paths are diffed, and `Drop` removes the repository. The opened repository receives no checkout, branch, ref, index, or worktree mutation.

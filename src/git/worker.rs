@@ -5,7 +5,7 @@ use std::thread;
 use crossbeam_channel::{Receiver, Sender, unbounded};
 
 use super::diff::DiffDocument;
-use super::github::{PullRequest, PullRequestSnapshot};
+use super::github::{PullRequest, PullRequestBatch, PullRequestSnapshot};
 use super::history::Commit;
 use super::status::{Change, RepoStatus};
 use super::{Branch, GitOperation, HistoryBranch, Repository};
@@ -34,8 +34,7 @@ pub enum WorkerCommand {
         generation: u64,
         repositories: Vec<super::github::GitHubRepository>,
         repository: Option<Box<super::github::GitHubRepository>>,
-        page: usize,
-        page_size: usize,
+        cursor: Option<String>,
         refresh: bool,
     },
     LookupPullRequest {
@@ -83,7 +82,11 @@ pub enum WorkerEvent {
         generation: u64,
         result: Result<DiffDocument, String>,
     },
-    PullRequests {
+    PullRequestBatch {
+        generation: u64,
+        result: Result<PullRequestBatch, String>,
+    },
+    PullRequestLookup {
         generation: u64,
         result: Result<PullRequestSnapshot, String>,
     },
@@ -142,13 +145,13 @@ impl Mailbox {
     }
 
     fn pop(&mut self) -> Option<WorkerCommand> {
-        // Explicit user work wins over background refresh and history queries.
+        // Explicit user work and visible previews win over background pagination.
         self.operations
             .pop_front()
             .or_else(|| self.branches.take())
+            .or_else(|| self.preview.take())
             .or_else(|| self.pull_requests.take())
             .or_else(|| self.refresh.take())
-            .or_else(|| self.preview.take())
             .or_else(|| self.history.take())
     }
 }
@@ -250,17 +253,15 @@ fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sende
                 generation,
                 repositories,
                 repository: selected_repository,
-                page,
-                page_size,
+                cursor,
                 refresh,
-            } => WorkerEvent::PullRequests {
+            } => WorkerEvent::PullRequestBatch {
                 generation,
                 result: repository
-                    .pull_request_page(
+                    .pull_request_batch(
                         &repositories,
                         selected_repository.as_deref(),
-                        page,
-                        page_size,
+                        cursor.as_deref(),
                         refresh,
                     )
                     .map_err(format_error),
@@ -271,7 +272,7 @@ fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sende
                 repository: selected_repository,
                 number,
                 refresh,
-            } => WorkerEvent::PullRequests {
+            } => WorkerEvent::PullRequestLookup {
                 generation,
                 result: repository
                     .pull_request_lookup(&repositories, &selected_repository, number, refresh)
@@ -367,11 +368,11 @@ mod tests {
 
         assert!(matches!(
             mailbox.pop(),
-            Some(WorkerCommand::Refresh { generation: 2 })
+            Some(WorkerCommand::LoadDiff { generation: 2, .. })
         ));
         assert!(matches!(
             mailbox.pop(),
-            Some(WorkerCommand::LoadDiff { generation: 2, .. })
+            Some(WorkerCommand::Refresh { generation: 2 })
         ));
         assert!(mailbox.pop().is_none());
     }
@@ -383,16 +384,14 @@ mod tests {
             generation: 1,
             repositories: Vec::new(),
             repository: None,
-            page: 1,
-            page_size: 25,
+            cursor: None,
             refresh: false,
         });
         mailbox.push(WorkerCommand::LoadPullRequests {
             generation: 2,
             repositories: Vec::new(),
             repository: None,
-            page: 2,
-            page_size: 25,
+            cursor: Some("next-cursor".to_owned()),
             refresh: false,
         });
         mailbox.push(WorkerCommand::LoadHistory {
@@ -406,9 +405,9 @@ mod tests {
             mailbox.pop(),
             Some(WorkerCommand::LoadPullRequests {
                 generation: 2,
-                page: 2,
+                cursor: Some(cursor),
                 ..
-            })
+            }) if cursor == "next-cursor"
         ));
         assert!(matches!(
             mailbox.pop(),
