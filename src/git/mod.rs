@@ -1,4 +1,5 @@
 pub mod diff;
+pub mod github;
 pub mod history;
 pub mod status;
 pub mod worker;
@@ -52,6 +53,10 @@ pub enum GitOperation {
         name: String,
         start: Option<String>,
     },
+    RenameBranch {
+        old: String,
+        new: String,
+    },
     DeleteBranch(String),
     Stash,
     StashPop,
@@ -79,6 +84,7 @@ impl GitOperation {
             Self::Sync => "Synchronizing changes",
             Self::Checkout(_) => "Switching branch",
             Self::CreateBranch { .. } => "Creating branch",
+            Self::RenameBranch { .. } => "Renaming branch",
             Self::DeleteBranch(_) => "Deleting branch",
             Self::Stash => "Stashing changes",
             Self::StashPop => "Applying stash",
@@ -97,6 +103,7 @@ impl GitOperation {
                 | Self::Sync
                 | Self::Checkout(_)
                 | Self::CreateBranch { .. }
+                | Self::RenameBranch { .. }
                 | Self::DeleteBranch(_)
                 | Self::CherryPick(_)
                 | Self::Revert(_)
@@ -392,6 +399,14 @@ impl Repository {
                 self.checked(args)?;
                 Ok(format!("Created and switched to {name}"))
             }
+            GitOperation::RenameBranch { old, new } => {
+                self.validate_branch_name(new)?;
+                if old == new {
+                    bail!("New branch name must be different from the current name");
+                }
+                self.checked(strings(["branch", "--move", "--", old, new]))?;
+                Ok(format!("Renamed local branch {old} to {new}"))
+            }
             GitOperation::DeleteBranch(branch) => {
                 self.checked(strings(["branch", "--delete", "--", branch]))?;
                 Ok(format!("Deleted {branch}"))
@@ -661,7 +676,68 @@ fn short_id(id: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
+
+    static TEST_REPOSITORY_ID: AtomicUsize = AtomicUsize::new(0);
+
+    struct TestRepository {
+        path: PathBuf,
+    }
+
+    impl TestRepository {
+        fn new() -> Self {
+            let id = TEST_REPOSITORY_ID.fetch_add(1, Ordering::Relaxed);
+            let path =
+                std::env::temp_dir().join(format!("quinjet-git-test-{}-{id}", std::process::id()));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).unwrap();
+            run_test_git(&path, ["init", "--initial-branch=main"]);
+            fs::write(path.join("README.md"), "test repository\n").unwrap();
+            run_test_git(&path, ["add", "README.md"]);
+            run_test_git(
+                &path,
+                [
+                    "-c",
+                    "user.name=Quinjet Test",
+                    "-c",
+                    "user.email=quinjet@example.com",
+                    "commit",
+                    "--message=initial",
+                ],
+            );
+            Self { path }
+        }
+
+        fn repository(&self) -> Repository {
+            Repository {
+                root: self.path.clone(),
+            }
+        }
+    }
+
+    impl Drop for TestRepository {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn run_test_git<const N: usize>(path: &Path, args: [&str; N]) -> String {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .args(args)
+            .env("LC_ALL", "C")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    }
 
     #[test]
     fn rejects_paths_outside_worktree() {
@@ -679,5 +755,106 @@ mod tests {
         let mut input = b"first\nsecond\nthird\n".to_vec();
         assert!(truncate(&mut input, 15));
         assert_eq!(input, b"first\nsecond\n");
+    }
+
+    #[test]
+    fn renames_the_current_local_branch() {
+        let test_repository = TestRepository::new();
+        let repository = test_repository.repository();
+
+        let message = repository
+            .perform(&GitOperation::RenameBranch {
+                old: "main".to_owned(),
+                new: "feature/renamed".to_owned(),
+            })
+            .unwrap();
+
+        assert_eq!(message, "Renamed local branch main to feature/renamed");
+        assert_eq!(
+            run_test_git(&test_repository.path, ["branch", "--show-current"]),
+            "feature/renamed"
+        );
+        assert!(
+            GitOperation::RenameBranch {
+                old: "main".to_owned(),
+                new: "feature/renamed".to_owned(),
+            }
+            .changes_history()
+        );
+    }
+
+    #[test]
+    fn renames_a_non_current_branch_and_preserves_its_tracking_config() {
+        let test_repository = TestRepository::new();
+        let repository = test_repository.repository();
+        run_test_git(&test_repository.path, ["branch", "topic"]);
+        run_test_git(
+            &test_repository.path,
+            ["config", "branch.topic.remote", "origin"],
+        );
+        run_test_git(
+            &test_repository.path,
+            ["config", "branch.topic.merge", "refs/heads/topic"],
+        );
+
+        repository
+            .perform(&GitOperation::RenameBranch {
+                old: "topic".to_owned(),
+                new: "feature/topic".to_owned(),
+            })
+            .unwrap();
+
+        assert_eq!(
+            run_test_git(&test_repository.path, ["branch", "--show-current"]),
+            "main"
+        );
+        assert_eq!(
+            run_test_git(
+                &test_repository.path,
+                ["config", "branch.feature/topic.remote"]
+            ),
+            "origin"
+        );
+        assert_eq!(
+            run_test_git(
+                &test_repository.path,
+                ["config", "branch.feature/topic.merge"]
+            ),
+            "refs/heads/topic"
+        );
+        assert!(
+            repository
+                .run(strings([
+                    "show-ref",
+                    "--verify",
+                    "refs/heads/feature/topic"
+                ]))
+                .unwrap()
+                .status
+                .success()
+        );
+    }
+
+    #[test]
+    fn branch_rename_rejects_invalid_identical_and_existing_names() {
+        let test_repository = TestRepository::new();
+        let repository = test_repository.repository();
+        run_test_git(&test_repository.path, ["branch", "existing"]);
+
+        for new in ["main", "bad..name", "existing"] {
+            assert!(
+                repository
+                    .perform(&GitOperation::RenameBranch {
+                        old: "main".to_owned(),
+                        new: new.to_owned(),
+                    })
+                    .is_err(),
+                "rename to {new:?} should fail"
+            );
+        }
+        assert_eq!(
+            run_test_git(&test_repository.path, ["branch", "--show-current"]),
+            "main"
+        );
     }
 }

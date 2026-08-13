@@ -5,6 +5,7 @@ use std::thread;
 use crossbeam_channel::{Receiver, Sender, unbounded};
 
 use super::diff::DiffDocument;
+use super::github::{PullRequest, PullRequestSnapshot};
 use super::history::Commit;
 use super::status::{Change, RepoStatus};
 use super::{Branch, GitOperation, Repository};
@@ -27,6 +28,13 @@ pub enum WorkerCommand {
     LoadCommit {
         generation: u64,
         commit: Box<Commit>,
+    },
+    LoadPullRequests {
+        generation: u64,
+    },
+    LoadPullRequest {
+        generation: u64,
+        pull_request: Box<PullRequest>,
     },
     LoadBranches {
         generation: u64,
@@ -57,6 +65,14 @@ pub enum WorkerEvent {
         generation: u64,
         result: Result<DiffDocument, String>,
     },
+    PullRequests {
+        generation: u64,
+        result: Result<PullRequestSnapshot, String>,
+    },
+    PullRequestDiff {
+        generation: u64,
+        result: Result<DiffDocument, String>,
+    },
     Branches {
         generation: u64,
         result: Result<Vec<Branch>, String>,
@@ -76,6 +92,7 @@ struct Mailbox {
     refresh: Option<WorkerCommand>,
     preview: Option<WorkerCommand>,
     history: Option<WorkerCommand>,
+    pull_requests: Option<WorkerCommand>,
     shutdown: bool,
 }
 
@@ -85,12 +102,17 @@ impl Mailbox {
             command @ WorkerCommand::Operate { .. } => self.operations.push_back(command),
             command @ WorkerCommand::LoadBranches { .. } => self.branches = Some(command),
             command @ WorkerCommand::Refresh { .. } => self.refresh = Some(command),
-            command @ (WorkerCommand::LoadDiff { .. } | WorkerCommand::LoadCommit { .. }) => {
+            command @ (WorkerCommand::LoadDiff { .. }
+            | WorkerCommand::LoadCommit { .. }
+            | WorkerCommand::LoadPullRequest { .. }) => {
                 // Only the newest preview matters. This makes key-repeat constant-space
                 // even when a large diff is slower than navigation.
                 self.preview = Some(command);
             }
             command @ WorkerCommand::LoadHistory { .. } => self.history = Some(command),
+            command @ WorkerCommand::LoadPullRequests { .. } => {
+                self.pull_requests = Some(command);
+            }
             WorkerCommand::Shutdown => self.shutdown = true,
         }
     }
@@ -100,6 +122,7 @@ impl Mailbox {
         self.operations
             .pop_front()
             .or_else(|| self.branches.take())
+            .or_else(|| self.pull_requests.take())
             .or_else(|| self.refresh.take())
             .or_else(|| self.preview.take())
             .or_else(|| self.history.take())
@@ -196,6 +219,19 @@ fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sende
                 generation,
                 result: repository.commit_detail(&commit).map_err(format_error),
             },
+            WorkerCommand::LoadPullRequests { generation } => WorkerEvent::PullRequests {
+                generation,
+                result: repository.pull_requests().map_err(format_error),
+            },
+            WorkerCommand::LoadPullRequest {
+                generation,
+                pull_request,
+            } => WorkerEvent::PullRequestDiff {
+                generation,
+                result: repository
+                    .pull_request_diff(&pull_request)
+                    .map_err(format_error),
+            },
             WorkerCommand::LoadBranches { generation } => WorkerEvent::Branches {
                 generation,
                 result: repository.branches().map_err(format_error),
@@ -276,6 +312,28 @@ mod tests {
         assert!(matches!(
             mailbox.pop(),
             Some(WorkerCommand::LoadDiff { generation: 2, .. })
+        ));
+        assert!(mailbox.pop().is_none());
+    }
+
+    #[test]
+    fn mailbox_coalesces_pull_request_lists_and_prioritizes_them_over_history() {
+        let mut mailbox = Mailbox::default();
+        mailbox.push(WorkerCommand::LoadPullRequests { generation: 1 });
+        mailbox.push(WorkerCommand::LoadPullRequests { generation: 2 });
+        mailbox.push(WorkerCommand::LoadHistory {
+            generation: 1,
+            skip: 0,
+            limit: 300,
+        });
+
+        assert!(matches!(
+            mailbox.pop(),
+            Some(WorkerCommand::LoadPullRequests { generation: 2 })
+        ));
+        assert!(matches!(
+            mailbox.pop(),
+            Some(WorkerCommand::LoadHistory { generation: 1, .. })
         ));
         assert!(mailbox.pop().is_none());
     }

@@ -26,7 +26,8 @@ filesystem watcher (coalesced signal)
 - `src/git/mod.rs`: safe argv construction and user-facing Git operations.
 - `src/git/status.rs`: byte-oriented porcelain-v2 status parser.
 - `src/git/history.rs`: delimiter-safe history parser.
-- `src/git/diff.rs`: unified-diff model and syntax highlighting.
+- `src/git/github.rs`: bounded `gh` discovery across fetch/push remotes, typed PR metadata, and explicitly targeted PR diffs.
+- `src/git/diff.rs`: unified-diff model and syntax highlighting for working-tree, commit, and PR patches.
 - `src/git/worker.rs`: the non-blocking UI/Git boundary.
 - `src/watch.rs`: repository watcher and event-storm coalescing.
 - `src/ui/`: viewport-only rendering, diff layouts, theme, and mouse hit map.
@@ -34,12 +35,12 @@ filesystem watcher (coalesced signal)
 ## Responsiveness Invariants
 
 1. The UI thread mutates only in-memory state and renders visible rows.
-2. Every preview/status/history request carries a generation; stale replies are ignored.
-3. The worker mailbox has fixed coalescing slots for read work, so key repeat cannot allocate unbounded previews; ordered user mutations are serialized by app state.
+2. Every preview, status, history, branch, and pull-request request carries a generation; stale replies are ignored.
+3. The worker mailbox has fixed coalescing slots for status, history, branch, pull-request-list, and preview reads, so key repeat cannot allocate unbounded work; ordered user mutations are serialized by app state.
 4. Watcher signals are lossy by design: one full status snapshot subsumes all preceding file events.
-5. Diff output is capped at 8 MiB and history is paginated.
-6. Git receives argv directly, never via a shell.
-7. Read operations set `GIT_OPTIONAL_LOCKS=0`.
+5. Git and PR diff output is capped at 8 MiB; history, remote discovery, and PR lists have explicit limits.
+6. Git and GitHub CLI receive argv directly, never via a shell. Every PR request carries its canonical base-repository URL, avoiding ambient-remote ambiguity.
+7. Read operations set `GIT_OPTIONAL_LOCKS=0`; `gh` runs with prompts, paging, color, and update checks disabled on the worker thread.
 
 ## VS Code Research
 
