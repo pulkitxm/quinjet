@@ -1,0 +1,28 @@
+name: Bug report
+description: Report reproducible incorrect behavior
+title: "bug: "
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: What happened?
+      description: Include expected and observed behavior.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Reproduction
+      description: Provide exact steps and a minimal repository when possible.
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Quinjet version
+      placeholder: quinjet 0.0.1
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: OS, terminal, and Git version
+    validations:
+      required: true

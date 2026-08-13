@@ -1,0 +1,66 @@
+# Contributing to Quinjet
+
+Thank you for helping improve Quinjet. Bug reports, design feedback, documentation, tests, and code are welcome.
+
+## Before You Start
+
+- Search existing issues and pull requests before opening a duplicate.
+- For a substantial feature or architectural change, open an issue first so the approach can be discussed.
+- Keep changes focused. Separate unrelated fixes into separate pull requests.
+- Never include credentials, private repository data, or generated build artifacts.
+
+## Development Setup
+
+Quinjet requires stable Rust and Git.
+
+```bash
+git clone https://github.com/pulkitxm/quinjet.git
+cd quinjet
+cargo run -- /path/to/a/test/repository
+```
+
+The `extras/` directory is ignored and is only for local reference repositories or experiments.
+
+## Required Checks
+
+Run these before submitting a pull request:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-features
+cargo build --release --locked
+cargo package --locked
+```
+
+Add focused tests for behavior changes, especially status parsing, destructive Git operations, input editing, scrolling, and pane geometry.
+
+## Code Guidelines
+
+- Keep terminal input and rendering independent from Git subprocess latency.
+- Do not execute user-derived commands through a shell; pass Git arguments directly.
+- Preserve generation checks and coalescing for asynchronous reads.
+- Keep destructive operations explicit and confirmed.
+- Ensure every action remains keyboard-accessible even when mouse support is added.
+- Avoid unbounded output, queues, histories, or caches.
+- Prefer small, typed domain changes over UI-specific Git logic.
+- Update `README.md` and in-app help when user-facing behavior changes.
+
+## Pull Requests
+
+A good pull request includes:
+
+1. A concise description of the problem and solution.
+2. Screenshots or terminal recordings for visual changes when useful.
+3. Tests or an explanation of why automated testing is impractical.
+4. Notes about compatibility, performance, and destructive behavior.
+
+Maintainers may request changes before merge. By contributing, you agree that your contribution is licensed under the repository's MIT License.
+
+## Reporting Security Issues
+
+Do not publish exploitable security issues in a public issue. Use GitHub's private security advisory flow for this repository instead.
+
+## Releases
+
+Package versions follow semantic versioning. Publishing is handled by maintainers and automation; contributors should not bump the version unless a maintainer requests it.

@@ -1,0 +1,46 @@
+name: Publish crate
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: crates-io
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Verify tag and package version
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[0].version')
+          test "${GITHUB_REF_NAME}" = "v${version}"
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test --all-features --locked
+      - run: cargo package --locked
+      - name: Publish when version is new
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          version=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[0].version')
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -A quinjet-publish "https://crates.io/api/v1/crates/quinjet/${version}")
+          if [ "$code" = 404 ]; then
+            test -n "$CARGO_REGISTRY_TOKEN"
+            cargo publish --locked
+          elif [ "$code" = 200 ]; then
+            echo "quinjet ${version} is already published"
+          else
+            echo "unexpected crates.io status: ${code}" >&2
+            exit 1
+          fi
