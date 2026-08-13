@@ -362,7 +362,7 @@ pub enum SidebarHit {
 
 #[derive(Debug, Clone)]
 pub struct ContentFileHit {
-    pub row: u16,
+    pub area: Rect,
     pub path: PathBuf,
 }
 
@@ -403,6 +403,7 @@ pub struct App {
     pub selected_change_group: Option<ChangeArea>,
     pub selected_preview_file: Option<PathBuf>,
     pub preview_file_cursor: usize,
+    pub collapsed_preview_files: std::collections::HashSet<PathBuf>,
     pub change_cursor: usize,
     pub history_cursor: usize,
     pub sidebar_offset: usize,
@@ -448,6 +449,7 @@ impl App {
             selected_change_group: Some(ChangeArea::Unstaged),
             selected_preview_file: None,
             preview_file_cursor: 0,
+            collapsed_preview_files: std::collections::HashSet::new(),
             change_cursor: 0,
             history_cursor: 0,
             sidebar_offset: 0,
@@ -574,6 +576,26 @@ impl App {
         self.selected_preview_file
             .as_deref()
             .is_some_and(|selected| selected.to_string_lossy() == path)
+    }
+
+    pub fn preview_file_collapsed(&self, path: &str) -> bool {
+        self.files_collapsed || self.collapsed_preview_files.contains(Path::new(path))
+    }
+
+    fn toggle_preview_file(&mut self, path: PathBuf) {
+        if self.files_collapsed {
+            self.files_collapsed = false;
+            self.collapsed_preview_files = self.preview_file_paths().into_iter().collect();
+        }
+        if !self.collapsed_preview_files.remove(&path) {
+            self.collapsed_preview_files.insert(path.clone());
+        }
+        self.selected_preview_file = Some(path.clone());
+        self.preview_file_cursor = self
+            .preview_file_paths()
+            .iter()
+            .position(|candidate| candidate == &path)
+            .unwrap_or_default();
     }
 
     fn preview_file_paths(&self) -> Vec<PathBuf> {
@@ -705,6 +727,7 @@ impl App {
             KeyCode::Char('v') => self.toggle_diff_layout(),
             KeyCode::Char('e') => {
                 self.files_collapsed = !self.files_collapsed;
+                self.collapsed_preview_files.clear();
                 self.content_scroll = 0;
             }
             KeyCode::Char('t') | KeyCode::Char('T') => {
@@ -891,18 +914,14 @@ impl App {
                     .contains((event.column, event.row).into())
                 {
                     self.focus = Focus::Content;
-                    if let Some(hit) = self
+                    if let Some(path) = self
                         .geometry
                         .content_file_hits
                         .iter()
-                        .find(|hit| hit.row == event.row)
+                        .find(|hit| hit.area.contains((event.column, event.row).into()))
+                        .map(|hit| hit.path.clone())
                     {
-                        self.selected_preview_file = Some(hit.path.clone());
-                        self.preview_file_cursor = self
-                            .preview_file_paths()
-                            .iter()
-                            .position(|path| path == &hit.path)
-                            .unwrap_or_default();
+                        self.toggle_preview_file(path);
                     }
                 }
             }
@@ -1032,6 +1051,7 @@ impl App {
                         self.document = document;
                         self.selected_preview_file = None;
                         self.preview_file_cursor = 0;
+                        self.collapsed_preview_files.clear();
                         self.content_scroll = 0;
                         self.horizontal_scroll = 0;
                     }
@@ -1357,6 +1377,7 @@ impl App {
             PaletteCommand::ToggleDiffLayout => self.toggle_diff_layout(),
             PaletteCommand::ToggleAllFiles => {
                 self.files_collapsed = !self.files_collapsed;
+                self.collapsed_preview_files.clear();
                 self.content_scroll = 0;
             }
             PaletteCommand::ShowChanges => self.switch_view(View::Changes),
@@ -1984,6 +2005,33 @@ mod tests {
         app.navigate(1, now);
         assert_eq!(app.selected_change_group, Some(ChangeArea::Unstaged));
         assert_eq!(app.selected_group_changes().len(), 1);
+    }
+
+    #[test]
+    fn clicking_a_file_header_toggles_only_that_file() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.geometry.content = Rect::new(20, 4, 80, 20);
+        app.geometry.content_file_hits = vec![ContentFileHit {
+            area: Rect::new(20, 8, 80, 1),
+            path: PathBuf::from("src/main.rs"),
+        }];
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 24,
+            row: 8,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        app.handle_mouse(click, Instant::now());
+        assert!(
+            app.collapsed_preview_files
+                .contains(Path::new("src/main.rs"))
+        );
+        app.handle_mouse(click, Instant::now());
+        assert!(
+            !app.collapsed_preview_files
+                .contains(Path::new("src/main.rs"))
+        );
     }
 
     #[test]

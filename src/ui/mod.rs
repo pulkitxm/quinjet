@@ -676,9 +676,9 @@ fn draw_content(
         .map_or(0, |_| commit_details_row_count(inner.height));
     let side_by_side = app.diff_layout == DiffLayout::SideBySide && inner.width >= 72;
     let diff_rows = if side_by_side {
-        side_by_side_rows(&app.document, app.files_collapsed).len()
+        side_by_side_rows(&app.document, app).len()
     } else {
-        unified_row_indices(&app.document, app.files_collapsed).len()
+        unified_row_indices(&app.document, app).len()
     };
     let visual_length = details_rows + diff_rows;
     let max_scroll = visual_length.saturating_sub(inner.height as usize);
@@ -686,30 +686,29 @@ fn draw_content(
 
     let mut diff_area = inner;
     let mut diff_scroll = app.content_scroll;
-    if let Some(details) = app.document.commit_details.as_ref()
-        && diff_scroll < details_rows
-    {
-        let visible_details = details_rows - diff_scroll;
-        let details_height = visible_details.min(inner.height as usize) as u16;
-        let details_area = Rect::new(inner.x, inner.y, inner.width, details_height);
-        draw_commit_details_scrolled(
-            frame,
-            details_area,
-            details,
-            &app.document,
-            diff_scroll,
-            details_rows,
-            theme,
-        );
-        diff_area = Rect::new(
-            inner.x,
-            inner.y.saturating_add(details_height),
-            inner.width,
-            inner.height.saturating_sub(details_height),
-        );
-        diff_scroll = 0;
-    } else {
-        diff_scroll = diff_scroll.saturating_sub(details_rows);
+    match app.document.commit_details.as_ref() {
+        Some(details) if diff_scroll < details_rows => {
+            let visible_details = details_rows - diff_scroll;
+            let details_height = visible_details.min(inner.height as usize) as u16;
+            let details_area = Rect::new(inner.x, inner.y, inner.width, details_height);
+            draw_commit_details_scrolled(
+                frame,
+                details_area,
+                details,
+                &app.document,
+                diff_scroll,
+                details_rows,
+                theme,
+            );
+            diff_area = Rect::new(
+                inner.x,
+                inner.y.saturating_add(details_height),
+                inner.width,
+                inner.height.saturating_sub(details_height),
+            );
+            diff_scroll = 0;
+        }
+        _ => diff_scroll = diff_scroll.saturating_sub(details_rows),
     }
 
     let render_area = Rect::new(
@@ -829,7 +828,7 @@ fn detail_line<'a>(label: &'a str, value: String, theme: &Theme) -> Line<'a> {
     ])
 }
 
-fn unified_row_indices(document: &DiffDocument, collapsed: bool) -> Vec<usize> {
+fn unified_row_indices(document: &DiffDocument, app: &App) -> Vec<usize> {
     let mut rows = Vec::new();
     let mut index = 0;
     while index < document.lines.len() {
@@ -840,7 +839,10 @@ fn unified_row_indices(document: &DiffDocument, collapsed: bool) -> Vec<usize> {
             continue;
         }
         rows.push(index);
-        if collapsed && document.lines[index].kind == DiffLineKind::FileHeader {
+        let collapsed = document.lines[index].kind == DiffLineKind::FileHeader
+            && file_header_path(&document.lines[index])
+                .is_some_and(|path| app.preview_file_collapsed(path));
+        if collapsed {
             index += 1;
             while index < document.lines.len()
                 && document.lines[index].kind != DiffLineKind::FileFooter
@@ -864,7 +866,7 @@ fn draw_unified_diff(
     diff_scroll: usize,
     theme: &Theme,
 ) -> Vec<ContentFileHit> {
-    let rows = unified_row_indices(&app.document, app.files_collapsed);
+    let rows = unified_row_indices(&app.document, app);
     let first_index = rows.get(diff_scroll).copied().unwrap_or_default();
     let mut in_file = inside_file_before(&app.document, first_index);
     let emphasis = intraline_emphasis(&app.document.lines);
@@ -880,7 +882,7 @@ fn draw_unified_diff(
         draw_file_header(frame, sticky_area, header, app, theme);
         if let Some(path) = file_header_path(header) {
             hits.push(ContentFileHit {
-                row: sticky_area.y,
+                area: sticky_area,
                 path: path.into(),
             });
         }
@@ -899,7 +901,7 @@ fn draw_unified_diff(
                 draw_file_header(frame, row_area, line, app, theme);
                 if let Some(path) = file_header_path(line) {
                     hits.push(ContentFileHit {
-                        row: row_area.y,
+                        area: row_area,
                         path: path.into(),
                     });
                 }
@@ -1003,7 +1005,12 @@ fn draw_file_header(frame: &mut Frame<'_>, area: Rect, line: &DiffLine, app: &Ap
         .first()
         .map(|span| span.text.as_str())
         .unwrap_or_default();
-    let disclosure = if app.files_collapsed { "›" } else { "⌄" };
+    let disclosure = if file_header_path(line).is_some_and(|path| app.preview_file_collapsed(path))
+    {
+        "›"
+    } else {
+        "⌄"
+    };
     let additions = line
         .spans
         .get(1)
@@ -1125,7 +1132,7 @@ fn draw_side_by_side_diff(
         theme.border
     };
 
-    let rows = side_by_side_rows(&app.document, app.files_collapsed);
+    let rows = side_by_side_rows(&app.document, app);
     let sticky = rows.get(diff_scroll).and_then(|first| match first {
         SideBySideRow::FileHeader(_) | SideBySideRow::FileFooter => None,
         _ => rows[..diff_scroll].iter().rev().find_map(|row| match row {
@@ -1142,7 +1149,7 @@ fn draw_side_by_side_diff(
         draw_file_header(frame, sticky_area, header, app, theme);
         if let Some(path) = file_header_path(header) {
             hits.push(ContentFileHit {
-                row: sticky_area.y,
+                area: sticky_area,
                 path: path.into(),
             });
         }
@@ -1160,7 +1167,7 @@ fn draw_side_by_side_diff(
                 draw_file_header(frame, row_area, line, app, theme);
                 if let Some(path) = file_header_path(line) {
                     hits.push(ContentFileHit {
-                        row: row_area.y,
+                        area: row_area,
                         path: path.into(),
                     });
                 }
@@ -1215,7 +1222,7 @@ enum SideBySideRow<'a> {
     Split(Option<&'a DiffLine>, Option<&'a DiffLine>),
 }
 
-fn side_by_side_rows(document: &DiffDocument, collapsed: bool) -> Vec<SideBySideRow<'_>> {
+fn side_by_side_rows<'a>(document: &'a DiffDocument, app: &App) -> Vec<SideBySideRow<'a>> {
     let mut rows = Vec::new();
     let mut index = 0;
     let mut in_file = false;
@@ -1226,7 +1233,7 @@ fn side_by_side_rows(document: &DiffDocument, collapsed: bool) -> Vec<SideBySide
                 rows.push(SideBySideRow::FileHeader(line));
                 in_file = true;
                 index += 1;
-                if collapsed {
+                if file_header_path(line).is_some_and(|path| app.preview_file_collapsed(path)) {
                     while index < document.lines.len()
                         && document.lines[index].kind != DiffLineKind::FileFooter
                     {
@@ -2262,7 +2269,8 @@ mod tests {
                 test_line(DiffLineKind::Context, "same"),
             ],
         };
-        let rows = side_by_side_rows(&document, false);
+        let app = App::new("/tmp/repo", "repo");
+        let rows = side_by_side_rows(&document, &app);
         assert_eq!(rows.len(), 3);
         let SideBySideRow::Split(old, new) = &rows[0] else {
             panic!("expected a split diff row");
@@ -2293,9 +2301,10 @@ mod tests {
             ],
         };
 
-        assert_eq!(unified_row_indices(&document, false), vec![0, 2, 3]);
+        let app = App::new("/tmp/repo", "repo");
+        assert_eq!(unified_row_indices(&document, &app), vec![0, 2, 3]);
         assert!(
-            side_by_side_rows(&document, false)
+            side_by_side_rows(&document, &app)
                 .iter()
                 .all(|row| !matches!(row, SideBySideRow::Full { line, .. } if line.kind == DiffLineKind::HunkHeader))
         );
@@ -2407,8 +2416,10 @@ mod tests {
             ],
         };
 
-        assert_eq!(unified_row_indices(&document, true), vec![0, 4]);
-        assert_eq!(side_by_side_rows(&document, true).len(), 2);
+        let mut app = App::new("/tmp/repo", "repo");
+        app.files_collapsed = true;
+        assert_eq!(unified_row_indices(&document, &app), vec![0, 4]);
+        assert_eq!(side_by_side_rows(&document, &app).len(), 2);
     }
 
     #[test]
