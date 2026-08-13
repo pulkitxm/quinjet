@@ -30,13 +30,13 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 On Linux or macOS:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://raw.githubusercontent.com/pulkitxm/quinjet/main/install.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://quinjet.pulkit.page/install.sh | sh
 ```
 
 On Windows PowerShell:
 
 ```powershell
-powershell -c "irm https://raw.githubusercontent.com/pulkitxm/quinjet/main/install.ps1 | iex"
+powershell -c "irm https://quinjet.pulkit.page/install.ps1 | iex"
 ```
 
 The installer detects the operating system and CPU architecture, downloads the matching binary from the latest GitHub release, verifies its SHA-256 checksum, and adds the installation directory to `PATH` when needed. It does not require Rust or Cargo.
@@ -44,7 +44,7 @@ The installer detects the operating system and CPU architecture, downloads the m
 Pass `--version` or `--bin-dir` to the shell installer to select a release or installation directory:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://raw.githubusercontent.com/pulkitxm/quinjet/main/install.sh | sh -s -- --version v0.0.1
+curl --proto '=https' --tlsv1.2 -LsSf https://quinjet.pulkit.page/install.sh | sh -s -- --version v0.0.1
 ```
 
 The equivalent PowerShell environment variables are `QUINJET_VERSION` and `QUINJET_INSTALL_DIR`.
