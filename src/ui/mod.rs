@@ -266,9 +266,9 @@ fn draw_changes_sidebar(
 ) -> Vec<(u16, SidebarHit)> {
     let block = panel_block(
         if app.filter.is_empty() {
-            format!(" Source Control  {} ", app.status.changes.len())
+            format!(" Changes  {} ", app.status.changes.len())
         } else {
-            format!(" Source Control  /{} ", app.filter)
+            format!(" Changes  /{} ", app.filter)
         },
         app.focus == Focus::Sidebar && app.modal.is_none(),
         theme,
@@ -283,12 +283,8 @@ fn draw_changes_sidebar(
     let visible = app.visible_change_indices();
     let row_count = change_row_count(app, &visible);
     let height = list_area.height as usize;
-    ensure_offset(
-        &mut app.sidebar_offset,
-        app.change_cursor,
-        height,
-        row_count,
-    );
+    let selected_row = selected_change_row(app, &visible, app.change_cursor);
+    ensure_offset(&mut app.sidebar_offset, selected_row, height, row_count);
     let rows = build_change_rows(app, &visible);
     let mut hits = Vec::new();
     let end = (app.sidebar_offset + height).min(rows.len());
@@ -353,7 +349,12 @@ fn draw_changes_sidebar(
                     Paragraph::new(line).style(row_style),
                     Rect::new(list_area.x, y, list_area.width.saturating_sub(4), 1),
                 );
-                let badge = format!(" {} ", change.status.code());
+                let action = match change.area {
+                    ChangeArea::Staged => "−",
+                    ChangeArea::Conflict => "!",
+                    ChangeArea::Unstaged => "+",
+                };
+                let badge = format!("{action} {} ", change.status.code());
                 frame.render_widget(
                     Paragraph::new(badge).alignment(Alignment::Right).style(
                         Style::default()
@@ -365,12 +366,14 @@ fn draw_changes_sidebar(
                             })
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Rect::new(list_area.right().saturating_sub(4), y, 4, 1),
+                    Rect::new(list_area.right().saturating_sub(5), y, 5, 1),
                 );
                 hits.push((y, SidebarHit::Change(*index)));
             }
         }
     }
+
+    draw_scrollbar(frame, list_area, app.sidebar_offset, rows.len(), theme);
 
     if visible.is_empty() {
         let message = if app.status.changes.is_empty() {
@@ -403,6 +406,38 @@ enum ChangeRow<'a> {
         cursor: usize,
         change: &'a Change,
     },
+}
+
+fn selected_change_row(app: &App, visible: &[usize], selected_cursor: usize) -> usize {
+    let Some(selected_index) = visible.get(selected_cursor).copied() else {
+        return 0;
+    };
+    let selected_area = app.status.changes[selected_index].area;
+    let mut row = 0;
+    for area in [
+        ChangeArea::Conflict,
+        ChangeArea::Staged,
+        ChangeArea::Unstaged,
+    ] {
+        let group: Vec<_> = visible
+            .iter()
+            .filter(|index| app.status.changes[**index].area == area)
+            .copied()
+            .collect();
+        if group.is_empty() {
+            continue;
+        }
+        row += 1;
+        if area == selected_area {
+            return row
+                + group
+                    .iter()
+                    .position(|index| *index == selected_index)
+                    .unwrap_or_default();
+        }
+        row += group.len();
+    }
+    0
 }
 
 fn change_row_count(app: &App, visible: &[usize]) -> usize {
@@ -549,6 +584,8 @@ fn draw_history_sidebar(
         );
         hits.push((y, SidebarHit::Commit(*index)));
     }
+
+    draw_scrollbar(frame, inner, app.sidebar_offset, visible.len(), theme);
 
     if visible.is_empty() {
         frame.render_widget(

@@ -285,4 +285,23 @@ mod tests {
         let document = parse_diff(b"", "empty", None, false);
         assert_eq!(document.lines[0].text(), "No textual diff to display");
     }
+
+    #[test]
+    fn highlights_typescript_and_hides_git_transport_headers() {
+        let raw = b"diff --git a/widget.tsx b/widget.tsx\nindex aaaaaaa..bbbbbbb 100644\n--- a/widget.tsx\n+++ b/widget.tsx\n@@ -1 +1 @@\n-const oldValue: number = 1;\n+const newValue: number = 2;\n";
+        let document = parse_diff(raw, "widget.tsx", Some(Path::new("widget.tsx")), false);
+
+        assert_eq!(document.lines.len(), 3);
+        assert_eq!(document.lines[0].kind, DiffLineKind::HunkHeader);
+        assert!(document.lines[2].spans.len() > 1);
+        assert!(
+            document.lines[2]
+                .spans
+                .iter()
+                .filter_map(|span| span.foreground)
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                > 1
+        );
+    }
 }
