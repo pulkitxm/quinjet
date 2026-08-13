@@ -28,6 +28,16 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Lint shell installer
+        if: runner.os == 'Linux'
+        run: shellcheck install.sh tests/install.sh
+      - name: Test shell installer
+        if: runner.os != 'Windows'
+        run: sh tests/install.sh
+      - name: Test PowerShell installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tests/install.ps1
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test --all-features --locked
