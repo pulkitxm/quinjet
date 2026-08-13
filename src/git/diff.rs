@@ -70,11 +70,43 @@ pub struct CommitDetails {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PullRequestDetails {
+    pub number: u64,
+    pub title: String,
+    pub author: String,
+    pub state: String,
+    pub is_draft: bool,
+    pub updated_at: String,
+    pub url: String,
+    pub base_repository: String,
+    pub base_ref: String,
+    pub base_remotes: Vec<String>,
+    pub head_repository: Option<String>,
+    pub head_ref: String,
+    pub head_remotes: Vec<String>,
+    pub is_cross_repository: bool,
+    pub changed_files: usize,
+    /// Whole-PR totals reported by GitHub.
+    pub additions: usize,
+    pub deletions: usize,
+    /// Counts represented by the currently rendered file page.
+    pub page_additions: usize,
+    pub page_deletions: usize,
+    pub file_page: usize,
+    pub file_page_size: usize,
+    pub displayed_files: usize,
+    pub total_files: usize,
+    pub has_previous_file_page: bool,
+    pub has_next_file_page: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DiffDocument {
     pub title: String,
     pub lines: Vec<DiffLine>,
     pub truncated: bool,
     pub commit_details: Option<CommitDetails>,
+    pub pull_request_details: Option<PullRequestDetails>,
 }
 
 impl DiffDocument {
@@ -89,6 +121,7 @@ impl DiffDocument {
             }],
             truncated: false,
             commit_details: None,
+            pull_request_details: None,
         }
     }
 
@@ -336,6 +369,7 @@ pub fn parse_diff(
         lines,
         truncated,
         commit_details: None,
+        pull_request_details: None,
     }
 }
 
