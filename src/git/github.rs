@@ -672,6 +672,8 @@ fn pull_request_document(
             .saturating_add(1)
     };
     let range_end = range_start.saturating_add(displayed_files.saturating_sub(1));
+    let page_additions = count_patch_lines(output, b'+');
+    let page_deletions = count_patch_lines(output, b'-');
     let mut document = parse_diff(
         output,
         format!(
@@ -717,6 +719,8 @@ fn pull_request_document(
         changed_files: pull_request.changed_files.max(total_files),
         additions: pull_request.additions,
         deletions: pull_request.deletions,
+        page_additions,
+        page_deletions,
         file_page,
         file_page_size,
         displayed_files,
@@ -725,6 +729,16 @@ fn pull_request_document(
         has_next_file_page,
     });
     document
+}
+
+fn count_patch_lines(output: &[u8], marker: u8) -> usize {
+    output
+        .split(|byte| *byte == b'\n')
+        .filter(|line| {
+            line.first() == Some(&marker)
+                && !line.starts_with(if marker == b'+' { b"+++ " } else { b"--- " })
+        })
+        .count()
 }
 
 fn pull_request_batch_args(repository: &GitHubRepository, cursor: Option<&str>) -> Vec<OsString> {
@@ -1999,6 +2013,22 @@ mod tests {
     }
 
     #[test]
+    fn page_counts_include_raw_patch_lines_even_when_rendering_is_truncated() {
+        let base = repository("acme/widget", "https://github.com/acme/widget", &["origin"]);
+        let mut request = pull_request(base, 9);
+        request.changed_files = 1;
+        request.additions = 3;
+        request.deletions = 2;
+        let patch = b"diff --git a/test.txt b/test.txt\n--- a/test.txt\n+++ b/test.txt\n@@ -1,2 +1,3 @@\n-old one\n-old two\n+new one\n+new two\n+new three\n";
+
+        let document = pull_request_document(patch, &request, true, 1, 20, 1, 1, false, false);
+        let details = document.pull_request_details.unwrap();
+
+        assert_eq!((details.page_additions, details.page_deletions), (3, 2));
+        assert_eq!((details.additions, details.deletions), (3, 2));
+    }
+
+    #[test]
     fn locally_available_pr_objects_avoid_disposable_fetches() {
         let source = initialized_repository();
         let base_oid = source.git(&["rev-parse", "HEAD"]);
@@ -2073,6 +2103,8 @@ mod tests {
         request.head_oid = source.git(&["rev-parse", "feature/rocket"]);
         request.head_repository = None;
         request.changed_files = 21;
+        request.additions = 21;
+        request.deletions = 0;
 
         let first_page = git_repository
             .local_pull_request_diff(&request, 1, DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE)
@@ -2083,8 +2115,26 @@ mod tests {
 
         assert_eq!(first_page.file_count(), 20);
         assert_eq!(second_page.file_count(), 1);
+        let first_page_counts = (first_page.addition_count(), first_page.deletion_count());
+        let second_page_counts = (second_page.addition_count(), second_page.deletion_count());
         let first_details = first_page.pull_request_details.unwrap();
         let second_details = second_page.pull_request_details.unwrap();
+        assert_eq!(
+            (first_details.page_additions, first_details.page_deletions),
+            first_page_counts
+        );
+        assert_eq!(
+            (second_details.page_additions, second_details.page_deletions),
+            second_page_counts
+        );
+        assert_eq!(
+            first_details.page_additions + second_details.page_additions,
+            request.additions
+        );
+        assert_eq!(
+            first_details.page_deletions + second_details.page_deletions,
+            request.deletions
+        );
         assert_eq!(
             (first_details.file_page, first_details.total_files),
             (1, 21)

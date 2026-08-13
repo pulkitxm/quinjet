@@ -1117,7 +1117,10 @@ fn draw_pull_request_details_scrolled(
     theme: &Theme,
 ) {
     let block = Block::default()
-        .title(format!(" Pull request #{} ", details.number))
+        .title(format!(
+            " Pull request #{} · page vs PR totals ",
+            details.number
+        ))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.border))
         .style(Style::default().bg(theme.panel_alt).fg(theme.text));
@@ -1170,23 +1173,38 @@ fn draw_pull_request_details_scrolled(
             theme,
         ),
         detail_line("URL", details.url.clone(), theme),
-        detail_line(
-            "Preview",
-            format!(
-                "{} file{} on page {}  ·  {} total  ·  , / . previous / next page",
-                details.displayed_files,
-                if details.displayed_files == 1 {
-                    ""
-                } else {
-                    "s"
-                },
-                details.file_page,
-                details.total_files,
-            ),
-            theme,
-        ),
         Line::from(vec![
-            Span::styled("Changes    ", Style::default().fg(theme.muted)),
+            Span::styled("Page       ", Style::default().fg(theme.muted)),
+            Span::styled(
+                format!(
+                    "{} file{} on page {}  ",
+                    details.displayed_files,
+                    if details.displayed_files == 1 {
+                        ""
+                    } else {
+                        "s"
+                    },
+                    details.file_page,
+                ),
+                Style::default().fg(theme.text),
+            ),
+            Span::styled(
+                format!("+{}", details.page_additions),
+                Style::default()
+                    .fg(theme.added)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  ", Style::default()),
+            Span::styled(
+                format!("-{}", details.page_deletions),
+                Style::default()
+                    .fg(theme.removed)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  ·  , / . files", Style::default().fg(theme.muted)),
+        ]),
+        Line::from(vec![
+            Span::styled("PR total   ", Style::default().fg(theme.muted)),
             Span::styled(
                 format!(
                     "{} file{} changed  ",
@@ -3089,8 +3107,10 @@ mod tests {
                 head_remotes: vec!["origin".to_owned(), "publish".to_owned()],
                 is_cross_repository: true,
                 changed_files: 1,
-                additions: 1,
-                deletions: 0,
+                additions: 101,
+                deletions: 20,
+                page_additions: 1,
+                page_deletions: 0,
                 file_page: 1,
                 file_page_size: 20,
                 displayed_files: 1,
@@ -3122,11 +3142,16 @@ mod tests {
         assert!(rendered.contains("acme/widget"));
         assert!(rendered.contains("←/→ 2/2"));
         assert_eq!(rendered.matches("Pull request #42").count(), 1);
+        assert!(rendered.contains("page vs PR totals"));
         assert!(rendered.contains("acme/widget:main"));
         assert!(rendered.contains("remote upstream"));
         assert!(rendered.contains("octocat/widget:feature/rocket"));
         assert!(rendered.contains("remotes origin, publish"));
         assert!(rendered.contains("fork"));
+        assert!(rendered.contains("Page"));
+        assert!(rendered.contains("PR total"));
+        assert!(rendered.contains("+101"));
+        assert!(rendered.contains("-20"));
         assert!(rendered.contains("src/rocket.rs"));
         assert!(!rendered.contains("@@"));
     }
