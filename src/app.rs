@@ -300,6 +300,7 @@ pub enum PaletteCommand {
     StashPop,
     Branches,
     ToggleDiffLayout,
+    ToggleAllFiles,
     ShowChanges,
     ShowHistory,
     Help,
@@ -307,7 +308,7 @@ pub enum PaletteCommand {
 }
 
 impl PaletteCommand {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::Refresh,
         Self::StageAll,
         Self::UnstageAll,
@@ -321,6 +322,7 @@ impl PaletteCommand {
         Self::StashPop,
         Self::Branches,
         Self::ToggleDiffLayout,
+        Self::ToggleAllFiles,
         Self::ShowChanges,
         Self::ShowHistory,
         Self::Help,
@@ -342,6 +344,7 @@ impl PaletteCommand {
             Self::StashPop => "Pop Latest Stash",
             Self::Branches => "Switch Branch…",
             Self::ToggleDiffLayout => "Toggle Unified / Side-by-Side Diff",
+            Self::ToggleAllFiles => "Collapse / Expand All Files",
             Self::ShowChanges => "Show Changes",
             Self::ShowHistory => "Show Commit History",
             Self::Help => "Keyboard Shortcuts",
@@ -355,6 +358,12 @@ pub enum SidebarHit {
     ChangeGroup(ChangeArea),
     Change(usize),
     Commit(usize),
+}
+
+#[derive(Debug, Clone)]
+pub struct ContentFileHit {
+    pub row: u16,
+    pub path: PathBuf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -373,6 +382,7 @@ pub struct UiGeometry {
     pub content: Rect,
     pub diff_divider: Option<Rect>,
     pub sidebar_hits: Vec<(u16, SidebarHit)>,
+    pub content_file_hits: Vec<ContentFileHit>,
 }
 
 #[derive(Debug)]
@@ -391,6 +401,8 @@ pub struct App {
     pub history: Vec<Commit>,
     pub document: DiffDocument,
     pub selected_change_group: Option<ChangeArea>,
+    pub selected_preview_file: Option<PathBuf>,
+    pub preview_file_cursor: usize,
     pub change_cursor: usize,
     pub history_cursor: usize,
     pub sidebar_offset: usize,
@@ -400,6 +412,7 @@ pub struct App {
     pub sidebar_hidden: bool,
     pub diff_split_percent: u16,
     pub expanded_diff: bool,
+    pub files_collapsed: bool,
     pub resize_target: Option<ResizeTarget>,
     pub filter: String,
     pub modal: Option<Modal>,
@@ -433,6 +446,8 @@ impl App {
             history: Vec::new(),
             document: DiffDocument::empty("Working Tree", "Loading changes…"),
             selected_change_group: Some(ChangeArea::Unstaged),
+            selected_preview_file: None,
+            preview_file_cursor: 0,
             change_cursor: 0,
             history_cursor: 0,
             sidebar_offset: 0,
@@ -442,6 +457,7 @@ impl App {
             sidebar_hidden: false,
             diff_split_percent: DEFAULT_DIFF_SPLIT_PERCENT,
             expanded_diff: false,
+            files_collapsed: false,
             resize_target: None,
             filter: String::new(),
             modal: None,
@@ -554,6 +570,51 @@ impl App {
             .filter(|target| self.change_targets().contains(target))
     }
 
+    pub fn preview_file_selected(&self, path: &str) -> bool {
+        self.selected_preview_file
+            .as_deref()
+            .is_some_and(|selected| selected.to_string_lossy() == path)
+    }
+
+    fn preview_file_paths(&self) -> Vec<PathBuf> {
+        self.document
+            .lines
+            .iter()
+            .filter(|line| line.kind == DiffLineKind::FileHeader)
+            .filter_map(|line| line.spans.first())
+            .map(|span| PathBuf::from(span.text.split("  · ").next().unwrap_or(span.text.as_str())))
+            .collect()
+    }
+
+    fn navigate_preview_file(&mut self, amount: isize) {
+        let paths = self.preview_file_paths();
+        if paths.is_empty() {
+            return;
+        }
+        let current = self
+            .selected_preview_file
+            .as_ref()
+            .and_then(|selected| paths.iter().position(|path| path == selected))
+            .unwrap_or_else(|| self.preview_file_cursor.min(paths.len() - 1));
+        self.preview_file_cursor = if amount < 0 {
+            current.saturating_sub(amount.unsigned_abs())
+        } else {
+            (current + amount as usize).min(paths.len() - 1)
+        };
+        self.selected_preview_file = Some(paths[self.preview_file_cursor].clone());
+        if let Some(line_index) = self.document.lines.iter().position(|line| {
+            line.kind == DiffLineKind::FileHeader
+                && line.spans.first().is_some_and(|span| {
+                    span.text
+                        .split("  · ")
+                        .next()
+                        .is_some_and(|path| Path::new(path) == paths[self.preview_file_cursor])
+                })
+        }) {
+            self.content_scroll = line_index;
+        }
+    }
+
     fn select_change_target(&mut self, target: ChangeTarget) {
         match target {
             ChangeTarget::Group(area) => self.selected_change_group = Some(area),
@@ -642,6 +703,10 @@ impl App {
                 });
             }
             KeyCode::Char('v') => self.toggle_diff_layout(),
+            KeyCode::Char('e') => {
+                self.files_collapsed = !self.files_collapsed;
+                self.content_scroll = 0;
+            }
             KeyCode::Char('t') | KeyCode::Char('T') => {
                 self.expanded_diff = !self.expanded_diff;
                 self.content_scroll = 0;
@@ -826,6 +891,19 @@ impl App {
                     .contains((event.column, event.row).into())
                 {
                     self.focus = Focus::Content;
+                    if let Some(hit) = self
+                        .geometry
+                        .content_file_hits
+                        .iter()
+                        .find(|hit| hit.row == event.row)
+                    {
+                        self.selected_preview_file = Some(hit.path.clone());
+                        self.preview_file_cursor = self
+                            .preview_file_paths()
+                            .iter()
+                            .position(|path| path == &hit.path)
+                            .unwrap_or_default();
+                    }
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) => match self.resize_target {
@@ -929,7 +1007,11 @@ impl App {
                             self.request_history(true, &mut effects);
                         }
                         if self.view == View::Changes {
-                            self.schedule_preview(now);
+                            // A status result is authoritative and already arrives off the UI
+                            // thread. Queue its preview immediately instead of adding another
+                            // debounce delay; navigation still uses debounced previews.
+                            self.preview_due = None;
+                            self.request_preview(&mut effects);
                         }
                     }
                     Err(error) => self.show_toast(error, ToastLevel::Error, now),
@@ -948,6 +1030,8 @@ impl App {
                 match result {
                     Ok(document) => {
                         self.document = document;
+                        self.selected_preview_file = None;
+                        self.preview_file_cursor = 0;
                         self.content_scroll = 0;
                         self.horizontal_scroll = 0;
                     }
@@ -1271,6 +1355,10 @@ impl App {
             PaletteCommand::StashPop => self.queue_operation(GitOperation::StashPop, effects),
             PaletteCommand::Branches => self.open_branches(effects),
             PaletteCommand::ToggleDiffLayout => self.toggle_diff_layout(),
+            PaletteCommand::ToggleAllFiles => {
+                self.files_collapsed = !self.files_collapsed;
+                self.content_scroll = 0;
+            }
             PaletteCommand::ShowChanges => self.switch_view(View::Changes),
             PaletteCommand::ShowHistory => self.switch_view(View::History),
             PaletteCommand::Help => self.modal = Some(Modal::Help { scroll: 0 }),
@@ -1342,7 +1430,9 @@ impl App {
 
     fn navigate(&mut self, amount: isize, now: Instant) {
         if self.focus == Focus::Content {
-            if amount < 0 {
+            if self.files_collapsed {
+                self.navigate_preview_file(amount);
+            } else if amount < 0 {
                 self.content_scroll = self.content_scroll.saturating_sub(amount.unsigned_abs());
             } else {
                 self.content_scroll = self.content_scroll.saturating_add(amount as usize);
