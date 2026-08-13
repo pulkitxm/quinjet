@@ -16,7 +16,7 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 - Syntax highlighting for TypeScript/TSX, Rust, Python, Go, JavaScript, and hundreds of other formats
 - Unified and draggable side-by-side diff panes
 - Compact change hunks by default; `t` expands the selected file to full context
-- Paginated, scrollable commit history with refs and commit patch previews
+- Paginated commit history with one commit-details card and a titled diff pane for every changed file
 - Commit, amend, stash, fetch, pull, push, sync, cherry-pick, and revert
 - Branch switching, creation, deletion, and creation at a selected commit
 - Natural mouse scrolling, clickable rows, and draggable pane dividers
@@ -67,7 +67,7 @@ The UI intentionally stays uncluttered; press `?` for the complete shortcut refe
 |---|---|
 | `j` / `k`, arrows | Move through every file/commit or scroll the preview |
 | Mouse wheel | Naturally scroll the pane under the pointer |
-| `Tab` | Switch sidebar/preview focus |
+| `Tab` / `Enter` | Toggle sidebar/preview focus |
 | `1` / `2` | Changes/history |
 | `s` or `Space` | Toggle stage/unstage for the selected file |
 | `a` / `U` | Stage all/unstage all |

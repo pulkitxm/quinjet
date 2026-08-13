@@ -26,7 +26,7 @@ pub enum WorkerCommand {
     },
     LoadCommit {
         generation: u64,
-        commit: Commit,
+        commit: Box<Commit>,
     },
     LoadBranches {
         generation: u64,

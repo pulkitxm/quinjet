@@ -614,7 +614,12 @@ impl App {
                 self.queue_operation(GitOperation::Pull, &mut effects);
             }
             KeyCode::Char('y') => self.queue_operation(GitOperation::Sync, &mut effects),
-            KeyCode::Enter => self.focus = Focus::Content,
+            KeyCode::Enter => {
+                self.focus = match self.focus {
+                    Focus::Sidebar => Focus::Content,
+                    Focus::Content => Focus::Sidebar,
+                };
+            }
             KeyCode::Esc => {
                 if !self.filter.is_empty() {
                     self.filter.clear();
@@ -1508,7 +1513,7 @@ impl App {
                     self.document_loading = true;
                     effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadCommit {
                         generation,
-                        commit,
+                        commit: Box::new(commit),
                     })));
                     let visible_len = self.visible_commit_indices().len();
                     if self.history_cursor + 20 >= visible_len
@@ -1715,6 +1720,17 @@ mod tests {
             app.selected_change().unwrap().path,
             PathBuf::from("README.md")
         );
+    }
+
+    #[test]
+    fn enter_toggles_focus_between_sidebar_and_content() {
+        let mut app = app_with_changes();
+        let now = Instant::now();
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+        assert_eq!(app.focus, Focus::Content);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+        assert_eq!(app.focus, Focus::Sidebar);
     }
 
     #[test]

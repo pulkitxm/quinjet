@@ -56,4 +56,4 @@ Important parity findings incorporated in the first implementation:
 
 ## Deliberate Next Steps
 
-Full VS Code parity is an ongoing scope rather than a single release. Highest-priority follow-ups are multi-repository actors, non-UTF-8 path preservation, partial hunk staging, a true three-way merge editor, multi-file commit views, ref-filtered topology lanes, and configurable keymaps.
+Full VS Code parity is an ongoing scope rather than a single release. Highest-priority follow-ups are multi-repository actors, non-UTF-8 path preservation, partial hunk staging, a true three-way merge editor, ref-filtered topology lanes, and configurable keymaps.

@@ -10,7 +10,7 @@ use std::process::{Command, Output};
 
 use anyhow::{Context, Result, bail};
 
-use self::diff::{DiffDocument, parse_diff};
+use self::diff::{CommitDetails, DiffDocument, parse_diff};
 use self::history::{Commit, LOG_FORMAT, parse_log};
 use self::status::{Change, ChangeArea, ChangeStatus, RepoStatus, parse_porcelain_v2};
 
@@ -219,18 +219,28 @@ impl Repository {
             OsString::from("--no-color"),
             OsString::from("--no-ext-diff"),
             OsString::from("--find-renames"),
-            OsString::from("--stat"),
             OsString::from("--patch"),
-            OsString::from("--format=fuller"),
+            OsString::from("--format="),
             OsString::from(&commit.id),
         ])?;
         let truncated = truncate(&mut output, MAX_DIFF_BYTES);
-        Ok(parse_diff(
+        let mut document = parse_diff(
             &output,
             format!("{} — {}", commit.short_id, commit.subject),
             None,
             truncated,
-        ))
+        );
+        document.commit_details = Some(CommitDetails {
+            id: commit.id.clone(),
+            subject: commit.subject.clone(),
+            author: commit.author.clone(),
+            author_email: commit.author_email.clone(),
+            authored_at: commit.authored_at.clone(),
+            committer: commit.committer.clone(),
+            committer_email: commit.committer_email.clone(),
+            committed_at: commit.committed_at.clone(),
+        });
+        Ok(document)
     }
 
     pub fn branches(&self) -> Result<Vec<Branch>> {

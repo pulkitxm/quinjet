@@ -13,7 +13,7 @@ use crate::app::{
     App, DiffLayout, Focus, Modal, PaletteCommand, SidebarHit, ToastLevel, UiGeometry, View,
 };
 use crate::git::Branch;
-use crate::git::diff::{DiffDocument, DiffLine, DiffLineKind, HighlightSpan};
+use crate::git::diff::{CommitDetails, DiffDocument, DiffLine, DiffLineKind, HighlightSpan};
 use crate::git::status::{Change, ChangeArea, ChangeStatus};
 
 use self::theme::Theme;
@@ -24,7 +24,7 @@ const HELP_LINES: &[(&str, &str)] = &[
     ("PgUp / PgDn", "Move by a page"),
     ("gg / G", "Jump to first / last item"),
     ("Tab", "Switch focus between sidebar and preview"),
-    ("Enter", "Focus preview"),
+    ("Enter", "Toggle sidebar / preview focus"),
     ("h / l, ← / →", "Scroll preview horizontally"),
     ("[ / ]", "Previous / next diff hunk"),
     ("1 / 2", "Changes / commit history"),
@@ -627,68 +627,276 @@ fn draw_content(frame: &mut Frame<'_>, area: Rect, app: &mut App, theme: &Theme)
         return None;
     }
 
-    let side_by_side = app.diff_layout == DiffLayout::SideBySide && inner.width >= 72;
+    let mut diff_area = inner;
+    if let Some(details) = app.document.commit_details.as_ref() {
+        let details_height = 7.min(inner.height.saturating_sub(3));
+        if details_height >= 4 {
+            let details_area = Rect::new(inner.x, inner.y, inner.width, details_height);
+            draw_commit_details(frame, details_area, details, &app.document, theme);
+            diff_area = Rect::new(
+                inner.x,
+                details_area.bottom().saturating_add(1),
+                inner.width,
+                inner
+                    .bottom()
+                    .saturating_sub(details_area.bottom().saturating_add(1)),
+            );
+        }
+    }
+    if diff_area.width < 2 || diff_area.height == 0 {
+        return None;
+    }
+
+    // Reserve the last column for the scrollbar so it never overwrites a file pane's
+    // right border.
+    let render_area = Rect::new(
+        diff_area.x,
+        diff_area.y,
+        diff_area.width.saturating_sub(1),
+        diff_area.height,
+    );
+    let side_by_side = app.diff_layout == DiffLayout::SideBySide && render_area.width >= 72;
     let visual_length = if side_by_side {
         side_by_side_rows(&app.document).len()
     } else {
         app.document.lines.len()
     };
-    let max_scroll = visual_length.saturating_sub(inner.height as usize);
+    let max_scroll = visual_length.saturating_sub(render_area.height as usize);
     app.content_scroll = app.content_scroll.min(max_scroll);
     let divider = if side_by_side {
-        Some(draw_side_by_side_diff(frame, inner, app, theme))
+        Some(draw_side_by_side_diff(frame, render_area, app, theme))
     } else {
-        draw_unified_diff(frame, inner, app, theme);
+        draw_unified_diff(frame, render_area, app, theme);
         None
     };
-    draw_scrollbar(frame, inner, app.content_scroll, visual_length, theme);
+    draw_scrollbar(frame, diff_area, app.content_scroll, visual_length, theme);
     divider
 }
 
+fn draw_commit_details(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    details: &CommitDetails,
+    document: &DiffDocument,
+    theme: &Theme,
+) {
+    let block = Block::default()
+        .title(" Commit details ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.border))
+        .style(Style::default().bg(theme.panel_alt).fg(theme.text));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let file_count = document.file_count();
+    let lines = vec![
+        Line::from(Span::styled(
+            details.subject.as_str(),
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+        )),
+        detail_line(
+            "Author",
+            format!(
+                "{} <{}>  ·  {}",
+                details.author, details.author_email, details.authored_at
+            ),
+            theme,
+        ),
+        detail_line(
+            "Committer",
+            format!(
+                "{} <{}>  ·  {}",
+                details.committer, details.committer_email, details.committed_at
+            ),
+            theme,
+        ),
+        detail_line("Commit", details.id.clone(), theme),
+        Line::from(vec![
+            Span::styled("Changes    ", Style::default().fg(theme.muted)),
+            Span::styled(
+                format!(
+                    "{} file{} changed  ",
+                    file_count,
+                    if file_count == 1 { "" } else { "s" }
+                ),
+                Style::default().fg(theme.text),
+            ),
+            Span::styled(
+                format!("+{}", document.addition_count()),
+                Style::default()
+                    .fg(theme.added)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  ", Style::default()),
+            Span::styled(
+                format!("-{}", document.deletion_count()),
+                Style::default()
+                    .fg(theme.removed)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+    ];
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn detail_line<'a>(label: &'a str, value: String, theme: &Theme) -> Line<'a> {
+    Line::from(vec![
+        Span::styled(format!("{label:<10}"), Style::default().fg(theme.muted)),
+        Span::styled(value, Style::default().fg(theme.text)),
+    ])
+}
+
 fn draw_unified_diff(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) {
-    let number_width = 6usize;
-    let visible_width = area.width as usize;
-    let lines = app
+    let mut in_file = inside_file_before(&app.document, app.content_scroll);
+    for (offset, line) in app
         .document
         .lines
         .iter()
         .skip(app.content_scroll)
         .take(area.height as usize)
-        .map(|line| {
-            let (marker, marker_style) = marker_for(line.kind, theme);
-            let old = line
-                .old_line
-                .map_or(String::new(), |number| number.to_string());
-            let new = line
-                .new_line
-                .map_or(String::new(), |number| number.to_string());
-            let mut spans = vec![
-                Span::styled(format!("{old:>4} "), Style::default().fg(theme.muted)),
-                Span::styled(format!("{new:>4} "), Style::default().fg(theme.muted)),
-                Span::styled(marker, marker_style),
-            ];
-            spans.extend(highlight_spans(
-                &line.spans,
-                app.horizontal_scroll,
-                visible_width.saturating_sub(number_width * 2 + 2),
-                line.kind,
-                theme,
-            ));
-            Line::from(spans).style(line_background(line.kind, theme))
-        })
-        .collect::<Vec<_>>();
-    frame.render_widget(Paragraph::new(lines), area);
+        .enumerate()
+    {
+        let row_area = Rect::new(area.x, area.y + offset as u16, area.width, 1);
+        match line.kind {
+            DiffLineKind::FileHeader => {
+                draw_file_header(frame, row_area, line, theme);
+                in_file = true;
+            }
+            DiffLineKind::FileFooter => {
+                draw_file_footer(frame, row_area, theme);
+                in_file = false;
+            }
+            _ => draw_unified_line(frame, row_area, line, in_file, app.horizontal_scroll, theme),
+        }
+    }
+}
+
+fn draw_unified_line(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    line: &DiffLine,
+    boxed: bool,
+    horizontal_scroll: usize,
+    theme: &Theme,
+) {
+    let content_area = if boxed {
+        draw_file_edges(frame, area, line.kind, theme);
+        Rect::new(area.x + 1, area.y, area.width.saturating_sub(2), 1)
+    } else {
+        area
+    };
+    let old = line
+        .old_line
+        .map_or(String::new(), |number| number.to_string());
+    let new = line
+        .new_line
+        .map_or(String::new(), |number| number.to_string());
+    let (marker, marker_style) = marker_for(line.kind, theme);
+    let mut spans = vec![
+        Span::styled(format!("{old:>4} "), Style::default().fg(theme.muted)),
+        Span::styled(format!("{new:>4} "), Style::default().fg(theme.muted)),
+        Span::styled(marker, marker_style),
+    ];
+    spans.extend(highlight_spans(
+        &line.spans,
+        horizontal_scroll,
+        content_area.width.saturating_sub(12) as usize,
+        line.kind,
+        theme,
+    ));
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).style(line_background(line.kind, theme)),
+        content_area,
+    );
+}
+
+fn inside_file_before(document: &DiffDocument, offset: usize) -> bool {
+    let mut in_file = false;
+    for line in document.lines.iter().take(offset) {
+        match line.kind {
+            DiffLineKind::FileHeader => in_file = true,
+            DiffLineKind::FileFooter => in_file = false,
+            _ => {}
+        }
+    }
+    in_file
+}
+
+fn draw_file_header(frame: &mut Frame<'_>, area: Rect, line: &DiffLine, theme: &Theme) {
+    if area.width == 0 {
+        return;
+    }
+    let label = truncate_middle(&line.text(), area.width.saturating_sub(5) as usize);
+    let fill = area
+        .width
+        .saturating_sub(5)
+        .saturating_sub(label.width() as u16) as usize;
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("┌─ ", Style::default().fg(theme.border)),
+            Span::styled(
+                label,
+                Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" ", Style::default()),
+            Span::styled("─".repeat(fill), Style::default().fg(theme.border)),
+            Span::styled("┐", Style::default().fg(theme.border)),
+        ]))
+        .style(Style::default().bg(theme.panel_alt)),
+        area,
+    );
+}
+
+fn draw_file_footer(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+    if area.width == 0 {
+        return;
+    }
+    let text = if area.width == 1 {
+        "└".to_owned()
+    } else {
+        format!("└{}┘", "─".repeat(area.width.saturating_sub(2) as usize))
+    };
+    frame.render_widget(
+        Paragraph::new(text).style(Style::default().fg(theme.border).bg(theme.panel)),
+        area,
+    );
+}
+
+fn draw_file_edges(frame: &mut Frame<'_>, area: Rect, kind: DiffLineKind, theme: &Theme) {
+    if area.width < 2 {
+        return;
+    }
+    let background = match kind {
+        DiffLineKind::Added => theme.added_background,
+        DiffLineKind::Removed => theme.removed_background,
+        DiffLineKind::HunkHeader => theme.panel_alt,
+        _ => theme.panel,
+    };
+    let style = Style::default().fg(theme.border).bg(background);
+    frame.render_widget(
+        Paragraph::new("│").style(style),
+        Rect::new(area.x, area.y, 1, 1),
+    );
+    frame.render_widget(
+        Paragraph::new("│").style(style),
+        Rect::new(area.right().saturating_sub(1), area.y, 1, 1),
+    );
 }
 
 fn draw_side_by_side_diff(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) -> Rect {
-    let usable_width = area.width.saturating_sub(1);
+    let content = Rect::new(
+        area.x + 1,
+        area.y,
+        area.width.saturating_sub(2),
+        area.height,
+    );
+    let usable_width = content.width.saturating_sub(1);
     let left_width = usable_width.saturating_mul(app.diff_split_percent) / 100;
-    let left_area = Rect::new(area.x, area.y, left_width, area.height);
-    let divider = Rect::new(left_area.right(), area.y, 1, area.height);
-    let right_area = Rect::new(
+    let left = Rect::new(content.x, content.y, left_width, content.height);
+    let divider = Rect::new(left.right(), area.y, 1, area.height);
+    let right = Rect::new(
         divider.right(),
         area.y,
-        area.right().saturating_sub(divider.right()),
+        content.right().saturating_sub(divider.right()),
         area.height,
     );
     let divider_color = if app.resize_target == Some(crate::app::ResizeTarget::Diff) {
@@ -696,12 +904,6 @@ fn draw_side_by_side_diff(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &
     } else {
         theme.border
     };
-    for row in divider.y..divider.bottom() {
-        frame.render_widget(
-            Paragraph::new("│").style(Style::default().fg(divider_color).bg(theme.panel)),
-            Rect::new(divider.x, row, 1, 1),
-        );
-    }
 
     let rows = side_by_side_rows(&app.document);
     for (offset, row) in rows
@@ -711,58 +913,142 @@ fn draw_side_by_side_diff(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &
         .enumerate()
     {
         let y = area.y + offset as u16;
-        draw_diff_side(
-            frame,
-            Rect::new(left_area.x, y, left_area.width.saturating_sub(1), 1),
-            row.0,
-            true,
-            app.horizontal_scroll,
-            theme,
-        );
-        draw_diff_side(
-            frame,
-            Rect::new(right_area.x, y, right_area.width, 1),
-            row.1,
-            false,
-            app.horizontal_scroll,
-            theme,
-        );
+        let row_area = Rect::new(area.x, y, area.width, 1);
+        match row {
+            SideBySideRow::FileHeader(line) => draw_file_header(frame, row_area, line, theme),
+            SideBySideRow::FileFooter => draw_file_footer(frame, row_area, theme),
+            SideBySideRow::Full { line, boxed } => draw_full_width_diff_line(
+                frame,
+                row_area,
+                line,
+                *boxed,
+                app.horizontal_scroll,
+                theme,
+            ),
+            SideBySideRow::Split(old_line, new_line) => {
+                draw_diff_side(
+                    frame,
+                    Rect::new(left.x, y, left.width, 1),
+                    *old_line,
+                    true,
+                    app.horizontal_scroll,
+                    theme,
+                );
+                frame.render_widget(
+                    Paragraph::new("│").style(Style::default().fg(divider_color).bg(theme.panel)),
+                    Rect::new(divider.x, y, 1, 1),
+                );
+                draw_diff_side(
+                    frame,
+                    Rect::new(right.x, y, right.width, 1),
+                    *new_line,
+                    false,
+                    app.horizontal_scroll,
+                    theme,
+                );
+                let edge_kind = old_line
+                    .or(*new_line)
+                    .map_or(DiffLineKind::Context, |line| line.kind);
+                draw_file_edges(frame, row_area, edge_kind, theme);
+            }
+        }
     }
     divider
 }
 
-type DiffPair<'a> = (Option<&'a DiffLine>, Option<&'a DiffLine>);
+enum SideBySideRow<'a> {
+    FileHeader(&'a DiffLine),
+    FileFooter,
+    Full { line: &'a DiffLine, boxed: bool },
+    Split(Option<&'a DiffLine>, Option<&'a DiffLine>),
+}
 
-fn side_by_side_rows(document: &DiffDocument) -> Vec<DiffPair<'_>> {
+fn side_by_side_rows(document: &DiffDocument) -> Vec<SideBySideRow<'_>> {
     let mut rows = Vec::new();
     let mut index = 0;
+    let mut in_file = false;
     while index < document.lines.len() {
         let line = &document.lines[index];
-        if line.kind != DiffLineKind::Removed {
-            if line.kind == DiffLineKind::Added {
-                rows.push((None, Some(line)));
-            } else {
-                rows.push((Some(line), Some(line)));
+        match line.kind {
+            DiffLineKind::FileHeader => {
+                rows.push(SideBySideRow::FileHeader(line));
+                in_file = true;
+                index += 1;
             }
-            index += 1;
-            continue;
-        }
-
-        let removed_start = index;
-        while index < document.lines.len() && document.lines[index].kind == DiffLineKind::Removed {
-            index += 1;
-        }
-        let added_start = index;
-        while index < document.lines.len() && document.lines[index].kind == DiffLineKind::Added {
-            index += 1;
-        }
-        let removed = &document.lines[removed_start..added_start];
-        let added = &document.lines[added_start..index];
-        for pair_index in 0..removed.len().max(added.len()) {
-            rows.push((removed.get(pair_index), added.get(pair_index)));
+            DiffLineKind::FileFooter => {
+                rows.push(SideBySideRow::FileFooter);
+                in_file = false;
+                index += 1;
+            }
+            DiffLineKind::HunkHeader | DiffLineKind::Meta => {
+                rows.push(SideBySideRow::Full {
+                    line,
+                    boxed: in_file,
+                });
+                index += 1;
+            }
+            DiffLineKind::Added => {
+                rows.push(SideBySideRow::Split(None, Some(line)));
+                index += 1;
+            }
+            DiffLineKind::Context => {
+                rows.push(SideBySideRow::Split(Some(line), Some(line)));
+                index += 1;
+            }
+            DiffLineKind::Removed => {
+                let removed_start = index;
+                while index < document.lines.len()
+                    && document.lines[index].kind == DiffLineKind::Removed
+                {
+                    index += 1;
+                }
+                let added_start = index;
+                while index < document.lines.len()
+                    && document.lines[index].kind == DiffLineKind::Added
+                {
+                    index += 1;
+                }
+                let removed = &document.lines[removed_start..added_start];
+                let added = &document.lines[added_start..index];
+                for pair_index in 0..removed.len().max(added.len()) {
+                    rows.push(SideBySideRow::Split(
+                        removed.get(pair_index),
+                        added.get(pair_index),
+                    ));
+                }
+            }
         }
     }
     rows
+}
+
+fn draw_full_width_diff_line(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    line: &DiffLine,
+    boxed: bool,
+    horizontal_scroll: usize,
+    theme: &Theme,
+) {
+    let content_area = if boxed {
+        draw_file_edges(frame, area, line.kind, theme);
+        Rect::new(area.x + 1, area.y, area.width.saturating_sub(2), 1)
+    } else {
+        area
+    };
+    let (marker, marker_style) = marker_for(line.kind, theme);
+    let mut spans = vec![Span::styled(marker, marker_style)];
+    spans.extend(highlight_spans(
+        &line.spans,
+        horizontal_scroll,
+        content_area.width.saturating_sub(2) as usize,
+        line.kind,
+        theme,
+    ));
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).style(line_background(line.kind, theme)),
+        content_area,
+    );
 }
 
 fn draw_diff_side(
@@ -775,7 +1061,7 @@ fn draw_diff_side(
 ) {
     let Some(line) = line else {
         frame.render_widget(
-            Paragraph::new("░").style(Style::default().fg(theme.border).bg(theme.panel_alt)),
+            Paragraph::new(" ").style(Style::default().bg(theme.panel_alt)),
             area,
         );
         return;
@@ -857,13 +1143,16 @@ fn marker_for(kind: DiffLineKind, theme: &Theme) -> (&'static str, Style) {
                 .add_modifier(Modifier::BOLD),
         ),
         DiffLineKind::HunkHeader => (
-            "◆ ",
+            "  ",
             Style::default()
                 .fg(theme.accent)
                 .add_modifier(Modifier::BOLD),
         ),
         DiffLineKind::Context => ("  ", Style::default().fg(theme.muted)),
         DiffLineKind::Meta => ("  ", Style::default().fg(theme.muted)),
+        DiffLineKind::FileHeader | DiffLineKind::FileFooter => {
+            ("", Style::default().fg(theme.muted))
+        }
     }
 }
 
@@ -1556,6 +1845,7 @@ mod tests {
         let document = DiffDocument {
             title: String::new(),
             truncated: false,
+            commit_details: None,
             lines: vec![
                 test_line(DiffLineKind::Removed, "old one"),
                 test_line(DiffLineKind::Removed, "old two"),
@@ -1565,10 +1855,69 @@ mod tests {
         };
         let rows = side_by_side_rows(&document);
         assert_eq!(rows.len(), 3);
-        assert_eq!(rows[0].0.unwrap().text(), "old one");
-        assert_eq!(rows[0].1.unwrap().text(), "new one");
-        assert!(rows[1].1.is_none());
-        assert_eq!(rows[2].0.unwrap().text(), "same");
+        let SideBySideRow::Split(old, new) = &rows[0] else {
+            panic!("expected a split diff row");
+        };
+        assert_eq!(old.unwrap().text(), "old one");
+        assert_eq!(new.unwrap().text(), "new one");
+        let SideBySideRow::Split(_, new) = &rows[1] else {
+            panic!("expected a split diff row");
+        };
+        assert!(new.is_none());
+        let SideBySideRow::Split(old, _) = &rows[2] else {
+            panic!("expected a split diff row");
+        };
+        assert_eq!(old.unwrap().text(), "same");
+    }
+
+    #[test]
+    fn commit_preview_renders_details_once_and_names_each_file_pane() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = App::new("/tmp/repo", "repo");
+        app.view = View::History;
+        app.focus = Focus::Content;
+        app.document = DiffDocument {
+            title: "abc1234 — Improve history".to_owned(),
+            truncated: false,
+            commit_details: Some(CommitDetails {
+                id: "abc123456789".to_owned(),
+                subject: "Improve history".to_owned(),
+                author: "Ada".to_owned(),
+                author_email: "ada@example.com".to_owned(),
+                authored_at: "2026-01-02T03:04:05Z".to_owned(),
+                committer: "Grace".to_owned(),
+                committer_email: "grace@example.com".to_owned(),
+                committed_at: "2026-01-02T04:05:06Z".to_owned(),
+            }),
+            lines: vec![
+                test_line(DiffLineKind::FileHeader, "src/main.rs   +1 -0"),
+                test_line(DiffLineKind::HunkHeader, "@@ -1,0 +1 @@"),
+                test_line(DiffLineKind::Added, "fn main() {}"),
+                test_line(DiffLineKind::FileFooter, ""),
+                test_line(DiffLineKind::FileHeader, "README.md   +1 -0"),
+                test_line(DiffLineKind::HunkHeader, "@@ -1,0 +1 @@"),
+                test_line(DiffLineKind::Added, "# Quinjet"),
+                test_line(DiffLineKind::FileFooter, ""),
+            ],
+        };
+        let backend = TestBackend::new(140, 32);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+
+        assert_eq!(rendered.matches("Commit details").count(), 1);
+        assert!(rendered.contains("src/main.rs"));
+        assert!(rendered.contains("README.md"));
+        assert!(!rendered.contains('◆'));
+        assert!(!rendered.contains('░'));
     }
 
     fn test_line(kind: DiffLineKind, text: &str) -> DiffLine {
