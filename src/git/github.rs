@@ -575,12 +575,12 @@ fn remote_url_for_gh(url: &str) -> String {
 
     // Convert SCP-like SSH URLs to a credential-free URL before putting one on
     // the `gh` process command line. This also handles nonstandard SSH usernames.
-    if let Some((_, target)) = url.rsplit_once('@')
-        && let Some((host, path)) = target.split_once(':')
-        && !host.is_empty()
-        && !path.is_empty()
-    {
-        return format!("ssh://{host}/{path}");
+    if let Some((_, target)) = url.rsplit_once('@') {
+        if let Some((host, path)) = target.split_once(':') {
+            if !host.is_empty() && !path.is_empty() {
+                return format!("ssh://{host}/{path}");
+            }
+        }
     }
     url.to_owned()
 }
@@ -626,10 +626,10 @@ fn merge_repository(
         repository.url = repository.url.trim_end_matches('/').to_owned();
         repository
     });
-    if let Some(remote) = remote
-        && !entry.remotes.iter().any(|existing| existing == remote)
-    {
-        entry.remotes.push(remote.to_owned());
+    if let Some(remote) = remote {
+        if !entry.remotes.iter().any(|existing| existing == remote) {
+            entry.remotes.push(remote.to_owned());
+        }
     }
 }
 
