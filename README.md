@@ -17,8 +17,9 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 - Unified and draggable side-by-side diff panes
 - Compact change hunks by default; `t` expands the selected file to full context
 - Paginated commit history with one commit-details card and a titled diff pane for every changed file
+- GitHub CLI-backed open pull requests and per-file diffs across multiple fetch/push remotes and forks
 - Commit, amend, stash, fetch, pull, push, sync, cherry-pick, and revert
-- Branch switching, creation, deletion, and creation at a selected commit
+- Local branch switching, creation, rename, deletion, and creation at a selected commit
 - Natural mouse scrolling, clickable rows, and draggable pane dividers
 - Keyboard-first filtering, command palette, modal text editing, and accessibility help
 - Coalesced background Git work, stale-result rejection, and bounded diff output
@@ -63,7 +64,7 @@ From the latest source:
 cargo install --git https://github.com/pulkitxm/quinjet --locked
 ```
 
-Git is required at runtime. A terminal with true-color support is recommended.
+Git is required at runtime. A terminal with true-color support is recommended. The Pull Requests view additionally requires the [GitHub CLI](https://cli.github.com/) with an authenticated account (`gh auth login`). All non-GitHub features remain available without `gh`.
 
 ## Usage
 
@@ -85,6 +86,14 @@ Mouse capture can be disabled without losing functionality:
 quinjet --no-mouse
 ```
 
+### Pull requests and remotes
+
+Press `3` to load open pull requests. Quinjet asks `gh` to resolve every distinct fetch **and** push URL from the repository's Git remotes, then combines the results. This supports common fork setups such as `origin` pointing to your fork and `upstream` pointing to the base repository, as well as a single remote with a separate push URL. Duplicate remote URLs are collapsed.
+
+Each PR preview identifies its base and head repository, branches, matching local remote aliases, and whether it crosses a fork boundary. Diffs are requested with an explicit base-repository URL, so a PR number from one remote cannot accidentally resolve against another. GitHub Enterprise hosts configured in `gh` are supported too. Press `r` in the Pull Requests view to reload it.
+
+Branch rename is local and deliberately does not delete or create remote branches. Open the branch picker with `b`, select a branch, and press `F2` or `Ctrl+R`; its existing upstream configuration is preserved by Git.
+
 ## Keyboard
 
 The UI intentionally stays uncluttered; press `?` for the complete shortcut reference.
@@ -96,13 +105,15 @@ The UI intentionally stays uncluttered; press `?` for the complete shortcut refe
 | `Tab` / `Enter` | Toggle sidebar/preview focus |
 | `z` | Hide/show the sidebar |
 | `e` | Collapse/expand every file diff |
-| `1` / `2` | Changes/history |
+| `1` / `2` / `3` | Changes/history/open pull requests |
 | `s` or `Space` | Toggle stage/unstage for the selected file |
 | `a` / `U` | Stage all/unstage all |
 | `c` | Open commit editor; `Ctrl+Enter` submits |
 | `t` | Toggle compact hunks/full-file context |
 | `v` | Toggle unified/side-by-side diff |
 | `x` | Discard selected change after confirmation |
+| `b` | Branch picker; `F2`/`Ctrl+R` renames the selected local branch |
+| `r` | Refresh status (and reload PRs when that view is active) |
 | `/` | Filter the active list |
 | `[` / `]` | Previous/next diff hunk |
 | `:` or `Ctrl+P` | Command palette |
@@ -119,8 +130,9 @@ Text fields support Unicode-safe editing plus familiar terminal and macOS motion
 - A coalescing worker mailbox replaces obsolete read requests.
 - Filesystem event storms collapse into authoritative status snapshots.
 - Preview requests carry generations so stale replies are ignored.
-- History is paginated and diff output is bounded.
-- Git receives argument arrays directly, never shell-concatenated commands.
+- History is paginated and all Git/PR diff output is bounded.
+- Pull-request discovery inspects at most 32 Git remotes, 64 configured fetch/push URL entries (32 distinct URLs), 16 GitHub repositories, 100 open PRs per repository, and 500 combined PRs.
+- Git and `gh` receive argument arrays directly, never shell-concatenated commands; embedded remote credentials are stripped before URLs become `gh` arguments.
 - Destructive operations are confirmed where appropriate.
 - Hooks, credentials, signing, filters, and repository semantics remain delegated to the installed Git CLI.
 
