@@ -17,6 +17,7 @@ pub enum WorkerCommand {
     LoadDiff {
         generation: u64,
         change: Change,
+        expanded: bool,
     },
     LoadHistory {
         generation: u64,
@@ -172,9 +173,15 @@ fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sende
                 generation,
                 result: repository.status().map_err(format_error),
             },
-            WorkerCommand::LoadDiff { generation, change } => WorkerEvent::Diff {
+            WorkerCommand::LoadDiff {
                 generation,
-                result: repository.diff_for_change(&change).map_err(format_error),
+                change,
+                expanded,
+            } => WorkerEvent::Diff {
+                generation,
+                result: repository
+                    .diff_for_change(&change, expanded)
+                    .map_err(format_error),
             },
             WorkerCommand::LoadHistory {
                 generation,
@@ -249,6 +256,7 @@ mod tests {
                 area: ChangeArea::Unstaged,
                 status: ChangeStatus::Modified,
             },
+            expanded: false,
         });
         mailbox.push(WorkerCommand::LoadDiff {
             generation: 2,
@@ -258,6 +266,7 @@ mod tests {
                 area: ChangeArea::Unstaged,
                 status: ChangeStatus::Modified,
             },
+            expanded: true,
         });
 
         assert!(matches!(

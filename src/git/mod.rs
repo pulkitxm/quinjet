@@ -177,7 +177,7 @@ impl Repository {
         Ok(parse_log(&output))
     }
 
-    pub fn diff_for_change(&self, change: &Change) -> Result<DiffDocument> {
+    pub fn diff_for_change(&self, change: &Change, expanded: bool) -> Result<DiffDocument> {
         if change.status == ChangeStatus::Untracked {
             return self.untracked_diff(change);
         }
@@ -187,7 +187,11 @@ impl Repository {
             OsString::from("--no-color"),
             OsString::from("--no-ext-diff"),
             OsString::from("--find-renames"),
-            OsString::from("--unified=3"),
+            OsString::from(if expanded {
+                "--unified=1000000"
+            } else {
+                "--unified=3"
+            }),
         ];
         if change.area == ChangeArea::Staged {
             args.push(OsString::from("--cached"));
