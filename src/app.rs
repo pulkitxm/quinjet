@@ -563,6 +563,7 @@ impl App {
         self.request_refresh(&mut effects);
         self.request_history(true, &mut effects);
         self.request_history_branches(&mut effects);
+        self.request_pull_requests(false, &mut effects);
         effects
     }
 
@@ -1985,7 +1986,14 @@ impl App {
                     || "Commit History".to_owned(),
                     |commit| format!("{} — {}", commit.short_id, commit.subject),
                 );
-                DiffDocument::empty(title, "Loading commit preview…")
+                let message = if self.history_loading && self.history.is_empty() {
+                    "Loading commit history…"
+                } else if self.history.is_empty() {
+                    "No commits in this repository"
+                } else {
+                    "Loading commit preview…"
+                };
+                DiffDocument::empty(title, message)
             }
             View::PullRequests => {
                 let title = self.selected_pull_request().map_or_else(
@@ -2945,6 +2953,28 @@ mod tests {
     }
 
     #[test]
+    fn startup_prefetches_pr_metadata_without_waiting_for_the_pr_tab() {
+        let mut app = App::new("/tmp/repo", "repo");
+
+        let effects = app.initial_effects();
+
+        assert!(matches!(
+            effects.as_slice(),
+            [
+                AppEffect::Git(refresh),
+                AppEffect::Git(history),
+                AppEffect::Git(branches),
+                AppEffect::Git(pull_requests),
+            ] if matches!(refresh.as_ref(), WorkerCommand::Refresh { .. })
+                && matches!(history.as_ref(), WorkerCommand::LoadHistory { .. })
+                && matches!(branches.as_ref(), WorkerCommand::LoadHistoryBranches { .. })
+                && matches!(pull_requests.as_ref(), WorkerCommand::LoadPullRequests { cursor: None, .. })
+        ));
+        assert!(app.pull_requests_loading);
+        assert_eq!(app.view, View::Changes);
+    }
+
+    #[test]
     fn pull_request_view_streams_batches_and_queues_the_selected_diff() {
         let mut app = App::new("/tmp/repo", "repo");
         let now = Instant::now();
@@ -3127,6 +3157,10 @@ mod tests {
         assert!(effects.is_empty());
         assert_eq!(app.view, View::History);
         assert_eq!(app.document.title, "Commit History");
+        assert_eq!(
+            app.document.lines[0].text(),
+            "No commits in this repository"
+        );
         assert_ne!(app.document.lines[0].text(), "stale PR contents");
     }
 

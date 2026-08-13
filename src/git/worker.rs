@@ -164,6 +164,7 @@ struct SharedMailbox {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WorkerLane {
     Background,
+    GitHubMetadata,
     LocalPreview,
     PullRequestPreview,
 }
@@ -173,6 +174,9 @@ fn worker_lane(command: &WorkerCommand) -> WorkerLane {
         WorkerCommand::LoadDiff { .. } | WorkerCommand::LoadCommit { .. } => {
             WorkerLane::LocalPreview
         }
+        WorkerCommand::LoadPullRequests { .. } | WorkerCommand::LookupPullRequest { .. } => {
+            WorkerLane::GitHubMetadata
+        }
         WorkerCommand::LoadPullRequest { .. } => WorkerLane::PullRequestPreview,
         _ => WorkerLane::Background,
     }
@@ -180,6 +184,7 @@ fn worker_lane(command: &WorkerCommand) -> WorkerLane {
 
 pub struct GitWorker {
     mailbox: Arc<SharedMailbox>,
+    github_mailbox: Arc<SharedMailbox>,
     local_preview_mailbox: Arc<SharedMailbox>,
     pull_request_preview_mailbox: Arc<SharedMailbox>,
     events: Receiver<WorkerEvent>,
@@ -188,20 +193,28 @@ pub struct GitWorker {
 impl GitWorker {
     pub fn start(repository: Repository) -> Self {
         let mailbox = new_mailbox();
+        let github_mailbox = new_mailbox();
         let local_preview_mailbox = new_mailbox();
         let pull_request_preview_mailbox = new_mailbox();
         let worker_mailbox = Arc::clone(&mailbox);
+        let worker_github_mailbox = Arc::clone(&github_mailbox);
         let worker_local_preview_mailbox = Arc::clone(&local_preview_mailbox);
         let worker_pull_request_preview_mailbox = Arc::clone(&pull_request_preview_mailbox);
+        let github_repository = repository.clone_for_worker();
         let local_preview_repository = repository.clone_for_worker();
         let pull_request_preview_repository = repository.clone_for_worker();
         let (event_tx, event_rx) = unbounded();
+        let github_events = event_tx.clone();
         let local_preview_events = event_tx.clone();
         let pull_request_preview_events = event_tx.clone();
         thread::Builder::new()
             .name("quinjet-git".to_owned())
             .spawn(move || run_worker(repository, worker_mailbox, event_tx))
             .expect("failed to start Git worker");
+        thread::Builder::new()
+            .name("quinjet-github".to_owned())
+            .spawn(move || run_worker(github_repository, worker_github_mailbox, github_events))
+            .expect("failed to start GitHub metadata worker");
         thread::Builder::new()
             .name("quinjet-preview".to_owned())
             .spawn(move || {
@@ -224,6 +237,7 @@ impl GitWorker {
             .expect("failed to start pull-request preview worker");
         Self {
             mailbox,
+            github_mailbox,
             local_preview_mailbox,
             pull_request_preview_mailbox,
             events: event_rx,
@@ -235,6 +249,7 @@ impl GitWorker {
     /// ordered queue and are additionally serialized by the app's busy state.
     pub fn send(&self, command: WorkerCommand) -> bool {
         let target = match worker_lane(&command) {
+            WorkerLane::GitHubMetadata => &self.github_mailbox,
             WorkerLane::LocalPreview => &self.local_preview_mailbox,
             WorkerLane::PullRequestPreview => &self.pull_request_preview_mailbox,
             WorkerLane::Background => &self.mailbox,
@@ -259,6 +274,7 @@ impl GitWorker {
 impl Drop for GitWorker {
     fn drop(&mut self) {
         shutdown_mailbox(&self.mailbox);
+        shutdown_mailbox(&self.github_mailbox);
         shutdown_mailbox(&self.local_preview_mailbox);
         shutdown_mailbox(&self.pull_request_preview_mailbox);
     }
@@ -523,6 +539,16 @@ mod tests {
         assert_eq!(
             worker_lane(&WorkerCommand::Refresh { generation: 4 }),
             WorkerLane::Background
+        );
+        assert_eq!(
+            worker_lane(&WorkerCommand::LoadPullRequests {
+                generation: 5,
+                repositories: Vec::new(),
+                repository: None,
+                cursor: None,
+                refresh: false,
+            }),
+            WorkerLane::GitHubMetadata
         );
     }
 

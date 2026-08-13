@@ -36,7 +36,7 @@ filesystem watcher (coalesced signal)
 
 1. The UI thread mutates only in-memory state and renders visible rows.
 2. Every preview, status, history, branch, and pull-request request carries a generation; stale replies are ignored.
-3. Fixed coalescing mailboxes isolate status/history/metadata, local change/commit previews, and potentially network-bound PR previews. Key repeat remains constant-space, slow GitHub work cannot block tab switches, and ordered user mutations are serialized by app state.
+3. Fixed coalescing mailboxes isolate status/history, GitHub metadata prefetch, local change/commit previews, and potentially network-bound PR previews. Key repeat remains constant-space, slow GitHub work cannot block tab switches, and ordered user mutations are serialized by app state.
 4. Watcher signals are lossy by design: one full status snapshot subsumes all preceding file events.
 5. Git/PR patch output is capped at 8 MiB. PR metadata is capped at 2 MiB, GraphQL batches at 50 records, the progressive snapshot at 10,000 PRs, local pages at 25 rows, changed paths at 2 MiB / 4,096 entries, file pages at 20 paths, repository discovery at 16 identities, and adaptive history fetches at 4,096 commits.
 6. Potentially large PR subprocess output is read through capped pipes. Crossing a cap kills the child rather than first allocating all output and truncating afterward.
