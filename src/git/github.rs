@@ -18,9 +18,8 @@ const MAX_GIT_REMOTES: usize = 32;
 const MAX_REMOTE_URL_ENTRIES: usize = 64;
 const MAX_REMOTE_URLS: usize = 32;
 const MAX_GITHUB_REPOSITORIES: usize = 16;
-const MAX_PULL_REQUEST_PAGE_SIZE: usize = 50;
-const MAX_PULL_REQUEST_PAGE: usize = 10_000;
 const MAX_GH_METADATA_BYTES: usize = 2 * 1024 * 1024;
+const MAX_PULL_REQUEST_TITLE_BYTES: usize = 16 * 1024;
 const MAX_GH_ERROR_BYTES: usize = 256 * 1024;
 const MAX_PR_PATH_BYTES: usize = 2 * 1024 * 1024;
 const MAX_PR_PATHS: usize = 4_096;
@@ -34,10 +33,27 @@ const CACHE_MAGIC: &[u8] = b"quinjet-gh-cache-v1\n";
 
 pub const DEFAULT_PULL_REQUEST_PAGE_SIZE: usize = 25;
 pub const DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE: usize = 20;
+pub const MAX_PULL_REQUESTS: usize = 10_000;
 
 const PULL_REQUEST_FIELDS: &str = "number,title,author,state,isDraft,updatedAt,url,baseRefName,baseRefOid,headRefName,headRefOid,headRepository,isCrossRepository,additions,deletions,changedFiles";
 const PULL_REQUEST_VIEW_TSV_JQ: &str = r#"[(.number|tostring), .title, (.author.login // "ghost"), .state, (.isDraft|tostring), .updatedAt, .url, .baseRefName, .headRefName, (.headRepository.nameWithOwner // ""), (.isCrossRepository|tostring), (.additions|tostring), (.deletions|tostring), (.changedFiles|tostring), .baseRefOid, .headRefOid] | @tsv"#;
-const PULL_REQUEST_API_TSV_JQ: &str = r#".[] | [(.number|tostring), .title, (.user.login // "ghost"), .state, (.draft|tostring), .updated_at, .html_url, .base.ref, .head.ref, (.head.repo.full_name // ""), (((.head.repo.full_name // "") != (.base.repo.full_name // ""))|tostring), "0", "0", "0", .base.sha, .head.sha] | @tsv"#;
+// Keep the GraphQL batch at 50: large enough to populate two UI pages per
+// round-trip, but small enough for responsive progress updates and bounded output.
+const PULL_REQUEST_GRAPHQL_QUERY: &str = r#"query($owner: String!, $name: String!, $endCursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(first: 50, after: $endCursor, orderBy: {field: UPDATED_AT, direction: DESC}) {
+      totalCount
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        number title state isDraft updatedAt url baseRefName baseRefOid headRefName headRefOid
+        author { login }
+        headRepository { nameWithOwner }
+        isCrossRepository additions deletions changedFiles
+      }
+    }
+  }
+}"#;
+const PULL_REQUEST_GRAPHQL_JQ: &str = r#".data.repository.pullRequests as $prs | (["meta", ($prs.totalCount|tostring), ($prs.pageInfo.hasNextPage|tostring), ($prs.pageInfo.endCursor // "")] | @tsv), ($prs.nodes[] | ["pr", (.number|tostring), .title, (.author.login // "ghost"), .state, (.isDraft|tostring), .updatedAt, .url, .baseRefName, .headRefName, (.headRepository.nameWithOwner // ""), (.isCrossRepository|tostring), (.additions|tostring), (.deletions|tostring), (.changedFiles|tostring), .baseRefOid, .headRefOid] | @tsv)"#;
 const REPOSITORY_TSV_TEMPLATE: &str = "{{.nameWithOwner}}{{\"\\t\"}}{{.url}}{{\"\\n\"}}";
 
 static TEMPORARY_REPOSITORY_ID: AtomicU64 = AtomicU64::new(0);
@@ -123,15 +139,24 @@ impl PullRequest {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PullRequestBatch {
+    pub repositories: Vec<GitHubRepository>,
+    pub selected_repository: Option<GitHubRepository>,
+    pub pull_requests: Vec<PullRequest>,
+    pub warnings: Vec<String>,
+    pub total_count: usize,
+    pub fetched_count: usize,
+    pub has_next_batch: bool,
+    pub next_cursor: Option<String>,
+    pub from_cache: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PullRequestSnapshot {
     pub repositories: Vec<GitHubRepository>,
     pub selected_repository: Option<GitHubRepository>,
     pub pull_requests: Vec<PullRequest>,
     pub warnings: Vec<String>,
-    pub page: usize,
-    pub page_size: usize,
-    pub has_previous: bool,
-    pub has_next: bool,
     pub exact_number: Option<u64>,
     pub from_cache: bool,
 }
@@ -155,16 +180,13 @@ struct GhResponse {
 }
 
 impl Repository {
-    pub fn pull_request_page(
+    pub fn pull_request_batch(
         &self,
         known_repositories: &[GitHubRepository],
         selected_repository: Option<&GitHubRepository>,
-        page: usize,
-        page_size: usize,
+        cursor: Option<&str>,
         refresh: bool,
-    ) -> Result<PullRequestSnapshot> {
-        let page = page.clamp(1, MAX_PULL_REQUEST_PAGE);
-        let page_size = page_size.clamp(1, MAX_PULL_REQUEST_PAGE_SIZE);
+    ) -> Result<PullRequestBatch> {
         let (repositories, mut warnings) = if known_repositories.is_empty() {
             self.github_repositories(refresh)?
         } else {
@@ -181,45 +203,40 @@ impl Repository {
                 .eq_ignore_ascii_case(selected.url.trim_end_matches('/'))
         }) {
             warnings.push(format!(
-                "The previously selected GitHub repository is no longer configured; showing {}",
+                "The previously selected GitHub repository is no longer configured; loading {}",
                 repository.display_name()
             ));
         }
 
-        let requested = page_size;
+        let cursor_key = cursor.unwrap_or("first");
         let response = self.checked_cached_gh(
             &format!(
-                "pull-request-page\n{}\n{page}\n{requested}",
+                "pull-request-batch-v2\n{}\n{cursor_key}",
                 repository.url.trim_end_matches('/')
             ),
             PULL_REQUEST_PAGE_CACHE_TTL,
             refresh,
-            pull_request_page_args(&repository, page, requested),
+            pull_request_batch_args(&repository, cursor),
             "unable to list pull requests",
         )?;
-        let pull_requests = parse_pull_requests(&response.data, &repository, &repositories)
-            .context("unable to parse GitHub pull-request page")?;
-        // The REST endpoint does not expose an offset. Keeping `per_page` identical
-        // to the displayed size prevents a +1 lookahead from skipping one PR at every
-        // page boundary. A full page may optimistically expose one final empty page.
-        let has_next = page < MAX_PULL_REQUEST_PAGE && pull_requests.len() == page_size;
+        let parsed = parse_pull_request_batch(&response.data, &repository, &repositories)
+            .context("unable to parse GitHub pull-request batch")?;
         if response.disposition == CacheDisposition::Stale {
             warnings.push(format!(
-                "GitHub is unavailable; showing a stale cached page for {}",
+                "GitHub is unavailable; showing stale cached pull requests for {}",
                 repository.display_name()
             ));
         }
 
-        Ok(PullRequestSnapshot {
+        Ok(PullRequestBatch {
             repositories,
             selected_repository: Some(repository),
-            pull_requests,
+            pull_requests: parsed.pull_requests,
             warnings,
-            page,
-            page_size,
-            has_previous: page > 1,
-            has_next,
-            exact_number: None,
+            total_count: parsed.total_count.min(MAX_PULL_REQUESTS),
+            fetched_count: parsed.fetched_count,
+            has_next_batch: parsed.has_next_batch && parsed.fetched_count < MAX_PULL_REQUESTS,
+            next_cursor: parsed.next_cursor,
             from_cache: response.disposition != CacheDisposition::Network,
         })
     }
@@ -247,10 +264,6 @@ impl Repository {
             selected_repository: Some(repository.clone()),
             pull_requests: vec![response.0],
             warnings,
-            page: 1,
-            page_size: 1,
-            has_previous: false,
-            has_next: false,
             exact_number: Some(number),
             from_cache: response.1 != CacheDisposition::Network,
         })
@@ -712,34 +725,35 @@ fn pull_request_document(
     document
 }
 
-fn pull_request_page_args(
-    repository: &GitHubRepository,
-    page: usize,
-    page_size: usize,
-) -> Vec<OsString> {
-    let mut args = vec![OsString::from("api")];
+fn pull_request_batch_args(repository: &GitHubRepository, cursor: Option<&str>) -> Vec<OsString> {
+    let mut args = vec![OsString::from("api"), OsString::from("graphql")];
     if !repository.host().is_empty() {
         args.extend([
             OsString::from("--hostname"),
             OsString::from(repository.host()),
         ]);
     }
+    let (owner, name) = repository
+        .name_with_owner
+        .split_once('/')
+        .unwrap_or((repository.name_with_owner.as_str(), ""));
     args.extend([
-        OsString::from("--method"),
-        OsString::from("GET"),
-        OsString::from(format!("repos/{}/pulls", repository.name_with_owner)),
         OsString::from("-f"),
-        OsString::from("state=open"),
-        OsString::from("-f"),
-        OsString::from("sort=updated"),
-        OsString::from("-f"),
-        OsString::from("direction=desc"),
+        OsString::from(format!("query={PULL_REQUEST_GRAPHQL_QUERY}")),
         OsString::from("-F"),
-        OsString::from(format!("per_page={page_size}")),
+        OsString::from(format!("owner={owner}")),
         OsString::from("-F"),
-        OsString::from(format!("page={page}")),
+        OsString::from(format!("name={name}")),
+    ]);
+    if let Some(cursor) = cursor {
+        args.extend([
+            OsString::from("-F"),
+            OsString::from(format!("endCursor={cursor}")),
+        ]);
+    }
+    args.extend([
         OsString::from("--jq"),
-        OsString::from(PULL_REQUEST_API_TSV_JQ),
+        OsString::from(PULL_REQUEST_GRAPHQL_JQ),
     ]);
     args
 }
@@ -758,6 +772,55 @@ fn pull_request_view_args(repository: &GitHubRepository, number: u64) -> Vec<OsS
     ]
 }
 
+struct ParsedPullRequestBatch {
+    pull_requests: Vec<PullRequest>,
+    total_count: usize,
+    fetched_count: usize,
+    has_next_batch: bool,
+    next_cursor: Option<String>,
+}
+
+fn parse_pull_request_batch(
+    output: &[u8],
+    base_repository: &GitHubRepository,
+    repositories: &[GitHubRepository],
+) -> Result<ParsedPullRequestBatch> {
+    let mut records = output.split(|byte| *byte == b'\n');
+    let metadata = records
+        .next()
+        .filter(|record| !record.is_empty())
+        .context("GitHub returned no pull-request progress metadata")?;
+    let fields = parse_tsv_record(metadata, 4).context("invalid pull-request batch metadata")?;
+    if fields[0] != "meta" {
+        bail!("GitHub pull-request batch did not begin with metadata");
+    }
+    let total_count = parse_field(&fields[1], "pull-request total")?;
+    let has_next_batch = parse_field(&fields[2], "pull-request pagination state")?;
+    let next_cursor = (!fields[3].is_empty()).then(|| fields[3].clone());
+    let mut requests = Vec::new();
+    for record in records {
+        if record.is_empty() {
+            continue;
+        }
+        let fields = parse_tsv_record(record, 17).context("invalid pull-request batch record")?;
+        if fields[0] != "pr" {
+            bail!("unexpected record in pull-request batch");
+        }
+        requests.push(parse_pull_request_fields(
+            &fields[1..],
+            base_repository,
+            repositories,
+        )?);
+    }
+    Ok(ParsedPullRequestBatch {
+        fetched_count: requests.len(),
+        pull_requests: requests,
+        total_count,
+        has_next_batch,
+        next_cursor,
+    })
+}
+
 fn parse_pull_requests(
     output: &[u8],
     base_repository: &GitHubRepository,
@@ -770,33 +833,59 @@ fn parse_pull_requests(
         }
         let fields = parse_tsv_record(record, 16)
             .with_context(|| format!("invalid pull-request record {}", index + 1))?;
-        let head_repository = (!fields[9].is_empty()).then(|| fields[9].clone());
-        let head_remotes = head_repository
-            .as_deref()
-            .map(|name| matching_remotes(repositories, base_repository.host(), name))
-            .unwrap_or_default();
-        pull_requests.push(PullRequest {
-            number: parse_field(&fields[0], "number")?,
-            title: fields[1].clone(),
-            author: fields[2].clone(),
-            state: fields[3].to_ascii_uppercase(),
-            is_draft: parse_field(&fields[4], "draft state")?,
-            updated_at: fields[5].clone(),
-            url: fields[6].clone(),
-            base_ref: fields[7].clone(),
-            head_ref: fields[8].clone(),
-            base_repository: base_repository.clone(),
-            head_repository,
-            head_remotes,
-            is_cross_repository: parse_field(&fields[10], "cross-repository state")?,
-            additions: parse_field(&fields[11], "addition count")?,
-            deletions: parse_field(&fields[12], "deletion count")?,
-            changed_files: parse_field(&fields[13], "changed-file count")?,
-            base_oid: fields[14].clone(),
-            head_oid: fields[15].clone(),
-        });
+        pull_requests.push(parse_pull_request_fields(
+            &fields,
+            base_repository,
+            repositories,
+        )?);
     }
     Ok(pull_requests)
+}
+
+fn parse_pull_request_fields(
+    fields: &[String],
+    base_repository: &GitHubRepository,
+    repositories: &[GitHubRepository],
+) -> Result<PullRequest> {
+    if fields.len() != 16 {
+        bail!("expected 16 pull-request fields, received {}", fields.len());
+    }
+    let head_repository = (!fields[9].is_empty()).then(|| fields[9].clone());
+    let head_remotes = head_repository
+        .as_deref()
+        .map(|name| matching_remotes(repositories, base_repository.host(), name))
+        .unwrap_or_default();
+    Ok(PullRequest {
+        number: parse_field(&fields[0], "number")?,
+        title: bounded_text(&fields[1], MAX_PULL_REQUEST_TITLE_BYTES),
+        author: fields[2].clone(),
+        state: fields[3].to_ascii_uppercase(),
+        is_draft: parse_field(&fields[4], "draft state")?,
+        updated_at: fields[5].clone(),
+        url: fields[6].clone(),
+        base_ref: fields[7].clone(),
+        head_ref: fields[8].clone(),
+        base_repository: base_repository.clone(),
+        head_repository,
+        head_remotes,
+        is_cross_repository: parse_field(&fields[10], "cross-repository state")?,
+        additions: parse_field(&fields[11], "addition count")?,
+        deletions: parse_field(&fields[12], "deletion count")?,
+        changed_files: parse_field(&fields[13], "changed-file count")?,
+        base_oid: fields[14].clone(),
+        head_oid: fields[15].clone(),
+    })
+}
+
+fn bounded_text(value: &str, maximum: usize) -> String {
+    if value.len() <= maximum {
+        return value.to_owned();
+    }
+    let mut end = maximum;
+    while !value.is_char_boundary(end) {
+        end = end.saturating_sub(1);
+    }
+    format!("{}…", &value[..end])
 }
 
 fn parse_tsv_record(record: &[u8], expected_fields: usize) -> Result<Vec<String>> {
@@ -1739,24 +1828,41 @@ mod tests {
     }
 
     #[test]
-    fn page_command_is_bounded_and_targets_enterprise_host() {
+    fn batch_command_is_bounded_cursor_based_and_targets_enterprise_host() {
         let repository = repository(
             "acme/widget",
             "https://github.example.com/acme/widget",
             &["work"],
         );
-        let args = pull_request_page_args(&repository, 3, DEFAULT_PULL_REQUEST_PAGE_SIZE)
+        let args = pull_request_batch_args(&repository, Some("cursor-1"))
             .iter()
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
 
+        assert_eq!(&args[..2], &["api", "graphql"]);
         assert!(
             args.windows(2)
                 .any(|pair| pair == ["--hostname", "github.example.com"])
         );
-        assert!(args.iter().any(|arg| arg == "repos/acme/widget/pulls"));
-        assert!(args.iter().any(|arg| arg == "per_page=25"));
-        assert!(args.iter().any(|arg| arg == "page=3"));
+        assert!(args.iter().any(|arg| arg == "owner=acme"));
+        assert!(args.iter().any(|arg| arg == "name=widget"));
+        assert!(args.iter().any(|arg| arg == "endCursor=cursor-1"));
+        assert!(args.iter().any(|arg| arg.contains("first: 50")));
+    }
+
+    #[test]
+    fn parses_batch_progress_and_all_pr_states() {
+        let base = repository("acme/widget", "https://github.com/acme/widget", &["origin"]);
+        let output = b"meta\t73\ttrue\tcursor-50\npr\t42\tOpen change\tada\tOPEN\tfalse\tdate\turl\tmain\ttopic\tacme/widget\tfalse\t1\t2\t3\tbase\thead\npr\t41\tMerged change\tgrace\tMERGED\tfalse\tdate\turl2\tmain\ttopic2\tacme/widget\tfalse\t4\t5\t6\tbase2\thead2\n";
+
+        let batch = parse_pull_request_batch(output, &base, std::slice::from_ref(&base)).unwrap();
+
+        assert_eq!(batch.total_count, 73);
+        assert_eq!(batch.fetched_count, 2);
+        assert!(batch.has_next_batch);
+        assert_eq!(batch.next_cursor.as_deref(), Some("cursor-50"));
+        assert_eq!(batch.pull_requests[0].state, "OPEN");
+        assert_eq!(batch.pull_requests[1].state, "MERGED");
     }
 
     #[test]

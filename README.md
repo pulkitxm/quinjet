@@ -17,7 +17,7 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 - Unified and draggable side-by-side diff panes
 - Compact change hunks by default; `t` expands the selected file to full context
 - Paginated, branch-scoped commit history with a view-only local/remote branch picker that never checks out
-- Bounded GitHub pull-request pages, repository-scoped numeric lookup, and changed-file diff pages
+- Progressive all-state GitHub pull-request loading, local 25-row pages, repository-scoped numeric lookup, and changed-file diff pages
 - Disposable local PR fetches across multiple fetch/push remotes and forks—no checkout or persistent refs
 - Commit, amend, stash, fetch, pull, push, sync, cherry-pick, and revert
 - Local branch switching, creation, rename, deletion, and creation at a selected commit
@@ -94,7 +94,7 @@ History starts at the currently checked-out branch instead of mixing every ref i
 
 ### Pull requests, remotes, and cache
 
-Press `3` to open Pull Requests. Quinjet resolves the repository's distinct fetch **and** push URLs through `gh`, but loads only one selected repository and one 25-item page at a time. Press `o` to choose the base repository and `←` / `→` to page. The always-visible `PR #` field accepts digits only; press `/`, enter a number, and press Enter for an exact lookup scoped to that selected repository. This avoids both an eager all-remote PR scan and ambiguous PR numbers.
+Press `3` to open Pull Requests. Quinjet resolves the repository's distinct fetch **and** push URLs through `gh`, selects one repository, and progressively fetches **all open, merged, and closed PRs** in bounded 50-record GraphQL batches. The first batch appears immediately; skeleton rows, fetched/total counts, and a percentage show the remaining work while later batches fill the local snapshot. Press `o` to choose the base repository and `←` / `→` to move through local 25-row pages without another network request. The bottom `PR #` field accepts digits only; press `/`, enter a number, and press Enter for an exact lookup scoped to that selected repository.
 
 Quinjet supports fork setups such as `origin` pointing to your fork and `upstream` to the base, separate push URLs, deleted fork heads exposed through GitHub's PR ref, and GitHub Enterprise hosts configured in `gh`. Selected metadata is enriched with immutable base/head OIDs. PR patches are **not** downloaded with `gh pr diff`: Quinjet creates a disposable bare repository, shallow-fetches fixed internal base/head refs with partial-clone filtering, deepens only as needed to find the merge base, and renders 20 changed files at a time. Use `,` / `.` for changed-file pages. The opened repository is never checked out or given temporary branches/refs.
 
@@ -113,7 +113,7 @@ The UI intentionally stays uncluttered; press `?` for the complete shortcut refe
 | `Tab` / `Enter` | Toggle sidebar/preview focus |
 | `z` | Hide/show the sidebar |
 | `e` / `E` | Collapse/expand every file diff; keep that preference across selections/views |
-| `1` / `2` / `3` | Changes/history/open pull requests |
+| `1` / `2` / `3` | Changes/history/pull requests (all states) |
 | `s` or `Space` | Toggle stage/unstage for the selected file |
 | `a` / `U` | Stage all/unstage all |
 | `c` | Open commit editor; `Ctrl+Enter` submits |
@@ -143,11 +143,11 @@ Text fields support Unicode-safe editing plus familiar terminal and macOS motion
 - Filesystem event storms collapse into authoritative status snapshots.
 - Preview requests carry generations so stale replies are ignored.
 - History is paginated for one explicit branch revision; choosing another branch is read-only.
-- PR lists load one selected repository in 25-item pages; exact lookup accepts only a positive integer and always includes the canonical base-repository URL.
+- PR discovery loads one selected repository progressively in 50-record cursor batches, caps the snapshot at 10,000 PRs, and exposes it in local 25-row pages. Exact lookup accepts only a positive integer and always includes the canonical base-repository URL.
 - Pull-request discovery inspects at most 32 Git remotes, 64 configured fetch/push URL entries (32 distinct URLs), and 16 GitHub repositories.
 - PR changed paths are capped at 4,096 / 2 MiB, patches at 8 MiB, and each preview fetches at most 20 files. Potentially large subprocess stdout is streamed and the child is terminated at the cap.
 - PR Git history deepens only to 4,096 commits in a disposable bare repository. No checkout, worktree mutation, or persistent source-repository ref is used.
-- Cached `gh` metadata is bounded to 32 MiB and 256 entries; fresh page entries live for 60 seconds and exact PR entries for five minutes.
+- Cached `gh` metadata is bounded to 32 MiB and 256 entries; fresh batch entries live for 60 seconds and exact PR entries for five minutes.
 - Git and `gh` receive argument arrays directly, never shell-concatenated commands; embedded remote credentials are stripped before URLs become `gh` arguments.
 - Destructive operations are confirmed where appropriate.
 - Hooks, credentials, signing, filters, and repository semantics remain delegated to the installed Git CLI.
