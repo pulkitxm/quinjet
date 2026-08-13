@@ -4,19 +4,46 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to release (for example, v0.0.1)
+        required: true
+        type: string
 
 permissions:
   contents: write
 
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify tag and package version
+        run: |
+          version=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[0].version')
+          test "${RELEASE_TAG}" = "v${version}"
+          test "$(git describe --tags --exact-match)" = "${RELEASE_TAG}"
+
   build:
+    needs: validate
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-musl
             artifact: quinjet-linux-x86_64
+            binary: quinjet
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            artifact: quinjet-linux-aarch64
             binary: quinjet
           - os: macos-15-intel
             target: x86_64-apple-darwin
@@ -33,6 +60,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - name: Install musl linker
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes musl-tools
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -45,21 +77,31 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: Copy-Item target/${{ matrix.target }}/release/${{ matrix.binary }} ${{ matrix.artifact }}
+      - name: Smoke test artifact (Unix)
+        if: runner.os != 'Windows'
+        run: ./${{ matrix.artifact }} --version
+      - name: Smoke test artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./${{ matrix.artifact }} --version
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}
 
   release:
-    needs: build
+    needs: [validate, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
-      - run: sha256sum dist/* > dist/SHA256SUMS
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum quinjet-* > SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           generate_release_notes: true
           files: dist/*

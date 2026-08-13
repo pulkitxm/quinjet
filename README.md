@@ -25,6 +25,32 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 
 ## Installation
 
+### Install script
+
+On Linux or macOS:
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://raw.githubusercontent.com/pulkitxm/quinjet/main/install.sh | sh
+```
+
+On Windows PowerShell:
+
+```powershell
+powershell -c "irm https://raw.githubusercontent.com/pulkitxm/quinjet/main/install.ps1 | iex"
+```
+
+The installer detects the operating system and CPU architecture, downloads the matching binary from the latest GitHub release, verifies its SHA-256 checksum, and adds the installation directory to `PATH` when needed. It does not require Rust or Cargo.
+
+Pass `--version` or `--bin-dir` to the shell installer to select a release or installation directory:
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://raw.githubusercontent.com/pulkitxm/quinjet/main/install.sh | sh -s -- --version v0.0.1
+```
+
+The equivalent PowerShell environment variables are `QUINJET_VERSION` and `QUINJET_INSTALL_DIR`.
+
+### Cargo
+
 From crates.io:
 
 ```bash
@@ -37,7 +63,7 @@ From the latest source:
 cargo install --git https://github.com/pulkitxm/quinjet --locked
 ```
 
-Git and a terminal with true-color support are recommended.
+Git is required at runtime. A terminal with true-color support is recommended.
 
 ## Usage
 
