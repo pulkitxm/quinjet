@@ -86,8 +86,12 @@ pub struct PullRequestDetails {
     pub head_remotes: Vec<String>,
     pub is_cross_repository: bool,
     pub changed_files: usize,
+    /// Whole-PR totals reported by GitHub.
     pub additions: usize,
     pub deletions: usize,
+    /// Counts represented by the currently rendered file page.
+    pub page_additions: usize,
+    pub page_deletions: usize,
     pub file_page: usize,
     pub file_page_size: usize,
     pub displayed_files: usize,
