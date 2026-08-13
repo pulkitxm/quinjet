@@ -391,7 +391,11 @@ impl Repository {
 
         for (index, (url, remotes)) in grouped_remote_urls.iter().take(MAX_REMOTE_URLS).enumerate()
         {
-            match self.resolve_github_repository(Some(url), refresh) {
+            match repository_from_remote_url(url)
+                .map(|repository| (repository, CacheDisposition::Fresh))
+                .map(Ok)
+                .unwrap_or_else(|| self.resolve_github_repository(Some(url), refresh))
+            {
                 Ok((repository, disposition)) => {
                     if disposition == CacheDisposition::Stale {
                         warnings.push(format!(
@@ -972,6 +976,31 @@ fn remote_url_for_gh(url: &str) -> String {
         }
     }
     url.to_owned()
+}
+
+fn repository_from_remote_url(url: &str) -> Option<GitHubRepository> {
+    let sanitized = remote_url_for_gh(url);
+    let (scheme, rest) = sanitized.split_once("://")?;
+    if !matches!(scheme, "http" | "https" | "ssh") {
+        return None;
+    }
+    let (host, path) = rest.split_once('/')?;
+    if host.is_empty() || path.is_empty() {
+        return None;
+    }
+    let mut components = path.trim_matches('/').split('/');
+    let owner = components.next()?;
+    let raw_name = components.next()?;
+    let name = raw_name.strip_suffix(".git").unwrap_or(raw_name);
+    if owner.is_empty() || name.is_empty() || components.next().is_some() {
+        return None;
+    }
+    let canonical_scheme = if scheme == "ssh" { "https" } else { scheme };
+    Some(GitHubRepository {
+        name_with_owner: format!("{owner}/{name}"),
+        url: format!("{canonical_scheme}://{host}/{owner}/{name}"),
+        remotes: Vec::new(),
+    })
 }
 
 fn group_remote_urls(remote_urls: &[RemoteUrl]) -> Vec<(String, Vec<String>)> {
@@ -1801,6 +1830,26 @@ mod tests {
             parse_tsv_record(b"one\ttwo\\tinside\tthree\r", 3).unwrap(),
             vec!["one", "two\tinside", "three"]
         );
+    }
+
+    #[test]
+    fn derives_standard_github_repository_identity_without_network_resolution() {
+        assert_eq!(
+            repository_from_remote_url("https://github.com/acme/widget.git"),
+            Some(GitHubRepository {
+                name_with_owner: "acme/widget".to_owned(),
+                url: "https://github.com/acme/widget".to_owned(),
+                remotes: Vec::new(),
+            })
+        );
+        assert_eq!(
+            repository_from_remote_url("git@github.example.com:acme/widget.git")
+                .unwrap()
+                .url,
+            "https://github.example.com/acme/widget"
+        );
+        assert!(repository_from_remote_url("file:///tmp/widget.git").is_none());
+        assert!(repository_from_remote_url("https://github.com/acme/widget/extra").is_none());
     }
 
     #[test]
