@@ -1,21 +1,47 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::env;
 use std::ffi::{OsStr, OsString};
-use std::process::{Command, Output};
+use std::fs::{self, OpenOptions};
+use std::io::{self, Read, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, bail};
 
 use super::diff::{DiffDocument, PullRequestDetails, parse_diff};
-use super::{MAX_DIFF_BYTES, Repository, command_error, text, trim_ascii, truncate};
+use super::{MAX_DIFF_BYTES, Repository, text, trim_ascii};
 
 const MAX_GIT_REMOTES: usize = 32;
 const MAX_REMOTE_URL_ENTRIES: usize = 64;
 const MAX_REMOTE_URLS: usize = 32;
 const MAX_GITHUB_REPOSITORIES: usize = 16;
-const MAX_PULL_REQUESTS_PER_REPOSITORY: usize = 100;
-const MAX_PULL_REQUESTS: usize = 500;
-const PULL_REQUEST_FIELDS: &str = "number,title,author,state,isDraft,updatedAt,url,baseRefName,headRefName,headRepository,isCrossRepository,additions,deletions,changedFiles";
-const PULL_REQUEST_TSV_JQ: &str = r#".[] | [(.number|tostring), .title, (.author.login // "ghost"), .state, (.isDraft|tostring), .updatedAt, .url, .baseRefName, .headRefName, (.headRepository.nameWithOwner // ""), (.isCrossRepository|tostring), (.additions|tostring), (.deletions|tostring), (.changedFiles|tostring)] | @tsv"#;
+const MAX_PULL_REQUEST_PAGE_SIZE: usize = 50;
+const MAX_PULL_REQUEST_PAGE: usize = 10_000;
+const MAX_GH_METADATA_BYTES: usize = 2 * 1024 * 1024;
+const MAX_GH_ERROR_BYTES: usize = 256 * 1024;
+const MAX_PR_PATH_BYTES: usize = 2 * 1024 * 1024;
+const MAX_PR_PATHS: usize = 4_096;
+const MAX_CACHE_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_CACHE_ENTRIES: usize = 256;
+const REPOSITORY_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+const PULL_REQUEST_PAGE_CACHE_TTL: Duration = Duration::from_secs(60);
+const PULL_REQUEST_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
+const TEMPORARY_REPOSITORY_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+const CACHE_MAGIC: &[u8] = b"quinjet-gh-cache-v1\n";
+
+pub const DEFAULT_PULL_REQUEST_PAGE_SIZE: usize = 25;
+pub const DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE: usize = 20;
+
+const PULL_REQUEST_FIELDS: &str = "number,title,author,state,isDraft,updatedAt,url,baseRefName,baseRefOid,headRefName,headRefOid,headRepository,isCrossRepository,additions,deletions,changedFiles";
+const PULL_REQUEST_VIEW_TSV_JQ: &str = r#"[(.number|tostring), .title, (.author.login // "ghost"), .state, (.isDraft|tostring), .updatedAt, .url, .baseRefName, .headRefName, (.headRepository.nameWithOwner // ""), (.isCrossRepository|tostring), (.additions|tostring), (.deletions|tostring), (.changedFiles|tostring), .baseRefOid, .headRefOid] | @tsv"#;
+const PULL_REQUEST_API_TSV_JQ: &str = r#".[] | [(.number|tostring), .title, (.user.login // "ghost"), .state, (.draft|tostring), .updated_at, .html_url, .base.ref, .head.ref, (.head.repo.full_name // ""), (((.head.repo.full_name // "") != (.base.repo.full_name // ""))|tostring), "0", "0", "0", .base.sha, .head.sha] | @tsv"#;
 const REPOSITORY_TSV_TEMPLATE: &str = "{{.nameWithOwner}}{{\"\\t\"}}{{.url}}{{\"\\n\"}}";
+
+static TEMPORARY_REPOSITORY_ID: AtomicU64 = AtomicU64::new(0);
+static CACHE_WRITE_ID: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitHubRepository {
@@ -26,8 +52,8 @@ pub struct GitHubRepository {
 
 impl GitHubRepository {
     pub fn selector(&self) -> &str {
-        // Passing the canonical URL makes the target unambiguous when a worktree has
-        // several GitHub remotes or remotes on different GitHub Enterprise hosts.
+        // A canonical URL keeps PR numbers scoped to the selected repository and
+        // also carries the GitHub Enterprise hostname.
         &self.url
     }
 
@@ -55,7 +81,9 @@ pub struct PullRequest {
     pub updated_at: String,
     pub url: String,
     pub base_ref: String,
+    pub base_oid: String,
     pub head_ref: String,
+    pub head_oid: String,
     pub base_repository: GitHubRepository,
     pub head_repository: Option<String>,
     pub head_remotes: Vec<String>,
@@ -92,39 +120,20 @@ impl PullRequest {
             },
         )
     }
-
-    pub fn matches(&self, query: &str) -> bool {
-        let query = query.to_lowercase();
-        query.is_empty()
-            || self.title.to_lowercase().contains(&query)
-            || self.author.to_lowercase().contains(&query)
-            || self.number.to_string().contains(&query)
-            || self
-                .base_repository
-                .name_with_owner
-                .to_lowercase()
-                .contains(&query)
-            || self.base_repository.url.to_lowercase().contains(&query)
-            || self.base_ref.to_lowercase().contains(&query)
-            || self.head_ref.to_lowercase().contains(&query)
-            || self
-                .head_repository
-                .as_ref()
-                .is_some_and(|repository| repository.to_lowercase().contains(&query))
-            || self
-                .base_repository
-                .remotes
-                .iter()
-                .chain(&self.head_remotes)
-                .any(|remote| remote.to_lowercase().contains(&query))
-    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PullRequestSnapshot {
     pub repositories: Vec<GitHubRepository>,
+    pub selected_repository: Option<GitHubRepository>,
     pub pull_requests: Vec<PullRequest>,
     pub warnings: Vec<String>,
+    pub page: usize,
+    pub page_size: usize,
+    pub has_previous: bool,
+    pub has_next: bool,
+    pub exact_number: Option<u64>,
+    pub from_cache: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,94 +142,253 @@ struct RemoteUrl {
     url: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CacheDisposition {
+    Network,
+    Fresh,
+    Stale,
+}
+
+struct GhResponse {
+    data: Vec<u8>,
+    disposition: CacheDisposition,
+}
+
 impl Repository {
-    pub fn pull_requests(&self) -> Result<PullRequestSnapshot> {
-        self.ensure_gh_available()?;
-        let (repositories, mut warnings) = self.github_repositories()?;
-        let mut pull_requests = Vec::new();
-        let mut successful_repositories = 0;
-        let mut load_errors = Vec::new();
-
-        for repository in &repositories {
-            let output = self.run_gh(pull_request_list_args(repository))?;
-            if !output.status.success() {
-                let error = format!(
-                    "{}: {}",
-                    repository.name_with_owner,
-                    command_error("unable to list pull requests", &output)
-                );
-                warnings.push(error.clone());
-                load_errors.push(error);
-                continue;
-            }
-
-            match parse_pull_requests(&output.stdout, repository, &repositories) {
-                Ok(mut requests) => {
-                    successful_repositories += 1;
-                    pull_requests.append(&mut requests);
-                }
-                Err(error) => {
-                    let error = format!(
-                        "{}: unable to parse GitHub CLI output: {error}",
-                        repository.name_with_owner
-                    );
-                    warnings.push(error.clone());
-                    load_errors.push(error);
-                }
-            }
-        }
-
-        if successful_repositories == 0 {
-            let detail = load_errors
-                .first()
-                .map(String::as_str)
-                .unwrap_or("no repository returned a result");
-            bail!("Unable to load pull requests: {detail}");
-        }
-
-        sort_pull_requests(&mut pull_requests);
-        if pull_requests.len() > MAX_PULL_REQUESTS {
-            pull_requests.truncate(MAX_PULL_REQUESTS);
+    pub fn pull_request_page(
+        &self,
+        known_repositories: &[GitHubRepository],
+        selected_repository: Option<&GitHubRepository>,
+        page: usize,
+        page_size: usize,
+        refresh: bool,
+    ) -> Result<PullRequestSnapshot> {
+        let page = page.clamp(1, MAX_PULL_REQUEST_PAGE);
+        let page_size = page_size.clamp(1, MAX_PULL_REQUEST_PAGE_SIZE);
+        let (repositories, mut warnings) = if known_repositories.is_empty() {
+            self.github_repositories(refresh)?
+        } else {
+            (known_repositories.to_vec(), Vec::new())
+        };
+        let Some(repository) = select_repository(&repositories, selected_repository).cloned()
+        else {
+            bail!("No configured fetch or push remote resolves to a GitHub repository");
+        };
+        if selected_repository.is_some_and(|selected| {
+            !repository
+                .url
+                .trim_end_matches('/')
+                .eq_ignore_ascii_case(selected.url.trim_end_matches('/'))
+        }) {
             warnings.push(format!(
-                "Showing the first {MAX_PULL_REQUESTS} pull requests across all remotes"
+                "The previously selected GitHub repository is no longer configured; showing {}",
+                repository.display_name()
+            ));
+        }
+
+        let requested = page_size;
+        let response = self.checked_cached_gh(
+            &format!(
+                "pull-request-page\n{}\n{page}\n{requested}",
+                repository.url.trim_end_matches('/')
+            ),
+            PULL_REQUEST_PAGE_CACHE_TTL,
+            refresh,
+            pull_request_page_args(&repository, page, requested),
+            "unable to list pull requests",
+        )?;
+        let pull_requests = parse_pull_requests(&response.data, &repository, &repositories)
+            .context("unable to parse GitHub pull-request page")?;
+        // The REST endpoint does not expose an offset. Keeping `per_page` identical
+        // to the displayed size prevents a +1 lookahead from skipping one PR at every
+        // page boundary. A full page may optimistically expose one final empty page.
+        let has_next = page < MAX_PULL_REQUEST_PAGE && pull_requests.len() == page_size;
+        if response.disposition == CacheDisposition::Stale {
+            warnings.push(format!(
+                "GitHub is unavailable; showing a stale cached page for {}",
+                repository.display_name()
             ));
         }
 
         Ok(PullRequestSnapshot {
             repositories,
+            selected_repository: Some(repository),
             pull_requests,
             warnings,
+            page,
+            page_size,
+            has_previous: page > 1,
+            has_next,
+            exact_number: None,
+            from_cache: response.disposition != CacheDisposition::Network,
         })
     }
 
-    pub fn pull_request_diff(&self, pull_request: &PullRequest) -> Result<DiffDocument> {
-        self.ensure_gh_available()?;
-        let output = self.checked_gh(pull_request_diff_args(pull_request))?;
-        let mut output = output;
-        let truncated = truncate(&mut output, MAX_DIFF_BYTES);
-        Ok(pull_request_document(&output, pull_request, truncated))
+    pub fn pull_request_lookup(
+        &self,
+        repositories: &[GitHubRepository],
+        repository: &GitHubRepository,
+        number: u64,
+        refresh: bool,
+    ) -> Result<PullRequestSnapshot> {
+        if number == 0 {
+            bail!("Pull-request numbers must be positive integers");
+        }
+        let response = self.pull_request_metadata(repository, repositories, number, refresh)?;
+        let mut warnings = Vec::new();
+        if response.1 == CacheDisposition::Stale {
+            warnings.push(format!(
+                "GitHub is unavailable; showing stale cached metadata for #{}",
+                number
+            ));
+        }
+        Ok(PullRequestSnapshot {
+            repositories: repositories.to_vec(),
+            selected_repository: Some(repository.clone()),
+            pull_requests: vec![response.0],
+            warnings,
+            page: 1,
+            page_size: 1,
+            has_previous: false,
+            has_next: false,
+            exact_number: Some(number),
+            from_cache: response.1 != CacheDisposition::Network,
+        })
     }
 
-    fn ensure_gh_available(&self) -> Result<()> {
-        let output = self.run_gh([OsString::from("--version")])?;
-        if !output.status.success() {
+    pub fn pull_request_diff(
+        &self,
+        pull_request: &PullRequest,
+        file_page: usize,
+        file_page_size: usize,
+    ) -> Result<DiffDocument> {
+        // Page rows intentionally contain only inexpensive list metadata. Enrich the
+        // selected PR once (normally from the short-lived cache) before fetching Git
+        // objects. If GitHub is temporarily unavailable, the list's immutable OIDs
+        // and refs are still sufficient for the isolated fetch.
+        let mut detailed = self
+            .pull_request_metadata(
+                &pull_request.base_repository,
+                std::slice::from_ref(&pull_request.base_repository),
+                pull_request.number,
+                false,
+            )
+            .map(|(pull_request, _)| pull_request)
+            .unwrap_or_else(|_| pull_request.clone());
+        if !same_pull_request_oids(&detailed, pull_request) {
+            detailed = self
+                .pull_request_metadata(
+                    &pull_request.base_repository,
+                    std::slice::from_ref(&pull_request.base_repository),
+                    pull_request.number,
+                    true,
+                )
+                .map(|(pull_request, _)| pull_request)
+                .ok()
+                .filter(|metadata| same_pull_request_oids(metadata, pull_request))
+                .unwrap_or_else(|| pull_request.clone());
+        }
+        if detailed.head_remotes.is_empty() {
+            detailed.head_remotes.clone_from(&pull_request.head_remotes);
+        }
+        self.local_pull_request_diff(&detailed, file_page, file_page_size)
+    }
+
+    fn pull_request_metadata(
+        &self,
+        repository: &GitHubRepository,
+        repositories: &[GitHubRepository],
+        number: u64,
+        refresh: bool,
+    ) -> Result<(PullRequest, CacheDisposition)> {
+        let response = self.checked_cached_gh(
+            &format!(
+                "pull-request\n{}\n{number}",
+                repository.url.trim_end_matches('/')
+            ),
+            PULL_REQUEST_CACHE_TTL,
+            refresh,
+            pull_request_view_args(repository, number),
+            "unable to load pull request",
+        )?;
+        let mut pull_requests = parse_pull_requests(&response.data, repository, repositories)
+            .context("unable to parse exact pull-request metadata")?;
+        if pull_requests.len() != 1 {
             bail!(
-                "{}",
-                command_error("GitHub CLI (`gh`) is unavailable", &output)
+                "GitHub returned {} records for pull request #{number}",
+                pull_requests.len()
             );
         }
-        Ok(())
+        Ok((pull_requests.remove(0), response.disposition))
     }
 
-    fn github_repositories(&self) -> Result<(Vec<GitHubRepository>, Vec<String>)> {
+    fn local_pull_request_diff(
+        &self,
+        pull_request: &PullRequest,
+        requested_file_page: usize,
+        requested_file_page_size: usize,
+    ) -> Result<DiffDocument> {
+        let temporary = TemporaryBareRepository::new()?;
+        let (merge_base, head) = fetch_pull_request(&temporary.path, pull_request)?;
+        let (paths, paths_truncated) = changed_paths(&temporary.path, &merge_base, &head)?;
+        let file_page_size =
+            requested_file_page_size.clamp(1, DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE.max(50));
+        let page_count = if paths.is_empty() {
+            1
+        } else {
+            paths.len().div_ceil(file_page_size)
+        };
+        let file_page = requested_file_page.max(1).min(page_count);
+        let offset = (file_page - 1).saturating_mul(file_page_size);
+        let selected_paths = paths
+            .iter()
+            .skip(offset)
+            .take(file_page_size)
+            .cloned()
+            .collect::<Vec<_>>();
+        let has_previous = file_page > 1;
+        let has_next = offset.saturating_add(selected_paths.len()) < paths.len();
+        let total_files = if paths_truncated {
+            pull_request.changed_files.max(paths.len())
+        } else {
+            paths.len()
+        };
+
+        let (patch, output_truncated) = if selected_paths.is_empty() {
+            (Vec::new(), false)
+        } else {
+            diff_selected_paths(&temporary.path, &merge_base, &head, &selected_paths)?
+        };
+        let truncated = output_truncated || paths_truncated;
+        Ok(pull_request_document(
+            &patch,
+            pull_request,
+            truncated,
+            file_page,
+            file_page_size,
+            selected_paths.len(),
+            total_files,
+            has_previous,
+            has_next,
+        ))
+    }
+
+    fn github_repositories(&self, refresh: bool) -> Result<(Vec<GitHubRepository>, Vec<String>)> {
         let (remote_urls, mut warnings) = self.remote_urls()?;
         let grouped_remote_urls = group_remote_urls(&remote_urls);
         let mut repositories = BTreeMap::new();
 
         for (index, (url, remotes)) in grouped_remote_urls.iter().take(MAX_REMOTE_URLS).enumerate()
         {
-            match self.resolve_github_repository(Some(url)) {
-                Ok(repository) => {
+            match self.resolve_github_repository(Some(url), refresh) {
+                Ok((repository, disposition)) => {
+                    if disposition == CacheDisposition::Stale {
+                        warnings.push(format!(
+                            "Using stale cached GitHub identity for remote{} {}",
+                            if remotes.len() == 1 { "" } else { "s" },
+                            remotes.join(", ")
+                        ));
+                    }
                     if remotes.is_empty() {
                         merge_repository(&mut repositories, repository, None);
                     } else {
@@ -251,11 +419,14 @@ impl Repository {
             ));
         }
 
-        // `gh` can infer a repository from GH_REPO or Git configuration. This also
-        // provides a useful fallback for repositories without a conventional remote.
         if repositories.is_empty() {
-            match self.resolve_github_repository(None) {
-                Ok(repository) => merge_repository(&mut repositories, repository, None),
+            match self.resolve_github_repository(None, refresh) {
+                Ok((repository, disposition)) => {
+                    if disposition == CacheDisposition::Stale {
+                        warnings.push("Using a stale cached inferred GitHub repository".to_owned());
+                    }
+                    merge_repository(&mut repositories, repository, None);
+                }
                 Err(error) => {
                     let remote_hint = if remote_urls.is_empty() {
                         "No Git remotes are configured".to_owned()
@@ -268,11 +439,16 @@ impl Repository {
         }
 
         let mut repositories: Vec<_> = repositories.into_values().collect();
-        repositories.sort_by_cached_key(|repository| repository.name_with_owner.to_lowercase());
         for repository in &mut repositories {
             repository.remotes.sort();
             repository.remotes.dedup();
         }
+        repositories.sort_by_key(|repository| {
+            (
+                !repository.remotes.iter().any(|remote| remote == "origin"),
+                repository.display_name().to_lowercase(),
+            )
+        });
         Ok((repositories, warnings))
     }
 
@@ -334,7 +510,11 @@ impl Repository {
         ))
     }
 
-    fn resolve_github_repository(&self, url: Option<&str>) -> Result<GitHubRepository> {
+    fn resolve_github_repository(
+        &self,
+        url: Option<&str>,
+        refresh: bool,
+    ) -> Result<(GitHubRepository, CacheDisposition)> {
         let mut args = vec![OsString::from("repo"), OsString::from("view")];
         if let Some(url) = url {
             args.push(OsString::from(url));
@@ -345,35 +525,95 @@ impl Repository {
             OsString::from("--template"),
             OsString::from(REPOSITORY_TSV_TEMPLATE),
         ]);
-        let output = self.run_gh(args)?;
-        if !output.status.success() {
-            bail!("{}", command_error("gh repo view failed", &output));
-        }
-        let record = trim_ascii(&output.stdout);
+        let identity = url.map(remote_url_for_gh).unwrap_or_else(|| {
+            format!(
+                "inferred\n{}\n{}",
+                self.root.display(),
+                env::var("GH_REPO").unwrap_or_default()
+            )
+        });
+        let key = format!("repository\n{identity}");
+        let response = self.checked_cached_gh(
+            &key,
+            REPOSITORY_CACHE_TTL,
+            refresh,
+            args,
+            "gh repo view failed",
+        )?;
+        let record = trim_ascii(&response.data);
         let fields = parse_tsv_record(record, 2).context("invalid gh repo view output")?;
         if fields[0].trim().is_empty() || fields[1].trim().is_empty() {
             bail!("gh repo view returned an incomplete repository identity");
         }
-        Ok(GitHubRepository {
-            name_with_owner: fields[0].clone(),
-            url: fields[1].clone(),
-            remotes: Vec::new(),
-        })
+        Ok((
+            GitHubRepository {
+                name_with_owner: fields[0].clone(),
+                url: fields[1].trim_end_matches('/').to_owned(),
+                remotes: Vec::new(),
+            },
+            response.disposition,
+        ))
     }
 
-    fn checked_gh<I, S>(&self, args: I) -> Result<Vec<u8>>
+    fn checked_cached_gh<I, S>(
+        &self,
+        cache_key: &str,
+        ttl: Duration,
+        refresh: bool,
+        args: I,
+        error_context: &str,
+    ) -> Result<GhResponse>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let output = self.run_gh(args)?;
-        if !output.status.success() {
-            bail!("{}", command_error("GitHub CLI command failed", &output));
+        let cache = CacheStore::discover();
+        let cached = cache.as_ref().and_then(|cache| cache.read(cache_key));
+        if !refresh {
+            if let Some(entry) = cached.as_ref() {
+                if entry.age <= ttl {
+                    return Ok(GhResponse {
+                        data: entry.data.clone(),
+                        disposition: CacheDisposition::Fresh,
+                    });
+                }
+            }
         }
-        Ok(output.stdout)
+
+        let output = match self.run_gh(args) {
+            Ok(output) => output,
+            Err(error) => {
+                if let Some(entry) = cached.as_ref() {
+                    return Ok(GhResponse {
+                        data: entry.data.clone(),
+                        disposition: CacheDisposition::Stale,
+                    });
+                }
+                return Err(error);
+            }
+        };
+        if output.status.success() && !output.stdout_truncated {
+            if let Some(cache) = cache.as_ref() {
+                let _ = cache.write(cache_key, &output.stdout);
+            }
+            return Ok(GhResponse {
+                data: output.stdout,
+                disposition: CacheDisposition::Network,
+            });
+        }
+        if let Some(entry) = cached {
+            return Ok(GhResponse {
+                data: entry.data,
+                disposition: CacheDisposition::Stale,
+            });
+        }
+        if output.stdout_truncated {
+            bail!("{error_context}: GitHub CLI output exceeded the metadata limit");
+        }
+        bail!("{}", bounded_command_error(error_context, &output));
     }
 
-    fn run_gh<I, S>(&self, args: I) -> Result<Output>
+    fn run_gh<I, S>(&self, args: I) -> Result<BoundedOutput>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
@@ -386,32 +626,53 @@ impl Repository {
             .env("GH_PAGER", "cat")
             .env("GH_NO_UPDATE_NOTIFIER", "1")
             .env("NO_COLOR", "1");
-        command.output().with_context(|| {
-            format!(
-                "failed to execute GitHub CLI (`gh`) in {}; install it and run `gh auth login`",
-                self.root.display()
-            )
-        })
+        run_bounded_command(&mut command, MAX_GH_METADATA_BYTES, MAX_GH_ERROR_BYTES).with_context(
+            || {
+                format!(
+                    "failed to execute GitHub CLI (`gh`) in {}; install it and run `gh auth login`",
+                    self.root.display()
+                )
+            },
+        )
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn pull_request_document(
     output: &[u8],
     pull_request: &PullRequest,
     truncated: bool,
+    file_page: usize,
+    file_page_size: usize,
+    displayed_files: usize,
+    total_files: usize,
+    has_previous_file_page: bool,
+    has_next_file_page: bool,
 ) -> DiffDocument {
+    let range_start = if displayed_files == 0 {
+        0
+    } else {
+        (file_page - 1)
+            .saturating_mul(file_page_size)
+            .saturating_add(1)
+    };
+    let range_end = range_start.saturating_add(displayed_files.saturating_sub(1));
     let mut document = parse_diff(
         output,
         format!(
-            "PR #{} — {}  ·  {} → {}",
+            "PR #{} — {}  ·  {} → {}  ·  files {}–{} of {}",
             pull_request.number,
             pull_request.title,
             pull_request.head_label(),
-            pull_request.base_label()
+            pull_request.base_label(),
+            range_start,
+            range_end,
+            total_files,
         ),
         None,
         truncated,
     );
+    document.truncated |= truncated;
     document.pull_request_details = Some(PullRequestDetails {
         number: pull_request.number,
         title: pull_request.title.clone(),
@@ -428,6 +689,7 @@ fn pull_request_document(
                 .base_repository
                 .host()
                 .eq_ignore_ascii_case("github.com")
+                || pull_request.base_repository.host().is_empty()
             {
                 repository.clone()
             } else {
@@ -437,38 +699,62 @@ fn pull_request_document(
         head_ref: pull_request.head_ref.clone(),
         head_remotes: pull_request.head_remotes.clone(),
         is_cross_repository: pull_request.is_cross_repository,
-        changed_files: pull_request.changed_files,
+        changed_files: pull_request.changed_files.max(total_files),
         additions: pull_request.additions,
         deletions: pull_request.deletions,
+        file_page,
+        file_page_size,
+        displayed_files,
+        total_files,
+        has_previous_file_page,
+        has_next_file_page,
     });
     document
 }
 
-fn pull_request_list_args(repository: &GitHubRepository) -> Vec<OsString> {
+fn pull_request_page_args(
+    repository: &GitHubRepository,
+    page: usize,
+    page_size: usize,
+) -> Vec<OsString> {
+    let mut args = vec![OsString::from("api")];
+    if !repository.host().is_empty() {
+        args.extend([
+            OsString::from("--hostname"),
+            OsString::from(repository.host()),
+        ]);
+    }
+    args.extend([
+        OsString::from("--method"),
+        OsString::from("GET"),
+        OsString::from(format!("repos/{}/pulls", repository.name_with_owner)),
+        OsString::from("-f"),
+        OsString::from("state=open"),
+        OsString::from("-f"),
+        OsString::from("sort=updated"),
+        OsString::from("-f"),
+        OsString::from("direction=desc"),
+        OsString::from("-F"),
+        OsString::from(format!("per_page={page_size}")),
+        OsString::from("-F"),
+        OsString::from(format!("page={page}")),
+        OsString::from("--jq"),
+        OsString::from(PULL_REQUEST_API_TSV_JQ),
+    ]);
+    args
+}
+
+fn pull_request_view_args(repository: &GitHubRepository, number: u64) -> Vec<OsString> {
     vec![
         OsString::from("pr"),
-        OsString::from("list"),
+        OsString::from("view"),
+        OsString::from(number.to_string()),
         OsString::from("--repo"),
         OsString::from(repository.selector()),
-        OsString::from("--state"),
-        OsString::from("open"),
-        OsString::from("--limit"),
-        OsString::from(MAX_PULL_REQUESTS_PER_REPOSITORY.to_string()),
         OsString::from("--json"),
         OsString::from(PULL_REQUEST_FIELDS),
         OsString::from("--jq"),
-        OsString::from(PULL_REQUEST_TSV_JQ),
-    ]
-}
-
-fn pull_request_diff_args(pull_request: &PullRequest) -> Vec<OsString> {
-    vec![
-        OsString::from("pr"),
-        OsString::from("diff"),
-        OsString::from(pull_request.number.to_string()),
-        OsString::from("--repo"),
-        OsString::from(pull_request.base_repository.selector()),
-        OsString::from("--color=never"),
+        OsString::from(PULL_REQUEST_VIEW_TSV_JQ),
     ]
 }
 
@@ -482,7 +768,7 @@ fn parse_pull_requests(
         if record.is_empty() {
             continue;
         }
-        let fields = parse_tsv_record(record, 14)
+        let fields = parse_tsv_record(record, 16)
             .with_context(|| format!("invalid pull-request record {}", index + 1))?;
         let head_repository = (!fields[9].is_empty()).then(|| fields[9].clone());
         let head_remotes = head_repository
@@ -493,7 +779,7 @@ fn parse_pull_requests(
             number: parse_field(&fields[0], "number")?,
             title: fields[1].clone(),
             author: fields[2].clone(),
-            state: fields[3].clone(),
+            state: fields[3].to_ascii_uppercase(),
             is_draft: parse_field(&fields[4], "draft state")?,
             updated_at: fields[5].clone(),
             url: fields[6].clone(),
@@ -506,6 +792,8 @@ fn parse_pull_requests(
             additions: parse_field(&fields[11], "addition count")?,
             deletions: parse_field(&fields[12], "deletion count")?,
             changed_files: parse_field(&fields[13], "changed-file count")?,
+            base_oid: fields[14].clone(),
+            head_oid: fields[15].clone(),
         });
     }
     Ok(pull_requests)
@@ -560,6 +848,31 @@ where
         .map_err(|error| anyhow::anyhow!("invalid {label} `{value}`: {error}"))
 }
 
+fn same_pull_request_oids(left: &PullRequest, right: &PullRequest) -> bool {
+    (left.base_oid.is_empty()
+        || right.base_oid.is_empty()
+        || left.base_oid.eq_ignore_ascii_case(&right.base_oid))
+        && (left.head_oid.is_empty()
+            || right.head_oid.is_empty()
+            || left.head_oid.eq_ignore_ascii_case(&right.head_oid))
+}
+
+fn select_repository<'a>(
+    repositories: &'a [GitHubRepository],
+    selected: Option<&GitHubRepository>,
+) -> Option<&'a GitHubRepository> {
+    selected
+        .and_then(|selected| {
+            repositories.iter().find(|repository| {
+                repository
+                    .url
+                    .trim_end_matches('/')
+                    .eq_ignore_ascii_case(selected.url.trim_end_matches('/'))
+            })
+        })
+        .or_else(|| repositories.first())
+}
+
 fn remote_url_for_gh(url: &str) -> String {
     if let Some((scheme, rest)) = url.split_once("://") {
         let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
@@ -573,8 +886,6 @@ fn remote_url_for_gh(url: &str) -> String {
         };
     }
 
-    // Convert SCP-like SSH URLs to a credential-free URL before putting one on
-    // the `gh` process command line. This also handles nonstandard SSH usernames.
     if let Some((_, target)) = url.rsplit_once('@') {
         if let Some((host, path)) = target.split_once(':') {
             if !host.is_empty() && !path.is_empty() {
@@ -633,38 +944,595 @@ fn merge_repository(
     }
 }
 
-fn sort_pull_requests(pull_requests: &mut [PullRequest]) {
-    pull_requests.sort_by(|left, right| {
-        right
-            .updated_at
-            .cmp(&left.updated_at)
-            .then_with(|| {
-                left.base_repository
-                    .name_with_owner
-                    .cmp(&right.base_repository.name_with_owner)
-            })
-            .then_with(|| right.number.cmp(&left.number))
-    });
-}
-
 fn repository_host(url: &str) -> Option<&str> {
     let (_, rest) = url.split_once("://")?;
     rest.split('/').next().filter(|host| !host.is_empty())
 }
 
+struct TemporaryBareRepository {
+    path: PathBuf,
+}
+
+impl TemporaryBareRepository {
+    fn new() -> Result<Self> {
+        let preferred_parent = cache_root().map(|root| root.join("tmp"));
+        let parent = match preferred_parent {
+            Some(parent) if create_private_directory(&parent).is_ok() => {
+                remove_stale_temporary_repositories(&parent);
+                parent
+            }
+            _ => env::temp_dir(),
+        };
+        for _ in 0..16 {
+            let id = TEMPORARY_REPOSITORY_ID.fetch_add(1, Ordering::Relaxed);
+            let path = parent.join(format!("pr-{}-{id}.git", std::process::id()));
+            if path.exists() {
+                continue;
+            }
+            let mut command = Command::new("git");
+            command
+                .args(["init", "--bare", "--quiet"])
+                .arg(&path)
+                .env("LC_ALL", "C")
+                .env("GIT_TERMINAL_PROMPT", "0");
+            let output = run_bounded_command(&mut command, 64 * 1024, 64 * 1024)
+                .context("failed to initialize a disposable Git repository")?;
+            if !output.status.success() {
+                bail!(
+                    "{}",
+                    bounded_command_error(
+                        "unable to initialize disposable Git repository",
+                        &output
+                    )
+                );
+            }
+            return Ok(Self { path });
+        }
+        bail!("unable to allocate a unique disposable Git repository")
+    }
+}
+
+impl Drop for TemporaryBareRepository {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+fn remove_stale_temporary_repositories(parent: &Path) {
+    let Ok(entries) = fs::read_dir(parent) else {
+        return;
+    };
+    for entry in entries.filter_map(Result::ok).take(256) {
+        let path = entry.path();
+        let is_quinjet_pr = path
+            .file_name()
+            .and_then(OsStr::to_str)
+            .is_some_and(|name| name.starts_with("pr-") && name.ends_with(".git"));
+        if !is_quinjet_pr {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .ok()
+            .and_then(|metadata| metadata.modified().ok())
+            .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+            .is_some_and(|age| age >= TEMPORARY_REPOSITORY_MAX_AGE);
+        if stale {
+            let _ = fs::remove_dir_all(path);
+        }
+    }
+}
+
+fn fetch_pull_request(temporary: &Path, pull_request: &PullRequest) -> Result<(String, String)> {
+    if pull_request.base_ref.is_empty() || pull_request.head_ref.is_empty() {
+        bail!("Pull request metadata does not contain complete base/head refs");
+    }
+    checked_temp_git(
+        temporary,
+        &[
+            OsString::from("remote"),
+            OsString::from("add"),
+            OsString::from("origin"),
+            OsString::from(pull_request.base_repository.selector()),
+        ],
+        "unable to configure the disposable base remote",
+    )?;
+    let base_refspec = format!("+refs/heads/{}:refs/quinjet/base", pull_request.base_ref);
+    let pull_refspec = format!("+refs/pull/{}/head:refs/quinjet/head", pull_request.number);
+
+    fetch_ref(temporary, "origin", &base_refspec, 64)?;
+    let (head_remote, head_refspec) = match fetch_ref(temporary, "origin", &pull_refspec, 64) {
+        Ok(()) => ("origin".to_owned(), pull_refspec),
+        Err(pull_ref_error) => {
+            let Some(head_repository) = pull_request.head_repository.as_deref() else {
+                return Err(pull_ref_error).context(
+                    "the base repository no longer exposes the PR head and its fork was deleted",
+                );
+            };
+            let head_url = repository_url_for_name(&pull_request.base_repository, head_repository);
+            checked_temp_git(
+                temporary,
+                &[
+                    OsString::from("remote"),
+                    OsString::from("add"),
+                    OsString::from("head"),
+                    OsString::from(head_url),
+                ],
+                "unable to configure the disposable fork remote",
+            )?;
+            let head_refspec = format!("+refs/heads/{}:refs/quinjet/head", pull_request.head_ref);
+            fetch_ref(temporary, "head", &head_refspec, 64).with_context(|| {
+                format!(
+                    "unable to fetch PR #{} from either the base PR ref or its fork",
+                    pull_request.number
+                )
+            })?;
+            ("head".to_owned(), head_refspec)
+        }
+    };
+
+    for depth in [64_usize, 256, 1_024, 4_096] {
+        if depth != 64 {
+            fetch_ref(temporary, "origin", &base_refspec, depth)?;
+            fetch_ref(temporary, &head_remote, &head_refspec, depth)?;
+        }
+        let base =
+            preferred_fetched_commit(temporary, &pull_request.base_oid, "refs/quinjet/base")?;
+        let head =
+            preferred_fetched_commit(temporary, &pull_request.head_oid, "refs/quinjet/head")?;
+        if let Some(merge_base) = try_merge_base(temporary, &base, &head)? {
+            return Ok((merge_base, head));
+        }
+    }
+    bail!(
+        "Unable to find the PR merge base within 4,096 commits; refusing an unbounded history fetch"
+    )
+}
+
+fn repository_url_for_name(base: &GitHubRepository, name_with_owner: &str) -> String {
+    if let Some((scheme, rest)) = base.url.split_once("://") {
+        let host = rest.split('/').next().unwrap_or_default();
+        if !host.is_empty() {
+            return format!("{scheme}://{host}/{name_with_owner}");
+        }
+    }
+    name_with_owner.to_owned()
+}
+
+fn fetch_ref(temporary: &Path, remote: &str, refspec: &str, depth: usize) -> Result<()> {
+    let args = [
+        OsString::from("fetch"),
+        OsString::from("--quiet"),
+        OsString::from("--force"),
+        OsString::from("--no-tags"),
+        OsString::from("--filter=blob:none"),
+        OsString::from(format!("--depth={depth}")),
+        OsString::from(remote),
+        OsString::from(refspec),
+    ];
+    let output = run_temp_git(temporary, &args, 128 * 1024, MAX_GH_ERROR_BYTES)?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    // Older GitHub Enterprise or local test remotes may not support partial clone.
+    let fallback = [
+        OsString::from("fetch"),
+        OsString::from("--quiet"),
+        OsString::from("--force"),
+        OsString::from("--no-tags"),
+        OsString::from(format!("--depth={depth}")),
+        OsString::from(remote),
+        OsString::from(refspec),
+    ];
+    let output = run_temp_git(temporary, &fallback, 128 * 1024, MAX_GH_ERROR_BYTES)?;
+    if !output.status.success() {
+        bail!(
+            "{}",
+            bounded_command_error("unable to fetch a pull-request ref", &output)
+        );
+    }
+    Ok(())
+}
+
+fn preferred_fetched_commit(temporary: &Path, oid: &str, fallback: &str) -> Result<String> {
+    if (oid.len() == 40 || oid.len() == 64) && oid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        let args = [
+            OsString::from("rev-parse"),
+            OsString::from("--verify"),
+            OsString::from(format!("{oid}^{{commit}}")),
+        ];
+        let output = run_temp_git(temporary, &args, 128 * 1024, 128 * 1024)?;
+        if output.status.success() {
+            let resolved = String::from_utf8_lossy(trim_ascii(&output.stdout)).into_owned();
+            if !resolved.is_empty() {
+                return Ok(resolved);
+            }
+        }
+    }
+    Ok(fallback.to_owned())
+}
+
+fn try_merge_base(temporary: &Path, base: &str, head: &str) -> Result<Option<String>> {
+    let args = [
+        OsString::from("merge-base"),
+        OsString::from(base),
+        OsString::from(head),
+    ];
+    let output = run_temp_git(temporary, &args, 128 * 1024, 128 * 1024)?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let merge_base = String::from_utf8_lossy(trim_ascii(&output.stdout)).into_owned();
+    Ok((!merge_base.is_empty()).then_some(merge_base))
+}
+
+fn changed_paths(temporary: &Path, merge_base: &str, head: &str) -> Result<(Vec<OsString>, bool)> {
+    let args = [
+        OsString::from("diff"),
+        OsString::from("--name-only"),
+        OsString::from("-z"),
+        OsString::from("--find-renames"),
+        OsString::from(merge_base),
+        OsString::from(head),
+        OsString::from("--"),
+    ];
+    let output = run_temp_git(temporary, &args, MAX_PR_PATH_BYTES, 128 * 1024)?;
+    if !output.status.success() && !output.stdout_truncated {
+        bail!(
+            "{}",
+            bounded_command_error("unable to enumerate pull-request files", &output)
+        );
+    }
+    let mut truncated = output.stdout_truncated;
+    let complete_output = if output.stdout_truncated && !output.stdout.ends_with(&[0]) {
+        output
+            .stdout
+            .iter()
+            .rposition(|byte| *byte == 0)
+            .map_or(&[][..], |index| &output.stdout[..=index])
+    } else {
+        &output.stdout
+    };
+    let mut paths = Vec::new();
+    for path in complete_output.split(|byte| *byte == 0) {
+        if path.is_empty() {
+            continue;
+        }
+        if paths.len() >= MAX_PR_PATHS {
+            truncated = true;
+            break;
+        }
+        paths.push(OsString::from(String::from_utf8_lossy(path).into_owned()));
+    }
+    Ok((paths, truncated))
+}
+
+fn diff_selected_paths(
+    temporary: &Path,
+    merge_base: &str,
+    head: &str,
+    paths: &[OsString],
+) -> Result<(Vec<u8>, bool)> {
+    let mut args = vec![
+        OsString::from("diff"),
+        OsString::from("--no-color"),
+        OsString::from("--no-ext-diff"),
+        OsString::from("--find-renames"),
+        OsString::from("--patch"),
+        OsString::from("--unified=3"),
+        OsString::from(merge_base),
+        OsString::from(head),
+        OsString::from("--"),
+    ];
+    args.extend(paths.iter().cloned());
+    let output = run_temp_git(temporary, &args, MAX_DIFF_BYTES, MAX_GH_ERROR_BYTES)?;
+    if !output.status.success() && !output.stdout_truncated {
+        bail!(
+            "{}",
+            bounded_command_error("unable to generate the local pull-request diff", &output)
+        );
+    }
+    let mut patch = output.stdout;
+    if output.stdout_truncated {
+        while patch.last().is_some_and(|byte| *byte != b'\n') {
+            patch.pop();
+        }
+    }
+    Ok((patch, output.stdout_truncated))
+}
+
+fn checked_temp_git(temporary: &Path, args: &[OsString], context: &str) -> Result<Vec<u8>> {
+    let output = run_temp_git(temporary, args, MAX_GH_METADATA_BYTES, MAX_GH_ERROR_BYTES)?;
+    if !output.status.success() || output.stdout_truncated {
+        bail!("{}", bounded_command_error(context, &output));
+    }
+    Ok(output.stdout)
+}
+
+fn run_temp_git(
+    temporary: &Path,
+    args: &[OsString],
+    stdout_limit: usize,
+    stderr_limit: usize,
+) -> Result<BoundedOutput> {
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(temporary)
+        .args(["-c", "core.quotepath=false"])
+        .args(args)
+        .env("LC_ALL", "C")
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_TERMINAL_PROMPT", "0");
+    run_bounded_command(&mut command, stdout_limit, stderr_limit)
+        .with_context(|| format!("failed to execute Git in {}", temporary.display()))
+}
+
+struct BoundedOutput {
+    status: ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    stdout_truncated: bool,
+}
+
+fn run_bounded_command(
+    command: &mut Command,
+    stdout_limit: usize,
+    stderr_limit: usize,
+) -> Result<BoundedOutput> {
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn()?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .context("child process did not expose stdout")?;
+    let stderr = child
+        .stderr
+        .take()
+        .context("child process did not expose stderr")?;
+    let stderr_reader = thread::spawn(move || read_and_drain(stderr, stderr_limit));
+
+    let mut collected = Vec::with_capacity(stdout_limit.min(64 * 1024));
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut truncated = false;
+    loop {
+        let read = match stdout.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stderr_reader.join();
+                return Err(error.into());
+            }
+        };
+        let remaining = stdout_limit.saturating_sub(collected.len());
+        if read > remaining {
+            collected.extend_from_slice(&buffer[..remaining]);
+            truncated = true;
+            let _ = child.kill();
+            break;
+        }
+        collected.extend_from_slice(&buffer[..read]);
+    }
+    drop(stdout);
+    let status = child.wait()?;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| anyhow::anyhow!("stderr reader thread panicked"))??;
+    Ok(BoundedOutput {
+        status,
+        stdout: collected,
+        stderr,
+        stdout_truncated: truncated,
+    })
+}
+
+fn read_and_drain(mut reader: impl Read, limit: usize) -> io::Result<Vec<u8>> {
+    let mut collected = Vec::with_capacity(limit.min(32 * 1024));
+    let mut buffer = [0_u8; 32 * 1024];
+    loop {
+        let read = match reader.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        };
+        let remaining = limit.saturating_sub(collected.len());
+        collected.extend_from_slice(&buffer[..read.min(remaining)]);
+    }
+    Ok(collected)
+}
+
+fn bounded_command_error(context: &str, output: &BoundedOutput) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let details = if !stderr.is_empty() { stderr } else { stdout };
+    if details.is_empty() {
+        format!("{context} (exit status {})", output.status)
+    } else {
+        format!("{context}: {details}")
+    }
+}
+
+struct CacheEntry {
+    data: Vec<u8>,
+    age: Duration,
+}
+
+struct CacheStore {
+    root: PathBuf,
+}
+
+impl CacheStore {
+    fn discover() -> Option<Self> {
+        cache_root().map(|root| Self {
+            root: root.join("github"),
+        })
+    }
+
+    #[cfg(test)]
+    fn at(root: PathBuf) -> Self {
+        Self { root }
+    }
+
+    fn read(&self, key: &str) -> Option<CacheEntry> {
+        let path = self.path(key);
+        let metadata = fs::metadata(&path).ok()?;
+        if metadata.len() > MAX_GH_METADATA_BYTES as u64 + CACHE_MAGIC.len() as u64 {
+            let _ = fs::remove_file(path);
+            return None;
+        }
+        let mut data = fs::read(path).ok()?;
+        if !data.starts_with(CACHE_MAGIC) {
+            return None;
+        }
+        data.drain(..CACHE_MAGIC.len());
+        let age = metadata
+            .modified()
+            .ok()
+            .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+            .unwrap_or_default();
+        Some(CacheEntry { data, age })
+    }
+
+    fn write(&self, key: &str, data: &[u8]) -> Result<()> {
+        if data.len() > MAX_GH_METADATA_BYTES {
+            return Ok(());
+        }
+        create_private_directory(&self.root)?;
+        let destination = self.path(key);
+        let id = CACHE_WRITE_ID.fetch_add(1, Ordering::Relaxed);
+        let temporary = self
+            .root
+            .join(format!(".write-{}-{id}.tmp", std::process::id()));
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary)?;
+        file.write_all(CACHE_MAGIC)?;
+        file.write_all(data)?;
+        file.flush()?;
+        drop(file);
+        if destination.exists() {
+            let _ = fs::remove_file(&destination);
+        }
+        if let Err(error) = fs::rename(&temporary, &destination) {
+            let _ = fs::remove_file(&temporary);
+            return Err(error.into());
+        }
+        self.prune();
+        Ok(())
+    }
+
+    fn path(&self, key: &str) -> PathBuf {
+        let (left, right) = stable_cache_hash(key.as_bytes());
+        self.root.join(format!("{left:016x}{right:016x}.cache"))
+    }
+
+    fn prune(&self) {
+        let Ok(entries) = fs::read_dir(&self.root) else {
+            return;
+        };
+        let mut files = entries
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                let path = entry.path();
+                if path.extension().and_then(OsStr::to_str) != Some("cache") {
+                    return None;
+                }
+                let metadata = entry.metadata().ok()?;
+                Some((
+                    metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+                    metadata.len(),
+                    path,
+                ))
+            })
+            .collect::<Vec<_>>();
+        files.sort_by_key(|(modified, _, _)| *modified);
+        let mut total = files.iter().map(|(_, bytes, _)| *bytes).sum::<u64>();
+        let mut count = files.len();
+        for (_, bytes, path) in files {
+            if count <= MAX_CACHE_ENTRIES && total <= MAX_CACHE_BYTES {
+                break;
+            }
+            if fs::remove_file(path).is_ok() {
+                count = count.saturating_sub(1);
+                total = total.saturating_sub(bytes);
+            }
+        }
+    }
+}
+
+fn cache_root() -> Option<PathBuf> {
+    if let Some(path) = env::var_os("QUINJET_CACHE_DIR").filter(|path| !path.is_empty()) {
+        return Some(PathBuf::from(path));
+    }
+    #[cfg(windows)]
+    {
+        if let Some(path) = env::var_os("LOCALAPPDATA").filter(|path| !path.is_empty()) {
+            return Some(PathBuf::from(path).join("quinjet").join("cache"));
+        }
+    }
+    if let Some(path) = env::var_os("XDG_CACHE_HOME").filter(|path| !path.is_empty()) {
+        return Some(PathBuf::from(path).join("quinjet"));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(path) = env::var_os("HOME").filter(|path| !path.is_empty()) {
+            return Some(
+                PathBuf::from(path)
+                    .join("Library")
+                    .join("Caches")
+                    .join("quinjet"),
+            );
+        }
+    }
+    env::var_os("HOME")
+        .filter(|path| !path.is_empty())
+        .map(|path| PathBuf::from(path).join(".cache").join("quinjet"))
+}
+
+fn create_private_directory(path: &Path) -> Result<()> {
+    fs::create_dir_all(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
+fn stable_cache_hash(value: &[u8]) -> (u64, u64) {
+    let mut left = 0xcbf29ce484222325_u64;
+    let mut right = 0x84222325cbf29ce4_u64;
+    for byte in value {
+        left ^= u64::from(*byte);
+        left = left.wrapping_mul(0x100000001b3);
+        right ^= u64::from(*byte).rotate_left(1);
+        right = right.wrapping_mul(0x100000001b3).rotate_left(5);
+    }
+    (left, right)
+}
+
 #[cfg(test)]
 mod tests {
-    use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
 
     static TEST_REPOSITORY_ID: AtomicUsize = AtomicUsize::new(0);
 
-    struct TestDirectory(std::path::PathBuf);
+    struct TestDirectory(PathBuf);
 
     impl TestDirectory {
-        fn git(&self, args: &[&str]) {
+        fn git(&self, args: &[&str]) -> String {
             let output = Command::new("git")
                 .arg("-C")
                 .arg(&self.0)
@@ -677,6 +1545,7 @@ mod tests {
                 "git failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
+            String::from_utf8_lossy(&output.stdout).trim().to_owned()
         }
     }
 
@@ -686,14 +1555,25 @@ mod tests {
         }
     }
 
-    fn test_directory() -> TestDirectory {
+    fn test_directory(label: &str) -> TestDirectory {
         let id = TEST_REPOSITORY_ID.fetch_add(1, Ordering::Relaxed);
-        let path =
-            std::env::temp_dir().join(format!("quinjet-github-test-{}-{id}", std::process::id()));
+        let path = env::temp_dir().join(format!(
+            "quinjet-github-{label}-{}-{id}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(&path).unwrap();
-        let directory = TestDirectory(path);
+        TestDirectory(path)
+    }
+
+    fn initialized_repository() -> TestDirectory {
+        let directory = test_directory("repo");
         directory.git(&["init", "--initial-branch=main"]);
+        directory.git(&["config", "user.name", "Quinjet Test"]);
+        directory.git(&["config", "user.email", "quinjet@example.com"]);
+        fs::write(directory.0.join("README.md"), "base\n").unwrap();
+        directory.git(&["add", "README.md"]);
+        directory.git(&["commit", "--message=base"]);
         directory
     }
 
@@ -705,9 +1585,32 @@ mod tests {
         }
     }
 
+    fn pull_request(base: GitHubRepository, number: u64) -> PullRequest {
+        PullRequest {
+            number,
+            title: "Ship the rocket".to_owned(),
+            author: "octocat".to_owned(),
+            state: "OPEN".to_owned(),
+            is_draft: false,
+            updated_at: "2026-08-13T12:00:00Z".to_owned(),
+            url: format!("{}/pull/{number}", base.url),
+            base_ref: "main".to_owned(),
+            base_oid: String::new(),
+            head_ref: "feature/rocket".to_owned(),
+            head_oid: String::new(),
+            base_repository: base,
+            head_repository: Some("octocat/widget".to_owned()),
+            head_remotes: vec!["origin".to_owned()],
+            is_cross_repository: true,
+            additions: 1,
+            deletions: 0,
+            changed_files: 1,
+        }
+    }
+
     #[test]
     fn discovers_distinct_fetch_and_push_repositories_for_each_remote() {
-        let directory = test_directory();
+        let directory = initialized_repository();
         directory.git(&[
             "remote",
             "add",
@@ -734,23 +1637,11 @@ mod tests {
         let (urls, warnings) = repository.remote_urls().unwrap();
 
         assert!(warnings.is_empty());
-        assert_eq!(
-            urls,
-            vec![
-                RemoteUrl {
-                    remote: "origin".to_owned(),
-                    url: "git@github.com:octocat/widget.git".to_owned(),
-                },
-                RemoteUrl {
-                    remote: "origin".to_owned(),
-                    url: "https://github.com/acme/widget.git".to_owned(),
-                },
-                RemoteUrl {
-                    remote: "upstream".to_owned(),
-                    url: "https://github.com/acme/widget.git".to_owned(),
-                },
-            ]
-        );
+        assert_eq!(urls.len(), 3);
+        assert!(urls.iter().any(|entry| {
+            entry.remote == "origin" && entry.url == "git@github.com:octocat/widget.git"
+        }));
+        assert!(urls.iter().any(|entry| entry.remote == "upstream"));
     }
 
     #[test]
@@ -782,39 +1673,7 @@ mod tests {
     }
 
     #[test]
-    fn groups_duplicate_remote_urls_without_losing_aliases() {
-        let grouped = group_remote_urls(&[
-            RemoteUrl {
-                remote: "upstream".to_owned(),
-                url: "https://github.com/acme/widget.git".to_owned(),
-            },
-            RemoteUrl {
-                remote: "origin".to_owned(),
-                url: "https://user:secret@github.com/acme/widget.git".to_owned(),
-            },
-            RemoteUrl {
-                remote: "publish".to_owned(),
-                url: "git@github.com:octocat/widget.git".to_owned(),
-            },
-        ]);
-
-        assert_eq!(
-            grouped,
-            vec![
-                (
-                    "https://github.com/acme/widget.git".to_owned(),
-                    vec!["origin".to_owned(), "upstream".to_owned()]
-                ),
-                (
-                    "ssh://github.com/octocat/widget.git".to_owned(),
-                    vec!["publish".to_owned()]
-                ),
-            ]
-        );
-    }
-
-    #[test]
-    fn parses_cross_repository_pull_requests_and_maps_both_remotes() {
+    fn parses_cross_repository_pull_requests_with_oids() {
         let upstream = repository(
             "acme/widget",
             "https://github.com/acme/widget",
@@ -825,109 +1684,198 @@ mod tests {
             "https://github.com/octocat/widget",
             &["origin", "publish"],
         );
-        let output = b"42\tShip the rocket\toctocat\tOPEN\ttrue\t2026-08-13T12:00:00Z\thttps://github.com/acme/widget/pull/42\tmain\tfeature/rocket\toctocat/widget\ttrue\t12\t3\t4\n";
+        let output = b"42\tShip the rocket\toctocat\tOPEN\ttrue\t2026-08-13T12:00:00Z\thttps://github.com/acme/widget/pull/42\tmain\tfeature/rocket\toctocat/widget\ttrue\t12\t3\t4\tbaseoid\theadid\n";
 
         let requests = parse_pull_requests(output, &upstream, &[upstream.clone(), fork]).unwrap();
 
-        assert_eq!(requests.len(), 1);
         let request = &requests[0];
         assert_eq!(request.base_label(), "acme/widget:main");
         assert_eq!(request.head_label(), "octocat/widget:feature/rocket");
-        assert_eq!(request.base_repository.remotes, vec!["upstream"]);
         assert_eq!(request.head_remotes, vec!["origin", "publish"]);
+        assert_eq!(request.base_oid, "baseoid");
+        assert_eq!(request.head_oid, "headid");
         assert!(request.is_cross_repository);
-        assert!(request.is_draft);
-        assert_eq!(
-            (request.changed_files, request.additions, request.deletions),
-            (4, 12, 3)
-        );
     }
 
     #[test]
-    fn builds_a_typed_multi_file_diff_with_cross_remote_details() {
-        let upstream = repository(
-            "acme/widget",
-            "https://github.com/acme/widget",
-            &["upstream"],
-        );
-        let fork = repository(
-            "octocat/widget",
-            "https://github.com/octocat/widget",
-            &["origin"],
-        );
-        let output = b"42\tShip the rocket\toctocat\tOPEN\tfalse\t2026-08-13T12:00:00Z\thttps://github.com/acme/widget/pull/42\tmain\tfeature/rocket\toctocat/widget\ttrue\t2\t1\t2\n";
-        let request = parse_pull_requests(output, &upstream, &[upstream.clone(), fork])
-            .unwrap()
-            .remove(0);
-        let patch = b"diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new\ndiff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -0,0 +1 @@\n+fn main() {}\n";
-
-        let document = pull_request_document(patch, &request, true);
-
-        assert_eq!(document.file_count(), 2);
-        assert_eq!(
-            (document.addition_count(), document.deletion_count()),
-            (2, 1)
-        );
-        assert!(document.truncated);
-        assert!(document.title.contains("octocat/widget:feature/rocket"));
-        assert!(document.title.contains("acme/widget:main"));
-        let details = document.pull_request_details.unwrap();
-        assert_eq!(details.base_remotes, vec!["upstream"]);
-        assert_eq!(details.head_remotes, vec!["origin"]);
-        assert!(details.is_cross_repository);
-        assert_eq!(
-            (details.changed_files, details.additions, details.deletions),
-            (2, 2, 1)
-        );
-    }
-
-    #[test]
-    fn same_repository_heads_use_the_base_remote_aliases() {
-        let base = repository(
-            "acme/widget",
-            "https://github.com/acme/widget",
-            &["origin", "upstream"],
-        );
-        let output = b"9\tLocal topic\tada\tOPEN\tfalse\t2026-01-01T00:00:00Z\thttps://github.com/acme/widget/pull/9\tmain\ttopic\tacme/widget\tfalse\t0\t0\t0\n";
-
-        let requests = parse_pull_requests(output, &base, std::slice::from_ref(&base)).unwrap();
-
-        assert_eq!(requests[0].head_label(), "topic");
-        assert_eq!(requests[0].head_remotes, vec!["origin", "upstream"]);
-        assert!(!requests[0].is_cross_repository);
-    }
-
-    #[test]
-    fn rejects_malformed_pull_request_output_without_panicking() {
-        let base = repository("acme/widget", "https://github.com/acme/widget", &["origin"]);
-
-        assert!(parse_pull_requests(b"not tsv", &base, std::slice::from_ref(&base)).is_err());
-        assert!(
-            parse_pull_requests(
-                b"not-a-number\ttitle\tuser\tOPEN\tfalse\tdate\turl\tmain\ttopic\trepo\tfalse\t0\t0\t1\n",
-                &base,
-                std::slice::from_ref(&base)
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn handles_deleted_forks_and_ghost_authors() {
+    fn deleted_fork_metadata_uses_the_base_repository_pr_ref() {
         let base = repository(
             "acme/widget",
             "https://github.example.com/acme/widget",
             &["enterprise"],
         );
-        let output = b"7\tOld contribution\tghost\tOPEN\tfalse\t2026-01-01T00:00:00Z\thttps://github.example.com/acme/widget/pull/7\ttrunk\tlost-branch\t\tfalse\t0\t0\t0\n";
+        let output = b"7\tOld contribution\tghost\tOPEN\tfalse\t2026-01-01T00:00:00Z\thttps://github.example.com/acme/widget/pull/7\ttrunk\tlost-branch\t\tfalse\t0\t0\t1\tbaseoid\theadid\n";
 
-        let requests = parse_pull_requests(output, &base, std::slice::from_ref(&base)).unwrap();
+        let request = parse_pull_requests(output, &base, std::slice::from_ref(&base))
+            .unwrap()
+            .remove(0);
 
-        assert_eq!(requests[0].author, "ghost");
-        assert_eq!(requests[0].head_label(), "deleted fork:lost-branch");
-        assert!(requests[0].head_remotes.is_empty());
-        assert_eq!(base.host(), "github.example.com");
-        assert_eq!(base.display_name(), "github.example.com/acme/widget");
+        assert_eq!(request.author, "ghost");
+        assert_eq!(request.head_label(), "deleted fork:lost-branch");
+        assert!(request.head_repository.is_none());
+        assert!(request.head_remotes.is_empty());
+        assert_eq!(request.base_repository.host(), "github.example.com");
+    }
+
+    #[test]
+    fn exact_lookup_command_is_repository_scoped_and_requests_oids() {
+        let repository = repository(
+            "acme/widget",
+            "https://github.example.com/acme/widget",
+            &["work"],
+        );
+        let args = pull_request_view_args(&repository, 19);
+        let args = args
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            &args[..5],
+            &["pr", "view", "19", "--repo", repository.url.as_str()]
+        );
+        assert!(args.iter().any(|arg| arg.contains("baseRefOid")));
+        assert!(args.iter().any(|arg| arg.contains("headRefOid")));
+    }
+
+    #[test]
+    fn page_command_is_bounded_and_targets_enterprise_host() {
+        let repository = repository(
+            "acme/widget",
+            "https://github.example.com/acme/widget",
+            &["work"],
+        );
+        let args = pull_request_page_args(&repository, 3, DEFAULT_PULL_REQUEST_PAGE_SIZE)
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--hostname", "github.example.com"])
+        );
+        assert!(args.iter().any(|arg| arg == "repos/acme/widget/pulls"));
+        assert!(args.iter().any(|arg| arg == "per_page=25"));
+        assert!(args.iter().any(|arg| arg == "page=3"));
+    }
+
+    #[test]
+    fn cache_round_trips_private_metadata_and_uses_stable_keys() {
+        let directory = test_directory("cache");
+        let cache = CacheStore::at(directory.0.clone());
+        cache.write("repo\npage 1", b"metadata\n").unwrap();
+
+        let entry = cache.read("repo\npage 1").unwrap();
+        assert_eq!(entry.data, b"metadata\n");
+        assert!(entry.age < Duration::from_secs(2));
+        assert_eq!(cache.path("same"), cache.path("same"));
+        assert_ne!(cache.path("same"), cache.path("different"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(cache.path("repo\npage 1"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o077,
+                0
+            );
+        }
+    }
+
+    #[test]
+    fn disposable_pr_diff_does_not_checkout_or_add_source_refs() {
+        let source = initialized_repository();
+        let remote = test_directory("remote.git");
+        source.git(&["init", "--bare", remote.0.to_str().unwrap()]);
+        source.git(&["remote", "add", "test-origin", remote.0.to_str().unwrap()]);
+        source.git(&["push", "test-origin", "main:refs/heads/main"]);
+        source.git(&["switch", "-c", "feature/rocket"]);
+        for index in 0..21 {
+            fs::write(
+                source.0.join(format!("rocket-{index:02}.txt")),
+                format!("launch {index}\n"),
+            )
+            .unwrap();
+        }
+        source.git(&["add", "."]);
+        source.git(&["commit", "--message=rocket"]);
+        source.git(&["push", "test-origin", "feature/rocket:refs/pull/7/head"]);
+        source.git(&["switch", "main"]);
+
+        let before_branch = source.git(&["branch", "--show-current"]);
+        let before_status = source.git(&["status", "--porcelain"]);
+        let before_refs = source.git(&["show-ref"]);
+        let git_repository = Repository {
+            root: source.0.clone(),
+        };
+        let mut request = pull_request(
+            repository("acme/widget", remote.0.to_str().unwrap(), &["test-origin"]),
+            7,
+        );
+        request.base_oid = source.git(&["rev-parse", "main"]);
+        request.head_oid = source.git(&["rev-parse", "feature/rocket"]);
+        request.head_repository = None;
+        request.changed_files = 21;
+
+        let first_page = git_repository
+            .local_pull_request_diff(&request, 1, DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE)
+            .unwrap();
+        let second_page = git_repository
+            .local_pull_request_diff(&request, 2, DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE)
+            .unwrap();
+
+        assert_eq!(first_page.file_count(), 20);
+        assert_eq!(second_page.file_count(), 1);
+        let first_details = first_page.pull_request_details.unwrap();
+        let second_details = second_page.pull_request_details.unwrap();
+        assert_eq!(
+            (first_details.file_page, first_details.total_files),
+            (1, 21)
+        );
+        assert!(first_details.has_next_file_page);
+        assert!(!first_details.has_previous_file_page);
+        assert_eq!(second_details.file_page, 2);
+        assert!(!second_details.has_next_file_page);
+        assert!(second_details.has_previous_file_page);
+        assert_eq!(source.git(&["branch", "--show-current"]), before_branch);
+        assert_eq!(source.git(&["status", "--porcelain"]), before_status);
+        assert_eq!(source.git(&["show-ref"]), before_refs);
+    }
+
+    #[test]
+    fn temporary_bare_repository_is_removed_on_drop() {
+        let path = {
+            let repository = TemporaryBareRepository::new().unwrap();
+            assert!(repository.path.exists());
+            repository.path.clone()
+        };
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn bounded_runner_kills_oversized_git_output() {
+        let repository = initialized_repository();
+        fs::write(repository.0.join("large.txt"), "x".repeat(256 * 1024)).unwrap();
+        repository.git(&["add", "large.txt"]);
+        repository.git(&["commit", "--message=large"]);
+        let mut command = Command::new("git");
+        command
+            .arg("-C")
+            .arg(&repository.0)
+            .args(["show", "HEAD:large.txt"]);
+
+        let output = run_bounded_command(&mut command, 1024, 1024).unwrap();
+
+        assert!(output.stdout_truncated);
+        assert_eq!(output.stdout.len(), 1024);
+    }
+
+    #[test]
+    fn rejects_malformed_pull_request_output_without_panicking() {
+        let base = repository("acme/widget", "https://github.com/acme/widget", &["origin"]);
+        assert!(parse_pull_requests(b"not tsv", &base, std::slice::from_ref(&base)).is_err());
     }
 
     #[test]
@@ -958,157 +1906,9 @@ mod tests {
             repository("acme/widget", "https://github.com/ACME/WIDGET", &[]),
             Some("upstream"),
         );
-        merge_repository(
-            &mut repositories,
-            repository("acme/widget", "https://github.com/acme/widget", &[]),
-            Some("origin"),
-        );
 
         let repository = repositories.into_values().next().unwrap();
         assert_eq!(repository.url, "https://github.com/acme/widget");
         assert_eq!(repository.remotes, vec!["origin", "upstream"]);
-    }
-
-    #[test]
-    fn list_command_is_bounded_and_explicitly_targets_the_repository() {
-        let repository = repository(
-            "acme/widget",
-            "https://github.example.com/acme/widget",
-            &["work"],
-        );
-
-        let args = pull_request_list_args(&repository);
-        let args: Vec<_> = args.iter().map(|arg| arg.to_string_lossy()).collect();
-
-        assert_eq!(
-            args[0..4],
-            ["pr", "list", "--repo", repository.url.as_str()]
-        );
-        assert!(args.windows(2).any(|pair| pair == ["--state", "open"]));
-        assert!(args.windows(2).any(|pair| {
-            pair[0] == "--limit" && pair[1] == MAX_PULL_REQUESTS_PER_REPOSITORY.to_string().as_str()
-        }));
-    }
-
-    #[test]
-    fn diff_command_always_targets_the_base_repository_url() {
-        let request = PullRequest {
-            number: 19,
-            title: "Cross-fork change".to_owned(),
-            author: "octocat".to_owned(),
-            state: "OPEN".to_owned(),
-            is_draft: false,
-            updated_at: String::new(),
-            url: "https://github.com/acme/widget/pull/19".to_owned(),
-            base_ref: "main".to_owned(),
-            head_ref: "topic".to_owned(),
-            base_repository: repository(
-                "acme/widget",
-                "https://github.com/acme/widget",
-                &["upstream"],
-            ),
-            head_repository: Some("octocat/widget".to_owned()),
-            head_remotes: vec!["origin".to_owned()],
-            is_cross_repository: true,
-            additions: 0,
-            deletions: 0,
-            changed_files: 0,
-        };
-
-        let args = pull_request_diff_args(&request);
-        let args: Vec<_> = args.iter().map(|arg| arg.to_string_lossy()).collect();
-        assert_eq!(
-            args,
-            [
-                "pr",
-                "diff",
-                "19",
-                "--repo",
-                "https://github.com/acme/widget",
-                "--color=never"
-            ]
-        );
-        assert!(!args.iter().any(|arg| arg.contains("octocat/widget")));
-    }
-
-    #[test]
-    fn pull_request_filter_covers_identity_branches_and_remotes() {
-        let request = PullRequest {
-            number: 42,
-            title: "Ship the rocket".to_owned(),
-            author: "octocat".to_owned(),
-            state: "OPEN".to_owned(),
-            is_draft: false,
-            updated_at: String::new(),
-            url: String::new(),
-            base_ref: "main".to_owned(),
-            head_ref: "feature/rocket".to_owned(),
-            base_repository: repository(
-                "acme/widget",
-                "https://github.com/acme/widget",
-                &["upstream"],
-            ),
-            head_repository: Some("octocat/widget".to_owned()),
-            head_remotes: vec!["origin".to_owned()],
-            is_cross_repository: true,
-            additions: 0,
-            deletions: 0,
-            changed_files: 0,
-        };
-
-        for query in [
-            "rocket",
-            "octocat",
-            "42",
-            "acme/widget",
-            "main",
-            "feature",
-            "upstream",
-            "origin",
-        ] {
-            assert!(request.matches(query), "query {query:?} should match");
-        }
-        assert!(!request.matches("unrelated"));
-    }
-
-    #[test]
-    fn sorts_most_recent_requests_first_with_stable_ties() {
-        let base = repository("z/repo", "https://github.com/z/repo", &[]);
-        let mut requests = [3_u64, 1, 2]
-            .into_iter()
-            .map(|number| PullRequest {
-                number,
-                title: String::new(),
-                author: String::new(),
-                state: String::new(),
-                is_draft: false,
-                updated_at: if number == 1 {
-                    "2026-09-01T00:00:00Z"
-                } else {
-                    "2026-08-01T00:00:00Z"
-                }
-                .to_owned(),
-                url: String::new(),
-                base_ref: String::new(),
-                head_ref: String::new(),
-                base_repository: base.clone(),
-                head_repository: None,
-                head_remotes: Vec::new(),
-                is_cross_repository: false,
-                additions: 0,
-                deletions: 0,
-                changed_files: 0,
-            })
-            .collect::<Vec<_>>();
-
-        sort_pull_requests(&mut requests);
-
-        assert_eq!(
-            requests
-                .iter()
-                .map(|request| request.number)
-                .collect::<Vec<_>>(),
-            vec![1, 3, 2]
-        );
     }
 }

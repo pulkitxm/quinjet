@@ -27,6 +27,18 @@ pub struct Branch {
     pub short_id: String,
 }
 
+/// A local or remote-tracking branch that can be inspected without changing HEAD.
+/// `reference` is always a full ref emitted by Git and is used only as a revision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryBranch {
+    pub name: String,
+    pub reference: String,
+    pub current: bool,
+    pub remote: bool,
+    pub relative_date: String,
+    pub short_id: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictChoice {
     Ours,
@@ -164,7 +176,13 @@ impl Repository {
         Ok(parse_porcelain_v2(&output))
     }
 
-    pub fn history(&self, skip: usize, limit: usize) -> Result<Vec<Commit>> {
+    pub fn history(&self, revision: &str, skip: usize, limit: usize) -> Result<Vec<Commit>> {
+        if revision != "HEAD"
+            && !revision.starts_with("refs/heads/")
+            && !revision.starts_with("refs/remotes/")
+        {
+            bail!("refusing to load history for an invalid branch reference");
+        }
         let limit = if limit == 0 {
             DEFAULT_HISTORY_PAGE
         } else {
@@ -172,13 +190,14 @@ impl Repository {
         };
         let args = vec![
             OsString::from("log"),
-            OsString::from("--all"),
             OsString::from("--topo-order"),
             OsString::from("--decorate=short"),
             OsString::from("--no-color"),
             OsString::from(format!("--skip={skip}")),
             OsString::from(format!("--max-count={limit}")),
             OsString::from(format!("--format={LOG_FORMAT}")),
+            OsString::from(revision),
+            OsString::from("--"),
         ];
         let output = self.checked(args)?;
         Ok(parse_log(&output))
@@ -311,6 +330,46 @@ impl Repository {
                 short_id: text(fields[4]),
             });
         }
+        Ok(branches)
+    }
+
+    pub fn history_branches(&self) -> Result<Vec<HistoryBranch>> {
+        let output = self.checked([
+            OsString::from("for-each-ref"),
+            OsString::from("--sort=-committerdate"),
+            OsString::from(
+                "--format=%(refname:short)%1f%(refname)%1f%(HEAD)%1f%(committerdate:relative)%1f%(objectname:short)%1f%(symref)%1e",
+            ),
+            OsString::from("refs/heads"),
+            OsString::from("refs/remotes"),
+        ])?;
+
+        let mut branches = Vec::new();
+        for record in output.split(|byte| *byte == 0x1e) {
+            let record = trim_ascii(record);
+            if record.is_empty() {
+                continue;
+            }
+            let fields: Vec<_> = record.split(|byte| *byte == 0x1f).collect();
+            if fields.len() < 6 || !trim_ascii(fields[5]).is_empty() {
+                // Skip symbolic remote HEAD aliases such as origin/HEAD.
+                continue;
+            }
+            let reference = text(fields[1]);
+            let remote = reference.starts_with("refs/remotes/");
+            if !reference.starts_with("refs/heads/") && !remote {
+                continue;
+            }
+            branches.push(HistoryBranch {
+                name: text(fields[0]),
+                reference,
+                current: fields[2] == b"*",
+                remote,
+                relative_date: text(fields[3]),
+                short_id: text(fields[4]),
+            });
+        }
+        branches.sort_by_key(|branch| (!branch.current, branch.remote));
         Ok(branches)
     }
 
@@ -755,6 +814,85 @@ mod tests {
         let mut input = b"first\nsecond\nthird\n".to_vec();
         assert!(truncate(&mut input, 15));
         assert_eq!(input, b"first\nsecond\n");
+    }
+
+    #[test]
+    fn reads_a_selected_branch_history_without_changing_head_or_worktree() {
+        let test_repository = TestRepository::new();
+        let repository = test_repository.repository();
+        run_test_git(&test_repository.path, ["switch", "-c", "topic"]);
+        fs::write(test_repository.path.join("topic.txt"), "topic\n").unwrap();
+        run_test_git(&test_repository.path, ["add", "topic.txt"]);
+        run_test_git(
+            &test_repository.path,
+            [
+                "-c",
+                "user.name=Quinjet Test",
+                "-c",
+                "user.email=quinjet@example.com",
+                "commit",
+                "--message=topic commit",
+            ],
+        );
+        let topic_id = run_test_git(&test_repository.path, ["rev-parse", "HEAD"]);
+        run_test_git(&test_repository.path, ["switch", "main"]);
+        let refs_before = run_test_git(&test_repository.path, ["show-ref"]);
+
+        let main = repository.history("HEAD", 0, 50).unwrap();
+        let topic = repository.history("refs/heads/topic", 0, 50).unwrap();
+
+        assert!(!main.iter().any(|commit| commit.id == topic_id));
+        assert!(topic.iter().any(|commit| commit.id == topic_id));
+        assert_eq!(
+            run_test_git(&test_repository.path, ["branch", "--show-current"]),
+            "main"
+        );
+        assert_eq!(
+            run_test_git(&test_repository.path, ["status", "--porcelain"]),
+            ""
+        );
+        assert_eq!(
+            run_test_git(&test_repository.path, ["show-ref"]),
+            refs_before
+        );
+        assert!(repository.history("--all", 0, 50).is_err());
+    }
+
+    #[test]
+    fn lists_history_branches_with_full_safe_references() {
+        let test_repository = TestRepository::new();
+        let repository = test_repository.repository();
+        run_test_git(&test_repository.path, ["branch", "topic"]);
+        run_test_git(
+            &test_repository.path,
+            ["update-ref", "refs/remotes/origin/main", "HEAD"],
+        );
+        run_test_git(
+            &test_repository.path,
+            [
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            ],
+        );
+
+        let branches = repository.history_branches().unwrap();
+
+        assert!(branches.iter().any(|branch| {
+            branch.current && branch.name == "main" && branch.reference == "refs/heads/main"
+        }));
+        assert!(branches.iter().any(|branch| {
+            !branch.current
+                && !branch.remote
+                && branch.name == "topic"
+                && branch.reference == "refs/heads/topic"
+        }));
+        assert!(branches.iter().any(|branch| {
+            branch.remote
+                && branch.name == "origin/main"
+                && branch.reference == "refs/remotes/origin/main"
+        }));
+        assert!(!branches.iter().any(|branch| branch.name == "origin/HEAD"));
     }
 
     #[test]
