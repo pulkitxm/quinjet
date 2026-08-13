@@ -1,0 +1,14 @@
+# Reference repositories and scratch research
+extras/
+
+# Rust build artifacts
+/target/
+
+# Editor / OS files
+.DS_Store
+*.swp
+
+
+# Added by cargo
+
+/target
