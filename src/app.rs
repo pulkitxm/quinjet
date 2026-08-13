@@ -1959,7 +1959,10 @@ impl App {
     fn switch_view(&mut self, view: View, effects: &mut Vec<AppEffect>) {
         self.pull_request_lookup_active = false;
         if self.view == view {
-            if view == View::PullRequests && !self.pull_requests_loaded {
+            if view == View::PullRequests
+                && !self.pull_requests_loaded
+                && !self.pull_requests_loading
+            {
                 self.request_pull_requests(false, effects);
             }
             return;
@@ -1971,7 +1974,7 @@ impl App {
         self.horizontal_scroll = 0;
         self.invalidate_preview();
         self.document = self.loading_document_for_view(view);
-        if view == View::PullRequests && !self.pull_requests_loaded {
+        if view == View::PullRequests && !self.pull_requests_loaded && !self.pull_requests_loading {
             self.request_pull_requests(false, effects);
         } else {
             self.preview_due = Some(Instant::now() + PREVIEW_DEBOUNCE);
@@ -2972,6 +2975,22 @@ mod tests {
         ));
         assert!(app.pull_requests_loading);
         assert_eq!(app.view, View::Changes);
+    }
+
+    #[test]
+    fn opening_pr_tab_does_not_restart_an_in_flight_startup_prefetch() {
+        let mut app = App::new("/tmp/repo", "repo");
+        let now = Instant::now();
+        let startup = app.initial_effects();
+        let generation = app.pull_request_generation;
+
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE), now);
+
+        assert_eq!(startup.len(), 4);
+        assert!(effects.is_empty());
+        assert_eq!(app.pull_request_generation, generation);
+        assert!(app.pull_requests_loading);
+        assert_eq!(app.document.title, "Pull Requests");
     }
 
     #[test]
