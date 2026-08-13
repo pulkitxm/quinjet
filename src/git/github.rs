@@ -275,36 +275,14 @@ impl Repository {
         file_page: usize,
         file_page_size: usize,
     ) -> Result<DiffDocument> {
-        // Page rows intentionally contain only inexpensive list metadata. Enrich the
-        // selected PR once (normally from the short-lived cache) before fetching Git
-        // objects. If GitHub is temporarily unavailable, the list's immutable OIDs
-        // and refs are still sufficient for the isolated fetch.
-        let mut detailed = self
-            .pull_request_metadata(
-                &pull_request.base_repository,
-                std::slice::from_ref(&pull_request.base_repository),
-                pull_request.number,
-                false,
-            )
-            .map(|(pull_request, _)| pull_request)
-            .unwrap_or_else(|_| pull_request.clone());
-        if !same_pull_request_oids(&detailed, pull_request) {
-            detailed = self
-                .pull_request_metadata(
-                    &pull_request.base_repository,
-                    std::slice::from_ref(&pull_request.base_repository),
-                    pull_request.number,
-                    true,
-                )
-                .map(|(pull_request, _)| pull_request)
-                .ok()
-                .filter(|metadata| same_pull_request_oids(metadata, pull_request))
-                .unwrap_or_else(|| pull_request.clone());
+        // GraphQL list rows already contain all metadata needed by the preview,
+        // including immutable base/head OIDs. Avoid a second `gh pr view` round-trip
+        // for every selection; exact lookup remains available as an explicit action.
+        if self.has_commit(&pull_request.base_oid) && self.has_commit(&pull_request.head_oid) {
+            self.local_source_pull_request_diff(pull_request, file_page, file_page_size)
+        } else {
+            self.local_pull_request_diff(pull_request, file_page, file_page_size)
         }
-        if detailed.head_remotes.is_empty() {
-            detailed.head_remotes.clone_from(&pull_request.head_remotes);
-        }
-        self.local_pull_request_diff(&detailed, file_page, file_page_size)
     }
 
     fn pull_request_metadata(
@@ -335,6 +313,22 @@ impl Repository {
         Ok((pull_requests.remove(0), response.disposition))
     }
 
+    fn local_source_pull_request_diff(
+        &self,
+        pull_request: &PullRequest,
+        requested_file_page: usize,
+        requested_file_page_size: usize,
+    ) -> Result<DiffDocument> {
+        let merge_base = self.merge_base(&pull_request.base_oid, &pull_request.head_oid)?;
+        self.source_pull_request_document(
+            pull_request,
+            &merge_base,
+            &pull_request.head_oid,
+            requested_file_page,
+            requested_file_page_size,
+        )
+    }
+
     fn local_pull_request_diff(
         &self,
         pull_request: &PullRequest,
@@ -344,46 +338,50 @@ impl Repository {
         let temporary = TemporaryBareRepository::new()?;
         let (merge_base, head) = fetch_pull_request(&temporary.path, pull_request)?;
         let (paths, paths_truncated) = changed_paths(&temporary.path, &merge_base, &head)?;
-        let file_page_size =
-            requested_file_page_size.clamp(1, DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE.max(50));
-        let page_count = if paths.is_empty() {
-            1
-        } else {
-            paths.len().div_ceil(file_page_size)
-        };
-        let file_page = requested_file_page.max(1).min(page_count);
-        let offset = (file_page - 1).saturating_mul(file_page_size);
-        let selected_paths = paths
-            .iter()
-            .skip(offset)
-            .take(file_page_size)
-            .cloned()
-            .collect::<Vec<_>>();
-        let has_previous = file_page > 1;
-        let has_next = offset.saturating_add(selected_paths.len()) < paths.len();
-        let total_files = if paths_truncated {
-            pull_request.changed_files.max(paths.len())
-        } else {
-            paths.len()
-        };
-
-        let (patch, output_truncated) = if selected_paths.is_empty() {
-            (Vec::new(), false)
-        } else {
-            diff_selected_paths(&temporary.path, &merge_base, &head, &selected_paths)?
-        };
-        let truncated = output_truncated || paths_truncated;
-        Ok(pull_request_document(
-            &patch,
+        build_pull_request_document(
+            &temporary.path,
             pull_request,
-            truncated,
-            file_page,
-            file_page_size,
-            selected_paths.len(),
-            total_files,
-            has_previous,
-            has_next,
-        ))
+            &merge_base,
+            &head,
+            requested_file_page,
+            requested_file_page_size,
+            paths,
+            paths_truncated,
+        )
+    }
+
+    fn merge_base(&self, base: &str, head: &str) -> Result<String> {
+        let output = self.checked([
+            OsString::from("merge-base"),
+            OsString::from(base),
+            OsString::from(head),
+        ])?;
+        let merge_base = text(trim_ascii(&output));
+        if merge_base.is_empty() {
+            bail!("Git did not return a pull-request merge base");
+        }
+        Ok(merge_base)
+    }
+
+    fn source_pull_request_document(
+        &self,
+        pull_request: &PullRequest,
+        merge_base: &str,
+        head: &str,
+        requested_file_page: usize,
+        requested_file_page_size: usize,
+    ) -> Result<DiffDocument> {
+        let (paths, paths_truncated) = changed_paths_in_repository(self.root(), merge_base, head)?;
+        build_pull_request_document(
+            self.root(),
+            pull_request,
+            merge_base,
+            head,
+            requested_file_page,
+            requested_file_page_size,
+            paths,
+            paths_truncated,
+        )
     }
 
     fn github_repositories(&self, refresh: bool) -> Result<(Vec<GitHubRepository>, Vec<String>)> {
@@ -937,15 +935,6 @@ where
         .map_err(|error| anyhow::anyhow!("invalid {label} `{value}`: {error}"))
 }
 
-fn same_pull_request_oids(left: &PullRequest, right: &PullRequest) -> bool {
-    (left.base_oid.is_empty()
-        || right.base_oid.is_empty()
-        || left.base_oid.eq_ignore_ascii_case(&right.base_oid))
-        && (left.head_oid.is_empty()
-            || right.head_oid.is_empty()
-            || left.head_oid.eq_ignore_ascii_case(&right.head_oid))
-}
-
 fn select_repository<'a>(
     repositories: &'a [GitHubRepository],
     selected: Option<&GitHubRepository>,
@@ -1257,6 +1246,14 @@ fn try_merge_base(temporary: &Path, base: &str, head: &str) -> Result<Option<Str
 }
 
 fn changed_paths(temporary: &Path, merge_base: &str, head: &str) -> Result<(Vec<OsString>, bool)> {
+    changed_paths_in_repository(temporary, merge_base, head)
+}
+
+fn changed_paths_in_repository(
+    repository: &Path,
+    merge_base: &str,
+    head: &str,
+) -> Result<(Vec<OsString>, bool)> {
     let args = [
         OsString::from("diff"),
         OsString::from("--name-only"),
@@ -1266,7 +1263,7 @@ fn changed_paths(temporary: &Path, merge_base: &str, head: &str) -> Result<(Vec<
         OsString::from(head),
         OsString::from("--"),
     ];
-    let output = run_temp_git(temporary, &args, MAX_PR_PATH_BYTES, 128 * 1024)?;
+    let output = run_repository_git(repository, &args, MAX_PR_PATH_BYTES, 128 * 1024)?;
     if !output.status.success() && !output.stdout_truncated {
         bail!(
             "{}",
@@ -1297,8 +1294,60 @@ fn changed_paths(temporary: &Path, merge_base: &str, head: &str) -> Result<(Vec<
     Ok((paths, truncated))
 }
 
+#[allow(clippy::too_many_arguments)]
+fn build_pull_request_document(
+    repository: &Path,
+    pull_request: &PullRequest,
+    merge_base: &str,
+    head: &str,
+    requested_file_page: usize,
+    requested_file_page_size: usize,
+    paths: Vec<OsString>,
+    paths_truncated: bool,
+) -> Result<DiffDocument> {
+    let file_page_size =
+        requested_file_page_size.clamp(1, DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE.max(50));
+    let page_count = if paths.is_empty() {
+        1
+    } else {
+        paths.len().div_ceil(file_page_size)
+    };
+    let file_page = requested_file_page.max(1).min(page_count);
+    let offset = (file_page - 1).saturating_mul(file_page_size);
+    let selected_paths = paths
+        .iter()
+        .skip(offset)
+        .take(file_page_size)
+        .cloned()
+        .collect::<Vec<_>>();
+    let has_previous = file_page > 1;
+    let has_next = offset.saturating_add(selected_paths.len()) < paths.len();
+    let total_files = if paths_truncated {
+        pull_request.changed_files.max(paths.len())
+    } else {
+        paths.len()
+    };
+    let (patch, output_truncated) = if selected_paths.is_empty() {
+        (Vec::new(), false)
+    } else {
+        diff_selected_paths(repository, merge_base, head, &selected_paths)?
+    };
+    let truncated = output_truncated || paths_truncated;
+    Ok(pull_request_document(
+        &patch,
+        pull_request,
+        truncated,
+        file_page,
+        file_page_size,
+        selected_paths.len(),
+        total_files,
+        has_previous,
+        has_next,
+    ))
+}
+
 fn diff_selected_paths(
-    temporary: &Path,
+    repository: &Path,
     merge_base: &str,
     head: &str,
     paths: &[OsString],
@@ -1315,7 +1364,7 @@ fn diff_selected_paths(
         OsString::from("--"),
     ];
     args.extend(paths.iter().cloned());
-    let output = run_temp_git(temporary, &args, MAX_DIFF_BYTES, MAX_GH_ERROR_BYTES)?;
+    let output = run_repository_git(repository, &args, MAX_DIFF_BYTES, MAX_GH_ERROR_BYTES)?;
     if !output.status.success() && !output.stdout_truncated {
         bail!(
             "{}",
@@ -1345,17 +1394,26 @@ fn run_temp_git(
     stdout_limit: usize,
     stderr_limit: usize,
 ) -> Result<BoundedOutput> {
+    run_repository_git(temporary, args, stdout_limit, stderr_limit)
+}
+
+fn run_repository_git(
+    repository: &Path,
+    args: &[OsString],
+    stdout_limit: usize,
+    stderr_limit: usize,
+) -> Result<BoundedOutput> {
     let mut command = Command::new("git");
     command
         .arg("-C")
-        .arg(temporary)
+        .arg(repository)
         .args(["-c", "core.quotepath=false"])
         .args(args)
         .env("LC_ALL", "C")
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_TERMINAL_PROMPT", "0");
     run_bounded_command(&mut command, stdout_limit, stderr_limit)
-        .with_context(|| format!("failed to execute Git in {}", temporary.display()))
+        .with_context(|| format!("failed to execute Git in {}", repository.display()))
 }
 
 struct BoundedOutput {
@@ -1888,6 +1946,47 @@ mod tests {
                 0
             );
         }
+    }
+
+    #[test]
+    fn locally_available_pr_objects_avoid_disposable_fetches() {
+        let source = initialized_repository();
+        let base_oid = source.git(&["rev-parse", "HEAD"]);
+        source.git(&["switch", "-c", "feature/local-preview"]);
+        fs::write(source.0.join("local.txt"), "available locally\n").unwrap();
+        source.git(&["add", "local.txt"]);
+        source.git(&["commit", "--message=local preview"]);
+        let head_oid = source.git(&["rev-parse", "HEAD"]);
+        let git_repository = Repository {
+            root: source.0.clone(),
+        };
+        let mut request = pull_request(
+            repository(
+                "acme/widget",
+                "https://invalid.example.test/acme/widget",
+                &["origin"],
+            ),
+            7,
+        );
+        request.base_oid = base_oid;
+        request.head_oid = head_oid;
+        request.changed_files = 1;
+
+        let started = std::time::Instant::now();
+        let document = git_repository
+            .pull_request_diff(&request, 1, DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE)
+            .unwrap();
+
+        let elapsed = started.elapsed();
+
+        assert_eq!(document.file_count(), 1);
+        assert!(
+            document
+                .lines
+                .iter()
+                .any(|line| line.text().contains("local.txt"))
+        );
+        assert!(elapsed < Duration::from_secs(2));
     }
 
     #[test]

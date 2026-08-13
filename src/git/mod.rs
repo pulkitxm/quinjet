@@ -157,6 +157,10 @@ impl Repository {
         &self.root
     }
 
+    pub fn clone_for_worker(&self) -> Self {
+        self.clone()
+    }
+
     pub fn name(&self) -> String {
         self.root
             .file_name()
@@ -269,6 +273,17 @@ impl Repository {
         args.push(OsString::from("--"));
         args.push(change.path.as_os_str().to_owned());
         self.checked(args)
+    }
+
+    pub fn has_commit(&self, oid: &str) -> bool {
+        is_full_oid(oid)
+            && self
+                .run([
+                    OsString::from("cat-file"),
+                    OsString::from("-e"),
+                    OsString::from(format!("{oid}^{{commit}}")),
+                ])
+                .is_ok_and(|output| output.status.success())
     }
 
     pub fn commit_detail(&self, commit: &Commit) -> Result<DiffDocument> {
@@ -727,6 +742,10 @@ fn plural_message(count: usize, singular: &str, plural: &str) -> String {
     } else {
         format!("{count} {plural}")
     }
+}
+
+fn is_full_oid(value: &str) -> bool {
+    matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn short_id(id: &str) -> &str {
