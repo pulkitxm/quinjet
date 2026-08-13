@@ -1,6 +1,8 @@
+use std::collections::VecDeque;
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
-use crossbeam_channel::{Receiver, Sender, TrySendError, bounded, unbounded};
+use crossbeam_channel::{Receiver, Sender, unbounded};
 
 use super::diff::DiffDocument;
 use super::history::Commit;
@@ -66,39 +68,85 @@ pub enum WorkerEvent {
     },
 }
 
-pub struct GitWorker {
-    commands: Sender<WorkerCommand>,
-    events: Receiver<WorkerEvent>,
+#[derive(Default)]
+struct Mailbox {
+    operations: VecDeque<WorkerCommand>,
+    branches: Option<WorkerCommand>,
+    refresh: Option<WorkerCommand>,
+    preview: Option<WorkerCommand>,
+    history: Option<WorkerCommand>,
+    shutdown: bool,
 }
 
-pub enum SendOutcome {
-    Queued,
-    Full(Box<WorkerCommand>),
-    Disconnected,
+impl Mailbox {
+    fn push(&mut self, command: WorkerCommand) {
+        match command {
+            command @ WorkerCommand::Operate { .. } => self.operations.push_back(command),
+            command @ WorkerCommand::LoadBranches { .. } => self.branches = Some(command),
+            command @ WorkerCommand::Refresh { .. } => self.refresh = Some(command),
+            command @ (WorkerCommand::LoadDiff { .. } | WorkerCommand::LoadCommit { .. }) => {
+                // Only the newest preview matters. This makes key-repeat constant-space
+                // even when a large diff is slower than navigation.
+                self.preview = Some(command);
+            }
+            command @ WorkerCommand::LoadHistory { .. } => self.history = Some(command),
+            WorkerCommand::Shutdown => self.shutdown = true,
+        }
+    }
+
+    fn pop(&mut self) -> Option<WorkerCommand> {
+        // Explicit user work wins over background refresh and history queries.
+        self.operations
+            .pop_front()
+            .or_else(|| self.branches.take())
+            .or_else(|| self.refresh.take())
+            .or_else(|| self.preview.take())
+            .or_else(|| self.history.take())
+    }
+}
+
+struct SharedMailbox {
+    state: Mutex<Mailbox>,
+    ready: Condvar,
+}
+
+pub struct GitWorker {
+    mailbox: Arc<SharedMailbox>,
+    events: Receiver<WorkerEvent>,
 }
 
 impl GitWorker {
     pub fn start(repository: Repository) -> Self {
-        // A small bounded queue applies backpressure if key-repeat produces requests
-        // faster than Git can satisfy them. The UI uses try_send and remains non-blocking.
-        let (command_tx, command_rx) = bounded(32);
+        let mailbox = Arc::new(SharedMailbox {
+            state: Mutex::new(Mailbox::default()),
+            ready: Condvar::new(),
+        });
+        let worker_mailbox = Arc::clone(&mailbox);
         let (event_tx, event_rx) = unbounded();
         thread::Builder::new()
             .name("quinjet-git".to_owned())
-            .spawn(move || run_worker(repository, command_rx, event_tx))
+            .spawn(move || run_worker(repository, worker_mailbox, event_tx))
             .expect("failed to start Git worker");
         Self {
-            commands: command_tx,
+            mailbox,
             events: event_rx,
         }
     }
 
-    pub fn try_send(&self, command: WorkerCommand) -> SendOutcome {
-        match self.commands.try_send(command) {
-            Ok(()) => SendOutcome::Queued,
-            Err(TrySendError::Full(command)) => SendOutcome::Full(Box::new(command)),
-            Err(TrySendError::Disconnected(_)) => SendOutcome::Disconnected,
+    /// Queue work without blocking the render thread. Read requests occupy fixed
+    /// mailbox slots and replace obsolete requests; repository mutations remain an
+    /// ordered queue and are additionally serialized by the app's busy state.
+    pub fn send(&self, command: WorkerCommand) -> bool {
+        let Ok(mut mailbox) = self.mailbox.state.lock() else {
+            return false;
+        };
+        if mailbox.shutdown {
+            return false;
         }
+        mailbox.push(command);
+        drop(mailbox);
+        self.mailbox.ready.notify_one();
+        true
     }
 
     pub fn events(&self) -> &Receiver<WorkerEvent> {
@@ -108,16 +156,17 @@ impl GitWorker {
 
 impl Drop for GitWorker {
     fn drop(&mut self) {
-        let _ = self.commands.try_send(WorkerCommand::Shutdown);
+        let Ok(mut mailbox) = self.mailbox.state.lock() else {
+            return;
+        };
+        mailbox.push(WorkerCommand::Shutdown);
+        drop(mailbox);
+        self.mailbox.ready.notify_one();
     }
 }
 
-fn run_worker(
-    repository: Repository,
-    commands: Receiver<WorkerCommand>,
-    events: Sender<WorkerEvent>,
-) {
-    while let Ok(command) = commands.recv() {
+fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sender<WorkerEvent>) {
+    while let Some(command) = next_command(&mailbox) {
         let event = match command {
             WorkerCommand::Refresh { generation } => WorkerEvent::Status {
                 generation,
@@ -163,6 +212,81 @@ fn run_worker(
     }
 }
 
+fn next_command(mailbox: &SharedMailbox) -> Option<WorkerCommand> {
+    let mut state = mailbox.state.lock().ok()?;
+    loop {
+        if state.shutdown {
+            return None;
+        }
+        if let Some(command) = state.pop() {
+            return Some(command);
+        }
+        state = mailbox.ready.wait(state).ok()?;
+    }
+}
+
 fn format_error(error: anyhow::Error) -> String {
     format!("{error:#}")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::git::status::{ChangeArea, ChangeStatus};
+
+    #[test]
+    fn mailbox_coalesces_previews_and_refreshes() {
+        let mut mailbox = Mailbox::default();
+        mailbox.push(WorkerCommand::Refresh { generation: 1 });
+        mailbox.push(WorkerCommand::Refresh { generation: 2 });
+        mailbox.push(WorkerCommand::LoadDiff {
+            generation: 1,
+            change: Change {
+                path: PathBuf::from("old.rs"),
+                original_path: None,
+                area: ChangeArea::Unstaged,
+                status: ChangeStatus::Modified,
+            },
+        });
+        mailbox.push(WorkerCommand::LoadDiff {
+            generation: 2,
+            change: Change {
+                path: PathBuf::from("new.rs"),
+                original_path: None,
+                area: ChangeArea::Unstaged,
+                status: ChangeStatus::Modified,
+            },
+        });
+
+        assert!(matches!(
+            mailbox.pop(),
+            Some(WorkerCommand::Refresh { generation: 2 })
+        ));
+        assert!(matches!(
+            mailbox.pop(),
+            Some(WorkerCommand::LoadDiff { generation: 2, .. })
+        ));
+        assert!(mailbox.pop().is_none());
+    }
+
+    #[test]
+    fn mailbox_prioritizes_user_operations() {
+        let mut mailbox = Mailbox::default();
+        mailbox.push(WorkerCommand::LoadHistory {
+            generation: 1,
+            skip: 0,
+            limit: 300,
+        });
+        mailbox.push(WorkerCommand::Operate {
+            id: 7,
+            operation: GitOperation::Fetch,
+        });
+
+        assert!(matches!(
+            mailbox.pop(),
+            Some(WorkerCommand::Operate { id: 7, .. })
+        ));
+    }
 }
