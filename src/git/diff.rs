@@ -45,7 +45,15 @@ pub struct DiffLine {
 
 impl DiffLine {
     pub fn text(&self) -> String {
-        self.spans.iter().map(|span| span.text.as_str()).collect()
+        if self.kind == DiffLineKind::FileHeader {
+            self.spans
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" ")
+        } else {
+            self.spans.iter().map(|span| span.text.as_str()).collect()
+        }
     }
 }
 
@@ -149,11 +157,14 @@ pub fn parse_diff(
     let mut old_line = None;
     let mut new_line = None;
     let mut current_file: Option<FileBuilder> = None;
+    let mut files = Vec::new();
     let mut lines = Vec::new();
 
     for raw_line in String::from_utf8_lossy(raw).lines() {
         if let Some(header) = raw_line.strip_prefix("diff --git ") {
-            flush_file(current_file.take(), &mut lines);
+            if let Some(file) = current_file.take() {
+                files.push(file);
+            }
             let (old_path, new_path) = diff_header_paths(header);
             current_file = Some(FileBuilder::new(old_path, new_path, path_hint));
             active_path = current_file.as_ref().and_then(FileBuilder::syntax_path);
@@ -168,7 +179,9 @@ pub fn parse_diff(
             .strip_prefix("diff --cc ")
             .or_else(|| raw_line.strip_prefix("diff --combined "))
         {
-            flush_file(current_file.take(), &mut lines);
+            if let Some(file) = current_file.take() {
+                files.push(file);
+            }
             let path = Some(PathBuf::from(decode_git_path(path)));
             current_file = Some(FileBuilder::new(path.clone(), path, path_hint));
             active_path = current_file.as_ref().and_then(FileBuilder::syntax_path);
@@ -298,7 +311,16 @@ pub fn parse_diff(
         }
     }
 
-    flush_file(current_file.take(), &mut lines);
+    if let Some(file) = current_file.take() {
+        files.push(file);
+    }
+    // GitHub's path sort follows Git's canonical, case-sensitive ordering of the
+    // complete repository-relative path. Sorting the full path (rather than only the
+    // basename) keeps nested files in the same order as GitHub's changed-files view.
+    files.sort_by_cached_key(FileBuilder::sort_path);
+    for file in files {
+        flush_file(file, &mut lines);
+    }
     if lines.is_empty() {
         return DiffDocument::empty(title, "No file changes to display");
     }
@@ -342,6 +364,14 @@ impl FileBuilder {
         self.new_path.clone().or_else(|| self.old_path.clone())
     }
 
+    fn sort_path(&self) -> String {
+        self.new_path
+            .as_ref()
+            .or(self.old_path.as_ref())
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default()
+    }
+
     fn display_path(&self) -> String {
         match (&self.old_path, &self.new_path) {
             (Some(old), Some(new)) if old != new => {
@@ -360,10 +390,7 @@ fn file_mut<'a>(
     current.get_or_insert_with(|| FileBuilder::new(None, None, path_hint))
 }
 
-fn flush_file(file: Option<FileBuilder>, output: &mut Vec<DiffLine>) {
-    let Some(mut file) = file else {
-        return;
-    };
+fn flush_file(mut file: FileBuilder, output: &mut Vec<DiffLine>) {
     if file.lines.is_empty() {
         file.lines.push(meta_line(
             DiffLineKind::Meta,
@@ -379,15 +406,16 @@ fn flush_file(file: Option<FileBuilder>, output: &mut Vec<DiffLine>) {
         .status
         .map(|status| format!("  · {status}"))
         .unwrap_or_default();
-    let counts = if file.additions == 0 && file.deletions == 0 {
-        String::new()
-    } else {
-        format!("   +{} -{}", file.additions, file.deletions)
-    };
-    output.push(meta_line(
-        DiffLineKind::FileHeader,
-        &format!("{}{}{}", file.display_path(), status, counts),
-    ));
+    output.push(DiffLine {
+        kind: DiffLineKind::FileHeader,
+        old_line: None,
+        new_line: None,
+        spans: vec![
+            HighlightSpan::plain(format!("{}{}", file.display_path(), status)),
+            HighlightSpan::plain(format!("+{}", file.additions)),
+            HighlightSpan::plain(format!("-{}", file.deletions)),
+        ],
+    });
     output.append(&mut file.lines);
     output.push(meta_line(DiffLineKind::FileFooter, ""));
 }
@@ -575,13 +603,45 @@ mod tests {
         assert_eq!(document.file_count(), 2);
         assert_eq!(document.addition_count(), 2);
         assert_eq!(document.deletion_count(), 1);
-        assert!(headers[0].starts_with("one.rs"));
-        assert!(headers[1].starts_with("docs/two.md"));
+        assert_eq!(headers[0], "docs/two.md  · added +1 -0");
+        assert_eq!(headers[1], "one.rs +1 -1");
         assert!(!document.lines.iter().any(|line| {
             let text = line.text();
             text.starts_with("commit ")
                 || text.starts_with("Author:")
                 || text.starts_with("diff --git")
         }));
+    }
+
+    #[test]
+    fn sorts_files_by_case_sensitive_full_repository_path() {
+        let mut files = [
+            "src/ui/mod.rs",
+            "README.md",
+            "src/app.rs",
+            ".github/workflows/ci.yml",
+            "Cargo.toml",
+            ".github/ISSUE_TEMPLATE/bug.yml",
+            "CODE_OF_CONDUCT.md",
+            ".github/labeler.yml",
+        ]
+        .map(|path| FileBuilder::new(None, Some(PathBuf::from(path)), None));
+
+        files.sort_by_cached_key(FileBuilder::sort_path);
+        let paths: Vec<_> = files.iter().map(FileBuilder::sort_path).collect();
+
+        assert_eq!(
+            paths,
+            vec![
+                ".github/ISSUE_TEMPLATE/bug.yml",
+                ".github/labeler.yml",
+                ".github/workflows/ci.yml",
+                "CODE_OF_CONDUCT.md",
+                "Cargo.toml",
+                "README.md",
+                "src/app.rs",
+                "src/ui/mod.rs",
+            ]
+        );
     }
 }

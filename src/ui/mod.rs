@@ -1,6 +1,7 @@
 mod theme;
 
 use std::collections::HashMap;
+use std::ops::Range;
 
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
@@ -27,6 +28,7 @@ const HELP_LINES: &[(&str, &str)] = &[
     ("Enter", "Toggle sidebar / preview focus"),
     ("h / l, ← / →", "Scroll preview horizontally"),
     ("[ / ]", "Previous / next diff hunk"),
+    ("z", "Hide / show sidebar"),
     ("1 / 2", "Changes / commit history"),
     ("/", "Filter the active list"),
     ("Esc", "Clear filter, close modal, or return focus"),
@@ -74,26 +76,37 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let footer = vertical[2];
     let maximum_sidebar = main.width.saturating_sub(32).max(22);
     app.sidebar_width = app.sidebar_width.clamp(22, maximum_sidebar);
-    let columns = Layout::horizontal([
-        Constraint::Length(app.sidebar_width),
-        Constraint::Length(1),
-        Constraint::Min(31),
-    ])
-    .split(main);
+    let (sidebar_area, sidebar_divider, content_area) = if app.sidebar_hidden {
+        (Rect::default(), Rect::default(), main)
+    } else {
+        let columns = Layout::horizontal([
+            Constraint::Length(app.sidebar_width),
+            Constraint::Length(1),
+            Constraint::Min(31),
+        ])
+        .split(main);
+        (columns[0], columns[1], columns[2])
+    };
 
     let (changes_tab, history_tab) = draw_tabs(frame, tabs, app, &theme);
-    let sidebar_hits = draw_sidebar(frame, columns[0], app, &theme);
-    draw_main_divider(frame, columns[1], app.resize_target.is_some(), &theme);
-    let diff_divider = draw_content(frame, columns[2], app, &theme);
+    let sidebar_hits = if app.sidebar_hidden {
+        Vec::new()
+    } else {
+        draw_sidebar(frame, sidebar_area, app, &theme)
+    };
+    if !app.sidebar_hidden {
+        draw_main_divider(frame, sidebar_divider, app.resize_target.is_some(), &theme);
+    }
+    let diff_divider = draw_content(frame, content_area, app, &theme);
     draw_footer(frame, footer, app, &theme);
 
     app.geometry = UiGeometry {
         changes_tab,
         history_tab,
         main,
-        sidebar: columns[0],
-        sidebar_divider: columns[1],
-        content: columns[2],
+        sidebar: sidebar_area,
+        sidebar_divider,
+        content: content_area,
         diff_divider,
         sidebar_hits,
     };
@@ -283,7 +296,7 @@ fn draw_changes_sidebar(
     let visible = app.visible_change_indices();
     let row_count = change_row_count(app, &visible);
     let height = list_area.height as usize;
-    let selected_row = selected_change_row(app, &visible, app.change_cursor);
+    let selected_row = selected_change_row(app, &visible);
     ensure_offset(&mut app.sidebar_offset, selected_row, height, row_count);
     let rows = build_change_rows(app, &visible);
     let mut hits = Vec::new();
@@ -293,6 +306,12 @@ fn draw_changes_sidebar(
     {
         match row {
             ChangeRow::Header { area: group, count } => {
+                let selected = app.selected_change_group == Some(*group);
+                let background = if selected {
+                    theme.selected
+                } else {
+                    theme.panel_alt
+                };
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![
                         Span::styled(" ▾ ", Style::default().fg(theme.muted)),
@@ -302,16 +321,17 @@ fn draw_changes_sidebar(
                         ),
                         Span::styled(format!("  {count}"), Style::default().fg(theme.muted)),
                     ]))
-                    .style(Style::default().bg(theme.panel_alt)),
+                    .style(Style::default().bg(background)),
                     Rect::new(list_area.x, y, list_area.width, 1),
                 );
+                hits.push((y, SidebarHit::ChangeGroup(*group)));
             }
             ChangeRow::Change {
                 index,
                 cursor,
                 change,
             } => {
-                let selected = *cursor == app.change_cursor;
+                let selected = app.selected_change_group.is_none() && *cursor == app.change_cursor;
                 let row_style = if selected {
                     Style::default().bg(theme.selected)
                 } else {
@@ -408,11 +428,9 @@ enum ChangeRow<'a> {
     },
 }
 
-fn selected_change_row(app: &App, visible: &[usize], selected_cursor: usize) -> usize {
-    let Some(selected_index) = visible.get(selected_cursor).copied() else {
-        return 0;
-    };
-    let selected_area = app.status.changes[selected_index].area;
+fn selected_change_row(app: &App, visible: &[usize]) -> usize {
+    let selected_index = visible.get(app.change_cursor).copied();
+    let selected_area = selected_index.map(|index| app.status.changes[index].area);
     let mut row = 0;
     for area in [
         ChangeArea::Conflict,
@@ -427,12 +445,15 @@ fn selected_change_row(app: &App, visible: &[usize], selected_cursor: usize) -> 
         if group.is_empty() {
             continue;
         }
+        if app.selected_change_group == Some(area) {
+            return row;
+        }
         row += 1;
-        if area == selected_area {
+        if selected_area == Some(area) {
             return row
                 + group
                     .iter()
-                    .position(|index| *index == selected_index)
+                    .position(|index| Some(*index) == selected_index)
                     .unwrap_or_default();
         }
         row += group.len();
@@ -747,10 +768,12 @@ fn detail_line<'a>(label: &'a str, value: String, theme: &Theme) -> Line<'a> {
 
 fn draw_unified_diff(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) {
     let mut in_file = inside_file_before(&app.document, app.content_scroll);
-    for (offset, line) in app
+    let emphasis = intraline_emphasis(&app.document.lines);
+    for (offset, (line_index, line)) in app
         .document
         .lines
         .iter()
+        .enumerate()
         .skip(app.content_scroll)
         .take(area.height as usize)
         .enumerate()
@@ -765,7 +788,15 @@ fn draw_unified_diff(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme
                 draw_file_footer(frame, row_area, theme);
                 in_file = false;
             }
-            _ => draw_unified_line(frame, row_area, line, in_file, app.horizontal_scroll, theme),
+            _ => draw_unified_line(
+                frame,
+                row_area,
+                line,
+                in_file,
+                app.horizontal_scroll,
+                emphasis[line_index].as_ref(),
+                theme,
+            ),
         }
     }
 }
@@ -776,6 +807,7 @@ fn draw_unified_line(
     line: &DiffLine,
     boxed: bool,
     horizontal_scroll: usize,
+    emphasis: Option<&Range<usize>>,
     theme: &Theme,
 ) {
     let content_area = if boxed {
@@ -801,6 +833,7 @@ fn draw_unified_line(
         horizontal_scroll,
         content_area.width.saturating_sub(12) as usize,
         line.kind,
+        emphasis,
         theme,
     ));
     frame.render_widget(
@@ -825,11 +858,26 @@ fn draw_file_header(frame: &mut Frame<'_>, area: Rect, line: &DiffLine, theme: &
     if area.width == 0 {
         return;
     }
-    let label = truncate_middle(&line.text(), area.width.saturating_sub(5) as usize);
-    let fill = area
-        .width
-        .saturating_sub(5)
-        .saturating_sub(label.width() as u16) as usize;
+    let label = line
+        .spans
+        .first()
+        .map(|span| span.text.as_str())
+        .unwrap_or_default();
+    let additions = line
+        .spans
+        .get(1)
+        .map(|span| span.text.as_str())
+        .unwrap_or("+0");
+    let deletions = line
+        .spans
+        .get(2)
+        .map(|span| span.text.as_str())
+        .unwrap_or("-0");
+    let reserved = 7usize + additions.width() + deletions.width();
+    let label = truncate_middle(label, (area.width as usize).saturating_sub(reserved));
+    let fill = (area.width as usize)
+        .saturating_sub(reserved)
+        .saturating_sub(label.width());
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("┌─ ", Style::default().fg(theme.border)),
@@ -837,9 +885,22 @@ fn draw_file_header(frame: &mut Frame<'_>, area: Rect, line: &DiffLine, theme: &
                 label,
                 Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" ", Style::default()),
             Span::styled("─".repeat(fill), Style::default().fg(theme.border)),
-            Span::styled("┐", Style::default().fg(theme.border)),
+            Span::styled(" ", Style::default()),
+            Span::styled(
+                additions.to_owned(),
+                Style::default()
+                    .fg(theme.added)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" ", Style::default()),
+            Span::styled(
+                deletions.to_owned(),
+                Style::default()
+                    .fg(theme.removed)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" ┐", Style::default().fg(theme.border)),
         ]))
         .style(Style::default().bg(theme.panel_alt)),
         area,
@@ -926,12 +987,14 @@ fn draw_side_by_side_diff(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &
                 theme,
             ),
             SideBySideRow::Split(old_line, new_line) => {
+                let (old_emphasis, new_emphasis) = paired_intraline_emphasis(*old_line, *new_line);
                 draw_diff_side(
                     frame,
                     Rect::new(left.x, y, left.width, 1),
                     *old_line,
                     true,
                     app.horizontal_scroll,
+                    old_emphasis.as_ref(),
                     theme,
                 );
                 frame.render_widget(
@@ -944,6 +1007,7 @@ fn draw_side_by_side_diff(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &
                     *new_line,
                     false,
                     app.horizontal_scroll,
+                    new_emphasis.as_ref(),
                     theme,
                 );
                 let edge_kind = old_line
@@ -1022,6 +1086,77 @@ fn side_by_side_rows(document: &DiffDocument) -> Vec<SideBySideRow<'_>> {
     rows
 }
 
+fn intraline_emphasis(lines: &[DiffLine]) -> Vec<Option<Range<usize>>> {
+    let mut emphasis = vec![None; lines.len()];
+    let mut index = 0;
+    while index < lines.len() {
+        if lines[index].kind != DiffLineKind::Removed {
+            index += 1;
+            continue;
+        }
+        let removed_start = index;
+        while index < lines.len() && lines[index].kind == DiffLineKind::Removed {
+            index += 1;
+        }
+        let added_start = index;
+        while index < lines.len() && lines[index].kind == DiffLineKind::Added {
+            index += 1;
+        }
+        let pair_count = (added_start - removed_start).min(index - added_start);
+        for pair_index in 0..pair_count {
+            let old_index = removed_start + pair_index;
+            let new_index = added_start + pair_index;
+            let (old_range, new_range) =
+                paired_intraline_emphasis(Some(&lines[old_index]), Some(&lines[new_index]));
+            emphasis[old_index] = old_range;
+            emphasis[new_index] = new_range;
+        }
+    }
+    emphasis
+}
+
+fn paired_intraline_emphasis(
+    old_line: Option<&DiffLine>,
+    new_line: Option<&DiffLine>,
+) -> (Option<Range<usize>>, Option<Range<usize>>) {
+    let (Some(old_line), Some(new_line)) = (old_line, new_line) else {
+        return (None, None);
+    };
+    if old_line.kind != DiffLineKind::Removed || new_line.kind != DiffLineKind::Added {
+        return (None, None);
+    }
+    changed_ranges(&old_line.text(), &new_line.text())
+}
+
+fn changed_ranges(old: &str, new: &str) -> (Option<Range<usize>>, Option<Range<usize>>) {
+    let mut prefix = 0;
+    for ((old_index, old_character), (new_index, new_character)) in
+        old.char_indices().zip(new.char_indices())
+    {
+        if old_character != new_character || old_index != new_index {
+            break;
+        }
+        prefix = old_index + old_character.len_utf8();
+    }
+
+    let mut old_end = old.len();
+    let mut new_end = new.len();
+    for ((old_index, old_character), (new_index, new_character)) in
+        old.char_indices().rev().zip(new.char_indices().rev())
+    {
+        if old_character != new_character || old_index < prefix || new_index < prefix {
+            break;
+        }
+        old_end = old_index;
+        new_end = new_index;
+    }
+
+    (
+        (prefix < old_end).then_some(prefix..old_end),
+        (prefix < new_end).then_some(prefix..new_end),
+    )
+}
+
 fn draw_full_width_diff_line(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -1043,6 +1178,7 @@ fn draw_full_width_diff_line(
         horizontal_scroll,
         content_area.width.saturating_sub(2) as usize,
         line.kind,
+        None,
         theme,
     ));
     frame.render_widget(
@@ -1057,6 +1193,7 @@ fn draw_diff_side(
     line: Option<&DiffLine>,
     old_side: bool,
     horizontal_scroll: usize,
+    emphasis: Option<&Range<usize>>,
     theme: &Theme,
 ) {
     let Some(line) = line else {
@@ -1082,6 +1219,7 @@ fn draw_diff_side(
         horizontal_scroll,
         area.width.saturating_sub(7) as usize,
         line.kind,
+        emphasis,
         theme,
     ));
     frame.render_widget(
@@ -1095,23 +1233,17 @@ fn highlight_spans<'a>(
     horizontal_scroll: usize,
     width: usize,
     kind: DiffLineKind,
+    emphasis: Option<&Range<usize>>,
     theme: &Theme,
 ) -> Vec<Span<'a>> {
     let mut skip = horizontal_scroll;
     let mut remaining = width;
+    let mut source_offset = 0;
     let mut output = Vec::new();
     for span in spans {
         if remaining == 0 {
             break;
         }
-        let text_width = span.text.width();
-        if skip >= text_width {
-            skip -= text_width;
-            continue;
-        }
-        let sliced = slice_width(&span.text, skip, remaining);
-        skip = 0;
-        remaining = remaining.saturating_sub(sliced.width());
         let foreground = span
             .foreground
             .map(|(r, g, b)| Color::Rgb(r, g, b))
@@ -1123,25 +1255,98 @@ fn highlight_spans<'a>(
         if span.italic {
             style = style.add_modifier(Modifier::ITALIC);
         }
-        output.push(Span::styled(sliced, style));
+
+        let span_start = source_offset;
+        let span_end = span_start + span.text.len();
+        let intersection = emphasis.and_then(|range| {
+            let start = range.start.max(span_start);
+            let end = range.end.min(span_end);
+            (start < end).then_some(start..end)
+        });
+        if let Some(changed) = intersection {
+            push_highlight_piece(
+                &mut output,
+                &span.text[..changed.start - span_start],
+                style,
+                false,
+                kind,
+                theme,
+                &mut skip,
+                &mut remaining,
+            );
+            push_highlight_piece(
+                &mut output,
+                &span.text[changed.start - span_start..changed.end - span_start],
+                style,
+                true,
+                kind,
+                theme,
+                &mut skip,
+                &mut remaining,
+            );
+            push_highlight_piece(
+                &mut output,
+                &span.text[changed.end - span_start..],
+                style,
+                false,
+                kind,
+                theme,
+                &mut skip,
+                &mut remaining,
+            );
+        } else {
+            push_highlight_piece(
+                &mut output,
+                &span.text,
+                style,
+                false,
+                kind,
+                theme,
+                &mut skip,
+                &mut remaining,
+            );
+        }
+        source_offset = span_end;
     }
     output
 }
 
+#[allow(clippy::too_many_arguments)]
+fn push_highlight_piece<'a>(
+    output: &mut Vec<Span<'a>>,
+    text: &str,
+    mut style: Style,
+    emphasized: bool,
+    kind: DiffLineKind,
+    theme: &Theme,
+    skip: &mut usize,
+    remaining: &mut usize,
+) {
+    if text.is_empty() || *remaining == 0 {
+        return;
+    }
+    let text_width = text.width();
+    if *skip >= text_width {
+        *skip -= text_width;
+        return;
+    }
+    if emphasized {
+        style = match kind {
+            DiffLineKind::Added => style.bg(theme.added_emphasis_background),
+            DiffLineKind::Removed => style.bg(theme.removed_emphasis_background),
+            _ => style,
+        };
+    }
+    let sliced = slice_width(text, *skip, *remaining);
+    *skip = 0;
+    *remaining = remaining.saturating_sub(sliced.width());
+    output.push(Span::styled(sliced, style));
+}
+
 fn marker_for(kind: DiffLineKind, theme: &Theme) -> (&'static str, Style) {
     match kind {
-        DiffLineKind::Added => (
-            "+ ",
-            Style::default()
-                .fg(theme.added)
-                .add_modifier(Modifier::BOLD),
-        ),
-        DiffLineKind::Removed => (
-            "- ",
-            Style::default()
-                .fg(theme.removed)
-                .add_modifier(Modifier::BOLD),
-        ),
+        DiffLineKind::Added => ("  ", Style::default().fg(theme.added)),
+        DiffLineKind::Removed => ("  ", Style::default().fg(theme.removed)),
         DiffLineKind::HunkHeader => (
             "  ",
             Style::default()
@@ -1892,11 +2097,11 @@ mod tests {
                 committed_at: "2026-01-02T04:05:06Z".to_owned(),
             }),
             lines: vec![
-                test_line(DiffLineKind::FileHeader, "src/main.rs   +1 -0"),
+                test_file_header("src/main.rs", 1, 0),
                 test_line(DiffLineKind::HunkHeader, "@@ -1,0 +1 @@"),
                 test_line(DiffLineKind::Added, "fn main() {}"),
                 test_line(DiffLineKind::FileFooter, ""),
-                test_line(DiffLineKind::FileHeader, "README.md   +1 -0"),
+                test_file_header("README.md", 1, 0),
                 test_line(DiffLineKind::HunkHeader, "@@ -1,0 +1 @@"),
                 test_line(DiffLineKind::Added, "# Quinjet"),
                 test_line(DiffLineKind::FileFooter, ""),
@@ -1918,6 +2123,75 @@ mod tests {
         assert!(rendered.contains("README.md"));
         assert!(!rendered.contains('◆'));
         assert!(!rendered.contains('░'));
+    }
+
+    #[test]
+    fn file_header_right_aligns_colored_line_counts() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let header = test_file_header("src/main.rs", 12, 3);
+        let theme = Theme::default();
+        let backend = TestBackend::new(40, 1);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| draw_file_header(frame, frame.area(), &header, &theme))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rendered: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+        let addition_column = rendered
+            .chars()
+            .position(|character| character == '+')
+            .unwrap();
+        let deletion_column = rendered
+            .chars()
+            .position(|character| character == '-')
+            .unwrap();
+
+        assert!(rendered.ends_with("+12 -3 ┐"));
+        assert_eq!(buffer[(addition_column as u16, 0)].fg, theme.added);
+        assert_eq!(buffer[(deletion_column as u16, 0)].fg, theme.removed);
+    }
+
+    #[test]
+    fn computes_vscode_style_intraline_changed_ranges() {
+        assert_eq!(
+            changed_ranges("const oldValue = 1;", "const newValue = 2;"),
+            (Some(6..18), Some(6..18))
+        );
+        assert_eq!(changed_ranges("same", "same"), (None, None));
+        assert_eq!(
+            changed_ranges("prefix old suffix", "prefix new suffix"),
+            (Some(7..10), Some(7..10))
+        );
+    }
+
+    fn test_file_header(path: &str, additions: usize, deletions: usize) -> DiffLine {
+        DiffLine {
+            kind: DiffLineKind::FileHeader,
+            old_line: None,
+            new_line: None,
+            spans: vec![
+                HighlightSpan {
+                    text: path.to_owned(),
+                    foreground: None,
+                    bold: false,
+                    italic: false,
+                },
+                HighlightSpan {
+                    text: format!("+{additions}"),
+                    foreground: None,
+                    bold: false,
+                    italic: false,
+                },
+                HighlightSpan {
+                    text: format!("-{deletions}"),
+                    foreground: None,
+                    bold: false,
+                    italic: false,
+                },
+            ],
+        }
     }
 
     fn test_line(kind: DiffLineKind, text: &str) -> DiffLine {

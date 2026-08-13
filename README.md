@@ -68,6 +68,7 @@ The UI intentionally stays uncluttered; press `?` for the complete shortcut refe
 | `j` / `k`, arrows | Move through every file/commit or scroll the preview |
 | Mouse wheel | Naturally scroll the pane under the pointer |
 | `Tab` / `Enter` | Toggle sidebar/preview focus |
+| `z` | Hide/show the sidebar |
 | `1` / `2` | Changes/history |
 | `s` or `Space` | Toggle stage/unstage for the selected file |
 | `a` / `U` | Stage all/unstage all |

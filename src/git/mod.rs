@@ -177,9 +177,50 @@ impl Repository {
         Ok(parse_log(&output))
     }
 
+    pub fn diff_for_changes(&self, changes: &[Change], expanded: bool) -> Result<DiffDocument> {
+        let Some(first) = changes.first() else {
+            return Ok(DiffDocument::empty("Working Tree", "No changes selected"));
+        };
+        if changes.len() == 1 {
+            return self.diff_for_change(first, expanded);
+        }
+        let area = first.area;
+        let mut patch = Vec::new();
+        let mut truncated = false;
+        for change in changes.iter().filter(|change| change.area == area) {
+            let document = self.raw_diff_for_change(change, expanded)?;
+            let remaining = MAX_DIFF_BYTES.saturating_sub(patch.len());
+            if document.len() > remaining {
+                let mut document = document;
+                truncated |= truncate(&mut document, remaining);
+                patch.extend(document);
+                break;
+            }
+            patch.extend(document);
+        }
+        Ok(parse_diff(
+            &patch,
+            format!("{}  {} files", area.label(), changes.len()),
+            None,
+            truncated,
+        ))
+    }
+
     pub fn diff_for_change(&self, change: &Change, expanded: bool) -> Result<DiffDocument> {
+        let mut output = self.raw_diff_for_change(change, expanded)?;
+        let truncated = truncate(&mut output, MAX_DIFF_BYTES);
+        let title = format!(
+            "{} — {} {}",
+            change.display_path(),
+            change.area.label(),
+            change.status.label()
+        );
+        Ok(parse_diff(&output, title, Some(&change.path), truncated))
+    }
+
+    fn raw_diff_for_change(&self, change: &Change, expanded: bool) -> Result<Vec<u8>> {
         if change.status == ChangeStatus::Untracked {
-            return self.untracked_diff(change);
+            return self.untracked_patch(change);
         }
 
         let mut args = vec![
@@ -201,16 +242,7 @@ impl Repository {
         }
         args.push(OsString::from("--"));
         args.push(change.path.as_os_str().to_owned());
-
-        let mut output = self.checked(args)?;
-        let truncated = truncate(&mut output, MAX_DIFF_BYTES);
-        let title = format!(
-            "{} — {} {}",
-            change.display_path(),
-            change.area.label(),
-            change.status.label()
-        );
-        Ok(parse_diff(&output, title, Some(&change.path), truncated))
+        self.checked(args)
     }
 
     pub fn commit_detail(&self, commit: &Commit) -> Result<DiffDocument> {
@@ -398,30 +430,29 @@ impl Repository {
         }
     }
 
-    fn untracked_diff(&self, change: &Change) -> Result<DiffDocument> {
+    fn untracked_patch(&self, change: &Change) -> Result<Vec<u8>> {
         let path = safe_worktree_path(&self.root, &change.path)?;
         let metadata = fs::symlink_metadata(&path)
             .with_context(|| format!("failed to read {}", change.display_path()))?;
+        let display_path = change.display_path();
         if !metadata.is_file() {
-            return Ok(DiffDocument::empty(
-                change.display_path(),
-                "Untracked directory or special file",
-            ));
+            return Ok(format!(
+                "diff --git a/{display_path} b/{display_path}\nnew file mode 100644\nBinary files /dev/null and b/{display_path} differ\n"
+            )
+            .into_bytes());
         }
 
-        let mut contents =
+        let contents =
             fs::read(&path).with_context(|| format!("failed to read {}", change.display_path()))?;
-        let truncated = truncate(&mut contents, MAX_DIFF_BYTES);
         if contents.contains(&0) {
-            return Ok(DiffDocument::empty(
-                change.display_path(),
-                format!("Binary file — {} bytes", metadata.len()),
-            ));
+            return Ok(format!(
+                "diff --git a/{display_path} b/{display_path}\nnew file mode 100644\nBinary files /dev/null and b/{display_path} differ\n"
+            )
+            .into_bytes());
         }
 
         let body = String::from_utf8_lossy(&contents);
         let line_count = body.lines().count();
-        let display_path = change.display_path();
         let mut patch = format!(
             "diff --git a/{display_path} b/{display_path}\nnew file mode 100644\n--- /dev/null\n+++ b/{display_path}\n@@ -0,0 +1,{line_count} @@\n"
         );
@@ -433,13 +464,7 @@ impl Repository {
             patch.push('\n');
             patch.push_str("\\ No newline at end of file\n");
         }
-
-        Ok(parse_diff(
-            patch.as_bytes(),
-            format!("{} — Untracked", change.display_path()),
-            Some(&change.path),
-            truncated,
-        ))
+        Ok(patch.into_bytes())
     }
 
     fn discard(&self, changes: &[Change]) -> Result<()> {
