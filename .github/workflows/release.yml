@@ -1,38 +1,90 @@
-name: Release binaries
+name: Release
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'README.md'
+      - '.github/workflows/release.yml'
   workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing version tag to release (for example, v0.0.1)
-        required: true
-        type: string
 
 permissions:
   contents: write
 
-env:
-  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  validate:
+  version:
+    name: Bump version and tag
+    if: "github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'chore: release v')"
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+      version: ${{ steps.bump.outputs.version }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          ref: ${{ env.RELEASE_TAG }}
       - uses: dtolnay/rust-toolchain@stable
-      - name: Verify tag and package version
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Choose the next patch version
+        id: bump
         run: |
-          version=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[0].version')
-          test "${RELEASE_TAG}" = "v${version}"
-          test "$(git describe --tags --exact-match)" = "${RELEASE_TAG}"
+          set -euo pipefail
+          current=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[0].version')
+          IFS=. read -r major minor patch <<<"${current}"
+          for _ in $(seq 1 100); do
+            patch=$((patch + 1))
+            next="${major}.${minor}.${patch}"
+            code=$(curl -sS -o /dev/null -w '%{http_code}' -A quinjet-release "https://crates.io/api/v1/crates/quinjet/${next}")
+            case "${code}" in
+              404) ;;
+              200) continue ;;
+              *) echo "unexpected crates.io status ${code} for ${next}" >&2; exit 1 ;;
+            esac
+            if git rev-parse -q --verify "refs/tags/v${next}" >/dev/null; then continue; fi
+            echo "version=${next}" >>"${GITHUB_OUTPUT}"
+            echo "tag=v${next}" >>"${GITHUB_OUTPUT}"
+            echo "releasing ${current} -> ${next}"
+            exit 0
+          done
+          echo "no free patch version after ${current}" >&2
+          exit 1
+      - name: Apply the version
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          set -euo pipefail
+          sed -i "0,/^version = .*/s//version = \"${VERSION}\"/" Cargo.toml
+          cargo update --workspace
+          test "$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[0].version')" = "${VERSION}"
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test --all-features --locked
+      - run: cargo package --locked
+      - name: Commit and tag
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore: release v${VERSION}"
+          git tag -a "v${VERSION}" -m "quinjet v${VERSION}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "v${VERSION}"
 
   build:
-    needs: validate
+    name: Build ${{ matrix.artifact }}
+    needs: version
     strategy:
       fail-fast: false
       matrix:
@@ -61,7 +113,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.version.outputs.tag }}
       - name: Install musl linker
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install --yes musl-tools
@@ -89,10 +141,31 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}
 
-  release:
-    needs: [validate, build]
+  publish:
+    name: Publish crate and release
+    needs: [version, build]
     runs-on: ubuntu-latest
+    environment: crates-io
     steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -A quinjet-release "https://crates.io/api/v1/crates/quinjet/${VERSION}")
+          if [ "${code}" = 200 ]; then
+            echo "quinjet ${VERSION} is already published"
+            exit 0
+          fi
+          test "${code}" = 404
+          test -n "${CARGO_REGISTRY_TOKEN}"
+          cargo publish --locked
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -102,6 +175,6 @@ jobs:
         run: sha256sum quinjet-* > SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
+          tag_name: ${{ needs.version.outputs.tag }}
           generate_release_notes: true
           files: dist/*

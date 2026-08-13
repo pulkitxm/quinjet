@@ -63,4 +63,4 @@ Do not publish exploitable security issues in a public issue. Use GitHub's priva
 
 ## Releases
 
-Package versions follow semantic versioning. Publishing is handled by maintainers and automation; contributors should not bump the version unless a maintainer requests it.
+Releases are automated. A push to `main` that touches `src/`, `Cargo.toml`, `Cargo.lock`, or `README.md` bumps the patch version, tags it, publishes the crate to crates.io, and attaches binaries to a GitHub release. Contributors should not bump the version themselves; a maintainer edits it directly when a release needs a minor or major bump.
