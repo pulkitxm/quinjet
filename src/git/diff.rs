@@ -88,6 +88,12 @@ pub struct PullRequestDetails {
     pub changed_files: usize,
     pub additions: usize,
     pub deletions: usize,
+    pub file_page: usize,
+    pub file_page_size: usize,
+    pub displayed_files: usize,
+    pub total_files: usize,
+    pub has_previous_file_page: bool,
+    pub has_next_file_page: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

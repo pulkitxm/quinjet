@@ -16,13 +16,15 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 - Syntax highlighting for TypeScript/TSX, Rust, Python, Go, JavaScript, and hundreds of other formats
 - Unified and draggable side-by-side diff panes
 - Compact change hunks by default; `t` expands the selected file to full context
-- Paginated commit history with one commit-details card and a titled diff pane for every changed file
-- GitHub CLI-backed open pull requests and per-file diffs across multiple fetch/push remotes and forks
+- Paginated, branch-scoped commit history with a view-only local/remote branch picker that never checks out
+- Bounded GitHub pull-request pages, repository-scoped numeric lookup, and changed-file diff pages
+- Disposable local PR fetches across multiple fetch/push remotes and forks—no checkout or persistent refs
 - Commit, amend, stash, fetch, pull, push, sync, cherry-pick, and revert
 - Local branch switching, creation, rename, deletion, and creation at a selected commit
 - Natural mouse scrolling, clickable rows, and draggable pane dividers
 - Keyboard-first filtering, command palette, modal text editing, and accessibility help
-- Coalesced background Git work, stale-result rejection, and bounded diff output
+- Persistent collapse/expand preference while moving among changes, commits, PRs, and views
+- Coalesced background Git work, stale-result rejection, bounded output, and a private metadata cache
 
 ## Installation
 
@@ -86,13 +88,19 @@ Mouse capture can be disabled without losing functionality:
 quinjet --no-mouse
 ```
 
-### Pull requests and remotes
+### History branches
 
-Press `3` to load open pull requests. Quinjet asks `gh` to resolve every distinct fetch **and** push URL from the repository's Git remotes, then combines the results. This supports common fork setups such as `origin` pointing to your fork and `upstream` pointing to the base repository, as well as a single remote with a separate push URL. Duplicate remote URLs are collapsed.
+History starts at the currently checked-out branch instead of mixing every ref into one log. In the History view, press `b` to choose any local or remote-tracking branch. This changes only the revision passed to `git log`; Quinjet does not run `git switch`, move `HEAD`, touch the index/worktree, or create a temporary ref. The checked-out branch remains visible in the top bar while the viewed branch appears in the History panel title. Press `B` when you explicitly want the checkout branch picker.
 
-Each PR preview identifies its base and head repository, branches, matching local remote aliases, and whether it crosses a fork boundary. Diffs are requested with an explicit base-repository URL, so a PR number from one remote cannot accidentally resolve against another. GitHub Enterprise hosts configured in `gh` are supported too. Press `r` in the Pull Requests view to reload it.
+### Pull requests, remotes, and cache
 
-Branch rename is local and deliberately does not delete or create remote branches. Open the branch picker with `b`, select a branch, and press `F2` or `Ctrl+R`; its existing upstream configuration is preserved by Git.
+Press `3` to open Pull Requests. Quinjet resolves the repository's distinct fetch **and** push URLs through `gh`, but loads only one selected repository and one 25-item page at a time. Press `o` to choose the base repository and `←` / `→` to page. The always-visible `PR #` field accepts digits only; press `/`, enter a number, and press Enter for an exact lookup scoped to that selected repository. This avoids both an eager all-remote PR scan and ambiguous PR numbers.
+
+Quinjet supports fork setups such as `origin` pointing to your fork and `upstream` to the base, separate push URLs, deleted fork heads exposed through GitHub's PR ref, and GitHub Enterprise hosts configured in `gh`. Selected metadata is enriched with immutable base/head OIDs. PR patches are **not** downloaded with `gh pr diff`: Quinjet creates a disposable bare repository, shallow-fetches fixed internal base/head refs with partial-clone filtering, deepens only as needed to find the merge base, and renders 20 changed files at a time. Use `,` / `.` for changed-file pages. The opened repository is never checked out or given temporary branches/refs.
+
+Successful `gh` repository, PR-page, and exact-PR responses are cached atomically with short TTLs. The cache is bounded to 32 MiB / 256 entries and stores metadata only—not credentials, Git objects, or patches. It lives under `$XDG_CACHE_HOME/quinjet/github` (or `~/.cache/quinjet/github`), `~/Library/Caches/quinjet/github` on macOS, and `%LOCALAPPDATA%\quinjet\cache\github` on Windows. Set `QUINJET_CACHE_DIR` to choose a different root. Cache directories/files use private permissions where supported; `r` bypasses fresh cache entries, while a stale entry can keep the view useful during a transient `gh` failure.
+
+Branch rename is local and deliberately does not delete or create remote branches. Open the checkout branch picker with `b` outside History (or `B` anywhere), select a branch, and press `F2` or `Ctrl+R`; its existing upstream configuration is preserved by Git.
 
 ## Keyboard
 
@@ -104,7 +112,7 @@ The UI intentionally stays uncluttered; press `?` for the complete shortcut refe
 | Mouse wheel | Naturally scroll the pane under the pointer |
 | `Tab` / `Enter` | Toggle sidebar/preview focus |
 | `z` | Hide/show the sidebar |
-| `e` | Collapse/expand every file diff |
+| `e` / `E` | Collapse/expand every file diff; keep that preference across selections/views |
 | `1` / `2` / `3` | Changes/history/open pull requests |
 | `s` or `Space` | Toggle stage/unstage for the selected file |
 | `a` / `U` | Stage all/unstage all |
@@ -112,9 +120,13 @@ The UI intentionally stays uncluttered; press `?` for the complete shortcut refe
 | `t` | Toggle compact hunks/full-file context |
 | `v` | Toggle unified/side-by-side diff |
 | `x` | Discard selected change after confirmation |
-| `b` | Branch picker; `F2`/`Ctrl+R` renames the selected local branch |
-| `r` | Refresh status (and reload PRs when that view is active) |
-| `/` | Filter the active list |
+| `b` in History | View another local/remote branch without checkout |
+| `b` elsewhere / `B` | Checkout branch picker; `F2`/`Ctrl+R` renames a local branch |
+| `o` in Pull Requests | Select the repository whose PRs are shown |
+| `←` / `→` in Pull Requests | Previous/next 25-item PR page |
+| `,` / `.` in Pull Requests | Previous/next 20-file diff page |
+| `r` | Refresh status; bypass PR metadata cache in the PR view |
+| `/` | Filter changes/history, or focus exact numeric PR lookup |
 | `[` / `]` | Previous/next diff hunk |
 | `:` or `Ctrl+P` | Command palette |
 | `?` | Shortcut help |
@@ -130,8 +142,12 @@ Text fields support Unicode-safe editing plus familiar terminal and macOS motion
 - A coalescing worker mailbox replaces obsolete read requests.
 - Filesystem event storms collapse into authoritative status snapshots.
 - Preview requests carry generations so stale replies are ignored.
-- History is paginated and all Git/PR diff output is bounded.
-- Pull-request discovery inspects at most 32 Git remotes, 64 configured fetch/push URL entries (32 distinct URLs), 16 GitHub repositories, 100 open PRs per repository, and 500 combined PRs.
+- History is paginated for one explicit branch revision; choosing another branch is read-only.
+- PR lists load one selected repository in 25-item pages; exact lookup accepts only a positive integer and always includes the canonical base-repository URL.
+- Pull-request discovery inspects at most 32 Git remotes, 64 configured fetch/push URL entries (32 distinct URLs), and 16 GitHub repositories.
+- PR changed paths are capped at 4,096 / 2 MiB, patches at 8 MiB, and each preview fetches at most 20 files. Potentially large subprocess stdout is streamed and the child is terminated at the cap.
+- PR Git history deepens only to 4,096 commits in a disposable bare repository. No checkout, worktree mutation, or persistent source-repository ref is used.
+- Cached `gh` metadata is bounded to 32 MiB and 256 entries; fresh page entries live for 60 seconds and exact PR entries for five minutes.
 - Git and `gh` receive argument arrays directly, never shell-concatenated commands; embedded remote credentials are stripped before URLs become `gh` arguments.
 - Destructive operations are confirmed where appropriate.
 - Hooks, credentials, signing, filters, and repository semantics remain delegated to the installed Git CLI.

@@ -8,7 +8,7 @@ use super::diff::DiffDocument;
 use super::github::{PullRequest, PullRequestSnapshot};
 use super::history::Commit;
 use super::status::{Change, RepoStatus};
-use super::{Branch, GitOperation, Repository};
+use super::{Branch, GitOperation, HistoryBranch, Repository};
 
 #[derive(Debug)]
 pub enum WorkerCommand {
@@ -22,6 +22,7 @@ pub enum WorkerCommand {
     },
     LoadHistory {
         generation: u64,
+        revision: String,
         skip: usize,
         limit: usize,
     },
@@ -31,12 +32,29 @@ pub enum WorkerCommand {
     },
     LoadPullRequests {
         generation: u64,
+        repositories: Vec<super::github::GitHubRepository>,
+        repository: Option<Box<super::github::GitHubRepository>>,
+        page: usize,
+        page_size: usize,
+        refresh: bool,
+    },
+    LookupPullRequest {
+        generation: u64,
+        repositories: Vec<super::github::GitHubRepository>,
+        repository: Box<super::github::GitHubRepository>,
+        number: u64,
+        refresh: bool,
     },
     LoadPullRequest {
         generation: u64,
         pull_request: Box<PullRequest>,
+        file_page: usize,
+        file_page_size: usize,
     },
     LoadBranches {
+        generation: u64,
+    },
+    LoadHistoryBranches {
         generation: u64,
     },
     Operate {
@@ -77,6 +95,10 @@ pub enum WorkerEvent {
         generation: u64,
         result: Result<Vec<Branch>, String>,
     },
+    HistoryBranches {
+        generation: u64,
+        result: Result<Vec<HistoryBranch>, String>,
+    },
     OperationFinished {
         id: u64,
         label: String,
@@ -100,7 +122,8 @@ impl Mailbox {
     fn push(&mut self, command: WorkerCommand) {
         match command {
             command @ WorkerCommand::Operate { .. } => self.operations.push_back(command),
-            command @ WorkerCommand::LoadBranches { .. } => self.branches = Some(command),
+            command @ (WorkerCommand::LoadBranches { .. }
+            | WorkerCommand::LoadHistoryBranches { .. }) => self.branches = Some(command),
             command @ WorkerCommand::Refresh { .. } => self.refresh = Some(command),
             command @ (WorkerCommand::LoadDiff { .. }
             | WorkerCommand::LoadCommit { .. }
@@ -110,7 +133,8 @@ impl Mailbox {
                 self.preview = Some(command);
             }
             command @ WorkerCommand::LoadHistory { .. } => self.history = Some(command),
-            command @ WorkerCommand::LoadPullRequests { .. } => {
+            command @ (WorkerCommand::LoadPullRequests { .. }
+            | WorkerCommand::LookupPullRequest { .. }) => {
                 self.pull_requests = Some(command);
             }
             WorkerCommand::Shutdown => self.shutdown = true,
@@ -208,33 +232,69 @@ fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sende
             },
             WorkerCommand::LoadHistory {
                 generation,
+                revision,
                 skip,
                 limit,
             } => WorkerEvent::History {
                 generation,
                 skip,
-                result: repository.history(skip, limit).map_err(format_error),
+                result: repository
+                    .history(&revision, skip, limit)
+                    .map_err(format_error),
             },
             WorkerCommand::LoadCommit { generation, commit } => WorkerEvent::CommitDetail {
                 generation,
                 result: repository.commit_detail(&commit).map_err(format_error),
             },
-            WorkerCommand::LoadPullRequests { generation } => WorkerEvent::PullRequests {
+            WorkerCommand::LoadPullRequests {
                 generation,
-                result: repository.pull_requests().map_err(format_error),
+                repositories,
+                repository: selected_repository,
+                page,
+                page_size,
+                refresh,
+            } => WorkerEvent::PullRequests {
+                generation,
+                result: repository
+                    .pull_request_page(
+                        &repositories,
+                        selected_repository.as_deref(),
+                        page,
+                        page_size,
+                        refresh,
+                    )
+                    .map_err(format_error),
+            },
+            WorkerCommand::LookupPullRequest {
+                generation,
+                repositories,
+                repository: selected_repository,
+                number,
+                refresh,
+            } => WorkerEvent::PullRequests {
+                generation,
+                result: repository
+                    .pull_request_lookup(&repositories, &selected_repository, number, refresh)
+                    .map_err(format_error),
             },
             WorkerCommand::LoadPullRequest {
                 generation,
                 pull_request,
+                file_page,
+                file_page_size,
             } => WorkerEvent::PullRequestDiff {
                 generation,
                 result: repository
-                    .pull_request_diff(&pull_request)
+                    .pull_request_diff(&pull_request, file_page, file_page_size)
                     .map_err(format_error),
             },
             WorkerCommand::LoadBranches { generation } => WorkerEvent::Branches {
                 generation,
                 result: repository.branches().map_err(format_error),
+            },
+            WorkerCommand::LoadHistoryBranches { generation } => WorkerEvent::HistoryBranches {
+                generation,
+                result: repository.history_branches().map_err(format_error),
             },
             WorkerCommand::Operate { id, operation } => {
                 let label = operation.label().to_owned();
@@ -319,17 +379,36 @@ mod tests {
     #[test]
     fn mailbox_coalesces_pull_request_lists_and_prioritizes_them_over_history() {
         let mut mailbox = Mailbox::default();
-        mailbox.push(WorkerCommand::LoadPullRequests { generation: 1 });
-        mailbox.push(WorkerCommand::LoadPullRequests { generation: 2 });
+        mailbox.push(WorkerCommand::LoadPullRequests {
+            generation: 1,
+            repositories: Vec::new(),
+            repository: None,
+            page: 1,
+            page_size: 25,
+            refresh: false,
+        });
+        mailbox.push(WorkerCommand::LoadPullRequests {
+            generation: 2,
+            repositories: Vec::new(),
+            repository: None,
+            page: 2,
+            page_size: 25,
+            refresh: false,
+        });
         mailbox.push(WorkerCommand::LoadHistory {
             generation: 1,
+            revision: "HEAD".to_owned(),
             skip: 0,
             limit: 300,
         });
 
         assert!(matches!(
             mailbox.pop(),
-            Some(WorkerCommand::LoadPullRequests { generation: 2 })
+            Some(WorkerCommand::LoadPullRequests {
+                generation: 2,
+                page: 2,
+                ..
+            })
         ));
         assert!(matches!(
             mailbox.pop(),
@@ -343,6 +422,7 @@ mod tests {
         let mut mailbox = Mailbox::default();
         mailbox.push(WorkerCommand::LoadHistory {
             generation: 1,
+            revision: "HEAD".to_owned(),
             skip: 0,
             limit: 300,
         });
