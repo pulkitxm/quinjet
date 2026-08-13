@@ -1,6 +1,6 @@
 use std::thread;
 
-use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
+use crossbeam_channel::{Receiver, Sender, TrySendError, bounded, unbounded};
 
 use super::diff::DiffDocument;
 use super::history::Commit;
@@ -71,6 +71,12 @@ pub struct GitWorker {
     events: Receiver<WorkerEvent>,
 }
 
+pub enum SendOutcome {
+    Queued,
+    Full(Box<WorkerCommand>),
+    Disconnected,
+}
+
 impl GitWorker {
     pub fn start(repository: Repository) -> Self {
         // A small bounded queue applies backpressure if key-repeat produces requests
@@ -87,8 +93,12 @@ impl GitWorker {
         }
     }
 
-    pub fn try_send(&self, command: WorkerCommand) -> bool {
-        self.commands.try_send(command).is_ok()
+    pub fn try_send(&self, command: WorkerCommand) -> SendOutcome {
+        match self.commands.try_send(command) {
+            Ok(()) => SendOutcome::Queued,
+            Err(TrySendError::Full(command)) => SendOutcome::Full(Box::new(command)),
+            Err(TrySendError::Disconnected(_)) => SendOutcome::Disconnected,
+        }
     }
 
     pub fn events(&self) -> &Receiver<WorkerEvent> {
