@@ -16,7 +16,7 @@ pub enum WorkerCommand {
     },
     LoadDiff {
         generation: u64,
-        change: Change,
+        changes: Vec<Change>,
         expanded: bool,
     },
     LoadHistory {
@@ -26,7 +26,7 @@ pub enum WorkerCommand {
     },
     LoadCommit {
         generation: u64,
-        commit: Commit,
+        commit: Box<Commit>,
     },
     LoadBranches {
         generation: u64,
@@ -175,12 +175,12 @@ fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sende
             },
             WorkerCommand::LoadDiff {
                 generation,
-                change,
+                changes,
                 expanded,
             } => WorkerEvent::Diff {
                 generation,
                 result: repository
-                    .diff_for_change(&change, expanded)
+                    .diff_for_changes(&changes, expanded)
                     .map_err(format_error),
             },
             WorkerCommand::LoadHistory {
@@ -250,22 +250,22 @@ mod tests {
         mailbox.push(WorkerCommand::Refresh { generation: 2 });
         mailbox.push(WorkerCommand::LoadDiff {
             generation: 1,
-            change: Change {
+            changes: vec![Change {
                 path: PathBuf::from("old.rs"),
                 original_path: None,
                 area: ChangeArea::Unstaged,
                 status: ChangeStatus::Modified,
-            },
+            }],
             expanded: false,
         });
         mailbox.push(WorkerCommand::LoadDiff {
             generation: 2,
-            change: Change {
+            changes: vec![Change {
                 path: PathBuf::from("new.rs"),
                 original_path: None,
                 area: ChangeArea::Unstaged,
                 status: ChangeStatus::Modified,
-            },
+            }],
             expanded: true,
         });
 
