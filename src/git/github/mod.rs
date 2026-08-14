@@ -3,7 +3,7 @@ mod conversation;
 
 pub use self::checks::{
     CheckLogLine, CheckLogSeverity, CheckRunLog, CheckStep, PullRequestCheck,
-    PullRequestCheckStatus, unix_now,
+    PullRequestCheckStatus, PullRequestChecks, unix_now,
 };
 pub use self::conversation::{ConversationEntry, ConversationKind, PullRequestConversation};
 
@@ -36,8 +36,11 @@ const MAX_PULL_REQUEST_BODY_BYTES: usize = 256 * 1024;
 const MAX_GH_ERROR_BYTES: usize = 256 * 1024;
 const MAX_PR_PATH_BYTES: usize = 8 * 1024 * 1024;
 const MAX_PR_PATHS: usize = 16_384;
-const MAX_CACHE_BYTES: u64 = 32 * 1024 * 1024;
-const MAX_CACHE_ENTRIES: usize = 256;
+/// The cache now holds immutable content (finished run logs, patches for a
+/// fixed pair of commits) rather than only small metadata blobs, so the budget
+/// is sized for those and pruned oldest-first.
+const MAX_CACHE_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_CACHE_ENTRIES: usize = 2_048;
 const REPOSITORY_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const PULL_REQUEST_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
 const TEMPORARY_REPOSITORY_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
@@ -180,6 +183,24 @@ enum CacheDisposition {
     Network,
     Fresh,
     Stale,
+}
+
+/// How long an entry stays usable. `Immutable` is for content whose identity is
+/// already in its key: a finished run's log, or a patch between two fixed
+/// commits. Such an entry can never become wrong, only evicted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CacheLife {
+    Immutable,
+    Ttl(Duration),
+}
+
+impl CacheLife {
+    fn accepts(self, age: Duration) -> bool {
+        match self {
+            Self::Immutable => true,
+            Self::Ttl(ttl) => age <= ttl,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -409,7 +430,7 @@ impl Repository {
                 "pull-request-v3\n{}\n{number}",
                 repository.url.trim_end_matches('/')
             ),
-            PULL_REQUEST_CACHE_TTL,
+            CacheLife::Ttl(PULL_REQUEST_CACHE_TTL),
             refresh,
             pull_request_view_args(repository, number),
             "unable to load pull request",
@@ -607,7 +628,7 @@ impl Repository {
         let key = format!("repository\n{identity}");
         let response = self.checked_cached_gh(
             &key,
-            REPOSITORY_CACHE_TTL,
+            CacheLife::Ttl(REPOSITORY_CACHE_TTL),
             refresh,
             args,
             "gh repo view failed",
@@ -627,10 +648,39 @@ impl Repository {
         ))
     }
 
+    /// Direct cache access for readers that cannot express themselves as a
+    /// single `gh` invocation: a response judged by its body rather than its
+    /// exit status, or bytes produced by Git rather than by GitHub.
+    pub(crate) fn cache_read(&self, key: &str, life: CacheLife) -> Option<Vec<u8>> {
+        self.cache_read_bounded(key, life, MAX_GH_METADATA_BYTES)
+    }
+
+    pub(crate) fn cache_read_bounded(
+        &self,
+        key: &str,
+        life: CacheLife,
+        limit: usize,
+    ) -> Option<Vec<u8>> {
+        CacheStore::discover()?
+            .read(key, limit)
+            .filter(|entry| life.accepts(entry.age))
+            .map(|entry| entry.data)
+    }
+
+    pub(crate) fn cache_write(&self, key: &str, data: &[u8]) {
+        self.cache_write_bounded(key, data, MAX_GH_METADATA_BYTES);
+    }
+
+    pub(crate) fn cache_write_bounded(&self, key: &str, data: &[u8], limit: usize) {
+        if let Some(cache) = CacheStore::discover() {
+            let _ = cache.write(key, data, limit);
+        }
+    }
+
     fn checked_cached_gh<I, S>(
         &self,
         cache_key: &str,
-        ttl: Duration,
+        life: CacheLife,
         refresh: bool,
         args: I,
         error_context: &str,
@@ -639,11 +689,40 @@ impl Repository {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
+        self.checked_cached_gh_bounded(
+            cache_key,
+            life,
+            refresh,
+            args,
+            error_context,
+            MAX_GH_METADATA_BYTES,
+        )
+    }
+
+    /// `limit` bounds both the response Quinjet will read and the entry it will
+    /// keep, so a check log can use the cache without letting metadata grow.
+    fn checked_cached_gh_bounded<I, S>(
+        &self,
+        cache_key: &str,
+        life: CacheLife,
+        refresh: bool,
+        args: I,
+        error_context: &str,
+        limit: usize,
+    ) -> Result<GhResponse>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
         let cache = CacheStore::discover();
-        let cached = cache.as_ref().and_then(|cache| cache.read(cache_key));
-        if !refresh {
+        let cached = cache
+            .as_ref()
+            .and_then(|cache| cache.read(cache_key, limit));
+        // An immutable entry is never re-read, even for an explicit refresh:
+        // its key already names exactly the content it holds.
+        if !refresh || life == CacheLife::Immutable {
             if let Some(entry) = cached.as_ref() {
-                if entry.age <= ttl {
+                if life.accepts(entry.age) {
                     return Ok(GhResponse {
                         data: entry.data.clone(),
                         disposition: CacheDisposition::Fresh,
@@ -652,7 +731,7 @@ impl Repository {
             }
         }
 
-        let output = match self.run_gh(args) {
+        let output = match self.run_gh_bounded(args, limit) {
             Ok(output) => output,
             Err(error) => {
                 if let Some(entry) = cached.as_ref() {
@@ -666,7 +745,7 @@ impl Repository {
         };
         if output.status.success() && !output.stdout_truncated {
             if let Some(cache) = cache.as_ref() {
-                let _ = cache.write(cache_key, &output.stdout);
+                let _ = cache.write(cache_key, &output.stdout, limit);
             }
             return Ok(GhResponse {
                 data: output.stdout,
@@ -1551,10 +1630,10 @@ impl CacheStore {
         Self { root }
     }
 
-    fn read(&self, key: &str) -> Option<CacheEntry> {
+    fn read(&self, key: &str, limit: usize) -> Option<CacheEntry> {
         let path = self.path(key);
         let metadata = fs::metadata(&path).ok()?;
-        if metadata.len() > MAX_GH_METADATA_BYTES as u64 + CACHE_MAGIC.len() as u64 {
+        if metadata.len() > limit as u64 + CACHE_MAGIC.len() as u64 {
             let _ = fs::remove_file(path);
             return None;
         }
@@ -1571,8 +1650,8 @@ impl CacheStore {
         Some(CacheEntry { data, age })
     }
 
-    fn write(&self, key: &str, data: &[u8]) -> Result<()> {
-        if data.len() > MAX_GH_METADATA_BYTES {
+    fn write(&self, key: &str, data: &[u8], limit: usize) -> Result<()> {
+        if data.len() > limit {
             return Ok(());
         }
         create_private_directory(&self.root)?;
@@ -1938,9 +2017,11 @@ mod tests {
     fn cache_round_trips_private_metadata_and_uses_stable_keys() {
         let directory = test_directory("cache");
         let cache = CacheStore::at(directory.0.clone());
-        cache.write("repo\npage 1", b"metadata\n").unwrap();
+        cache
+            .write("repo\npage 1", b"metadata\n", MAX_GH_METADATA_BYTES)
+            .unwrap();
 
-        let entry = cache.read("repo\npage 1").unwrap();
+        let entry = cache.read("repo\npage 1", MAX_GH_METADATA_BYTES).unwrap();
         assert_eq!(entry.data, b"metadata\n");
         assert!(entry.age < Duration::from_secs(2));
         assert_eq!(cache.path("same"), cache.path("same"));

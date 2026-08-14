@@ -7,8 +7,8 @@ use crossbeam_channel::{Receiver, Sender, unbounded};
 
 use super::diff::DiffDocument;
 use super::github::{
-    CheckRunLog, PreparedPullRequest, PullRequest, PullRequestCheck, PullRequestConversation,
-    PullRequestDiffIndex, PullRequestProgress, PullRequestSnapshot,
+    CheckRunLog, PreparedPullRequest, PullRequest, PullRequestCheck, PullRequestChecks,
+    PullRequestConversation, PullRequestDiffIndex, PullRequestProgress, PullRequestSnapshot,
 };
 use super::history::Commit;
 use super::status::RepoStatus;
@@ -67,6 +67,7 @@ pub enum WorkerCommand {
     LoadPullRequestChecks {
         generation: u64,
         pull_request: Box<PullRequest>,
+        refresh: bool,
     },
     LoadPullRequestConversation {
         generation: u64,
@@ -140,7 +141,7 @@ pub enum WorkerEvent {
     },
     PullRequestChecks {
         generation: u64,
-        result: Result<Vec<PullRequestCheck>, String>,
+        result: Result<PullRequestChecks, String>,
     },
     PullRequestConversation {
         generation: u64,
@@ -516,10 +517,11 @@ fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sende
             WorkerCommand::LoadPullRequestChecks {
                 generation,
                 pull_request,
+                refresh,
             } => WorkerEvent::PullRequestChecks {
                 generation,
                 result: repository
-                    .pull_request_checks(&pull_request)
+                    .pull_request_checks(&pull_request, refresh)
                     .map_err(format_error),
             },
             WorkerCommand::LoadPullRequestConversation {
@@ -734,6 +736,7 @@ mod tests {
             worker_lane(&WorkerCommand::LoadPullRequestChecks {
                 generation: 6,
                 pull_request: Box::new(request),
+                refresh: false,
             }),
             WorkerLane::GitHubMetadata
         );

@@ -2,9 +2,16 @@ use std::ffi::OsString;
 
 use anyhow::{Context, Result, bail};
 
-use super::{BoundedOutput, PullRequest, Repository, bounded_command_error, parse_tsv_record};
+use std::time::Duration;
+
+use super::{
+    BoundedOutput, CacheLife, PullRequest, Repository, bounded_command_error, parse_tsv_record,
+};
 
 const MAX_CHECK_LOG_BYTES: usize = 8 * 1024 * 1024;
+/// Check state is the one thing here that genuinely changes minute to minute,
+/// so it is the one thing kept on a clock rather than on an identity.
+const CHECK_LIST_CACHE_TTL: Duration = Duration::from_secs(30);
 const MAX_CHECK_LOG_LINES: usize = 200_000;
 const CHECK_TSV_FIELDS: usize = 8;
 const STEP_TSV_FIELDS: usize = 6;
@@ -120,6 +127,14 @@ pub fn unix_now() -> i64 {
         .unwrap_or_default()
 }
 
+/// A check list plus where it came from, so the view can say whether it is
+/// showing a cached answer or one just read from GitHub.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PullRequestChecks {
+    pub checks: Vec<PullRequestCheck>,
+    pub from_cache: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CheckRunLog {
     pub steps: Vec<CheckStep>,
@@ -158,10 +173,29 @@ impl CheckRunLog {
 }
 
 impl Repository {
+    /// `gh pr checks` exits non-zero when any run failed, so a useful response
+    /// has to be recognised by its content rather than by the exit status. That
+    /// is why this reads `gh` directly instead of going through the cached
+    /// helper, and caches the accepted body itself.
     pub(crate) fn pull_request_checks(
         &self,
         pull_request: &PullRequest,
-    ) -> Result<Vec<PullRequestCheck>> {
+        refresh: bool,
+    ) -> Result<PullRequestChecks> {
+        let key = format!(
+            "checks-v1\n{}\n{}\n{}",
+            pull_request.base_repository.url.trim_end_matches('/'),
+            pull_request.number,
+            pull_request.head_oid
+        );
+        if !refresh {
+            if let Some(cached) = self.cache_read(&key, CacheLife::Ttl(CHECK_LIST_CACHE_TTL)) {
+                return Ok(PullRequestChecks {
+                    checks: parse_pull_request_checks(&cached)?,
+                    from_cache: true,
+                });
+            }
+        }
         let output = self.run_gh(pull_request_checks_args(pull_request))?;
         let accepted_status = output.status.success()
             || matches!(output.status.code(), Some(1 | 8)) && !output.stdout.is_empty();
@@ -171,14 +205,19 @@ impl Repository {
         if !accepted_status {
             let error = String::from_utf8_lossy(&output.stderr);
             if error.to_ascii_lowercase().contains("no checks") {
-                return Ok(Vec::new());
+                return Ok(PullRequestChecks::default());
             }
             bail!(
                 "{}",
                 bounded_command_error("unable to load pull-request checks", &output)
             );
         }
-        parse_pull_request_checks(&output.stdout)
+        let checks = parse_pull_request_checks(&output.stdout)?;
+        self.cache_write(&key, &output.stdout);
+        Ok(PullRequestChecks {
+            checks,
+            from_cache: false,
+        })
     }
 
     /// Read a check run's steps and its raw log, then attach every log line to
@@ -201,8 +240,15 @@ impl Repository {
             )));
         };
         let repository = &pull_request.base_repository.name_with_owner;
-        let mut steps = self.check_run_steps(repository, job)?;
-        let (raw, truncated) = self.check_run_raw_log(repository, job)?;
+        // A run that has finished can never change again, so its steps and log
+        // are keyed by the job alone and kept indefinitely.
+        let life = if check.status.is_running() {
+            CacheLife::Ttl(Duration::ZERO)
+        } else {
+            CacheLife::Immutable
+        };
+        let mut steps = self.check_run_steps(repository, job, life)?;
+        let (raw, truncated) = self.check_run_raw_log(repository, job, life)?;
         if raw.is_empty() && steps.is_empty() {
             return Ok(CheckRunLog::unavailable(
                 "GitHub has not published anything for this check yet".to_owned(),
@@ -222,21 +268,46 @@ impl Repository {
         })
     }
 
-    fn check_run_steps(&self, repository: &str, job: u64) -> Result<Vec<CheckStep>> {
-        let output = self.run_gh([
-            OsString::from("api"),
-            OsString::from(format!("repos/{repository}/actions/jobs/{job}")),
-            OsString::from("--jq"),
-            OsString::from(JOB_STEPS_TSV_JQ),
-        ])?;
-        if !output.status.success() {
+    fn check_run_steps(
+        &self,
+        repository: &str,
+        job: u64,
+        life: CacheLife,
+    ) -> Result<Vec<CheckStep>> {
+        let response = self.checked_cached_gh(
+            &format!("check-steps-v1\n{repository}\n{job}\n{life:?}"),
+            life,
+            false,
+            [
+                OsString::from("api"),
+                OsString::from(format!("repos/{repository}/actions/jobs/{job}")),
+                OsString::from("--jq"),
+                OsString::from(JOB_STEPS_TSV_JQ),
+            ],
+            "unable to read the check run steps",
+        );
+        match response {
             // A job whose steps cannot be read still has a log worth showing.
-            return Ok(Vec::new());
+            Err(_) => Ok(Vec::new()),
+            Ok(response) => parse_check_steps(&response.data),
         }
-        parse_check_steps(&output.stdout)
     }
 
-    fn check_run_raw_log(&self, repository: &str, job: u64) -> Result<(Vec<u8>, bool)> {
+    fn check_run_raw_log(
+        &self,
+        repository: &str,
+        job: u64,
+        life: CacheLife,
+    ) -> Result<(Vec<u8>, bool)> {
+        let key = format!("check-log-v1\n{repository}\n{job}");
+        // A finished job's archive is fixed forever, so it is read once and then
+        // never again. A running job has no stable identity to key on, so it is
+        // always re-read; that is exactly what makes it tail.
+        if life == CacheLife::Immutable {
+            if let Some(cached) = self.cache_read_bounded(&key, life, MAX_CHECK_LOG_BYTES) {
+                return Ok((cached, false));
+            }
+        }
         let endpoint = format!("repos/{repository}/actions/jobs/{job}/logs");
         let output = self.run_gh_log([
             OsString::from("api"),
@@ -258,6 +329,9 @@ impl Repository {
                 "{}",
                 bounded_command_error("unable to read the check run log", &output)
             );
+        }
+        if life == CacheLife::Immutable && !output.stdout_truncated && !output.stdout.is_empty() {
+            self.cache_write_bounded(&key, &output.stdout, MAX_CHECK_LOG_BYTES);
         }
         Ok((output.stdout, output.stdout_truncated))
     }

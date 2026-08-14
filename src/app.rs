@@ -584,6 +584,7 @@ pub struct App {
     pub pull_request_check_cursor: Option<usize>,
     pub pull_request_checks_loading: bool,
     pub pull_request_checks_error: Option<String>,
+    pub pull_request_checks_from_cache: bool,
     pub pull_request_conversation: PullRequestConversation,
     pub pull_request_conversation_loading: bool,
     pub pull_request_conversation_error: Option<String>,
@@ -710,6 +711,7 @@ impl App {
             pull_request_check_cursor: None,
             pull_request_checks_loading: false,
             pull_request_checks_error: None,
+            pull_request_checks_from_cache: false,
             pull_request_conversation: PullRequestConversation::default(),
             pull_request_conversation_loading: false,
             pull_request_conversation_error: None,
@@ -2106,7 +2108,7 @@ impl App {
                 }
                 self.pull_request_checks_loading = false;
                 match result {
-                    Ok(checks) => {
+                    Ok(snapshot) => {
                         // A live refresh can add, drop or reorder runs. Follow the
                         // selected check by identity so a completing run never
                         // pulls a different one under the reader's cursor.
@@ -2116,7 +2118,8 @@ impl App {
                         let was_running = self
                             .selected_pull_request_check()
                             .is_some_and(|check| check.status.is_running());
-                        self.pull_request_checks = checks;
+                        self.pull_request_checks_from_cache = snapshot.from_cache;
+                        self.pull_request_checks = snapshot.checks;
                         let cursor = selected.and_then(|selected| {
                             self.pull_request_checks.iter().position(|check| {
                                 (check.workflow.as_str(), check.name.as_str())
@@ -4026,6 +4029,7 @@ impl App {
             WorkerCommand::LoadPullRequestChecks {
                 generation: self.pull_request_checks_generation,
                 pull_request: Box::new(pull_request),
+                refresh,
             },
         )));
     }
