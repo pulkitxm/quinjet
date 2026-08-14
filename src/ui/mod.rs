@@ -1959,7 +1959,7 @@ fn check_run_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> {
         let expanded = app.check_step_expanded(step.number);
         rows.push(check_step_row(step, expanded, width, theme));
         if expanded {
-            push_log_lines(&mut rows, &step.lines, width, theme);
+            push_log_lines(&mut rows, &step.lines, theme);
         }
     }
     if !log.loose_lines.is_empty() {
@@ -1968,7 +1968,7 @@ fn check_run_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> {
             width,
             theme,
         )));
-        push_log_lines(&mut rows, &log.loose_lines, width, theme);
+        push_log_lines(&mut rows, &log.loose_lines, theme);
     }
     if log.truncated {
         rows.push(ContentRow::text(
@@ -2006,7 +2006,7 @@ fn check_step_row(step: &CheckStep, expanded: bool, width: usize, theme: &Theme)
     }
 }
 
-fn push_log_lines(rows: &mut Vec<ContentRow>, lines: &[CheckLogLine], width: usize, theme: &Theme) {
+fn push_log_lines(rows: &mut Vec<ContentRow>, lines: &[CheckLogLine], theme: &Theme) {
     if lines.is_empty() {
         rows.push(ContentRow::text(
             "   │ no output",
@@ -2015,13 +2015,15 @@ fn push_log_lines(rows: &mut Vec<ContentRow>, lines: &[CheckLogLine], width: usi
         return;
     }
     for line in lines {
-        rows.push(ContentRow::text(
-            format!(
-                "      {}",
-                truncate_end(&line.text, width.saturating_sub(6))
+        // Runner output keeps its full width; the pane scrolls sideways rather
+        // than cutting a line off at the border.
+        rows.push(ContentRow::wide(Line::from(vec![
+            Span::styled("   │ ", Style::default().fg(theme.border)),
+            Span::styled(
+                line.text.clone(),
+                Style::default().fg(log_severity_color(line.severity, theme)),
             ),
-            Style::default().fg(log_severity_color(line.severity, theme)),
-        ));
+        ])));
     }
 }
 
@@ -5444,6 +5446,21 @@ terminal rows because that is what real pull-request comments look like in pract
         assert!(
             !app.geometry.content_step_hits.is_empty(),
             "step rows stay clickable"
+        );
+
+        // Log output is the widest thing this pane shows, so it has to be the
+        // thing that scrolls rather than the thing that gets cut off.
+        let rows = check_run_rows(&app, 40, &Theme::default());
+        let log = rows
+            .iter()
+            .find(|row| row.line.to_string().contains("rockets"))
+            .expect("the expanded step's output is rendered");
+        assert!(log.wide, "a log line scrolls instead of being truncated");
+        assert!(
+            log.line
+                .to_string()
+                .ends_with("test tests::rockets ... FAILED"),
+            "the line keeps its full text even in a pane far narrower than it"
         );
     }
 
