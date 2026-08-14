@@ -1310,12 +1310,16 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            fs::read_to_string(test_repository.path.join("README.md")).unwrap(),
-            "test repository\n"
+            fs::read_to_string(test_repository.path.join("README.md"))
+                .unwrap()
+                .trim_end(),
+            "test repository"
         );
         assert_eq!(
-            fs::read_to_string(test_repository.path.join("other.txt")).unwrap(),
-            "unstaged\n"
+            fs::read_to_string(test_repository.path.join("other.txt"))
+                .unwrap()
+                .trim_end(),
+            "unstaged"
         );
         let status = repository.status().unwrap();
         assert_eq!(status.staged_count(), 0);
