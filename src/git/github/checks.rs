@@ -175,11 +175,15 @@ impl Repository {
         }
         let (lines, line_limit_reached) = parse_check_log(&raw);
         let loose_lines = assign_lines_to_steps(&mut steps, lines);
+        // A run still in progress has steps but no published archive yet, which
+        // is worth saying rather than showing a set of empty steps.
+        let pending = raw.is_empty() && check.status.is_running();
         Ok(CheckRunLog {
             steps,
             loose_lines,
             truncated: truncated || line_limit_reached,
-            unavailable: None,
+            unavailable: pending
+                .then(|| "GitHub publishes this run's log once the job finishes".to_owned()),
         })
     }
 
@@ -212,8 +216,7 @@ impl Repository {
             self.run_gh_log([OsString::from("api"), OsString::from(&endpoint)])?
         };
         if !output.status.success() && !output.stdout_truncated {
-            let error = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
-            if error.contains("not found") || error.contains("410") || error.contains("gone") {
+            if log_not_published(&output) {
                 return Ok((Vec::new(), false));
             }
             bail!(
@@ -230,6 +233,16 @@ impl Repository {
     {
         self.run_gh_bounded(args, MAX_CHECK_LOG_BYTES)
     }
+}
+
+/// GitHub answers the log endpoint with 404 until a job has finished writing
+/// its archive, and with 410 once retention expires. Neither is a failure worth
+/// showing: the run itself is still readable from its steps.
+fn log_not_published(output: &BoundedOutput) -> bool {
+    let error = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+    ["404", "410", "not found", "gone"]
+        .into_iter()
+        .any(|marker| error.contains(marker))
 }
 
 fn rejects_unknown_flag(output: &BoundedOutput) -> bool {
@@ -526,6 +539,29 @@ mod tests {
         );
         assert_eq!(check("https://ci.example.test/build/9").job_id(), None);
         assert_eq!(check("").job_id(), None);
+    }
+
+    #[test]
+    fn an_unpublished_log_is_pending_rather_than_a_failure() {
+        let mut output = BoundedOutput {
+            status: std::process::Command::new("false").status().unwrap(),
+            stdout: Vec::new(),
+            stderr: b"gh: HTTP 404".to_vec(),
+            stdout_truncated: false,
+        };
+        assert!(
+            log_not_published(&output),
+            "a job that has not finished writing its archive is not an error"
+        );
+
+        output.stderr = b"gh: Gone (HTTP 410)".to_vec();
+        assert!(
+            log_not_published(&output),
+            "expired retention is not either"
+        );
+
+        output.stderr = b"gh: HTTP 500 Internal Server Error".to_vec();
+        assert!(!log_not_published(&output));
     }
 
     #[test]
