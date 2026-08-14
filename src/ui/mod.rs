@@ -4222,6 +4222,7 @@ mod tests {
             author: "octocat".to_owned(),
             state: "OPEN".to_owned(),
             is_draft: false,
+            created_at: String::new(),
             updated_at: String::new(),
             url: "https://github.com/acme/widget/pull/42".to_owned(),
             base_ref: "main".to_owned(),

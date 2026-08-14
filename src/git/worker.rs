@@ -7,8 +7,8 @@ use crossbeam_channel::{Receiver, Sender, unbounded};
 
 use super::diff::DiffDocument;
 use super::github::{
-    PreparedPullRequest, PullRequest, PullRequestCheck, PullRequestDiffIndex, PullRequestProgress,
-    PullRequestSnapshot,
+    PreparedPullRequest, PullRequest, PullRequestCheck, PullRequestConversation,
+    PullRequestDiffIndex, PullRequestProgress, PullRequestSnapshot,
 };
 use super::history::Commit;
 use super::status::RepoStatus;
@@ -65,6 +65,10 @@ pub enum WorkerCommand {
         paths: Vec<PathBuf>,
     },
     LoadPullRequestChecks {
+        generation: u64,
+        pull_request: Box<PullRequest>,
+    },
+    LoadPullRequestConversation {
         generation: u64,
         pull_request: Box<PullRequest>,
     },
@@ -133,6 +137,10 @@ pub enum WorkerEvent {
         generation: u64,
         result: Result<Vec<PullRequestCheck>, String>,
     },
+    PullRequestConversation {
+        generation: u64,
+        result: Result<PullRequestConversation, String>,
+    },
     Branches {
         generation: u64,
         result: Result<Vec<Branch>, String>,
@@ -163,6 +171,7 @@ struct Mailbox {
     pull_request: Option<WorkerCommand>,
     prefetch: Option<WorkerCommand>,
     checks: Option<WorkerCommand>,
+    conversation: Option<WorkerCommand>,
     shutdown: bool,
 }
 
@@ -193,6 +202,9 @@ impl Mailbox {
                 self.pull_request = Some(command);
             }
             command @ WorkerCommand::LoadPullRequestChecks { .. } => self.checks = Some(command),
+            command @ WorkerCommand::LoadPullRequestConversation { .. } => {
+                self.conversation = Some(command);
+            }
             WorkerCommand::Shutdown => self.shutdown = true,
         }
     }
@@ -206,6 +218,7 @@ impl Mailbox {
             .or_else(|| self.pull_request.take())
             .or_else(|| self.refresh.take())
             .or_else(|| self.checks.take())
+            .or_else(|| self.conversation.take())
             .or_else(|| self.history.take())
             .or_else(|| self.prefetch.take())
     }
@@ -231,7 +244,8 @@ fn worker_lane(command: &WorkerCommand) -> WorkerLane {
         }
         WorkerCommand::LoadGitHubRepositories { .. }
         | WorkerCommand::LookupPullRequest { .. }
-        | WorkerCommand::LoadPullRequestChecks { .. } => WorkerLane::GitHubMetadata,
+        | WorkerCommand::LoadPullRequestChecks { .. }
+        | WorkerCommand::LoadPullRequestConversation { .. } => WorkerLane::GitHubMetadata,
         WorkerCommand::PreparePullRequest { .. }
         | WorkerCommand::LoadPullRequestFile { .. }
         | WorkerCommand::LoadPullRequestFileBatch { .. } => WorkerLane::PullRequestPreview,
@@ -488,6 +502,15 @@ fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sende
                     .pull_request_checks(&pull_request)
                     .map_err(format_error),
             },
+            WorkerCommand::LoadPullRequestConversation {
+                generation,
+                pull_request,
+            } => WorkerEvent::PullRequestConversation {
+                generation,
+                result: repository
+                    .pull_request_conversation(&pull_request)
+                    .map_err(format_error),
+            },
             WorkerCommand::LoadBranches { generation } => WorkerEvent::Branches {
                 generation,
                 result: repository.branches().map_err(format_error),
@@ -639,6 +662,7 @@ mod tests {
             author: String::new(),
             state: "OPEN".to_owned(),
             is_draft: false,
+            created_at: String::new(),
             updated_at: String::new(),
             url: String::new(),
             base_ref: "main".to_owned(),
