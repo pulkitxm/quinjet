@@ -11,28 +11,39 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget, Wra
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{
-    App, ContentFileHit, DiffLayout, Focus, Modal, PaletteCommand, ScmAction, ScmActionHit,
-    SidebarHit, ToastLevel, UiGeometry, View,
+    App, ContentFileHit, DiffLayout, Focus, Modal, PaletteCommand, PullRequestSection,
+    PullRequestTreeEntry, ScmAction, ScmActionHit, SidebarHit, SidebarHitArea, ToastLevel,
+    UiGeometry, View,
 };
-use crate::git::diff::{
-    CommitDetails, DiffDocument, DiffLine, DiffLineKind, HighlightSpan, PullRequestDetails,
-};
-use crate::git::github::GitHubRepository;
+#[cfg(test)]
+use crate::git::diff::CommitDetails;
+use crate::git::diff::{DiffDocument, DiffLine, DiffLineKind, HighlightSpan, PullRequestDetails};
+#[cfg(test)]
+use crate::git::github::PullRequestFile;
+use crate::git::github::{GitHubRepository, PullRequestCheckStatus, PullRequestFileStatus};
 use crate::git::status::{Change, ChangeArea, ChangeStatus};
 use crate::git::{Branch, HistoryBranch, Stash};
 
 use self::theme::Theme;
 
+const DETAIL_LABEL_WIDTH: usize = 12;
+
 const HELP_LINES: &[(&str, &str)] = &[
     ("Navigation", ""),
     ("j / k, ↑ / ↓", "Move selection or scroll preview"),
+    (
+        "Shift + drag",
+        "Select terminal text without activating controls",
+    ),
+    ("Double-click divider", "Restore that pane's default size"),
     ("PgUp / PgDn", "Move by a page"),
     ("gg / G", "Jump to first / last item"),
     ("Tab", "Switch focus between sidebar and preview"),
     ("Enter", "Toggle sidebar / preview focus"),
     ("h / l, ← / →", "Scroll preview horizontally"),
     ("[ / ]", "Previous / next diff hunk"),
-    ("e / E", "Collapse / expand all diffs (preference persists)"),
+    ("e / E", "Collapse / expand multi-file diffs"),
+    ("Space in preview", "Toggle a file in a multi-file preview"),
     ("z", "Hide / show sidebar"),
     ("1 / 2 / 3", "Changes / commit history / pull requests"),
     ("/", "Filter the active list"),
@@ -57,8 +68,10 @@ const HELP_LINES: &[(&str, &str)] = &[
     ("3", "Open the on-demand PR view (no automatic fetch)"),
     ("/", "Focus the numeric PR field; Enter opens it"),
     ("o", "Discover or choose the base repository"),
-    (", / .", "Previous / next changed-file page"),
-    ("r", "Refetch this PR only, bypassing cache"),
+    ("F / C", "All changed files / live checks"),
+    ("j / k", "Select every file, folder, or check row"),
+    ("← / →, Enter", "Collapse / expand the selected folder"),
+    ("r", "Refetch this PR and its checks"),
     ("", ""),
     ("Repository", ""),
     ("r / Ctrl+R", "Refresh"),
@@ -291,7 +304,7 @@ fn draw_sidebar(
     area: Rect,
     app: &mut App,
     theme: &Theme,
-) -> (Vec<(u16, SidebarHit)>, Vec<ScmActionHit>) {
+) -> (Vec<SidebarHitArea>, Vec<ScmActionHit>) {
     match app.view {
         View::Changes => draw_changes_sidebar(frame, area, app, theme),
         View::History => (draw_history_sidebar(frame, area, app, theme), Vec::new()),
@@ -307,7 +320,7 @@ fn draw_changes_sidebar(
     area: Rect,
     app: &mut App,
     theme: &Theme,
-) -> (Vec<(u16, SidebarHit)>, Vec<ScmActionHit>) {
+) -> (Vec<SidebarHitArea>, Vec<ScmActionHit>) {
     let block = panel_block(
         if app.filter.is_empty() {
             format!(" Changes  {} ", app.status.changes.len())
@@ -379,7 +392,10 @@ fn draw_changes_sidebar(
                     area: action_area,
                     action,
                 });
-                hits.push((y, SidebarHit::ChangeGroup(*group)));
+                hits.push(SidebarHitArea {
+                    area: Rect::new(list_area.x, y, list_area.width, 1),
+                    target: SidebarHit::ChangeGroup(*group),
+                });
             }
             ChangeRow::Change {
                 index,
@@ -462,7 +478,10 @@ fn draw_changes_sidebar(
                     area: action_area,
                     action,
                 });
-                hits.push((y, SidebarHit::Change(*index)));
+                hits.push(SidebarHitArea {
+                    area: Rect::new(list_area.x, y, list_area.width, 1),
+                    target: SidebarHit::Change(*index),
+                });
             }
         }
     }
@@ -649,7 +668,7 @@ fn draw_history_sidebar(
     area: Rect,
     app: &mut App,
     theme: &Theme,
-) -> Vec<(u16, SidebarHit)> {
+) -> Vec<SidebarHitArea> {
     let title = if app.filter.is_empty() {
         format!(
             " History · {}  {}{}  [b branch] ",
@@ -741,7 +760,10 @@ fn draw_history_sidebar(
                 })),
             Rect::new(inner.right().saturating_sub(10), y, 9, 1),
         );
-        hits.push((y, SidebarHit::Commit(*index)));
+        hits.push(SidebarHitArea {
+            area: Rect::new(inner.x, y, inner.width, 1),
+            target: SidebarHit::Commit(*index),
+        });
     }
 
     draw_scrollbar(frame, inner, app.sidebar_offset, visible.len(), theme);
@@ -774,7 +796,7 @@ fn draw_pull_requests_sidebar(
     area: Rect,
     app: &mut App,
     theme: &Theme,
-) -> Vec<(u16, SidebarHit)> {
+) -> Vec<SidebarHitArea> {
     let warning = if app.pull_request_warnings.is_empty() {
         String::new()
     } else {
@@ -790,8 +812,16 @@ fn draw_pull_requests_sidebar(
     } else {
         ""
     };
-    let title = if let Some(number) = app.pull_request_exact_number {
-        format!(" Pull Request #{number}{loading}{cache}{warning} ")
+    let title = if let Some(pull_request) = app.selected_pull_request() {
+        let state = if pull_request.is_draft {
+            "DRAFT"
+        } else {
+            pull_request.state.as_str()
+        };
+        format!(
+            " Pull Request #{} · {state}{loading}{cache}{warning} ",
+            pull_request.number
+        )
     } else {
         format!(" Open Pull Request · on demand{loading}{warning} ")
     };
@@ -807,92 +837,112 @@ fn draw_pull_requests_sidebar(
     }
 
     let controls_height = inner.height.min(3);
-    let list_area = Rect::new(
+    let body_area = Rect::new(
         inner.x,
         inner.y,
         inner.width,
         inner.height.saturating_sub(controls_height),
     );
-    if let Some(pull_request) = app.selected_pull_request() {
-        let state = if pull_request.is_draft {
-            "DRAFT"
-        } else {
-            pull_request.state.as_str()
-        };
-        let description = if pull_request.description.trim().is_empty() {
-            "No description provided".to_owned()
-        } else {
-            pull_request.description.replace(['\r', '\n'], " ")
-        };
-        let lines = vec![
-            Line::from(vec![
-                Span::styled(
-                    format!(" #{}  ", pull_request.number),
-                    Style::default()
-                        .fg(theme.accent)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    truncate_middle(
-                        &pull_request.title,
-                        list_area.width.saturating_sub(10) as usize,
-                    ),
-                    Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
-                ),
-            ]),
-            detail_line(
-                "Status",
-                format!("{state} · @{}", pull_request.author),
-                theme,
-            ),
-            detail_line("Description", description, theme),
-            detail_line("Source", pull_request.head_label(), theme),
-            detail_line("Destination", pull_request.base_label(), theme),
-        ];
-        frame.render_widget(
-            Paragraph::new(lines)
-                .style(Style::default().bg(theme.panel))
-                .wrap(Wrap { trim: true }),
-            list_area,
+    let mut hits = Vec::new();
+    if app.pull_request.is_some() && body_area.height > 0 {
+        let files_width = body_area.width / 2;
+        let files_tab = Rect::new(body_area.x, body_area.y, files_width, 1);
+        let checks_tab = Rect::new(
+            files_tab.right(),
+            body_area.y,
+            body_area.width.saturating_sub(files_width),
+            1,
         );
+        draw_pull_request_section_tab(
+            frame,
+            files_tab,
+            format!("[F] Files {}", app.pull_request_total_files),
+            app.pull_request_section == PullRequestSection::Files,
+            theme,
+        );
+        draw_pull_request_section_tab(
+            frame,
+            checks_tab,
+            format!(
+                "[C] Checks {}{}",
+                app.pull_request_checks.len(),
+                if app.pull_request_checks_loading && app.pull_request_checks.is_empty() {
+                    " ⟳"
+                } else {
+                    ""
+                }
+            ),
+            app.pull_request_section == PullRequestSection::Checks,
+            theme,
+        );
+        hits.push(SidebarHitArea {
+            area: files_tab,
+            target: SidebarHit::PullRequestFiles,
+        });
+        hits.push(SidebarHitArea {
+            area: checks_tab,
+            target: SidebarHit::PullRequestChecks,
+        });
+
+        let list_area = Rect::new(
+            body_area.x,
+            body_area.y + 1,
+            body_area.width,
+            body_area.height.saturating_sub(1),
+        );
+        match app.pull_request_section {
+            PullRequestSection::Files => {
+                hits.extend(draw_pull_request_file_tree(frame, list_area, app, theme));
+            }
+            PullRequestSection::Checks => {
+                hits.extend(draw_pull_request_check_list(frame, list_area, app, theme));
+            }
+        }
     } else if app.pull_request_loading {
-        let skeleton_count = list_area.height.min(6);
+        let skeleton_count = body_area.height.min(6);
         for offset in 0..skeleton_count {
-            let y = list_area.y + offset;
-            let width = list_area.width.saturating_sub(8 + (offset % 3) * 5);
+            let y = body_area.y + offset;
+            let width = body_area.width.saturating_sub(8 + (offset % 3) * 5);
             frame.render_widget(
                 Paragraph::new(format!(
                     "   ◌ {}",
                     "─".repeat(width.saturating_sub(6) as usize)
                 ))
                 .style(Style::default().fg(theme.border).bg(theme.panel)),
-                Rect::new(list_area.x, y, list_area.width, 1),
+                Rect::new(body_area.x, y, body_area.width, 1),
             );
         }
-    } else if list_area.height > 0 {
+    } else if body_area.height > 0 {
         frame.render_widget(
-            Paragraph::new("\n  Enter a pull-request number below\n\n  Nothing is fetched until you press Enter.")
-                .style(Style::default().fg(theme.muted))
-                .wrap(Wrap { trim: false }),
-            list_area,
+            Paragraph::new(
+                "\n  Enter a pull-request number below\n\n  Nothing is fetched until you press Enter.",
+            )
+            .style(Style::default().fg(theme.muted))
+            .wrap(Wrap { trim: false }),
+            body_area,
         );
     }
 
-    let controls_y = list_area.bottom();
+    let controls_y = body_area.bottom();
     let repository_name = app
         .pull_request_repository
         .as_ref()
         .map(GitHubRepository::display_name)
         .unwrap_or_else(|| "auto-detect from remotes".to_owned());
     if controls_height >= 1 {
+        let repository_area = Rect::new(inner.x, controls_y, inner.width, 1);
         frame.render_widget(
             Paragraph::new(truncate_middle(
                 &format!(" repo {repository_name}  [o choose]"),
                 inner.width as usize,
             ))
             .style(Style::default().fg(theme.text).bg(theme.panel_alt)),
-            Rect::new(inner.x, controls_y, inner.width, 1),
+            repository_area,
         );
+        hits.push(SidebarHitArea {
+            area: repository_area,
+            target: SidebarHit::PullRequestChooseRepository,
+        });
     }
     if controls_height >= 2 {
         let lookup_area = Rect::new(inner.x, controls_y + 1, inner.width, 1);
@@ -932,19 +982,481 @@ fn draw_pull_requests_sidebar(
                 false,
             );
         }
+        hits.push(SidebarHitArea {
+            area: lookup_area,
+            target: SidebarHit::PullRequestLookup,
+        });
     }
     if controls_height >= 3 {
-        let progress = app.pull_request_progress.map_or_else(
-            || "ready".to_owned(),
-            |progress| format!("{}% {}", progress.percent(), progress.label()),
-        );
+        let status = if let Some(progress) = app.pull_request_progress {
+            format!("{}% {}", progress.percent(), progress.label())
+        } else {
+            match app.pull_request_section {
+                PullRequestSection::Files => {
+                    let suffix = if app.pull_request_files_truncated {
+                        " · list bounded"
+                    } else {
+                        ""
+                    };
+                    format!(
+                        "j/k select · ←/→ folders · {} files{suffix}",
+                        app.pull_request_total_files
+                    )
+                }
+                PullRequestSection::Checks => {
+                    if app.pull_request_checks_error.is_some() {
+                        "checks unavailable · r retry".to_owned()
+                    } else {
+                        "live · refreshes every 10s".to_owned()
+                    }
+                }
+            }
+        };
         frame.render_widget(
-            Paragraph::new(format!(" ,/. files  r refetch  {progress}"))
+            Paragraph::new(format!(" {status}"))
                 .style(Style::default().fg(theme.muted).bg(theme.panel_alt)),
             Rect::new(inner.x, controls_y + 2, inner.width, 1),
         );
     }
-    Vec::new()
+    hits
+}
+
+fn draw_pull_request_section_tab(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    label: String,
+    selected: bool,
+    theme: &Theme,
+) {
+    frame.render_widget(
+        Paragraph::new(truncate_end(&label, area.width as usize))
+            .alignment(Alignment::Center)
+            .style(
+                Style::default()
+                    .fg(if selected { theme.text } else { theme.muted })
+                    .bg(if selected {
+                        theme.selected
+                    } else {
+                        theme.panel_alt
+                    })
+                    .add_modifier(if selected {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    }),
+            ),
+        area,
+    );
+}
+
+fn draw_pull_request_file_tree(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &mut App,
+    theme: &Theme,
+) -> Vec<SidebarHitArea> {
+    if app.pull_request_files.is_empty() {
+        let message = if app.document_loading || app.pull_request_progress.is_some() {
+            "\n  Preparing local diff index…"
+        } else {
+            "\n  No changed files"
+        };
+        frame.render_widget(
+            Paragraph::new(message).style(Style::default().fg(theme.muted)),
+            area,
+        );
+        return Vec::new();
+    }
+    let rows = app.pull_request_tree_entries();
+    app.pull_request_tree_cursor = app
+        .pull_request_tree_cursor
+        .min(rows.len().saturating_sub(1));
+    ensure_offset(
+        &mut app.sidebar_offset,
+        app.pull_request_tree_cursor,
+        area.height as usize,
+        rows.len(),
+    );
+    let mut hits = Vec::new();
+    for (offset, row) in rows
+        .iter()
+        .skip(app.sidebar_offset)
+        .take(area.height as usize)
+        .enumerate()
+    {
+        let row_index = app.sidebar_offset + offset;
+        let y = area.y + offset as u16;
+        let selected = row_index == app.pull_request_tree_cursor;
+        let background = if selected {
+            theme.selected
+        } else {
+            theme.panel
+        };
+        match row {
+            PullRequestTreeEntry::Directory { path, depth } => {
+                let background = if selected {
+                    theme.selected
+                } else {
+                    theme.panel_alt
+                };
+                let indent_width = depth.saturating_mul(2).min(16);
+                let name = path
+                    .file_name()
+                    .map(|name| name.to_string_lossy())
+                    .unwrap_or_else(|| path.to_string_lossy());
+                let available = (area.width as usize)
+                    .saturating_sub(indent_width)
+                    .saturating_sub(5);
+                let icon = if app.pull_request_directory_collapsed(path) {
+                    "›"
+                } else {
+                    "⌄"
+                };
+                frame.render_widget(
+                    Paragraph::new(format!(
+                        " {}{icon} {}/",
+                        "  ".repeat((*depth).min(8)),
+                        truncate_end(&name, available),
+                    ))
+                    .style(
+                        Style::default()
+                            .fg(if selected { theme.text } else { theme.muted })
+                            .bg(background)
+                            .add_modifier(if selected {
+                                Modifier::BOLD
+                            } else {
+                                Modifier::empty()
+                            }),
+                    ),
+                    Rect::new(area.x, y, area.width, 1),
+                );
+                hits.push(SidebarHitArea {
+                    area: Rect::new(area.x, y, area.width, 1),
+                    target: SidebarHit::PullRequestDirectory(path.clone()),
+                });
+            }
+            PullRequestTreeEntry::File { depth, index } => {
+                let Some(file) = app.pull_request_files.get(*index) else {
+                    continue;
+                };
+                let indent_width = depth.saturating_mul(2).min(16);
+                let name = file
+                    .path
+                    .file_name()
+                    .map(|name| name.to_string_lossy())
+                    .unwrap_or_else(|| file.path.to_string_lossy());
+                let available = (area.width as usize)
+                    .saturating_sub(indent_width)
+                    .saturating_sub(7);
+                let line = format!(
+                    " {}{}{}",
+                    "  ".repeat((*depth).min(8)),
+                    if selected { "• " } else { "  " },
+                    truncate_end(&name, available),
+                );
+                frame.render_widget(
+                    Paragraph::new(line).style(
+                        Style::default()
+                            .fg(theme.text)
+                            .bg(background)
+                            .add_modifier(if selected {
+                                Modifier::BOLD
+                            } else {
+                                Modifier::empty()
+                            }),
+                    ),
+                    Rect::new(area.x, y, area.width.saturating_sub(3), 1),
+                );
+                frame.render_widget(
+                    Paragraph::new(pull_request_file_status_code(file.status))
+                        .alignment(Alignment::Right)
+                        .style(
+                            Style::default()
+                                .fg(pull_request_file_status_color(file.status, theme))
+                                .bg(background)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    Rect::new(area.right().saturating_sub(3), y, 2, 1),
+                );
+                hits.push(SidebarHitArea {
+                    area: Rect::new(area.x, y, area.width, 1),
+                    target: SidebarHit::PullRequestFile(*index),
+                });
+            }
+        }
+    }
+    draw_scrollbar(frame, area, app.sidebar_offset, rows.len(), theme);
+    hits
+}
+
+fn pull_request_file_status_code(status: PullRequestFileStatus) -> &'static str {
+    match status {
+        PullRequestFileStatus::Added => "A",
+        PullRequestFileStatus::Modified => "M",
+        PullRequestFileStatus::Deleted => "D",
+        PullRequestFileStatus::Renamed => "R",
+        PullRequestFileStatus::Copied => "C",
+        PullRequestFileStatus::TypeChanged => "T",
+        PullRequestFileStatus::Unmerged => "U",
+        PullRequestFileStatus::Unknown => "?",
+    }
+}
+
+fn pull_request_file_status_color(status: PullRequestFileStatus, theme: &Theme) -> Color {
+    match status {
+        PullRequestFileStatus::Added => theme.added,
+        PullRequestFileStatus::Deleted => theme.removed,
+        PullRequestFileStatus::Renamed
+        | PullRequestFileStatus::Copied
+        | PullRequestFileStatus::Modified
+        | PullRequestFileStatus::TypeChanged => theme.modified,
+        PullRequestFileStatus::Unmerged => theme.conflict,
+        PullRequestFileStatus::Unknown => theme.muted,
+    }
+}
+
+fn draw_pull_request_check_list(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &mut App,
+    theme: &Theme,
+) -> Vec<SidebarHitArea> {
+    if app.pull_request_checks.is_empty() {
+        let message = if app.pull_request_checks_loading {
+            "\n  Loading checks…"
+        } else {
+            app.pull_request_checks_error
+                .as_deref()
+                .unwrap_or("\n  No checks reported")
+        };
+        frame.render_widget(
+            Paragraph::new(message)
+                .style(Style::default().fg(theme.muted))
+                .wrap(Wrap { trim: true }),
+            area,
+        );
+        return Vec::new();
+    }
+    ensure_offset(
+        &mut app.sidebar_offset,
+        app.pull_request_check_cursor,
+        area.height as usize,
+        app.pull_request_checks.len(),
+    );
+    let mut hits = Vec::new();
+    for (offset, (index, check)) in app
+        .pull_request_checks
+        .iter()
+        .enumerate()
+        .skip(app.sidebar_offset)
+        .take(area.height as usize)
+        .enumerate()
+    {
+        let y = area.y + offset as u16;
+        let selected = index == app.pull_request_check_cursor;
+        let background = if selected {
+            theme.selected
+        } else {
+            theme.panel
+        };
+        let (icon, color) = pull_request_check_icon(check.status, theme);
+        let reserved = 7 + check.workflow.width();
+        let name = truncate_end(&check.name, (area.width as usize).saturating_sub(reserved));
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(
+                    if selected { " › " } else { "   " },
+                    Style::default().fg(theme.accent),
+                ),
+                Span::styled(format!("{icon} "), Style::default().fg(color)),
+                Span::styled(name, Style::default().fg(theme.text)),
+                Span::styled(
+                    if check.workflow.is_empty() {
+                        String::new()
+                    } else {
+                        format!("  {}", check.workflow)
+                    },
+                    Style::default().fg(theme.muted),
+                ),
+            ]))
+            .style(Style::default().bg(background)),
+            Rect::new(area.x, y, area.width, 1),
+        );
+        hits.push(SidebarHitArea {
+            area: Rect::new(area.x, y, area.width, 1),
+            target: SidebarHit::PullRequestCheck(index),
+        });
+    }
+    draw_scrollbar(
+        frame,
+        area,
+        app.sidebar_offset,
+        app.pull_request_checks.len(),
+        theme,
+    );
+    hits
+}
+
+fn pull_request_check_icon(status: PullRequestCheckStatus, theme: &Theme) -> (&'static str, Color) {
+    match status {
+        PullRequestCheckStatus::Passed => ("✓", theme.success),
+        PullRequestCheckStatus::Failed => ("×", theme.error),
+        PullRequestCheckStatus::Pending => ("◌", theme.accent),
+        PullRequestCheckStatus::Skipped => ("−", theme.muted),
+        PullRequestCheckStatus::Cancelled => ("■", theme.removed),
+        PullRequestCheckStatus::Unknown => ("?", theme.muted),
+    }
+}
+
+fn draw_pull_request_checks_content(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &App,
+    theme: &Theme,
+) -> (Option<Rect>, Vec<ContentFileHit>) {
+    let passed = app
+        .pull_request_checks
+        .iter()
+        .filter(|check| check.status == PullRequestCheckStatus::Passed)
+        .count();
+    let pending = app
+        .pull_request_checks
+        .iter()
+        .filter(|check| check.status == PullRequestCheckStatus::Pending)
+        .count();
+    let failed = app
+        .pull_request_checks
+        .iter()
+        .filter(|check| check.status == PullRequestCheckStatus::Failed)
+        .count();
+    let title = app.selected_pull_request().map_or_else(
+        || " Pull Request Checks ".to_owned(),
+        |pull_request| {
+            format!(
+                " PR #{} · Checks  ✓{}  ◌{}  ×{} ",
+                pull_request.number, passed, pending, failed
+            )
+        },
+    );
+    let block = panel_block(
+        title,
+        app.focus == Focus::Content && app.modal.is_none(),
+        theme,
+    );
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.width == 0 || inner.height == 0 {
+        return (None, Vec::new());
+    }
+
+    let mut lines = Vec::new();
+    if let Some(pull_request) = app.selected_pull_request() {
+        let state = if pull_request.is_draft {
+            "DRAFT"
+        } else {
+            pull_request.state.as_str()
+        };
+        lines.push(Line::from(Span::styled(
+            pull_request.title.as_str(),
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+        )));
+        lines.push(detail_line(
+            "Status",
+            format!(
+                "{state}  ·  @{}  ·  updated {}",
+                pull_request.author, pull_request.updated_at
+            ),
+            theme,
+        ));
+        lines.push(detail_line(
+            "Branches",
+            format!(
+                "{} → {}",
+                pull_request.head_label(),
+                pull_request.base_label()
+            ),
+            theme,
+        ));
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{:<DETAIL_LABEL_WIDTH$}", "Changes"),
+                Style::default().fg(theme.muted),
+            ),
+            Span::styled(
+                format!("{} files  ", pull_request.changed_files),
+                Style::default().fg(theme.text),
+            ),
+            Span::styled(
+                format!("+{}", pull_request.additions),
+                Style::default()
+                    .fg(theme.added)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  ", Style::default()),
+            Span::styled(
+                format!("-{}", pull_request.deletions),
+                Style::default()
+                    .fg(theme.removed)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(Line::default());
+    }
+
+    if let Some(check) = app.selected_pull_request_check() {
+        let (icon, color) = pull_request_check_icon(check.status, theme);
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!(" {icon} "),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                check.name.as_str(),
+                Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(detail_line("Workflow", check.workflow.clone(), theme));
+        lines.push(detail_line("State", check.state.clone(), theme));
+        if !check.started_at.is_empty() {
+            lines.push(detail_line("Started", check.started_at.clone(), theme));
+        }
+        if !check.completed_at.is_empty() {
+            lines.push(detail_line("Completed", check.completed_at.clone(), theme));
+        }
+        if !check.description.is_empty() {
+            lines.push(detail_line("Details", check.description.clone(), theme));
+        }
+        if !check.link.is_empty() {
+            lines.push(detail_line("URL", check.link.clone(), theme));
+        }
+    } else if app.pull_request_checks_loading {
+        lines.push(Line::from(Span::styled(
+            " Loading checks…",
+            Style::default().fg(theme.accent),
+        )));
+    } else if let Some(error) = app.pull_request_checks_error.as_deref() {
+        lines.push(Line::from(Span::styled(
+            format!(" Checks unavailable: {error}"),
+            Style::default().fg(theme.error),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            " No checks reported for this pull request",
+            Style::default().fg(theme.muted),
+        )));
+    }
+    lines.push(Line::default());
+    lines.push(Line::from(Span::styled(
+        " Checks refresh silently every 10 seconds",
+        Style::default().fg(theme.muted),
+    )));
+    frame.render_widget(
+        Paragraph::new(lines)
+            .style(Style::default().bg(theme.panel))
+            .wrap(Wrap { trim: false }),
+        inner,
+    );
+    (None, Vec::new())
 }
 
 fn draw_content(
@@ -953,8 +1465,11 @@ fn draw_content(
     app: &mut App,
     theme: &Theme,
 ) -> (Option<Rect>, Vec<ContentFileHit>) {
-    let file_action = if app.document.file_count() > 0 {
-        if app.files_collapsed {
+    if app.view == View::PullRequests && app.pull_request_section == PullRequestSection::Checks {
+        return draw_pull_request_checks_content(frame, area, app, theme);
+    }
+    let file_action = if app.preview_files_collapsible() {
+        if app.preview_files_all_collapsed() {
             "  [e Expand all]"
         } else {
             "  [e Collapse all]"
@@ -964,7 +1479,9 @@ fn draw_content(
     };
     let loading = app.pull_request_progress.map_or_else(
         || {
-            if app.document_loading {
+            if app.document_loading
+                && !(app.view == View::PullRequests && app.document.file_count() > 0)
+            {
                 "  ⟳".to_owned()
             } else {
                 String::new()
@@ -972,9 +1489,13 @@ fn draw_content(
         },
         |progress| format!("  ⟳ {}%", progress.percent()),
     );
+    let title_width = (area.width as usize)
+        .saturating_sub(loading.width())
+        .saturating_sub(file_action.width())
+        .saturating_sub(4);
     let title = format!(
         " {}{}{} ",
-        truncate_middle(&app.document.title, area.width.saturating_sub(38) as usize),
+        truncate_middle(&app.document.title, title_width),
         loading,
         file_action,
     );
@@ -994,7 +1515,7 @@ fn draw_content(
     // permanently reduces the diff viewport.
     let details_rows = if app.document.commit_details.is_some() {
         commit_details_row_count(inner.height)
-    } else if app.document.pull_request_details.is_some() {
+    } else if app.view != View::PullRequests && app.document.pull_request_details.is_some() {
         pull_request_details_row_count(inner.height)
     } else {
         0
@@ -1015,12 +1536,11 @@ fn draw_content(
         let visible_details = details_rows - diff_scroll;
         let details_height = visible_details.min(inner.height as usize) as u16;
         let details_area = Rect::new(inner.x, inner.y, inner.width, details_height);
-        if let Some(details) = app.document.commit_details.as_ref() {
+        if app.document.commit_details.is_some() {
             draw_commit_details_scrolled(
                 frame,
                 details_area,
-                details,
-                &app.document,
+                app,
                 diff_scroll,
                 details_rows,
                 theme,
@@ -1076,12 +1596,16 @@ fn pull_request_details_row_count(available_height: u16) -> usize {
 fn draw_commit_details_scrolled(
     frame: &mut Frame<'_>,
     area: Rect,
-    details: &CommitDetails,
-    document: &DiffDocument,
+    app: &App,
     scroll: usize,
     total_rows: usize,
     theme: &Theme,
 ) {
+    let Some(details) = app.document.commit_details.as_ref() else {
+        return;
+    };
+    let document = &app.document;
+    let load_progress = app.local_diff_load_progress();
     let block = Block::default()
         .title(" Commit details ")
         .borders(Borders::ALL)
@@ -1120,9 +1644,12 @@ fn draw_commit_details_scrolled(
             Span::styled("Changes    ", Style::default().fg(theme.muted)),
             Span::styled(
                 format!(
-                    "{} file{} changed  ",
+                    "{} file{} changed{}  ",
                     file_count,
-                    if file_count == 1 { "" } else { "s" }
+                    if file_count == 1 { "" } else { "s" },
+                    load_progress.map_or_else(String::new, |(loaded, total)| {
+                        format!("  ·  {loaded}/{total} diffs loaded")
+                    }),
                 ),
                 Style::default().fg(theme.text),
             ),
@@ -1239,34 +1766,31 @@ fn draw_pull_request_details_scrolled(
         ),
         detail_line("URL", details.url.clone(), theme),
         Line::from(vec![
-            Span::styled("Page       ", Style::default().fg(theme.muted)),
             Span::styled(
-                format!(
-                    "{} file{} on page {}  ",
-                    details.displayed_files,
-                    if details.displayed_files == 1 {
-                        ""
-                    } else {
-                        "s"
-                    },
-                    details.file_page,
-                ),
-                Style::default().fg(theme.text),
+                format!("{:<DETAIL_LABEL_WIDTH$}", "Selected"),
+                Style::default().fg(theme.muted),
             ),
             Span::styled(
-                format!("+{}", details.page_additions),
+                details
+                    .selected_file
+                    .as_deref()
+                    .unwrap_or("Preparing files"),
+                Style::default().fg(theme.text),
+            ),
+            Span::styled("  ", Style::default()),
+            Span::styled(
+                format!("+{}", details.selected_file_additions),
                 Style::default()
                     .fg(theme.added)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled("  ", Style::default()),
             Span::styled(
-                format!("-{}", details.page_deletions),
+                format!("-{}", details.selected_file_deletions),
                 Style::default()
                     .fg(theme.removed)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("  ·  , / . files", Style::default().fg(theme.muted)),
         ]),
         Line::from(vec![
             Span::styled("PR total   ", Style::default().fg(theme.muted)),
@@ -1313,27 +1837,97 @@ fn draw_pull_request_details_scrolled(
 }
 
 fn description_preview_lines(value: &str, width: usize, maximum_lines: usize) -> Vec<String> {
+    let description = markdown_preview_text(value);
+    text_preview_lines(
+        if description.is_empty() {
+            "No description provided"
+        } else {
+            &description
+        },
+        width,
+        maximum_lines,
+    )
+}
+
+fn markdown_preview_text(value: &str) -> String {
+    let mut output = String::new();
+    for raw_line in value.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let heading = line.starts_with('#');
+        let line = line.trim_start_matches('#').trim_start();
+        let (line, bullet) = ["- ", "* ", "+ "]
+            .into_iter()
+            .find_map(|marker| line.strip_prefix(marker).map(|line| (line, true)))
+            .unwrap_or((line, false));
+        let line = strip_inline_markdown(line);
+        if line.is_empty()
+            || (heading
+                && matches!(
+                    line.to_ascii_lowercase().as_str(),
+                    "summary" | "description" | "overview"
+                ))
+        {
+            continue;
+        }
+        if !output.is_empty() {
+            output.push_str(if bullet { " • " } else { " " });
+        }
+        output.push_str(&line);
+    }
+    output
+}
+
+fn strip_inline_markdown(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| !matches!(character, '*' | '`'))
+        .collect()
+}
+
+fn text_preview_lines(value: &str, width: usize, maximum_lines: usize) -> Vec<String> {
+    if maximum_lines == 0 {
+        return Vec::new();
+    }
     let width = width.max(1);
     let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    let normalized = if normalized.is_empty() {
-        "No description provided".to_owned()
-    } else {
-        normalized
-    };
+    let total_width = normalized.width();
     let mut lines = Vec::with_capacity(maximum_lines);
     let mut skipped = 0;
-    while skipped < normalized.width() && lines.len() < maximum_lines {
-        let line = slice_width(&normalized, skipped, width);
-        let used = line.width();
+    while skipped < total_width && lines.len() < maximum_lines {
+        while skipped < total_width && slice_width(&normalized, skipped, 1) == " " {
+            skipped += 1;
+        }
+        let chunk = slice_width(&normalized, skipped, width);
+        if chunk.is_empty() {
+            break;
+        }
+        let reaches_end = skipped.saturating_add(chunk.width()) >= total_width;
+        let (line, used) = if reaches_end {
+            let used = chunk.width();
+            (chunk, used)
+        } else if let Some(space) = chunk.rfind(' ').filter(|space| *space > 0) {
+            let line = chunk[..space].to_owned();
+            let used = line.width().saturating_add(1);
+            (line, used)
+        } else {
+            let used = chunk.width();
+            (chunk, used)
+        };
         if used == 0 {
             break;
         }
         skipped = skipped.saturating_add(used);
         lines.push(line);
     }
-    if skipped < normalized.width() {
+    if skipped < total_width {
         if let Some(last) = lines.last_mut() {
-            *last = format!("{}…", slice_width(last, 0, width.saturating_sub(1)));
+            *last = format!(
+                "{}…",
+                slice_width(last.trim_end(), 0, width.saturating_sub(1))
+            );
         }
     }
     while lines.len() < maximum_lines {
@@ -1356,7 +1950,10 @@ fn remote_suffix(remotes: &[String]) -> String {
 
 fn detail_line<'a>(label: &'a str, value: String, theme: &Theme) -> Line<'a> {
     Line::from(vec![
-        Span::styled(format!("{label:<10}"), Style::default().fg(theme.muted)),
+        Span::styled(
+            format!("{label:<DETAIL_LABEL_WIDTH$}"),
+            Style::default().fg(theme.muted),
+        ),
         Span::styled(value, Style::default().fg(theme.text)),
     ])
 }
@@ -1538,8 +2135,9 @@ fn draw_file_header(frame: &mut Frame<'_>, area: Rect, line: &DiffLine, app: &Ap
         .first()
         .map(|span| span.text.as_str())
         .unwrap_or_default();
-    let disclosure = if file_header_path(line).is_some_and(|path| app.preview_file_collapsed(path))
-    {
+    let disclosure = if !app.preview_files_collapsible() {
+        " "
+    } else if file_header_path(line).is_some_and(|path| app.preview_file_collapsed(path)) {
         "›"
     } else {
         "⌄"
@@ -3217,6 +3815,19 @@ fn centered_rect(width: u16, height: u16, outer: Rect) -> Rect {
     )
 }
 
+fn truncate_end(value: &str, width: usize) -> String {
+    if value.width() <= width {
+        return value.to_owned();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    if width == 1 {
+        return "…".to_owned();
+    }
+    format!("{}…", slice_width(value, 0, width - 1))
+}
+
 fn truncate_middle(value: &str, width: usize) -> String {
     if width == 0 {
         return String::new();
@@ -3385,6 +3996,113 @@ mod tests {
     }
 
     #[test]
+    fn pull_request_folders_render_as_clickable_collapse_controls() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = App::new("/tmp/repo", "repo");
+        app.pull_request_files = ["src/app.rs", "src/git/diff.rs"]
+            .into_iter()
+            .map(|path| PullRequestFile {
+                path: std::path::PathBuf::from(path),
+                old_path: None,
+                status: PullRequestFileStatus::Modified,
+            })
+            .collect();
+        let backend = TestBackend::new(40, 8);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut hits = Vec::new();
+
+        terminal
+            .draw(|frame| {
+                hits =
+                    draw_pull_request_file_tree(frame, frame.area(), &mut app, &Theme::default());
+            })
+            .unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("⌄ src/"));
+        assert!(rendered.contains("app.rs"));
+        assert!(hits.iter().any(|hit| {
+            matches!(
+                &hit.target,
+                SidebarHit::PullRequestDirectory(path) if path == std::path::Path::new("src")
+            )
+        }));
+
+        app.collapsed_pull_request_directories
+            .insert(std::path::PathBuf::from("src"));
+        terminal.clear().unwrap();
+        terminal
+            .draw(|frame| {
+                draw_pull_request_file_tree(frame, frame.area(), &mut app, &Theme::default());
+            })
+            .unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("› src/"));
+        assert!(!rendered.contains("app.rs"));
+    }
+
+    #[test]
+    fn pull_request_file_tree_virtualizes_a_thousand_files() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = App::new("/tmp/repo", "repo");
+        app.pull_request_files = (0..1_000)
+            .map(|index| PullRequestFile {
+                path: std::path::PathBuf::from(format!(
+                    "packages/package-{index:04}/src/file-{index:04}.rs"
+                )),
+                old_path: None,
+                status: PullRequestFileStatus::Modified,
+            })
+            .collect();
+        app.pull_request_total_files = app.pull_request_files.len();
+        app.pull_request_file_cursor = 999;
+        let rows = app.pull_request_tree_entries();
+        assert_eq!(
+            rows.iter()
+                .filter(|row| matches!(row, PullRequestTreeEntry::File { .. }))
+                .count(),
+            1_000
+        );
+        app.pull_request_tree_cursor = rows
+            .iter()
+            .position(|row| matches!(row, PullRequestTreeEntry::File { index: 999, .. }))
+            .unwrap();
+
+        let backend = TestBackend::new(48, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                draw_pull_request_file_tree(frame, frame.area(), &mut app, &Theme::default());
+            })
+            .unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+
+        assert!(app.sidebar_offset > 0);
+        assert!(rendered.contains("file-0999.rs"));
+    }
+
+    #[test]
     fn hides_raw_hunk_coordinates_in_both_diff_layouts() {
         let document = DiffDocument {
             title: String::new(),
@@ -3484,7 +4202,9 @@ mod tests {
         app.pull_request = Some(crate::git::github::PullRequest {
             number: 42,
             title: "Ship the rocket".to_owned(),
-            description: "Launch safely after all checks pass".to_owned(),
+            description:
+                "## Summary\n- Launch **safely** after all checks pass\n- Keep raw `gh` output bounded"
+                    .to_owned(),
             author: "octocat".to_owned(),
             state: "OPEN".to_owned(),
             is_draft: false,
@@ -3492,16 +4212,16 @@ mod tests {
             url: "https://github.com/acme/widget/pull/42".to_owned(),
             base_ref: "main".to_owned(),
             base_oid: String::new(),
-            head_ref: "topic".to_owned(),
+            head_ref: "feature/rocket".to_owned(),
             head_oid: String::new(),
             base_repository: GitHubRepository {
                 name_with_owner: "acme/widget".to_owned(),
                 url: "https://github.com/acme/widget".to_owned(),
                 remotes: vec!["upstream".to_owned()],
             },
-            head_repository: Some("acme/widget".to_owned()),
-            head_remotes: vec!["upstream".to_owned()],
-            is_cross_repository: false,
+            head_repository: Some("octocat/widget".to_owned()),
+            head_remotes: vec!["origin".to_owned(), "publish".to_owned()],
+            is_cross_repository: true,
             additions: 101,
             deletions: 20,
             changed_files: 1,
@@ -3511,6 +4231,12 @@ mod tests {
             url: "https://github.com/acme/widget".to_owned(),
             remotes: vec!["upstream".to_owned()],
         });
+        app.pull_request_files = vec![PullRequestFile {
+            path: std::path::PathBuf::from("src/rocket.rs"),
+            old_path: None,
+            status: PullRequestFileStatus::Added,
+        }];
+        app.pull_request_total_files = 1;
         app.document = DiffDocument {
             title: "PR #42 — Ship the rocket".to_owned(),
             truncated: false,
@@ -3534,14 +4260,9 @@ mod tests {
                 changed_files: 1,
                 additions: 101,
                 deletions: 20,
-                page_additions: 1,
-                page_deletions: 0,
-                file_page: 1,
-                file_page_size: 20,
-                displayed_files: 1,
-                total_files: 1,
-                has_previous_file_page: false,
-                has_next_file_page: false,
+                selected_file: Some("src/rocket.rs".to_owned()),
+                selected_file_additions: 1,
+                selected_file_deletions: 0,
             }),
             lines: vec![
                 test_file_header("src/rocket.rs", 1, 0),
@@ -3563,26 +4284,41 @@ mod tests {
             .collect();
 
         assert!(rendered.contains("Pull Requests"));
-        assert!(rendered.contains("PR #"));
-        assert!(rendered.contains("acme/widget"));
-        assert!(!rendered.contains("←/→"));
-        assert_eq!(rendered.matches("Pull request #42").count(), 1);
-        assert!(rendered.contains("details"));
-        assert!(rendered.contains("Description"));
-        assert!(rendered.contains("Launch safely"));
-        assert!(rendered.contains("Destination"));
-        assert!(rendered.contains("acme/widget:main"));
-        assert!(rendered.contains("remote upstream"));
-        assert!(rendered.contains("Source"));
+        assert!(rendered.contains("[F] Files 1"));
+        assert!(rendered.contains("[C] Checks 0"));
+        assert!(rendered.contains("rocket.rs"));
+        assert!(rendered.contains("launch();"));
+        assert!(!rendered.contains("Page"));
+        assert!(!rendered.contains("files on page"));
+        assert!(!rendered.contains("@@"));
+
+        app.pull_request_section = PullRequestSection::Checks;
+        app.pull_request_checks = vec![crate::git::github::PullRequestCheck {
+            name: "CI / ubuntu".to_owned(),
+            workflow: "CI".to_owned(),
+            state: "SUCCESS".to_owned(),
+            status: PullRequestCheckStatus::Passed,
+            description: "All jobs passed".to_owned(),
+            link: "https://github.com/acme/widget/actions/1".to_owned(),
+            started_at: "2026-08-13T12:00:00Z".to_owned(),
+            completed_at: "2026-08-13T12:01:00Z".to_owned(),
+        }];
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("[C] Checks 1"));
+        assert!(rendered.contains("CI / ubuntu"));
+        assert!(rendered.contains("Ship the rocket"));
         assert!(rendered.contains("octocat/widget:feature/rocket"));
-        assert!(rendered.contains("remotes origin, publish"));
-        assert!(rendered.contains("fork"));
-        assert!(rendered.contains("Page"));
-        assert!(rendered.contains("PR total"));
+        assert!(rendered.contains("acme/widget:main"));
         assert!(rendered.contains("+101"));
         assert!(rendered.contains("-20"));
-        assert!(rendered.contains("src/rocket.rs"));
-        assert!(!rendered.contains("@@"));
+        assert!(rendered.contains("Checks refresh silently"));
     }
 
     #[test]
@@ -3622,11 +4358,10 @@ mod tests {
         let theme = Theme::default();
         let backend = TestBackend::new(40, 1);
         let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new("/tmp/repo", "repo");
+        app.document.lines = vec![header.clone()];
         terminal
-            .draw(|frame| {
-                let app = App::new("/tmp/repo", "repo");
-                draw_file_header(frame, frame.area(), &header, &app, &theme);
-            })
+            .draw(|frame| draw_file_header(frame, frame.area(), &header, &app, &theme))
             .unwrap();
         let buffer = terminal.backend().buffer();
         let rendered: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
@@ -3640,6 +4375,8 @@ mod tests {
             .unwrap();
 
         assert!(rendered.ends_with("+12 -3 ┐"));
+        assert!(!rendered.contains('⌄'));
+        assert!(!rendered.contains('›'));
         assert_eq!(buffer[(addition_column as u16, 0)].fg, theme.added);
         assert_eq!(buffer[(deletion_column as u16, 0)].fg, theme.removed);
     }
@@ -3661,6 +4398,24 @@ mod tests {
         assert_eq!(lines.len(), 3);
         assert!(lines.last().unwrap().ends_with('…'));
         assert!(lines.iter().all(|line| line.width() <= 10));
+    }
+
+    #[test]
+    fn pull_request_description_preview_cleans_common_markdown() {
+        let lines = description_preview_lines(
+            "## Summary\n- Add a **Pull Requests** tab\n- Cache raw `gh` metadata",
+            24,
+            3,
+        );
+        let rendered = lines.join(" ");
+
+        assert!(rendered.contains("Add a Pull Requests tab"));
+        assert!(rendered.contains("•"));
+        assert!(!rendered.contains("Summary"));
+        assert!(!rendered.contains('#'));
+        assert!(!rendered.contains('*'));
+        assert!(!rendered.contains('`'));
+        assert!(lines.iter().all(|line| line.width() <= 24));
     }
 
     #[test]
@@ -3692,6 +4447,7 @@ mod tests {
         };
 
         let mut app = App::new("/tmp/repo", "repo");
+        app.document = document.clone();
         app.files_collapsed = true;
         assert_eq!(unified_row_indices(&document, &app), vec![0, 4]);
         assert_eq!(side_by_side_rows(&document, &app).len(), 2);
