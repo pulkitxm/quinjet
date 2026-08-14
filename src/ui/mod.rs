@@ -72,7 +72,10 @@ const HELP_LINES: &[(&str, &str)] = &[
     ("3", "Open the on-demand PR view (no automatic fetch)"),
     ("/", "Focus the numeric PR field; Enter opens it"),
     ("o", "Discover or choose the base repository"),
-    ("P / F", "Pull request and its checks / all changed files"),
+    (
+        "Shift+P / Shift+F",
+        "The PR and its checks / all changed files",
+    ),
     (
         "j / k",
         "Select the conversation, a check, a file, or a folder",
@@ -878,7 +881,7 @@ fn draw_pull_requests_sidebar(
             frame,
             overview_tab,
             format!(
-                "[P] Pull request{}",
+                "PR{}",
                 if app.pull_request_checks_loading && app.pull_request_checks.is_empty() {
                     " ⟳"
                 } else {
@@ -891,7 +894,7 @@ fn draw_pull_requests_sidebar(
         draw_pull_request_section_tab(
             frame,
             files_tab,
-            format!("[F] Files {}", app.pull_request_total_files),
+            format!("Files {}", app.pull_request_total_files),
             app.pull_request_section == PullRequestSection::Files,
             theme,
         );
@@ -5108,8 +5111,8 @@ mod tests {
             .collect();
 
         assert!(rendered.contains("Pull Requests"));
-        assert!(rendered.contains("[F] Files 1"));
-        assert!(rendered.contains("[P] Pull request"));
+        assert!(rendered.contains("Files 1"));
+        assert!(rendered.contains("PR"));
         assert!(rendered.contains("rocket.rs"));
         assert!(rendered.contains("launch();"));
         assert!(!rendered.contains("Page"));
@@ -5556,7 +5559,6 @@ terminal rows because that is what real pull-request comments look like in pract
             .map(|cell| cell.symbol())
             .collect();
 
-        assert!(rendered.contains("[P] Pull request"));
         assert!(rendered.contains("Conversation"));
         assert!(rendered.contains("Format, lint, and test"));
         assert!(rendered.contains("#42"));
