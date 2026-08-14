@@ -398,37 +398,48 @@ fn split_log_marker(value: &str) -> (CheckLogSeverity, String) {
     (CheckLogSeverity::Normal, value.to_owned())
 }
 
-/// Distribute timestamped lines across steps in a single forward pass. Lines
-/// that fall outside every step window, or that carry no timestamp before the
-/// first step starts, are returned as loose output.
+/// Distribute timestamped lines across steps in a single forward pass, moving on
+/// as soon as the next step has started. Comparing whole seconds matters:
+/// runner lines carry sub-second precision while the steps API reports whole
+/// seconds, and comparing those as text puts everything written during a step's
+/// final second into the step before it.
+///
+/// Output from before the first step or after the last one is returned loose,
+/// which is where provisioning and teardown failures live.
 fn assign_lines_to_steps(steps: &mut [CheckStep], lines: Vec<CheckLogLine>) -> Vec<CheckLogLine> {
     if steps.is_empty() {
         return lines;
     }
+    let starts: Vec<Option<i64>> = steps
+        .iter()
+        .map(|step| timestamp_seconds(&step.started_at))
+        .collect();
     let mut loose = Vec::new();
-    let mut current = 0;
+    let mut current: Option<usize> = None;
     for line in lines {
-        if line.timestamp.is_empty() {
-            match steps.get_mut(current) {
-                Some(step) if !step.lines.is_empty() => step.lines.push(line),
-                _ => loose.push(line),
+        if let Some(seconds) = timestamp_seconds(&line.timestamp) {
+            while let Some(next) = current.map_or(Some(0), |index| {
+                (index + 1 < steps.len()).then_some(index + 1)
+            }) {
+                if starts[next].is_some_and(|start| seconds >= start) {
+                    current = Some(next);
+                } else {
+                    break;
+                }
             }
-            continue;
+            let past_last = current.is_some_and(|index| {
+                index + 1 == steps.len()
+                    && timestamp_seconds(&steps[index].completed_at)
+                        .is_some_and(|end| seconds > end)
+            });
+            if past_last {
+                loose.push(line);
+                continue;
+            }
         }
-        while current < steps.len() {
-            let step = &steps[current];
-            let ended = !step.completed_at.is_empty() && line.timestamp > step.completed_at;
-            if ended {
-                current += 1;
-            } else {
-                break;
-            }
-        }
-        match steps.get_mut(current) {
-            Some(step) if step.started_at.is_empty() || line.timestamp >= step.started_at => {
-                step.lines.push(line);
-            }
-            _ => loose.push(line),
+        match current.and_then(|index| steps.get_mut(index)) {
+            Some(step) => step.lines.push(line),
+            None => loose.push(line),
         }
     }
     loose
@@ -604,6 +615,64 @@ untimestamped trailing output\n";
         );
         assert_eq!(steps[1].duration_label(), "2m 20s");
         assert_eq!(steps[0].duration_label(), "10s");
+    }
+
+    #[test]
+    fn a_step_boundary_splits_on_whole_seconds_not_on_text_order() {
+        let mut steps = vec![
+            CheckStep {
+                number: 1,
+                name: "Set up job".to_owned(),
+                status: PullRequestCheckStatus::Passed,
+                conclusion: "success".to_owned(),
+                started_at: "2026-08-14T18:59:57Z".to_owned(),
+                completed_at: "2026-08-14T18:59:58Z".to_owned(),
+                lines: Vec::new(),
+            },
+            CheckStep {
+                number: 2,
+                name: "Run actions/checkout@v5".to_owned(),
+                status: PullRequestCheckStatus::Passed,
+                conclusion: "success".to_owned(),
+                started_at: "2026-08-14T18:59:58Z".to_owned(),
+                completed_at: "2026-08-14T19:00:09Z".to_owned(),
+                lines: Vec::new(),
+            },
+        ];
+        let line = |timestamp: &str, text: &str| CheckLogLine {
+            timestamp: timestamp.to_owned(),
+            text: text.to_owned(),
+            severity: CheckLogSeverity::Normal,
+        };
+
+        // "18:59:58.4…" sorts before "18:59:58Z" as text, so a lexicographic
+        // comparison would leave checkout's own output under "Set up job".
+        let loose = assign_lines_to_steps(
+            &mut steps,
+            vec![
+                line("2026-08-14T18:59:57.3510133Z", "Current runner version"),
+                line("2026-08-14T18:59:58.4821004Z", "Run actions/checkout@v5"),
+                line("2026-08-14T19:00:08.1200000Z", "Getting Git version info"),
+            ],
+        );
+
+        assert!(loose.is_empty());
+        assert_eq!(
+            steps[0]
+                .lines
+                .iter()
+                .map(|line| line.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Current runner version"]
+        );
+        assert_eq!(
+            steps[1]
+                .lines
+                .iter()
+                .map(|line| line.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Run actions/checkout@v5", "Getting Git version info"]
+        );
     }
 
     #[test]
