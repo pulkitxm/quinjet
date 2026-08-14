@@ -1,5 +1,10 @@
+mod checks;
 mod conversation;
 
+pub use self::checks::{
+    CheckLogLine, CheckLogSeverity, CheckRunLog, CheckStep, PullRequestCheck,
+    PullRequestCheckStatus,
+};
 pub use self::conversation::{ConversationEntry, ConversationKind, PullRequestConversation};
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -162,28 +167,6 @@ pub struct PullRequestDiffIndex {
     pub files: Vec<PullRequestFile>,
     pub total_files: usize,
     pub truncated: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PullRequestCheckStatus {
-    Pending,
-    Passed,
-    Failed,
-    Skipped,
-    Cancelled,
-    Unknown,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PullRequestCheck {
-    pub name: String,
-    pub workflow: String,
-    pub state: String,
-    pub status: PullRequestCheckStatus,
-    pub description: String,
-    pub link: String,
-    pub started_at: String,
-    pub completed_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -412,29 +395,6 @@ impl Repository {
                 truncated,
             },
         })
-    }
-
-    pub(crate) fn pull_request_checks(
-        &self,
-        pull_request: &PullRequest,
-    ) -> Result<Vec<PullRequestCheck>> {
-        let output = self.run_gh(pull_request_checks_args(pull_request))?;
-        let accepted_status = output.status.success()
-            || matches!(output.status.code(), Some(1 | 8)) && !output.stdout.is_empty();
-        if output.stdout_truncated {
-            bail!("pull-request checks exceeded the metadata limit");
-        }
-        if !accepted_status {
-            let error = String::from_utf8_lossy(&output.stderr);
-            if error.to_ascii_lowercase().contains("no checks") {
-                return Ok(Vec::new());
-            }
-            bail!(
-                "{}",
-                bounded_command_error("unable to load pull-request checks", &output)
-            );
-        }
-        parse_pull_request_checks(&output.stdout)
     }
 
     fn pull_request_metadata(
@@ -730,6 +690,16 @@ impl Repository {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
+        self.run_gh_bounded(args, MAX_GH_METADATA_BYTES)
+    }
+
+    /// Metadata responses are small and share one cap, but a check run log is
+    /// arbitrarily large and needs its own.
+    fn run_gh_bounded<I, S>(&self, args: I, stdout_limit: usize) -> Result<BoundedOutput>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
         let mut command = Command::new("gh");
         command
             .current_dir(&self.root)
@@ -738,14 +708,12 @@ impl Repository {
             .env("GH_PAGER", "cat")
             .env("GH_NO_UPDATE_NOTIFIER", "1")
             .env("NO_COLOR", "1");
-        run_bounded_command(&mut command, MAX_GH_METADATA_BYTES, MAX_GH_ERROR_BYTES).with_context(
-            || {
-                format!(
-                    "failed to execute GitHub CLI (`gh`) in {}; install it and run `gh auth login`",
-                    self.root.display()
-                )
-            },
-        )
+        run_bounded_command(&mut command, stdout_limit, MAX_GH_ERROR_BYTES).with_context(|| {
+            format!(
+                "failed to execute GitHub CLI (`gh`) in {}; install it and run `gh auth login`",
+                self.root.display()
+            )
+        })
     }
 }
 
@@ -823,55 +791,6 @@ fn pull_request_view_args(repository: &GitHubRepository, number: u64) -> Vec<OsS
         OsString::from("--jq"),
         OsString::from(PULL_REQUEST_VIEW_TSV_JQ),
     ]
-}
-
-fn pull_request_checks_args(pull_request: &PullRequest) -> Vec<OsString> {
-    vec![
-        OsString::from("pr"),
-        OsString::from("checks"),
-        OsString::from(pull_request.number.to_string()),
-        OsString::from("--repo"),
-        OsString::from(pull_request.base_repository.selector()),
-        OsString::from("--json"),
-        OsString::from("bucket,completedAt,description,link,name,startedAt,state,workflow"),
-        OsString::from("--jq"),
-        OsString::from(
-            r#".[] | [.name, .workflow, .state, .bucket, (.description // ""), (.link // ""), (.startedAt // ""), (.completedAt // "")] | @tsv"#,
-        ),
-    ]
-}
-
-fn parse_pull_request_checks(output: &[u8]) -> Result<Vec<PullRequestCheck>> {
-    let mut checks = Vec::new();
-    for (index, record) in output.split(|byte| *byte == b'\n').enumerate() {
-        if record.is_empty() {
-            continue;
-        }
-        let fields = parse_tsv_record(record, 8)
-            .with_context(|| format!("invalid pull-request check record {}", index + 1))?;
-        let status = match fields[3].to_ascii_lowercase().as_str() {
-            "pass" => PullRequestCheckStatus::Passed,
-            "fail" => PullRequestCheckStatus::Failed,
-            "pending" => PullRequestCheckStatus::Pending,
-            "skipping" => PullRequestCheckStatus::Skipped,
-            "cancel" => PullRequestCheckStatus::Cancelled,
-            _ => PullRequestCheckStatus::Unknown,
-        };
-        checks.push(PullRequestCheck {
-            name: fields[0].clone(),
-            workflow: fields[1].clone(),
-            state: fields[2].clone(),
-            status,
-            description: fields[4].clone(),
-            link: fields[5].clone(),
-            started_at: fields[6].clone(),
-            completed_at: fields[7].clone(),
-        });
-    }
-    // Keep ordering independent of status so a pending check completing does not
-    // move rows underneath the user's cursor during a live refresh.
-    checks.sort_by_key(|check| (check.workflow.to_lowercase(), check.name.to_lowercase()));
-    Ok(checks)
 }
 
 fn parse_pull_requests(
@@ -2013,22 +1932,6 @@ mod tests {
         assert!(args.iter().any(|arg| arg.contains("baseRefOid")));
         assert!(args.iter().any(|arg| arg.contains("headRefOid")));
         assert!(args.iter().any(|arg| arg.contains("body")));
-    }
-
-    #[test]
-    fn parses_live_pull_request_checks_in_stable_name_order() {
-        let output = b"tests\tCI\tSUCCESS\tpass\tall good\thttps://example.test/pass\tstart\tdone\nlint\tCI\tFAILURE\tfail\tbroken\thttps://example.test/fail\tstart\tdone\nbuild\tCI\tIN_PROGRESS\tpending\t\thttps://example.test/pending\tstart\t\n";
-
-        let checks = parse_pull_request_checks(output).unwrap();
-
-        assert_eq!(checks.len(), 3);
-        assert_eq!(checks[0].name, "build");
-        assert_eq!(checks[0].status, PullRequestCheckStatus::Pending);
-        assert_eq!(checks[1].name, "lint");
-        assert_eq!(checks[1].status, PullRequestCheckStatus::Failed);
-        assert_eq!(checks[2].name, "tests");
-        assert_eq!(checks[2].status, PullRequestCheckStatus::Passed);
-        assert_eq!(checks[2].description, "all good");
     }
 
     #[test]

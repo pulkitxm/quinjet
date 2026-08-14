@@ -11,16 +11,19 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget, Wra
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{
-    App, ContentFileHit, DiffLayout, Focus, Modal, PaletteCommand, PullRequestSection,
-    PullRequestTreeEntry, ScmAction, ScmActionHit, SidebarHit, SidebarHitArea, ToastLevel,
-    UiGeometry, View,
+    App, ContentFileHit, ContentStepHit, DiffLayout, Focus, Modal, PaletteCommand,
+    PullRequestSection, PullRequestTreeEntry, ScmAction, ScmActionHit, SidebarHit, SidebarHitArea,
+    ToastLevel, UiGeometry, View,
 };
 #[cfg(test)]
 use crate::git::diff::CommitDetails;
 use crate::git::diff::{DiffDocument, DiffLine, DiffLineKind, HighlightSpan, PullRequestDetails};
 #[cfg(test)]
 use crate::git::github::PullRequestFile;
-use crate::git::github::{GitHubRepository, PullRequestCheckStatus, PullRequestFileStatus};
+use crate::git::github::{
+    CheckLogLine, CheckLogSeverity, CheckStep, ConversationEntry, ConversationKind,
+    GitHubRepository, PullRequestCheck, PullRequestCheckStatus, PullRequestFileStatus,
+};
 use crate::git::status::{Change, ChangeArea, ChangeStatus};
 use crate::git::{Branch, HistoryBranch, Stash};
 
@@ -127,7 +130,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     if !app.sidebar_hidden {
         draw_main_divider(frame, sidebar_divider, app.resize_target.is_some(), &theme);
     }
-    let (diff_divider, content_file_hits) = draw_content(frame, content_area, app, &theme);
+    let (diff_divider, content_file_hits, content_step_hits) =
+        draw_content(frame, content_area, app, &theme);
     draw_footer(frame, footer, app, &theme);
 
     app.geometry = UiGeometry {
@@ -142,6 +146,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         sidebar_hits,
         scm_action_hits,
         content_file_hits,
+        content_step_hits,
     };
 
     if let Some(modal) = app.modal.as_ref() {
@@ -846,13 +851,27 @@ fn draw_pull_requests_sidebar(
     );
     let mut hits = Vec::new();
     if app.pull_request.is_some() && body_area.height > 0 {
-        let files_width = body_area.width / 2;
-        let files_tab = Rect::new(body_area.x, body_area.y, files_width, 1);
-        let checks_tab = Rect::new(
-            files_tab.right(),
+        let overview_width = body_area.width.saturating_mul(3) / 5;
+        let overview_tab = Rect::new(body_area.x, body_area.y, overview_width, 1);
+        let files_tab = Rect::new(
+            overview_tab.right(),
             body_area.y,
-            body_area.width.saturating_sub(files_width),
+            body_area.width.saturating_sub(overview_width),
             1,
+        );
+        draw_pull_request_section_tab(
+            frame,
+            overview_tab,
+            format!(
+                "[P] Pull request{}",
+                if app.pull_request_checks_loading && app.pull_request_checks.is_empty() {
+                    " ⟳"
+                } else {
+                    ""
+                }
+            ),
+            app.pull_request_section == PullRequestSection::Overview,
+            theme,
         );
         draw_pull_request_section_tab(
             frame,
@@ -861,28 +880,13 @@ fn draw_pull_requests_sidebar(
             app.pull_request_section == PullRequestSection::Files,
             theme,
         );
-        draw_pull_request_section_tab(
-            frame,
-            checks_tab,
-            format!(
-                "[C] Checks {}{}",
-                app.pull_request_checks.len(),
-                if app.pull_request_checks_loading && app.pull_request_checks.is_empty() {
-                    " ⟳"
-                } else {
-                    ""
-                }
-            ),
-            app.pull_request_section == PullRequestSection::Checks,
-            theme,
-        );
+        hits.push(SidebarHitArea {
+            area: overview_tab,
+            target: SidebarHit::PullRequestOverview,
+        });
         hits.push(SidebarHitArea {
             area: files_tab,
             target: SidebarHit::PullRequestFiles,
-        });
-        hits.push(SidebarHitArea {
-            area: checks_tab,
-            target: SidebarHit::PullRequestChecks,
         });
 
         let list_area = Rect::new(
@@ -895,7 +899,7 @@ fn draw_pull_requests_sidebar(
             PullRequestSection::Files => {
                 hits.extend(draw_pull_request_file_tree(frame, list_area, app, theme));
             }
-            PullRequestSection::Checks => {
+            PullRequestSection::Overview => {
                 hits.extend(draw_pull_request_check_list(frame, list_area, app, theme));
             }
         }
@@ -1004,11 +1008,13 @@ fn draw_pull_requests_sidebar(
                         app.pull_request_total_files
                     )
                 }
-                PullRequestSection::Checks => {
+                PullRequestSection::Overview => {
                     if app.pull_request_checks_error.is_some() {
                         "checks unavailable · r retry".to_owned()
+                    } else if app.pull_request_check_cursor.is_some() {
+                        "[ / ] step · space fold · e all".to_owned()
                     } else {
-                        "live · refreshes every 10s".to_owned()
+                        format!("live · {}", app.live_refresh_label())
                     }
                 }
             }
@@ -1216,86 +1222,126 @@ fn pull_request_file_status_color(status: PullRequestFileStatus, theme: &Theme) 
     }
 }
 
+/// The overview sidebar is the pull request itself on row zero followed by its
+/// checks, so one list carries both the way back to the conversation and the way
+/// into any run's log.
 fn draw_pull_request_check_list(
     frame: &mut Frame<'_>,
     area: Rect,
     app: &mut App,
     theme: &Theme,
 ) -> Vec<SidebarHitArea> {
-    if app.pull_request_checks.is_empty() {
-        let message = if app.pull_request_checks_loading {
-            "\n  Loading checks…"
-        } else {
-            app.pull_request_checks_error
-                .as_deref()
-                .unwrap_or("\n  No checks reported")
-        };
-        frame.render_widget(
-            Paragraph::new(message)
-                .style(Style::default().fg(theme.muted))
-                .wrap(Wrap { trim: true }),
-            area,
-        );
+    if area.height == 0 {
         return Vec::new();
     }
+    let rows = app.pull_request_checks.len() + 1;
+    let cursor_row = app
+        .pull_request_check_cursor
+        .map_or(0, |cursor| cursor.saturating_add(1));
     ensure_offset(
         &mut app.sidebar_offset,
-        app.pull_request_check_cursor,
+        cursor_row,
         area.height as usize,
-        app.pull_request_checks.len(),
+        rows,
     );
+
     let mut hits = Vec::new();
-    for (offset, (index, check)) in app
-        .pull_request_checks
-        .iter()
-        .enumerate()
-        .skip(app.sidebar_offset)
+    for (offset, row) in (app.sidebar_offset..rows)
         .take(area.height as usize)
         .enumerate()
     {
         let y = area.y + offset as u16;
-        let selected = index == app.pull_request_check_cursor;
+        let row_area = Rect::new(area.x, y, area.width, 1);
+        let selected = row == cursor_row;
         let background = if selected {
             theme.selected
         } else {
             theme.panel
         };
-        let (icon, color) = pull_request_check_icon(check.status, theme);
-        let reserved = 7 + check.workflow.width();
-        let name = truncate_end(&check.name, (area.width as usize).saturating_sub(reserved));
+        let marker = Span::styled(
+            if selected { " › " } else { "   " },
+            Style::default().fg(theme.accent),
+        );
+        let (line, target) = if row == 0 {
+            (
+                Line::from(vec![
+                    marker,
+                    Span::styled(
+                        "Conversation",
+                        Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        conversation_row_suffix(app),
+                        Style::default().fg(theme.muted),
+                    ),
+                ]),
+                SidebarHit::PullRequestConversation,
+            )
+        } else {
+            let index = row - 1;
+            let check = &app.pull_request_checks[index];
+            let (icon, color) = pull_request_check_icon(check.status, theme);
+            let workflow = if check.workflow.is_empty() {
+                String::new()
+            } else {
+                format!("  {}", check.workflow)
+            };
+            let reserved = 6 + workflow.width();
+            (
+                Line::from(vec![
+                    marker,
+                    Span::styled(format!("{icon} "), Style::default().fg(color)),
+                    Span::styled(
+                        truncate_end(&check.name, (area.width as usize).saturating_sub(reserved)),
+                        Style::default().fg(theme.text),
+                    ),
+                    Span::styled(workflow, Style::default().fg(theme.muted)),
+                ]),
+                SidebarHit::PullRequestCheck(index),
+            )
+        };
         frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(
-                    if selected { " › " } else { "   " },
-                    Style::default().fg(theme.accent),
-                ),
-                Span::styled(format!("{icon} "), Style::default().fg(color)),
-                Span::styled(name, Style::default().fg(theme.text)),
-                Span::styled(
-                    if check.workflow.is_empty() {
-                        String::new()
-                    } else {
-                        format!("  {}", check.workflow)
-                    },
-                    Style::default().fg(theme.muted),
-                ),
-            ]))
-            .style(Style::default().bg(background)),
-            Rect::new(area.x, y, area.width, 1),
+            Paragraph::new(line).style(Style::default().bg(background)),
+            row_area,
         );
         hits.push(SidebarHitArea {
-            area: Rect::new(area.x, y, area.width, 1),
-            target: SidebarHit::PullRequestCheck(index),
+            area: row_area,
+            target,
         });
     }
-    draw_scrollbar(
-        frame,
-        area,
-        app.sidebar_offset,
-        app.pull_request_checks.len(),
-        theme,
-    );
+    draw_scrollbar(frame, area, app.sidebar_offset, rows, theme);
+
+    if app.pull_request_checks.is_empty() && area.height > 1 {
+        let message = if app.pull_request_checks_loading {
+            "  Loading checks…".to_owned()
+        } else if let Some(error) = app.pull_request_checks_error.as_deref() {
+            format!("  {error}")
+        } else {
+            "  No checks reported".to_owned()
+        };
+        frame.render_widget(
+            Paragraph::new(message)
+                .style(Style::default().fg(theme.muted).bg(theme.panel))
+                .wrap(Wrap { trim: true }),
+            Rect::new(area.x, area.y + 1, area.width, area.height - 1),
+        );
+    }
     hits
+}
+
+fn conversation_row_suffix(app: &App) -> String {
+    if app.pull_request_conversation_loading && app.pull_request_conversation.entries.is_empty() {
+        return "  ⟳".to_owned();
+    }
+    if app.pull_request_conversation_error.is_some() {
+        return "  ⚠".to_owned();
+    }
+    let comments = app.pull_request_conversation.comment_count();
+    if comments == 0 {
+        String::new()
+    } else {
+        format!("  {comments}")
+    }
 }
 
 fn pull_request_check_icon(status: PullRequestCheckStatus, theme: &Theme) -> (&'static str, Color) {
@@ -1309,36 +1355,35 @@ fn pull_request_check_icon(status: PullRequestCheckStatus, theme: &Theme) -> (&'
     }
 }
 
-fn draw_pull_request_checks_content(
+/// A pre-wrapped content row, optionally anchored to a check step so a click or
+/// the step cursor can find it after scrolling.
+struct ContentRow {
+    line: Line<'static>,
+    step: Option<usize>,
+}
+
+impl ContentRow {
+    fn plain(line: Line<'static>) -> Self {
+        Self { line, step: None }
+    }
+
+    fn blank() -> Self {
+        Self::plain(Line::default())
+    }
+
+    fn text(value: impl Into<String>, style: Style) -> Self {
+        Self::plain(Line::from(Span::styled(value.into(), style)))
+    }
+}
+
+fn draw_pull_request_overview(
     frame: &mut Frame<'_>,
     area: Rect,
-    app: &App,
+    app: &mut App,
     theme: &Theme,
-) -> (Option<Rect>, Vec<ContentFileHit>) {
-    let passed = app
-        .pull_request_checks
-        .iter()
-        .filter(|check| check.status == PullRequestCheckStatus::Passed)
-        .count();
-    let pending = app
-        .pull_request_checks
-        .iter()
-        .filter(|check| check.status == PullRequestCheckStatus::Pending)
-        .count();
-    let failed = app
-        .pull_request_checks
-        .iter()
-        .filter(|check| check.status == PullRequestCheckStatus::Failed)
-        .count();
-    let title = app.selected_pull_request().map_or_else(
-        || " Pull Request Checks ".to_owned(),
-        |pull_request| {
-            format!(
-                " PR #{} · Checks  ✓{}  ◌{}  ×{} ",
-                pull_request.number, passed, pending, failed
-            )
-        },
-    );
+) -> Vec<ContentStepHit> {
+    let showing_check = app.pull_request_check_cursor.is_some();
+    let title = overview_title(app, showing_check);
     let block = panel_block(
         title,
         app.focus == Focus::Content && app.modal.is_none(),
@@ -1347,117 +1392,734 @@ fn draw_pull_request_checks_content(
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {
-        return (None, Vec::new());
+        return Vec::new();
     }
 
-    let mut lines = Vec::new();
-    if let Some(pull_request) = app.selected_pull_request() {
-        let state = if pull_request.is_draft {
-            "DRAFT"
-        } else {
-            pull_request.state.as_str()
-        };
-        lines.push(Line::from(Span::styled(
-            pull_request.title.as_str(),
-            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
-        )));
-        lines.push(detail_line(
-            "Status",
-            format!(
-                "{state}  ·  @{}  ·  updated {}",
-                pull_request.author, pull_request.updated_at
-            ),
-            theme,
-        ));
-        lines.push(detail_line(
-            "Branches",
-            format!(
-                "{} → {}",
-                pull_request.head_label(),
-                pull_request.base_label()
-            ),
-            theme,
-        ));
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{:<DETAIL_LABEL_WIDTH$}", "Changes"),
-                Style::default().fg(theme.muted),
-            ),
-            Span::styled(
-                format!("{} files  ", pull_request.changed_files),
-                Style::default().fg(theme.text),
-            ),
-            Span::styled(
-                format!("+{}", pull_request.additions),
-                Style::default()
-                    .fg(theme.added)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("  ", Style::default()),
-            Span::styled(
-                format!("-{}", pull_request.deletions),
-                Style::default()
-                    .fg(theme.removed)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
-        lines.push(Line::default());
-    }
-
-    if let Some(check) = app.selected_pull_request_check() {
-        let (icon, color) = pull_request_check_icon(check.status, theme);
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!(" {icon} "),
-                Style::default().fg(color).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                check.name.as_str(),
-                Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
-            ),
-        ]));
-        lines.push(detail_line("Workflow", check.workflow.clone(), theme));
-        lines.push(detail_line("State", check.state.clone(), theme));
-        if !check.started_at.is_empty() {
-            lines.push(detail_line("Started", check.started_at.clone(), theme));
-        }
-        if !check.completed_at.is_empty() {
-            lines.push(detail_line("Completed", check.completed_at.clone(), theme));
-        }
-        if !check.description.is_empty() {
-            lines.push(detail_line("Details", check.description.clone(), theme));
-        }
-        if !check.link.is_empty() {
-            lines.push(detail_line("URL", check.link.clone(), theme));
-        }
-    } else if app.pull_request_checks_loading {
-        lines.push(Line::from(Span::styled(
-            " Loading checks…",
-            Style::default().fg(theme.accent),
-        )));
-    } else if let Some(error) = app.pull_request_checks_error.as_deref() {
-        lines.push(Line::from(Span::styled(
-            format!(" Checks unavailable: {error}"),
-            Style::default().fg(theme.error),
-        )));
+    let width = inner.width as usize;
+    let rows = if showing_check {
+        check_run_rows(app, width, theme)
     } else {
-        lines.push(Line::from(Span::styled(
-            " No checks reported for this pull request",
+        conversation_rows(app, width, theme)
+    };
+
+    // Following the step cursor here keeps `[` and `]` useful on a log that is
+    // far taller than the pane.
+    if showing_check
+        && let Some(cursor_row) = rows
+            .iter()
+            .position(|row| row.step == Some(app.pull_request_step_cursor))
+    {
+        ensure_offset(
+            &mut app.content_scroll,
+            cursor_row,
+            inner.height as usize,
+            rows.len(),
+        );
+    }
+    app.content_scroll = app
+        .content_scroll
+        .min(rows.len().saturating_sub(inner.height as usize));
+
+    let mut hits = Vec::new();
+    for (offset, row) in rows
+        .iter()
+        .skip(app.content_scroll)
+        .take(inner.height as usize)
+        .enumerate()
+    {
+        let row_area = Rect::new(inner.x, inner.y + offset as u16, inner.width, 1);
+        let selected = showing_check && row.step == Some(app.pull_request_step_cursor);
+        frame.render_widget(
+            Paragraph::new(row.line.clone()).style(Style::default().bg(if selected {
+                theme.selected
+            } else {
+                theme.panel
+            })),
+            row_area,
+        );
+        if let Some(step) = row.step {
+            hits.push(ContentStepHit {
+                area: row_area,
+                step,
+            });
+        }
+    }
+    draw_scrollbar(frame, inner, app.content_scroll, rows.len(), theme);
+    hits
+}
+
+fn overview_title(app: &App, showing_check: bool) -> String {
+    let Some(pull_request) = app.selected_pull_request() else {
+        return " Pull Request ".to_owned();
+    };
+    if showing_check {
+        let name = app
+            .selected_pull_request_check()
+            .map_or("Check", |check| check.name.as_str());
+        let loading = if app.pull_request_check_log_loading {
+            "  ⟳"
+        } else {
+            ""
+        };
+        return format!(" PR #{} · {name}{loading} ", pull_request.number);
+    }
+    let state = if pull_request.is_draft {
+        "DRAFT"
+    } else {
+        pull_request.state.as_str()
+    };
+    let loading = if app.pull_request_conversation_loading {
+        "  ⟳"
+    } else {
+        ""
+    };
+    format!(" PR #{} · {state}{loading} ", pull_request.number)
+}
+
+fn conversation_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> {
+    let mut rows = Vec::new();
+    let Some(pull_request) = app.selected_pull_request() else {
+        rows.push(ContentRow::text(
+            "  Enter a pull-request number to open one",
             Style::default().fg(theme.muted),
+        ));
+        return rows;
+    };
+
+    let state = if pull_request.is_draft {
+        "DRAFT"
+    } else {
+        pull_request.state.as_str()
+    };
+    rows.push(ContentRow::plain(Line::from(vec![
+        Span::styled(
+            format!("#{}  ", pull_request.number),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            truncate_end(&pull_request.title, width.saturating_sub(8)),
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+        ),
+    ])));
+    rows.push(ContentRow::plain(detail_line(
+        "State",
+        format!(
+            "{state}  ·  @{}  ·  opened {}  ·  updated {}",
+            pull_request.author,
+            short_timestamp(&pull_request.created_at),
+            short_timestamp(&pull_request.updated_at)
+        ),
+        theme,
+    )));
+    rows.push(ContentRow::plain(detail_line(
+        "Source",
+        format!(
+            "{}{}",
+            pull_request.head_label(),
+            if pull_request.is_cross_repository {
+                "  ·  fork"
+            } else {
+                ""
+            }
+        ),
+        theme,
+    )));
+    rows.push(ContentRow::plain(detail_line(
+        "Destination",
+        pull_request.base_label(),
+        theme,
+    )));
+    rows.push(ContentRow::plain(Line::from(vec![
+        Span::styled(
+            format!("{:<DETAIL_LABEL_WIDTH$}", "Changes"),
+            Style::default().fg(theme.muted),
+        ),
+        Span::styled(
+            format!(
+                "{} file{}  ",
+                pull_request.changed_files,
+                if pull_request.changed_files == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            ),
+            Style::default().fg(theme.text),
+        ),
+        Span::styled(
+            format!("+{}", pull_request.additions),
+            Style::default()
+                .fg(theme.added)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("  ", Style::default()),
+        Span::styled(
+            format!("-{}", pull_request.deletions),
+            Style::default()
+                .fg(theme.removed)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ])));
+    rows.push(ContentRow::plain(check_summary_line(app, theme)));
+    rows.push(ContentRow::plain(detail_line(
+        "URL",
+        pull_request.url.clone(),
+        theme,
+    )));
+
+    // The description is rendered on its own rather than waiting for the
+    // conversation, so a pull request reads completely from the moment its
+    // metadata lands.
+    rows.push(ContentRow::blank());
+    rows.push(ContentRow::plain(section_rule("Description", width, theme)));
+    if pull_request.description.trim().is_empty() {
+        rows.push(ContentRow::text(
+            "  No description provided",
+            Style::default().fg(theme.muted),
+        ));
+    } else {
+        for (style, text) in wrap_prose(&pull_request.description, width.saturating_sub(2)) {
+            rows.push(ContentRow::text(
+                format!("  {text}"),
+                prose_style(style, theme),
+            ));
+        }
+    }
+
+    rows.push(ContentRow::blank());
+    rows.push(ContentRow::plain(section_rule(
+        "Conversation",
+        width,
+        theme,
+    )));
+    if let Some(error) = app.pull_request_conversation_error.as_deref() {
+        rows.push(ContentRow::text(
+            format!("  {error}"),
+            Style::default().fg(theme.error),
+        ));
+        return rows;
+    }
+    if app.pull_request_conversation.entries.is_empty() {
+        rows.push(ContentRow::text(
+            if app.pull_request_conversation_loading {
+                "  Loading the conversation…"
+            } else {
+                "  No activity yet"
+            },
+            Style::default().fg(theme.muted),
+        ));
+        return rows;
+    }
+    if app.pull_request_conversation.truncated {
+        rows.push(ContentRow::text(
+            "  Older activity was omitted to keep this view bounded",
+            Style::default().fg(theme.muted),
+        ));
+    }
+    for entry in &app.pull_request_conversation.entries {
+        rows.push(ContentRow::blank());
+        push_conversation_entry(&mut rows, entry, width, theme);
+    }
+    rows
+}
+
+fn push_conversation_entry(
+    rows: &mut Vec<ContentRow>,
+    entry: &ConversationEntry,
+    width: usize,
+    theme: &Theme,
+) {
+    let (icon, color, action) = conversation_marker(entry, theme);
+    let mut header = vec![
+        Span::styled(format!("{icon} "), Style::default().fg(color)),
+        Span::styled(
+            format!("@{}", entry.actor),
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(format!(" {action}"), Style::default().fg(theme.muted)),
+    ];
+    let stamp = short_timestamp(&entry.timestamp);
+    if !stamp.is_empty() {
+        header.push(Span::styled(
+            format!("  ·  {stamp}"),
+            Style::default().fg(theme.muted),
+        ));
+    }
+    rows.push(ContentRow::plain(Line::from(header)));
+
+    if !entry.context.is_empty() {
+        for line in entry.context.lines().take(8) {
+            let style = match line.as_bytes().first() {
+                Some(b'+') => Style::default().fg(theme.added),
+                Some(b'-') => Style::default().fg(theme.removed),
+                _ => Style::default().fg(theme.muted),
+            };
+            rows.push(ContentRow::text(
+                format!("    {}", truncate_end(line, width.saturating_sub(4))),
+                style,
+            ));
+        }
+    }
+    // The opening post's body is the description, already shown above it.
+    if entry.kind != ConversationKind::Opened
+        && entry.kind.has_body()
+        && !entry.body.trim().is_empty()
+    {
+        for (style, text) in wrap_prose(&entry.body, width.saturating_sub(4)) {
+            rows.push(ContentRow::text(
+                format!("    {text}"),
+                prose_style(style, theme),
+            ));
+        }
+    }
+}
+
+fn conversation_marker(entry: &ConversationEntry, theme: &Theme) -> (&'static str, Color, String) {
+    match entry.kind {
+        ConversationKind::Opened => (
+            "◆",
+            theme.accent,
+            format!("opened this pull request from {}", entry.detail),
+        ),
+        ConversationKind::Comment => ("▣", theme.text, "commented".to_owned()),
+        ConversationKind::Review => {
+            let (icon, color) = match entry.detail.to_ascii_lowercase().as_str() {
+                "approved" => ("✓", theme.success),
+                "changes_requested" => ("×", theme.error),
+                _ => ("▣", theme.accent),
+            };
+            (
+                icon,
+                color,
+                format!("reviewed · {}", entry.detail.to_lowercase()),
+            )
+        }
+        ConversationKind::ReviewComment => (
+            "▸",
+            theme.modified,
+            format!("commented on {}", entry.detail),
+        ),
+        ConversationKind::Commit => ("●", theme.muted, format!("pushed {}", entry.detail)),
+        ConversationKind::ForcePush => (
+            "↻",
+            theme.modified,
+            format!(
+                "force-pushed{}",
+                if entry.reference.is_empty() {
+                    String::new()
+                } else {
+                    format!(" to {}", short_oid(&entry.reference))
+                }
+            ),
+        ),
+        ConversationKind::Merged => ("⏵", theme.success, "merged this pull request".to_owned()),
+        ConversationKind::Closed => ("×", theme.removed, "closed this pull request".to_owned()),
+        ConversationKind::Reopened => ("◆", theme.accent, "reopened this pull request".to_owned()),
+        ConversationKind::Labeled => (
+            "◈",
+            theme.muted,
+            format!("added the {} label", entry.detail),
+        ),
+        ConversationKind::Unlabeled => (
+            "◈",
+            theme.muted,
+            format!("removed the {} label", entry.detail),
+        ),
+        ConversationKind::Renamed => (
+            "✎",
+            theme.muted,
+            format!("renamed this from {}", entry.detail),
+        ),
+        ConversationKind::ReadyForReview => {
+            ("◆", theme.accent, "marked this ready for review".to_owned())
+        }
+        ConversationKind::ConvertedToDraft => {
+            ("◇", theme.muted, "converted this to a draft".to_owned())
+        }
+        ConversationKind::ReviewRequested => (
+            "◎",
+            theme.muted,
+            format!("requested a review from {}", entry.detail),
+        ),
+        ConversationKind::ReviewRequestRemoved => (
+            "◎",
+            theme.muted,
+            format!("removed the review request for {}", entry.detail),
+        ),
+        ConversationKind::Assigned => ("◎", theme.muted, format!("assigned {}", entry.detail)),
+        ConversationKind::Unassigned => ("◎", theme.muted, format!("unassigned {}", entry.detail)),
+        ConversationKind::CrossReferenced => (
+            "⇥",
+            theme.muted,
+            format!("referenced this from #{}", entry.detail),
+        ),
+        ConversationKind::HeadRefDeleted => {
+            ("⌫", theme.muted, "deleted the source branch".to_owned())
+        }
+        ConversationKind::HeadRefRestored => {
+            ("↺", theme.muted, "restored the source branch".to_owned())
+        }
+        ConversationKind::BaseRefChanged => (
+            "⇄",
+            theme.modified,
+            "changed the destination branch".to_owned(),
+        ),
+        ConversationKind::Other => ("·", theme.muted, "updated this pull request".to_owned()),
+    }
+}
+
+fn check_summary_line(app: &App, theme: &Theme) -> Line<'static> {
+    let count = |status: PullRequestCheckStatus| {
+        app.pull_request_checks
+            .iter()
+            .filter(|check| check.status == status)
+            .count()
+    };
+    let passed = count(PullRequestCheckStatus::Passed);
+    let pending = count(PullRequestCheckStatus::Pending);
+    let failed = count(PullRequestCheckStatus::Failed);
+    let mut spans = vec![Span::styled(
+        format!("{:<DETAIL_LABEL_WIDTH$}", "Checks"),
+        Style::default().fg(theme.muted),
+    )];
+    if app.pull_request_checks.is_empty() {
+        spans.push(Span::styled(
+            if app.pull_request_checks_loading {
+                "loading…"
+            } else {
+                "none reported"
+            },
+            Style::default().fg(theme.muted),
+        ));
+        return Line::from(spans);
+    }
+    spans.push(Span::styled(
+        format!("✓{passed}  "),
+        Style::default().fg(theme.success),
+    ));
+    spans.push(Span::styled(
+        format!("◌{pending}  "),
+        Style::default().fg(theme.accent),
+    ));
+    spans.push(Span::styled(
+        format!("×{failed}"),
+        Style::default().fg(theme.error),
+    ));
+    Line::from(spans)
+}
+
+fn check_run_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> {
+    let mut rows = Vec::new();
+    let Some(check) = app.selected_pull_request_check() else {
+        return rows;
+    };
+    let (icon, color) = pull_request_check_icon(check.status, theme);
+    rows.push(ContentRow::plain(Line::from(vec![
+        Span::styled(
+            format!("{icon} "),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            truncate_end(&check.name, width.saturating_sub(4)),
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+        ),
+    ])));
+    rows.push(ContentRow::plain(detail_line(
+        "Workflow",
+        format!("{}  ·  {}", check.workflow, check.state.to_lowercase()),
+        theme,
+    )));
+    if !check.started_at.is_empty() {
+        rows.push(ContentRow::plain(detail_line(
+            "Ran",
+            format!(
+                "{}{}",
+                short_timestamp(&check.started_at),
+                match check_duration(check) {
+                    duration if duration.is_empty() => String::new(),
+                    duration => format!("  ·  {duration}"),
+                }
+            ),
+            theme,
         )));
     }
-    lines.push(Line::default());
-    lines.push(Line::from(Span::styled(
-        " Checks refresh silently every 10 seconds",
-        Style::default().fg(theme.muted),
+    if !check.description.is_empty() {
+        rows.push(ContentRow::plain(detail_line(
+            "Details",
+            check.description.clone(),
+            theme,
+        )));
+    }
+    if !check.link.is_empty() {
+        rows.push(ContentRow::plain(detail_line(
+            "URL",
+            check.link.clone(),
+            theme,
+        )));
+    }
+    rows.push(ContentRow::blank());
+
+    if let Some(error) = app.pull_request_check_log_error.as_deref() {
+        rows.push(ContentRow::text(
+            format!("  {error}"),
+            Style::default().fg(theme.error),
+        ));
+        return rows;
+    }
+    let Some(log) = app.pull_request_check_log.as_ref() else {
+        rows.push(ContentRow::text(
+            if app.pull_request_check_log_loading {
+                "  Loading the run log…"
+            } else {
+                "  No log loaded"
+            },
+            Style::default().fg(theme.muted),
+        ));
+        return rows;
+    };
+    if let Some(reason) = log.unavailable.as_deref() {
+        rows.push(ContentRow::text(
+            format!("  {reason}"),
+            Style::default().fg(theme.muted),
+        ));
+        return rows;
+    }
+    rows.push(ContentRow::plain(section_rule(
+        &format!("{} steps", log.steps.len()),
+        width,
+        theme,
     )));
-    frame.render_widget(
-        Paragraph::new(lines)
-            .style(Style::default().bg(theme.panel))
-            .wrap(Wrap { trim: false }),
-        inner,
-    );
-    (None, Vec::new())
+    for step in &log.steps {
+        let expanded = app.check_step_expanded(step.number);
+        let (icon, color) = pull_request_check_icon(step.status, theme);
+        let duration = step.duration_label();
+        let reserved = 8 + duration.width();
+        let name = truncate_end(&step.name, width.saturating_sub(reserved));
+        let padding = width
+            .saturating_sub(reserved)
+            .saturating_sub(name.width())
+            .saturating_add(1);
+        rows.push(ContentRow {
+            line: Line::from(vec![
+                Span::styled(
+                    if expanded { " ⌄ " } else { " › " },
+                    Style::default().fg(theme.muted),
+                ),
+                Span::styled(format!("{icon} "), Style::default().fg(color)),
+                Span::styled(name, Style::default().fg(theme.text)),
+                Span::styled(" ".repeat(padding), Style::default()),
+                Span::styled(duration, Style::default().fg(theme.muted)),
+            ]),
+            step: Some(step.number),
+        });
+        if expanded {
+            push_log_lines(&mut rows, &step.lines, width, theme);
+        }
+    }
+    if !log.loose_lines.is_empty() {
+        rows.push(ContentRow::plain(section_rule(
+            "Runner output",
+            width,
+            theme,
+        )));
+        push_log_lines(&mut rows, &log.loose_lines, width, theme);
+    }
+    if log.truncated {
+        rows.push(ContentRow::text(
+            "  … log truncated to keep Quinjet responsive …",
+            Style::default().fg(theme.muted),
+        ));
+    }
+    rows
+}
+
+fn push_log_lines(rows: &mut Vec<ContentRow>, lines: &[CheckLogLine], width: usize, theme: &Theme) {
+    if lines.is_empty() {
+        rows.push(ContentRow::text(
+            "      no output",
+            Style::default().fg(theme.muted),
+        ));
+        return;
+    }
+    for line in lines {
+        rows.push(ContentRow::text(
+            format!(
+                "      {}",
+                truncate_end(&line.text, width.saturating_sub(6))
+            ),
+            Style::default().fg(log_severity_color(line.severity, theme)),
+        ));
+    }
+}
+
+fn log_severity_color(severity: CheckLogSeverity, theme: &Theme) -> Color {
+    match severity {
+        CheckLogSeverity::Normal => theme.text,
+        CheckLogSeverity::Command => theme.accent,
+        CheckLogSeverity::Notice => theme.modified,
+        CheckLogSeverity::Warning => theme.modified,
+        CheckLogSeverity::Error => theme.error,
+    }
+}
+
+fn check_duration(check: &PullRequestCheck) -> String {
+    CheckStep {
+        number: 0,
+        name: String::new(),
+        status: check.status,
+        conclusion: String::new(),
+        started_at: check.started_at.clone(),
+        completed_at: check.completed_at.clone(),
+        lines: Vec::new(),
+    }
+    .duration_label()
+}
+
+fn section_rule(label: &str, width: usize, theme: &Theme) -> Line<'static> {
+    let label = format!(" {label} ");
+    let fill = width.saturating_sub(label.width()).saturating_sub(2);
+    Line::from(vec![
+        Span::styled("──", Style::default().fg(theme.border)),
+        Span::styled(label, Style::default().fg(theme.muted)),
+        Span::styled("─".repeat(fill), Style::default().fg(theme.border)),
+    ])
+}
+
+fn short_oid(value: &str) -> String {
+    value.chars().take(7).collect()
+}
+
+/// Show the calendar day and clock time from an RFC 3339 stamp without pulling
+/// in a date library; the seconds and zone add nothing at this size.
+fn short_timestamp(value: &str) -> String {
+    let Some((date, rest)) = value.split_once('T') else {
+        return value.to_owned();
+    };
+    let time = rest.split(['Z', '+', '.']).next().unwrap_or_default();
+    let time = time.rsplit_once(':').map_or(time, |(head, _)| head);
+    format!("{date} {time}")
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ProseStyle {
+    Text,
+    Heading,
+    Bullet,
+    Code,
+    Quote,
+}
+
+fn prose_style(style: ProseStyle, theme: &Theme) -> Style {
+    match style {
+        ProseStyle::Text => Style::default().fg(theme.text),
+        ProseStyle::Heading => Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+        ProseStyle::Bullet => Style::default().fg(theme.text),
+        ProseStyle::Code => Style::default().fg(theme.modified),
+        ProseStyle::Quote => Style::default().fg(theme.muted),
+    }
+}
+
+/// Wrap a Markdown body to a fixed width, keeping paragraph breaks, list
+/// structure and fenced code intact. Code is truncated rather than wrapped so
+/// its own indentation still reads correctly.
+fn wrap_prose(value: &str, width: usize) -> Vec<(ProseStyle, String)> {
+    let width = width.max(8);
+    let mut output = Vec::new();
+    let mut fenced = false;
+    let mut previous_blank = true;
+    for raw_line in value.lines() {
+        let trimmed = raw_line.trim_end();
+        if trimmed.trim_start().starts_with("```") {
+            fenced = !fenced;
+            previous_blank = false;
+            output.push((ProseStyle::Code, truncate_end(trimmed, width)));
+            continue;
+        }
+        if fenced {
+            previous_blank = false;
+            output.push((ProseStyle::Code, truncate_end(trimmed, width)));
+            continue;
+        }
+        if trimmed.trim().is_empty() {
+            if !previous_blank {
+                output.push((ProseStyle::Text, String::new()));
+                previous_blank = true;
+            }
+            continue;
+        }
+        previous_blank = false;
+        let content = trimmed.trim_start();
+        let (style, indent, body) = if let Some(rest) = content.strip_prefix("> ") {
+            (ProseStyle::Quote, "  ", rest)
+        } else if content.starts_with('#') {
+            (
+                ProseStyle::Heading,
+                "",
+                content.trim_start_matches('#').trim_start(),
+            )
+        } else if let Some(rest) = ["- ", "* ", "+ "]
+            .into_iter()
+            .find_map(|marker| content.strip_prefix(marker))
+        {
+            (ProseStyle::Bullet, "  ", rest)
+        } else {
+            (ProseStyle::Text, "", content)
+        };
+        let prefix = if style == ProseStyle::Bullet {
+            "• "
+        } else {
+            ""
+        };
+        let available = width.saturating_sub(indent.width() + prefix.width());
+        for (index, wrapped) in wrap_words(body, available).into_iter().enumerate() {
+            let lead = if index == 0 {
+                format!("{indent}{prefix}")
+            } else {
+                " ".repeat(indent.width() + prefix.width())
+            };
+            output.push((style, format!("{lead}{wrapped}")));
+        }
+    }
+    while output.last().is_some_and(|(_, text)| text.is_empty()) {
+        output.pop();
+    }
+    output
+}
+
+fn wrap_words(value: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for word in value.split_whitespace() {
+        let word_width = word.width();
+        if current.is_empty() {
+            current = if word_width > width {
+                lines.push(truncate_end(word, width));
+                continue;
+            } else {
+                word.to_owned()
+            };
+        } else if current.width() + 1 + word_width <= width {
+            current.push(' ');
+            current.push_str(word);
+        } else {
+            lines.push(std::mem::take(&mut current));
+            if word_width > width {
+                lines.push(truncate_end(word, width));
+            } else {
+                current = word.to_owned();
+            }
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
 }
 
 fn draw_content(
@@ -1465,9 +2127,10 @@ fn draw_content(
     area: Rect,
     app: &mut App,
     theme: &Theme,
-) -> (Option<Rect>, Vec<ContentFileHit>) {
-    if app.view == View::PullRequests && app.pull_request_section == PullRequestSection::Checks {
-        return draw_pull_request_checks_content(frame, area, app, theme);
+) -> (Option<Rect>, Vec<ContentFileHit>, Vec<ContentStepHit>) {
+    if app.view == View::PullRequests && app.pull_request_section == PullRequestSection::Overview {
+        let step_hits = draw_pull_request_overview(frame, area, app, theme);
+        return (None, Vec::new(), step_hits);
     }
     let file_action = if app.preview_files_collapsible() {
         if app.preview_files_all_collapsed() {
@@ -1508,7 +2171,7 @@ fn draw_content(
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {
-        return (None, Vec::new());
+        return (None, Vec::new(), Vec::new());
     }
 
     // Commit and pull-request metadata belong to the same scrollable document as
@@ -1583,7 +2246,7 @@ fn draw_content(
         (None, hits)
     };
     draw_scrollbar(frame, inner, app.content_scroll, visual_length, theme);
-    (divider, content_file_hits)
+    (divider, content_file_hits, Vec::new())
 }
 
 fn commit_details_row_count(available_height: u16) -> usize {
@@ -4211,6 +4874,7 @@ mod tests {
         let mut app = App::new("/tmp/repo", "repo");
         app.view = View::PullRequests;
         app.focus = Focus::Content;
+        app.pull_request_section = PullRequestSection::Files;
         app.pull_request_exact_number = Some(42);
         app.pull_request_lookup = crate::app::TextBuffer::new("42");
         app.pull_request = Some(crate::git::github::PullRequest {
@@ -4301,14 +4965,14 @@ mod tests {
 
         assert!(rendered.contains("Pull Requests"));
         assert!(rendered.contains("[F] Files 1"));
-        assert!(rendered.contains("[C] Checks 0"));
+        assert!(rendered.contains("[P] Pull request"));
         assert!(rendered.contains("rocket.rs"));
         assert!(rendered.contains("launch();"));
         assert!(!rendered.contains("Page"));
         assert!(!rendered.contains("files on page"));
         assert!(!rendered.contains("@@"));
 
-        app.pull_request_section = PullRequestSection::Checks;
+        app.pull_request_section = PullRequestSection::Overview;
         app.pull_request_checks = vec![crate::git::github::PullRequestCheck {
             name: "CI / ubuntu".to_owned(),
             workflow: "CI".to_owned(),
@@ -4327,14 +4991,17 @@ mod tests {
             .iter()
             .map(|cell| cell.symbol())
             .collect();
-        assert!(rendered.contains("[C] Checks 1"));
+        assert!(rendered.contains("Conversation"));
         assert!(rendered.contains("CI / ubuntu"));
         assert!(rendered.contains("Ship the rocket"));
         assert!(rendered.contains("octocat/widget:feature/rocket"));
         assert!(rendered.contains("acme/widget:main"));
         assert!(rendered.contains("+101"));
         assert!(rendered.contains("-20"));
-        assert!(rendered.contains("Checks refresh silently"));
+        assert!(
+            rendered.contains("Launch"),
+            "the pull-request body is part of the default view"
+        );
     }
 
     #[test]

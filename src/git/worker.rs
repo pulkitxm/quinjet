@@ -7,7 +7,7 @@ use crossbeam_channel::{Receiver, Sender, unbounded};
 
 use super::diff::DiffDocument;
 use super::github::{
-    PreparedPullRequest, PullRequest, PullRequestCheck, PullRequestConversation,
+    CheckRunLog, PreparedPullRequest, PullRequest, PullRequestCheck, PullRequestConversation,
     PullRequestDiffIndex, PullRequestProgress, PullRequestSnapshot,
 };
 use super::history::Commit;
@@ -71,6 +71,11 @@ pub enum WorkerCommand {
     LoadPullRequestConversation {
         generation: u64,
         pull_request: Box<PullRequest>,
+    },
+    LoadCheckRunLog {
+        generation: u64,
+        pull_request: Box<PullRequest>,
+        check: Box<PullRequestCheck>,
     },
     LoadBranches {
         generation: u64,
@@ -141,6 +146,10 @@ pub enum WorkerEvent {
         generation: u64,
         result: Result<PullRequestConversation, String>,
     },
+    CheckRunLog {
+        generation: u64,
+        result: Result<CheckRunLog, String>,
+    },
     Branches {
         generation: u64,
         result: Result<Vec<Branch>, String>,
@@ -172,6 +181,7 @@ struct Mailbox {
     prefetch: Option<WorkerCommand>,
     checks: Option<WorkerCommand>,
     conversation: Option<WorkerCommand>,
+    check_log: Option<WorkerCommand>,
     shutdown: bool,
 }
 
@@ -205,6 +215,7 @@ impl Mailbox {
             command @ WorkerCommand::LoadPullRequestConversation { .. } => {
                 self.conversation = Some(command);
             }
+            command @ WorkerCommand::LoadCheckRunLog { .. } => self.check_log = Some(command),
             WorkerCommand::Shutdown => self.shutdown = true,
         }
     }
@@ -217,6 +228,7 @@ impl Mailbox {
             .or_else(|| self.preview.take())
             .or_else(|| self.pull_request.take())
             .or_else(|| self.refresh.take())
+            .or_else(|| self.check_log.take())
             .or_else(|| self.checks.take())
             .or_else(|| self.conversation.take())
             .or_else(|| self.history.take())
@@ -245,7 +257,8 @@ fn worker_lane(command: &WorkerCommand) -> WorkerLane {
         WorkerCommand::LoadGitHubRepositories { .. }
         | WorkerCommand::LookupPullRequest { .. }
         | WorkerCommand::LoadPullRequestChecks { .. }
-        | WorkerCommand::LoadPullRequestConversation { .. } => WorkerLane::GitHubMetadata,
+        | WorkerCommand::LoadPullRequestConversation { .. }
+        | WorkerCommand::LoadCheckRunLog { .. } => WorkerLane::GitHubMetadata,
         WorkerCommand::PreparePullRequest { .. }
         | WorkerCommand::LoadPullRequestFile { .. }
         | WorkerCommand::LoadPullRequestFileBatch { .. } => WorkerLane::PullRequestPreview,
@@ -509,6 +522,16 @@ fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sende
                 generation,
                 result: repository
                     .pull_request_conversation(&pull_request)
+                    .map_err(format_error),
+            },
+            WorkerCommand::LoadCheckRunLog {
+                generation,
+                pull_request,
+                check,
+            } => WorkerEvent::CheckRunLog {
+                generation,
+                result: repository
+                    .pull_request_check_log(&pull_request, &check)
                     .map_err(format_error),
             },
             WorkerCommand::LoadBranches { generation } => WorkerEvent::Branches {

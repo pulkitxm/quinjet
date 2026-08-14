@@ -115,13 +115,6 @@ impl PullRequestConversation {
             })
             .count()
     }
-
-    pub fn review_count(&self) -> usize {
-        self.entries
-            .iter()
-            .filter(|entry| entry.kind == ConversationKind::Review)
-            .count()
-    }
 }
 
 impl Repository {
