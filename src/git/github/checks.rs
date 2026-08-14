@@ -189,7 +189,7 @@ impl Repository {
             pull_request.head_oid
         );
         if !refresh {
-            if let Some(cached) = self.cache_read(&key, CacheLife::Ttl(CHECK_LIST_CACHE_TTL)) {
+            if let Some(cached) = super::cache_read(&key, CacheLife::Ttl(CHECK_LIST_CACHE_TTL)) {
                 return Ok(PullRequestChecks {
                     checks: parse_pull_request_checks(&cached)?,
                     from_cache: true,
@@ -213,7 +213,7 @@ impl Repository {
             );
         }
         let checks = parse_pull_request_checks(&output.stdout)?;
-        self.cache_write(&key, &output.stdout);
+        super::cache_write(&key, &output.stdout);
         Ok(PullRequestChecks {
             checks,
             from_cache: false,
@@ -304,7 +304,7 @@ impl Repository {
         // never again. A running job has no stable identity to key on, so it is
         // always re-read; that is exactly what makes it tail.
         if life == CacheLife::Immutable {
-            if let Some(cached) = self.cache_read_bounded(&key, life, MAX_CHECK_LOG_BYTES) {
+            if let Some(cached) = super::cache_read_bounded(&key, life, MAX_CHECK_LOG_BYTES) {
                 return Ok((cached, false));
             }
         }
@@ -331,7 +331,7 @@ impl Repository {
             );
         }
         if life == CacheLife::Immutable && !output.stdout_truncated && !output.stdout.is_empty() {
-            self.cache_write_bounded(&key, &output.stdout, MAX_CHECK_LOG_BYTES);
+            super::cache_write_bounded(&key, &output.stdout, MAX_CHECK_LOG_BYTES);
         }
         Ok((output.stdout, output.stdout_truncated))
     }

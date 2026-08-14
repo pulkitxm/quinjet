@@ -36,6 +36,9 @@ const MAX_PULL_REQUEST_BODY_BYTES: usize = 256 * 1024;
 const MAX_GH_ERROR_BYTES: usize = 256 * 1024;
 const MAX_PR_PATH_BYTES: usize = 8 * 1024 * 1024;
 const MAX_PR_PATHS: usize = 16_384;
+/// A single file's patch is cached only if it is small enough that one file
+/// cannot crowd out the rest of a pull request.
+const MAX_CACHED_PATCH_BYTES: usize = 1024 * 1024;
 /// The cache now holds immutable content (finished run logs, patches for a
 /// fixed pair of commits) rather than only small metadata blobs, so the budget
 /// is sized for those and pruned oldest-first.
@@ -271,12 +274,25 @@ impl PreparedPullRequest {
             .iter()
             .find(|file| file.path == path)
             .with_context(|| format!("{} is not part of this pull request", path.display()))?;
+        let key = patch_cache_key(&self.merge_base, &self.head, &file.path);
+        if let Some(patch) = cache_read_bounded(&key, CacheLife::Immutable, MAX_CACHED_PATCH_BYTES)
+        {
+            return Ok(pull_request_file_document(
+                &patch,
+                &self.pull_request,
+                file,
+                false,
+            ));
+        }
         let (patch, truncated) = diff_selected_paths(
             self.repository.path(),
             &self.merge_base,
             &self.head,
             std::slice::from_ref(&file.path),
         )?;
+        if !truncated {
+            cache_write_bounded(&key, &patch, MAX_CACHED_PATCH_BYTES);
+        }
         Ok(pull_request_file_document(
             &patch,
             &self.pull_request,
@@ -297,28 +313,79 @@ impl PreparedPullRequest {
         if files.is_empty() {
             return Ok(Vec::new());
         }
-        let requested: Vec<PathBuf> = files.iter().map(|file| file.path.clone()).collect();
-        let (patch, truncated) = diff_selected_paths(
-            self.repository.path(),
-            &self.merge_base,
-            &self.head,
-            &requested,
-        )?;
+        // Serve whatever this pair of commits has already produced, and ask Git
+        // only for the remainder. A pull request opened a second time without a
+        // new head asks Git for nothing at all.
+        let mut cached: HashMap<PathBuf, Vec<u8>> = HashMap::new();
+        let mut requested: Vec<PathBuf> = Vec::new();
+        for file in &files {
+            let key = patch_cache_key(&self.merge_base, &self.head, &file.path);
+            match cache_read_bounded(&key, CacheLife::Immutable, MAX_CACHED_PATCH_BYTES) {
+                Some(patch) => {
+                    cached.insert(file.path.clone(), patch);
+                }
+                None => requested.push(file.path.clone()),
+            }
+        }
+        let (patch, truncated) = if requested.is_empty() {
+            (Vec::new(), false)
+        } else {
+            diff_selected_paths(
+                self.repository.path(),
+                &self.merge_base,
+                &self.head,
+                &requested,
+            )?
+        };
         let sections = split_patch_by_file(&patch);
         Ok(files
             .into_iter()
             .map(|file| {
-                let body = sections
-                    .iter()
-                    .find(|section| section.matches(&file.path))
-                    .map(|section| section.body)
-                    .unwrap_or_default();
+                let body = match cached.get(&file.path) {
+                    Some(patch) => patch.as_slice(),
+                    None => {
+                        let body = sections
+                            .iter()
+                            .find(|section| section.matches(&file.path))
+                            .map(|section| section.body)
+                            .unwrap_or_default();
+                        if !truncated {
+                            let key = patch_cache_key(&self.merge_base, &self.head, &file.path);
+                            cache_write_bounded(&key, body, MAX_CACHED_PATCH_BYTES);
+                        }
+                        body
+                    }
+                };
                 (
                     file.path.clone(),
                     pull_request_file_document(body, &self.pull_request, file, truncated),
                 )
             })
             .collect())
+    }
+}
+
+/// Direct cache access for readers that cannot express themselves as a single
+/// `gh` invocation: a response judged by its body rather than its exit status,
+/// or bytes produced by Git rather than by GitHub.
+pub(crate) fn cache_read(key: &str, life: CacheLife) -> Option<Vec<u8>> {
+    cache_read_bounded(key, life, MAX_GH_METADATA_BYTES)
+}
+
+pub(crate) fn cache_read_bounded(key: &str, life: CacheLife, limit: usize) -> Option<Vec<u8>> {
+    CacheStore::discover()?
+        .read(key, limit)
+        .filter(|entry| life.accepts(entry.age))
+        .map(|entry| entry.data)
+}
+
+pub(crate) fn cache_write(key: &str, data: &[u8]) {
+    cache_write_bounded(key, data, MAX_GH_METADATA_BYTES);
+}
+
+pub(crate) fn cache_write_bounded(key: &str, data: &[u8], limit: usize) {
+    if let Some(cache) = CacheStore::discover() {
+        let _ = cache.write(key, data, limit);
     }
 }
 
@@ -646,35 +713,6 @@ impl Repository {
             },
             response.disposition,
         ))
-    }
-
-    /// Direct cache access for readers that cannot express themselves as a
-    /// single `gh` invocation: a response judged by its body rather than its
-    /// exit status, or bytes produced by Git rather than by GitHub.
-    pub(crate) fn cache_read(&self, key: &str, life: CacheLife) -> Option<Vec<u8>> {
-        self.cache_read_bounded(key, life, MAX_GH_METADATA_BYTES)
-    }
-
-    pub(crate) fn cache_read_bounded(
-        &self,
-        key: &str,
-        life: CacheLife,
-        limit: usize,
-    ) -> Option<Vec<u8>> {
-        CacheStore::discover()?
-            .read(key, limit)
-            .filter(|entry| life.accepts(entry.age))
-            .map(|entry| entry.data)
-    }
-
-    pub(crate) fn cache_write(&self, key: &str, data: &[u8]) {
-        self.cache_write_bounded(key, data, MAX_GH_METADATA_BYTES);
-    }
-
-    pub(crate) fn cache_write_bounded(&self, key: &str, data: &[u8], limit: usize) {
-        if let Some(cache) = CacheStore::discover() {
-            let _ = cache.write(key, data, limit);
-        }
     }
 
     fn checked_cached_gh<I, S>(
@@ -1352,13 +1390,31 @@ fn changed_files_in_repository(
         OsString::from("--"),
     ];
     let counts = numstat_counts(repository, merge_base, head);
-    let output = run_repository_git(repository, &args, MAX_PR_PATH_BYTES, 128 * 1024)?;
-    if !output.status.success() && !output.stdout_truncated {
-        bail!(
-            "{}",
-            bounded_command_error("unable to enumerate pull-request files", &output)
-        );
-    }
+    // The listing between two fixed commits can never change, so it is keyed by
+    // those commits and kept. A moved head simply asks a different question.
+    let key = format!("pr-files-v1\n{merge_base}\n{head}");
+    let cached = cache_read_bounded(&key, CacheLife::Immutable, MAX_PR_PATH_BYTES);
+    let output = match cached {
+        Some(data) => BoundedOutput {
+            status: successful_status(),
+            stdout: data,
+            stderr: Vec::new(),
+            stdout_truncated: false,
+        },
+        None => {
+            let output = run_repository_git(repository, &args, MAX_PR_PATH_BYTES, 128 * 1024)?;
+            if !output.status.success() && !output.stdout_truncated {
+                bail!(
+                    "{}",
+                    bounded_command_error("unable to enumerate pull-request files", &output)
+                );
+            }
+            if !output.stdout_truncated {
+                cache_write_bounded(&key, &output.stdout, MAX_PR_PATH_BYTES);
+            }
+            output
+        }
+    };
     let mut truncated = output.stdout_truncated;
     let complete_output = if output.stdout_truncated && !output.stdout.ends_with(&[0]) {
         output
@@ -1435,6 +1491,10 @@ fn numstat_counts(
     merge_base: &str,
     head: &str,
 ) -> HashMap<PathBuf, DiffLineCounts> {
+    let key = format!("pr-numstat-v1\n{merge_base}\n{head}");
+    if let Some(data) = cache_read_bounded(&key, CacheLife::Immutable, MAX_PR_PATH_BYTES) {
+        return parse_numstat(&data);
+    }
     let args = [
         OsString::from("diff"),
         OsString::from("--numstat"),
@@ -1446,9 +1506,31 @@ fn numstat_counts(
     ];
     run_repository_git(repository, &args, MAX_PR_PATH_BYTES, 128 * 1024)
         .ok()
-        .filter(|output| output.status.success())
-        .map(|output| parse_numstat(&output.stdout))
+        .filter(|output| output.status.success() && !output.stdout_truncated)
+        .map(|output| {
+            cache_write_bounded(&key, &output.stdout, MAX_PR_PATH_BYTES);
+            parse_numstat(&output.stdout)
+        })
         .unwrap_or_default()
+}
+
+/// A status that reports success, for feeding cached bytes back through the
+/// same path a real command's output takes.
+fn successful_status() -> ExitStatus {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        ExitStatus::from_raw(0)
+    }
+    #[cfg(not(unix))]
+    {
+        use std::os::windows::process::ExitStatusExt;
+        ExitStatus::from_raw(0)
+    }
+}
+
+fn patch_cache_key(merge_base: &str, head: &str, path: &Path) -> String {
+    format!("pr-patch-v1\n{merge_base}\n{head}\n{}", path.display())
 }
 
 fn diff_selected_paths(
