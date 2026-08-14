@@ -2092,12 +2092,15 @@ impl App {
                             .selected_pull_request_check()
                             .is_some_and(|check| check.status.is_running());
                         self.pull_request_checks = checks;
-                        self.pull_request_check_cursor = selected.and_then(|selected| {
+                        let cursor = selected.and_then(|selected| {
                             self.pull_request_checks.iter().position(|check| {
                                 (check.workflow.as_str(), check.name.as_str())
                                     == (selected.0.as_str(), selected.1.as_str())
                             })
                         });
+                        // A run that disappeared takes the reader back to the
+                        // conversation rather than to another run's log.
+                        self.set_check_cursor(cursor);
                         self.pull_request_checks_error = None;
                         if was_running {
                             self.request_check_run_log(true, &mut effects);
@@ -3026,6 +3029,10 @@ impl App {
         self.horizontal_scroll = 0;
         self.invalidate_preview();
         self.document = self.loading_document_for_view(view);
+        // The poll cadence depends on which view is open, so a pending tick
+        // scheduled at the slow background rate would otherwise leave a pull
+        // request stale for up to two minutes after returning to it.
+        self.schedule_pull_request_poll(Instant::now());
         if view == View::PullRequests && self.pull_request.is_none() {
             self.pull_request_lookup_active = true;
         } else {
