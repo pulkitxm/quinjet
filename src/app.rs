@@ -4127,21 +4127,27 @@ impl App {
                 self.pull_request_check_log_generation.wrapping_add(1);
             return;
         };
-        if self.pull_request_check_log_loading {
-            return;
-        }
         let target = (check.workflow.clone(), check.name.clone());
         if self.pull_request_check_log_target.as_ref() == Some(&target) {
+            // Nothing to do for a run already loaded or already on its way,
+            // unless a live refresh is asking for its newest output.
+            if self.pull_request_check_log_loading {
+                return;
+            }
             let held = self.pull_request_check_log.is_some()
                 || self.pull_request_check_log_error.is_some();
             if held && !refresh {
                 return;
             }
         } else {
+            // A different run. Anything in flight is now answering for the wrong
+            // check, so it has to be dropped rather than waited on: bumping the
+            // generation below is what makes its reply unusable.
             self.pull_request_check_log = None;
             self.pull_request_check_log_error = None;
             self.expanded_check_steps.clear();
             self.pull_request_check_log_target = Some(target);
+            self.pull_request_log_read_at = None;
         }
         self.pull_request_check_log_generation =
             self.pull_request_check_log_generation.wrapping_add(1);
@@ -5562,6 +5568,78 @@ mod tests {
         assert_eq!(app.pull_request_step_cursor, 3);
         app.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE), now);
         assert_eq!(app.pull_request_step_cursor, 1);
+    }
+
+    #[test]
+    fn moving_to_another_check_never_shows_the_previous_run_under_its_name() {
+        let mut app = App::new("/tmp/repo", "repo");
+        let now = Instant::now();
+        app.view = View::PullRequests;
+        app.pull_request = Some(pull_request(8, "Two checks", "acme/widget"));
+        app.pull_request_checks = vec![
+            check("Build every workspace", PullRequestCheckStatus::Passed),
+            check("No-comment policy", PullRequestCheckStatus::Passed),
+        ];
+
+        // Open the first check. Its log is slow, so it is still in flight.
+        let mut effects = Vec::new();
+        app.select_pull_request_check(Some(0), &mut effects);
+        assert_eq!(effects.len(), 1);
+        let slow = app.pull_request_check_log_generation;
+        assert!(app.pull_request_check_log_loading);
+
+        // Move to the second check before the first one answers.
+        let mut effects = Vec::new();
+        app.select_pull_request_check(Some(1), &mut effects);
+        assert!(
+            matches!(
+                effects.as_slice(),
+                [AppEffect::Git(command)] if matches!(
+                    command.as_ref(),
+                    WorkerCommand::LoadCheckRunLog { check, .. }
+                        if check.name == "No-comment policy"
+                )
+            ),
+            "the newly selected run is requested rather than waited for"
+        );
+        assert_ne!(
+            app.pull_request_check_log_generation, slow,
+            "the in-flight read is invalidated by the move"
+        );
+
+        // The slow reply finally lands. It belongs to a check nobody is looking
+        // at, so it must not be rendered under the selected one.
+        let effects = app.handle_worker_event(
+            WorkerEvent::CheckRunLog {
+                generation: slow,
+                result: Ok(crate::git::github::CheckRunLog {
+                    steps: vec![crate::git::github::CheckStep {
+                        number: 1,
+                        name: "Build every workspace".to_owned(),
+                        status: PullRequestCheckStatus::Passed,
+                        conclusion: "success".to_owned(),
+                        started_at: String::new(),
+                        completed_at: String::new(),
+                        lines: Vec::new(),
+                    }],
+                    loose_lines: Vec::new(),
+                    truncated: false,
+                    unavailable: None,
+                    log_pending: false,
+                }),
+            },
+            now,
+        );
+
+        assert!(effects.is_empty());
+        assert!(
+            app.pull_request_check_log.is_none(),
+            "a reply for the previous check is discarded, not shown under the new one"
+        );
+        assert!(
+            app.pull_request_check_log_loading,
+            "the new read is still pending"
+        );
     }
 
     #[test]
