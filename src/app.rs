@@ -1812,11 +1812,10 @@ impl App {
         self.request_refresh(effects);
     }
 
+    /// The repository heartbeat. Pull-request liveness is separate because it
+    /// paces itself against GitHub rather than the local working tree.
     pub fn periodic_refresh(&mut self, effects: &mut Vec<AppEffect>) {
         self.request_refresh(effects);
-        if self.view == View::PullRequests && self.pull_request.is_some() {
-            self.request_pull_request_checks(effects);
-        }
     }
 
     pub fn handle_worker_event(&mut self, event: WorkerEvent, now: Instant) -> Vec<AppEffect> {
@@ -4526,7 +4525,21 @@ fn is_word_character(character: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git::github::PullRequestCheckStatus;
     use crate::git::status::{BranchState, ChangeStatus};
+
+    fn check(name: &str, status: PullRequestCheckStatus) -> PullRequestCheck {
+        PullRequestCheck {
+            name: name.to_owned(),
+            workflow: "CI".to_owned(),
+            state: format!("{status:?}").to_uppercase(),
+            status,
+            description: String::new(),
+            link: "https://github.com/acme/widget/actions/runs/1/job/2".to_owned(),
+            started_at: "2026-08-14T18:00:00Z".to_owned(),
+            completed_at: String::new(),
+        }
+    }
 
     fn pull_request(number: u64, title: &str, repository: &str) -> PullRequest {
         PullRequest {
@@ -5257,31 +5270,143 @@ mod tests {
     }
 
     #[test]
-    fn periodic_refresh_updates_checks_without_clearing_them() {
+    fn a_live_poll_refreshes_a_pull_request_without_disturbing_the_reader() {
+        let mut app = App::new("/tmp/repo", "repo");
+        let now = Instant::now();
+        app.view = View::PullRequests;
+        app.pull_request = Some(pull_request(8, "Checks", "acme/widget"));
+        app.pull_request_exact_number = Some(8);
+        app.pull_request_section = PullRequestSection::Files;
+        app.pull_request_checks = vec![check("build", PullRequestCheckStatus::Passed)];
+        app.pull_request_check_cursor = Some(0);
+        app.content_scroll = 40;
+
+        let mut effects = Vec::new();
+        app.refresh_pull_request_live(now, &mut effects);
+
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            AppEffect::Git(command) if matches!(
+                command.as_ref(),
+                WorkerCommand::LookupPullRequest { number: 8, refresh: true, .. }
+            )
+        )));
+        for expected in ["checks", "conversation", "log"] {
+            assert!(
+                effects.iter().any(|effect| matches!(
+                    effect,
+                    AppEffect::Git(command) if match expected {
+                        "checks" => matches!(
+                            command.as_ref(),
+                            WorkerCommand::LoadPullRequestChecks { .. }
+                        ),
+                        "conversation" => matches!(
+                            command.as_ref(),
+                            WorkerCommand::LoadPullRequestConversation { .. }
+                        ),
+                        _ => matches!(command.as_ref(), WorkerCommand::LoadCheckRunLog { .. }),
+                    }
+                )),
+                "a poll refreshes the {expected}"
+            );
+        }
+        assert!(
+            app.pull_request.is_some(),
+            "the loaded pull request stays on screen while the poll runs"
+        );
+        assert_eq!(app.pull_request_section, PullRequestSection::Files);
+        assert_eq!(app.content_scroll, 40);
+        assert!(app.pull_request_progress.is_none());
+    }
+
+    #[test]
+    fn a_settled_pull_request_polls_less_often_than_a_running_one() {
         let mut app = App::new("/tmp/repo", "repo");
         app.view = View::PullRequests;
         app.pull_request = Some(pull_request(8, "Checks", "acme/widget"));
-        app.pull_request_checks = vec![PullRequestCheck {
-            name: "CI".to_owned(),
-            workflow: "CI".to_owned(),
-            state: "SUCCESS".to_owned(),
-            status: crate::git::github::PullRequestCheckStatus::Passed,
-            description: String::new(),
-            link: String::new(),
-            started_at: String::new(),
-            completed_at: String::new(),
-        }];
-        let mut effects = Vec::new();
+        app.pull_request_checks = vec![check("build", PullRequestCheckStatus::Passed)];
+        assert_eq!(app.pull_request_poll_interval(), PULL_REQUEST_IDLE_POLL);
 
-        app.periodic_refresh(&mut effects);
+        app.pull_request_checks = vec![check("build", PullRequestCheckStatus::Pending)];
+        assert_eq!(app.pull_request_poll_interval(), PULL_REQUEST_ACTIVE_POLL);
 
-        assert_eq!(app.pull_request_checks.len(), 1);
-        assert!(app.pull_request_checks_loading);
+        app.view = View::Changes;
+        assert_eq!(
+            app.pull_request_poll_interval(),
+            PULL_REQUEST_BACKGROUND_POLL,
+            "a pull request nobody is looking at still stays fresh, just cheaply"
+        );
+    }
+
+    #[test]
+    fn a_moved_head_reindexes_the_diff_and_keeps_everything_else() {
+        let mut app = App::new("/tmp/repo", "repo");
+        let now = Instant::now();
+        app.view = View::PullRequests;
+        app.pull_request_generation = 4;
+        app.pull_request_loading = true;
+        app.pull_request = Some(pull_request(8, "Force pushed", "acme/widget"));
+        app.pull_request_section = PullRequestSection::Files;
+        app.pull_request_workspace_generation = Some(2);
+        app.pull_request_documents
+            .insert(PathBuf::from("src/one.rs"), DiffDocument::default());
+        app.pull_request_check_cursor = Some(0);
+        app.pull_request_checks = vec![check("build", PullRequestCheckStatus::Passed)];
+
+        let mut moved = pull_request(8, "Force pushed", "acme/widget");
+        moved.head_oid = "rewritten".to_owned();
+        let repository = moved.base_repository.clone();
+        let effects = app.handle_worker_event(
+            WorkerEvent::PullRequestLookup {
+                generation: 4,
+                result: Ok(crate::git::github::PullRequestSnapshot {
+                    repositories: vec![repository.clone()],
+                    selected_repository: Some(repository),
+                    pull_request: moved,
+                    warnings: Vec::new(),
+                    exact_number: Some(8),
+                    from_cache: false,
+                }),
+            },
+            now,
+        );
+
+        assert!(app.pull_request_workspace_generation.is_none());
+        assert!(app.pull_request_documents.is_empty());
+        assert_eq!(
+            app.pull_request_section,
+            PullRequestSection::Files,
+            "a force push replaces the diff, not the reader's place in the view"
+        );
+        assert_eq!(app.pull_request_check_cursor, Some(0));
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            AppEffect::Git(command)
+                if matches!(command.as_ref(), WorkerCommand::PreparePullRequest { .. })
+        )));
+    }
+
+    #[test]
+    fn a_forwarded_webhook_refreshes_immediately_instead_of_waiting_for_the_poll() {
+        let mut app = App::new("/tmp/repo", "repo");
+        let now = Instant::now();
+        app.view = View::PullRequests;
+        app.pull_request = Some(pull_request(8, "Checks", "acme/widget"));
+        app.pull_request_exact_number = Some(8);
+        app.pull_request_poll_due = Some(now + Duration::from_secs(3_600));
+
+        let effects = app.webhook_delivered(now);
+
         assert!(effects.iter().any(|effect| matches!(
             effect,
             AppEffect::Git(command)
                 if matches!(command.as_ref(), WorkerCommand::LoadPullRequestChecks { .. })
         )));
+        assert!(
+            app.pull_request_poll_due
+                .is_some_and(|due| due <= now + PULL_REQUEST_IDLE_POLL),
+            "the delivery also restarts the poll clock"
+        );
     }
 
     #[test]
