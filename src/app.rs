@@ -2060,16 +2060,16 @@ impl App {
                         // A failure is the reason anyone opens a log, so open that
                         // step for them. The cursor follows so `space` folds it
                         // again without any navigation first.
-                        if self.expanded_check_steps.is_empty()
-                            && let Some(step) = log.failed_step()
-                        {
-                            self.expanded_check_steps.insert(step.number);
-                            self.pull_request_step_cursor = step.number;
+                        if self.expanded_check_steps.is_empty() {
+                            if let Some(step) = log.failed_step() {
+                                self.expanded_check_steps.insert(step.number);
+                                self.pull_request_step_cursor = step.number;
+                            }
                         }
-                        if self.pull_request_step_cursor == 0
-                            && let Some(step) = log.steps.first()
-                        {
-                            self.pull_request_step_cursor = step.number;
+                        if self.pull_request_step_cursor == 0 {
+                            if let Some(step) = log.steps.first() {
+                                self.pull_request_step_cursor = step.number;
+                            }
                         }
                         self.pull_request_check_log = Some(log);
                         self.pull_request_check_log_error = None;
