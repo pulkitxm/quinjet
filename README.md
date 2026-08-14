@@ -186,7 +186,7 @@ Text fields support Unicode-safe editing plus familiar terminal and macOS motion
 - History is paginated for one explicit branch revision; choosing another branch is read-only.
 - No pull-request command is queued at startup or when the PR tab opens. Only an explicit positive-number lookup contacts GitHub, and refreshing refetches only that PR.
 - Once a pull request is open it refreshes on an adaptive schedule: every 5 seconds while a check is running, every 20 seconds once they settle, and every 2 minutes from another view. Each read is independent, so one failing endpoint never stalls the others, and a moved head reindexes only the diff.
-- Conversations are bounded to 2,000 entries and check logs to 8 MiB / 200,000 lines, read through the same capped pipes as every other subprocess.
+- Conversations are bounded to 500 entries and check logs to 8 MiB / 200,000 lines, read through the same capped pipes as every other subprocess.
 - On-demand repository discovery inspects at most 32 Git remotes, 64 configured fetch/push URL entries (32 distinct URLs), and 16 GitHub repositories.
 - PR file indexes are capped at 16,384 paths / 8 MiB. Each selected file has an independent 8 MiB patch cap; the full PR patch is never materialized. Potentially large subprocess output is streamed and the child is terminated at the cap.
 - The changed-file tree is virtualized: render cost follows terminal height rather than PR size. Rapid file selections coalesce into the newest per-file Git diff with no loading-layout replacement.

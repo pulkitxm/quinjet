@@ -5088,6 +5088,46 @@ mod tests {
     }
 
     #[test]
+    fn a_long_conversation_stays_bounded_to_render() {
+        let mut app = overview_app();
+        let body = "Some reasonably long review comment body that wraps across several \
+terminal rows because that is what real pull-request comments look like in practice."
+            .to_owned();
+        app.pull_request_conversation = crate::git::github::PullRequestConversation {
+            truncated: true,
+            entries: (0..500)
+                .map(|index| ConversationEntry {
+                    kind: if index % 3 == 0 {
+                        ConversationKind::Comment
+                    } else {
+                        ConversationKind::Commit
+                    },
+                    actor: "octocat".to_owned(),
+                    timestamp: "2026-08-02T09:10:00Z".to_owned(),
+                    detail: "abc1234".to_owned(),
+                    body: body.clone(),
+                    url: String::new(),
+                    reference: String::new(),
+                    context: String::new(),
+                })
+                .collect(),
+        };
+
+        let rows = conversation_rows(&app, 120, &Theme::default());
+
+        assert!(
+            rows.len() < 3_000,
+            "a thread at the fetch cap still builds a bounded number of rows: {}",
+            rows.len()
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.line.to_string().contains("Older activity was omitted")),
+            "a truncated thread says so rather than silently dropping history"
+        );
+    }
+
+    #[test]
     fn a_failed_lookup_stays_readable_after_its_toast_expires() {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;

@@ -1424,7 +1424,9 @@ impl App {
                     self.pull_request = None;
                     self.reset_pull_request_runtime();
                     self.pull_request_warnings.clear();
+                    self.pull_request_error = None;
                     self.pull_request_progress = None;
+                    self.pull_request_poll_due = None;
                     self.pull_request_lookup = TextBuffer::default();
                     self.pull_request_lookup_active = true;
                     self.document = DiffDocument::empty(
