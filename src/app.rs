@@ -551,6 +551,10 @@ pub struct App {
     pub github_repositories: Vec<GitHubRepository>,
     pub pull_request_repository: Option<GitHubRepository>,
     pub pull_request_warnings: Vec<String>,
+    /// Why the last lookup failed. The pull-request pane renders app state
+    /// rather than a document, so a failure needs somewhere to live that
+    /// outlasts the toast announcing it.
+    pub pull_request_error: Option<String>,
     pub pull_request_exact_number: Option<u64>,
     pub pull_request_from_cache: bool,
     pub history_branches: Vec<HistoryBranch>,
@@ -663,6 +667,7 @@ impl App {
             github_repositories: Vec::new(),
             pull_request_repository: None,
             pull_request_warnings: Vec::new(),
+            pull_request_error: None,
             pull_request_exact_number: None,
             pull_request_from_cache: false,
             history_branches: Vec::new(),
@@ -2212,6 +2217,7 @@ impl App {
                         // Metadata has landed; anything still to do reports its
                         // own progress from here.
                         self.pull_request_progress = None;
+                        self.pull_request_error = None;
                         self.schedule_pull_request_poll(now);
                         self.request_pull_request_checks(&mut effects);
                         self.request_pull_request_conversation(&mut effects);
@@ -2222,6 +2228,7 @@ impl App {
                     }
                     Err(error) => {
                         self.pull_request_progress = None;
+                        self.pull_request_error = Some(error.clone());
                         self.document = DiffDocument::empty("Pull Requests", error.clone());
                         self.show_toast(error, ToastLevel::Error, now);
                     }
@@ -4106,6 +4113,7 @@ impl App {
         self.pull_request_loading = true;
         self.pull_request_exact_number = Some(number);
         if !silent {
+            self.pull_request_error = None;
             self.invalidate_preview();
             self.pull_request_progress = Some(PullRequestProgress::LoadingMetadata);
             self.pull_request_warnings.clear();

@@ -1490,8 +1490,33 @@ fn overview_title(app: &App, showing_check: bool) -> String {
 fn conversation_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> {
     let mut rows = Vec::new();
     let Some(pull_request) = app.selected_pull_request() else {
+        if let Some(error) = app.pull_request_error.as_deref() {
+            rows.push(ContentRow::text(
+                "  This pull request could not be opened",
+                Style::default()
+                    .fg(theme.error)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            rows.push(ContentRow::blank());
+            for (_, text) in wrap_prose(error, width.saturating_sub(2)) {
+                rows.push(ContentRow::text(
+                    format!("  {text}"),
+                    Style::default().fg(theme.error),
+                ));
+            }
+            rows.push(ContentRow::blank());
+            rows.push(ContentRow::text(
+                "  Press r to try again, or o to choose another repository",
+                Style::default().fg(theme.muted),
+            ));
+            return rows;
+        }
         rows.push(ContentRow::text(
-            "  Enter a pull-request number to open one",
+            if app.pull_request_loading {
+                "  Fetching pull-request metadata…"
+            } else {
+                "  Enter a pull-request number to open one"
+            },
             Style::default().fg(theme.muted),
         ));
         return rows;
@@ -5060,6 +5085,32 @@ mod tests {
             completed_at: "2026-08-02T10:02:30Z".to_owned(),
         }];
         app
+    }
+
+    #[test]
+    fn a_failed_lookup_stays_readable_after_its_toast_expires() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = App::new("/tmp/repo", "repo");
+        app.view = View::PullRequests;
+        app.pull_request_exact_number = Some(404);
+        app.pull_request_error =
+            Some("unable to load pull request: GraphQL: Could not resolve to a PullRequest".into());
+        let mut terminal = Terminal::new(TestBackend::new(120, 24)).unwrap();
+
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+
+        assert!(rendered.contains("could not be opened"));
+        assert!(rendered.contains("Could not resolve to a PullRequest"));
+        assert!(rendered.contains("Press r to try again"));
     }
 
     #[test]
