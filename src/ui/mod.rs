@@ -81,10 +81,16 @@ const HELP_LINES: &[(&str, &str)] = &[
     ("r", "Refetch this PR now, bypassing the cache"),
     ("", ""),
     ("Check Logs", ""),
-    ("j / k", "Select a check to read its run log"),
+    ("j / k in the list", "Select a check to read its run log"),
+    ("Tab, then j / k", "Move through that run's steps"),
     ("[ / ]", "Previous / next step"),
-    ("Space", "Fold or unfold the selected step"),
+    ("Space, Enter", "Fold or unfold the selected step"),
     ("e / E", "Fold or unfold every step"),
+    (
+        "PgUp / PgDn, wheel",
+        "Scroll the output of an unfolded step",
+    ),
+    ("h / l, ← / →", "Read a log line past the right edge"),
     ("", ""),
     ("Repository", ""),
     ("r / Ctrl+R", "Refresh"),
@@ -1457,9 +1463,9 @@ fn draw_pull_request_overview(
             rows.len(),
         );
     }
-    app.content_scroll = app
-        .content_scroll
-        .min(rows.len().saturating_sub(inner.height as usize));
+    let max_scroll = rows.len().saturating_sub(inner.height as usize);
+    app.content_scroll = app.content_scroll.min(max_scroll);
+    app.content_at_bottom = app.content_scroll == max_scroll;
 
     let mut hits = Vec::new();
     for (offset, row) in rows
@@ -1955,11 +1961,25 @@ fn check_run_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> {
         width,
         theme,
     )));
+    if log.log_pending {
+        rows.push(ContentRow::text(
+            "  Waiting for the runner to write its first output",
+            Style::default().fg(theme.muted),
+        ));
+    }
+    let now = crate::git::github::unix_now();
     for step in &log.steps {
         let expanded = app.check_step_expanded(step.number);
-        rows.push(check_step_row(step, expanded, width, theme));
+        rows.push(check_step_row(step, expanded, now, width, theme));
         if expanded {
-            push_log_lines(&mut rows, &step.lines, theme);
+            if step.lines.is_empty() && step.status.is_running() {
+                rows.push(ContentRow::text(
+                    "   │ waiting for output…",
+                    Style::default().fg(theme.accent),
+                ));
+            } else {
+                push_log_lines(&mut rows, &step.lines, theme);
+            }
         }
     }
     if !log.loose_lines.is_empty() {
@@ -1981,9 +2001,15 @@ fn check_run_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> {
 
 /// A step reads as one row: fold state, outcome, name, and how long it took,
 /// with the duration pushed to the right edge the way a run page shows it.
-fn check_step_row(step: &CheckStep, expanded: bool, width: usize, theme: &Theme) -> ContentRow {
+fn check_step_row(
+    step: &CheckStep,
+    expanded: bool,
+    now: i64,
+    width: usize,
+    theme: &Theme,
+) -> ContentRow {
     let (icon, color) = pull_request_check_icon(step.status, theme);
-    let duration = step.duration_label();
+    let duration = step.duration_label(now);
     let reserved = 8 + duration.width();
     let name = truncate_end(&step.name, width.saturating_sub(reserved));
     let padding = width
@@ -5203,6 +5229,63 @@ terminal rows because that is what real pull-request comments look like in pract
     }
 
     #[test]
+    fn a_running_check_shows_the_step_it_is_on_before_any_log_exists() {
+        let mut app = overview_app();
+        app.pull_request_check_cursor = Some(0);
+        app.expanded_check_steps.insert(2);
+        app.pull_request_step_cursor = 2;
+        app.pull_request_check_log = Some(crate::git::github::CheckRunLog {
+            truncated: false,
+            unavailable: None,
+            // GitHub has published no archive yet, which is the normal state for
+            // most of a job's life.
+            log_pending: true,
+            loose_lines: Vec::new(),
+            steps: vec![
+                CheckStep {
+                    number: 1,
+                    name: "Set up job".to_owned(),
+                    status: PullRequestCheckStatus::Passed,
+                    conclusion: "success".to_owned(),
+                    started_at: "2026-08-02T10:00:00Z".to_owned(),
+                    completed_at: "2026-08-02T10:00:02Z".to_owned(),
+                    lines: Vec::new(),
+                },
+                CheckStep {
+                    number: 2,
+                    name: "Run cargo test".to_owned(),
+                    status: PullRequestCheckStatus::Pending,
+                    conclusion: String::new(),
+                    started_at: "2026-08-02T10:00:02Z".to_owned(),
+                    completed_at: String::new(),
+                    lines: Vec::new(),
+                },
+            ],
+        });
+
+        let rendered = check_run_rows(&app, 100, &Theme::default())
+            .iter()
+            .map(|row| row.line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("2 steps"));
+        assert!(
+            rendered.contains("Set up job") && rendered.contains("2s"),
+            "a finished step still reports how long it took"
+        );
+        assert!(
+            rendered.contains("Run cargo test"),
+            "the step in progress is visible rather than hidden behind the missing log"
+        );
+        assert!(rendered.contains("waiting for output…"));
+        assert!(
+            rendered.contains("Waiting for the runner"),
+            "the view says why there is no output yet instead of looking broken"
+        );
+    }
+
+    #[test]
     fn a_comment_shows_its_code_intact_and_only_that_code_scrolls() {
         let mut app = overview_app();
         let wide = "│ ✓ Format, lint, and test (ubuntu-latest)   CI   passed in 33s   https://github.com/acme/widget/actions/runs/1/job/2 │";
@@ -5384,6 +5467,7 @@ terminal rows because that is what real pull-request comments look like in pract
         app.pull_request_check_log = Some(crate::git::github::CheckRunLog {
             truncated: false,
             unavailable: None,
+            log_pending: false,
             loose_lines: vec![CheckLogLine {
                 timestamp: "2026-08-02T10:02:31Z".to_owned(),
                 text: "Cleaning up runner".to_owned(),

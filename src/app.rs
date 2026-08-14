@@ -32,7 +32,9 @@ const PULL_REQUEST_BACKGROUND_POLL: Duration = Duration::from_secs(120);
 /// as often as the tick fires. Metadata, the conversation and a growing log all
 /// change on human or build timescales and hold their own floor.
 const PULL_REQUEST_DETAIL_POLL: Duration = Duration::from_secs(20);
-const PULL_REQUEST_LOG_POLL: Duration = Duration::from_secs(15);
+/// A running job's log grows continuously, so this is a tail interval rather
+/// than a staleness bound.
+const PULL_REQUEST_LOG_POLL: Duration = Duration::from_secs(8);
 const MAX_PULL_REQUEST_NUMBER_DIGITS: usize = 20;
 const DEFAULT_SIDEBAR_WIDTH: u16 = 42;
 const MIN_SIDEBAR_WIDTH: u16 = 22;
@@ -590,6 +592,10 @@ pub struct App {
     pub pull_request_check_log_error: Option<String>,
     pub expanded_check_steps: HashSet<usize>,
     pub pull_request_step_cursor: usize,
+    /// Whether the last draw left the content pane scrolled to its end. The
+    /// renderer owns the row count, so it reports this back for the one decision
+    /// that needs it: whether a growing log should keep following.
+    pub content_at_bottom: bool,
     pub pull_request_progress: Option<PullRequestProgress>,
     pub auxiliary_preview: Option<AuxiliaryPreview>,
     pub document: DiffDocument,
@@ -704,6 +710,7 @@ impl App {
             pull_request_check_log_error: None,
             expanded_check_steps: HashSet::new(),
             pull_request_step_cursor: 0,
+            content_at_bottom: true,
             pull_request_progress: None,
             auxiliary_preview: None,
             document: DiffDocument::empty("Working Tree", "Loading changes…"),
@@ -1472,8 +1479,12 @@ impl App {
             }
             KeyCode::Char('G') => self.go_to_edge(true, now),
             KeyCode::Char('z') => self.toggle_sidebar(),
-            KeyCode::Char('[') if self.check_log_visible() => self.move_check_step_cursor(false),
-            KeyCode::Char(']') if self.check_log_visible() => self.move_check_step_cursor(true),
+            KeyCode::Char('[') if self.check_log_visible() => {
+                self.move_check_step_cursor(-1);
+            }
+            KeyCode::Char(']') if self.check_log_visible() => {
+                self.move_check_step_cursor(1);
+            }
             // The conversation has neither steps nor hunks to jump between.
             KeyCode::Char('[') | KeyCode::Char(']')
                 if self.view == View::PullRequests
@@ -2118,13 +2129,20 @@ impl App {
                     return effects;
                 }
                 self.pull_request_check_log_loading = false;
+                let following = self.content_at_bottom
+                    && self
+                        .selected_pull_request_check()
+                        .is_some_and(|check| check.status.is_running());
                 match result {
                     Ok(log) => {
                         // A failure is the reason anyone opens a log, so open that
                         // step for them. The cursor follows so `space` folds it
                         // again without any navigation first.
                         if self.expanded_check_steps.is_empty() {
-                            if let Some(step) = log.failed_step() {
+                            // A failure is the reason anyone opens a finished
+                            // log; the step in progress is the reason anyone
+                            // opens a running one.
+                            if let Some(step) = log.failed_step().or_else(|| log.running_step()) {
                                 self.expanded_check_steps.insert(step.number);
                                 self.pull_request_step_cursor = step.number;
                             }
@@ -2136,6 +2154,12 @@ impl App {
                         }
                         self.pull_request_check_log = Some(log);
                         self.pull_request_check_log_error = None;
+                        // Stay on the newest output while a job is still writing,
+                        // but never yank a reader who has scrolled up to read
+                        // something earlier.
+                        if following {
+                            self.content_scroll = usize::MAX;
+                        }
                     }
                     Err(error) => {
                         self.pull_request_check_log = None;
@@ -3109,6 +3133,15 @@ impl App {
     }
 
     fn navigate(&mut self, amount: isize, now: Instant) {
+        // A check log is a list of steps, so moving through it selects a step
+        // the way every other list in Quinjet does. The draw scrolls whatever
+        // is selected into view.
+        if self.focus == Focus::Content
+            && self.check_log_visible()
+            && self.move_check_step_cursor(amount)
+        {
+            return;
+        }
         if self.focus == Focus::Content {
             if self.preview_files_all_collapsed() {
                 self.navigate_preview_file(amount);
@@ -4043,21 +4076,22 @@ impl App {
 
     /// Move between steps the way `[` and `]` move between diff hunks, so a long
     /// log can be walked without scrolling through it.
-    fn move_check_step_cursor(&mut self, forward: bool) {
+    fn move_check_step_cursor(&mut self, amount: isize) -> bool {
         let steps = self.check_step_numbers();
         if steps.is_empty() {
-            return;
+            return false;
         }
         let current = steps
             .iter()
             .position(|step| *step == self.pull_request_step_cursor)
             .unwrap_or_default();
-        let next = if forward {
-            (current + 1).min(steps.len() - 1)
+        let next = if amount < 0 {
+            current.saturating_sub(amount.unsigned_abs())
         } else {
-            current.saturating_sub(1)
+            current.saturating_add(amount as usize).min(steps.len() - 1)
         };
         self.pull_request_step_cursor = steps[next];
+        true
     }
 
     fn select_pull_request_check(&mut self, cursor: Option<usize>, effects: &mut Vec<AppEffect>) {
@@ -5462,6 +5496,118 @@ mod tests {
         let forced = app.webhook_delivered(start + PULL_REQUEST_ACTIVE_POLL);
         assert_eq!(command_count(&forced, "conversation"), 1);
         assert_eq!(command_count(&forced, "log"), 1);
+    }
+
+    #[test]
+    fn steps_are_selected_with_the_same_keys_as_every_other_list() {
+        let mut app = App::new("/tmp/repo", "repo");
+        let now = Instant::now();
+        app.view = View::PullRequests;
+        app.focus = Focus::Content;
+        app.pull_request = Some(pull_request(8, "Running", "acme/widget"));
+        app.pull_request_checks = vec![check("build", PullRequestCheckStatus::Passed)];
+        app.pull_request_check_cursor = Some(0);
+        let step = |number: usize| crate::git::github::CheckStep {
+            number,
+            name: format!("step {number}"),
+            status: PullRequestCheckStatus::Passed,
+            conclusion: "success".to_owned(),
+            started_at: String::new(),
+            completed_at: String::new(),
+            lines: Vec::new(),
+        };
+        app.pull_request_check_log = Some(crate::git::github::CheckRunLog {
+            steps: vec![step(1), step(2), step(3)],
+            loose_lines: Vec::new(),
+            truncated: false,
+            unavailable: None,
+            log_pending: false,
+        });
+        app.pull_request_step_cursor = 1;
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE), now);
+        assert_eq!(app.pull_request_step_cursor, 2);
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), now);
+        assert_eq!(app.pull_request_step_cursor, 3);
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE), now);
+        assert_eq!(app.pull_request_step_cursor, 3, "the last step is the end");
+        app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE), now);
+        assert_eq!(app.pull_request_step_cursor, 2);
+        assert_eq!(
+            app.content_scroll, 0,
+            "selecting a step never scrolls the pane behind the reader's back"
+        );
+
+        // Space folds whatever is selected.
+        app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE), now);
+        assert!(app.check_step_expanded(2));
+
+        // Paging still scrolls the output rather than moving the selection.
+        app.geometry.content = Rect::new(0, 0, 80, 20);
+        app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE), now);
+        assert_eq!(app.pull_request_step_cursor, 2);
+        assert!(app.content_scroll > 0);
+    }
+
+    #[test]
+    fn a_running_log_follows_its_own_tail_unless_the_reader_scrolled_up() {
+        let mut app = App::new("/tmp/repo", "repo");
+        let now = Instant::now();
+        app.view = View::PullRequests;
+        app.pull_request = Some(pull_request(8, "Running", "acme/widget"));
+        app.pull_request_checks = vec![check("build", PullRequestCheckStatus::Pending)];
+        app.pull_request_check_cursor = Some(0);
+        app.pull_request_check_log_generation = 3;
+        let log = || crate::git::github::CheckRunLog {
+            steps: Vec::new(),
+            loose_lines: Vec::new(),
+            truncated: false,
+            unavailable: None,
+            log_pending: false,
+        };
+
+        // Sitting at the end: new output keeps arriving in view.
+        app.content_at_bottom = true;
+        app.content_scroll = 120;
+        app.handle_worker_event(
+            WorkerEvent::CheckRunLog {
+                generation: 3,
+                result: Ok(log()),
+            },
+            now,
+        );
+        assert_eq!(
+            app.content_scroll,
+            usize::MAX,
+            "the draw clamps this to the new end"
+        );
+
+        // Scrolled up to read something: the view stays where it was put.
+        app.content_at_bottom = false;
+        app.content_scroll = 40;
+        app.pull_request_check_log_generation = 4;
+        app.handle_worker_event(
+            WorkerEvent::CheckRunLog {
+                generation: 4,
+                result: Ok(log()),
+            },
+            now,
+        );
+        assert_eq!(app.content_scroll, 40);
+
+        // A finished run has nothing more to follow.
+        app.pull_request_checks = vec![check("build", PullRequestCheckStatus::Passed)];
+        app.content_at_bottom = true;
+        app.content_scroll = 40;
+        app.pull_request_check_log_generation = 5;
+        app.handle_worker_event(
+            WorkerEvent::CheckRunLog {
+                generation: 5,
+                result: Ok(log()),
+            },
+            now,
+        );
+        assert_eq!(app.content_scroll, 40);
     }
 
     #[test]
