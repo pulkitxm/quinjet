@@ -1474,6 +1474,10 @@ impl App {
             KeyCode::Char('z') => self.toggle_sidebar(),
             KeyCode::Char('[') if self.check_log_visible() => self.move_check_step_cursor(false),
             KeyCode::Char(']') if self.check_log_visible() => self.move_check_step_cursor(true),
+            // The conversation has neither steps nor hunks to jump between.
+            KeyCode::Char('[') | KeyCode::Char(']')
+                if self.view == View::PullRequests
+                    && self.pull_request_section == PullRequestSection::Overview => {}
             KeyCode::Char('[') => self.jump_hunk(false),
             KeyCode::Char(']') => self.jump_hunk(true),
             KeyCode::Left | KeyCode::Char('h')
@@ -3196,11 +3200,10 @@ impl App {
 
     fn go_to_edge(&mut self, end: bool, now: Instant) {
         if self.focus == Focus::Content {
-            self.content_scroll = if end {
-                self.document.lines.len().saturating_sub(1)
-            } else {
-                0
-            };
+            // The renderer owns the true row count: a pane may compose rows from
+            // app state rather than from the diff document. Ask for the end and
+            // let the draw clamp to whatever that pane actually holds.
+            self.content_scroll = if end { usize::MAX } else { 0 };
             return;
         }
         let preserve_auxiliary_preview = self.auxiliary_preview.is_some();

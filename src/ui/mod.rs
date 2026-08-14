@@ -1369,11 +1369,27 @@ fn pull_request_check_icon(status: PullRequestCheckStatus, theme: &Theme) -> (&'
 struct ContentRow {
     line: Line<'static>,
     step: Option<usize>,
+    /// Whether this row may exceed the pane and therefore scrolls sideways.
+    /// Prose is wrapped to fit and stays put, which keeps the surrounding text
+    /// readable while a long value, a line of code or a log row is chased right.
+    wide: bool,
 }
 
 impl ContentRow {
     fn plain(line: Line<'static>) -> Self {
-        Self { line, step: None }
+        Self {
+            line,
+            step: None,
+            wide: false,
+        }
+    }
+
+    fn wide(line: Line<'static>) -> Self {
+        Self {
+            line,
+            step: None,
+            wide: true,
+        }
     }
 
     fn blank() -> Self {
@@ -1392,15 +1408,15 @@ fn draw_pull_request_overview(
     theme: &Theme,
 ) -> Vec<ContentStepHit> {
     let showing_check = app.pull_request_check_cursor.is_some();
-    let title = overview_title(app, showing_check);
-    let block = panel_block(
-        title,
-        app.focus == Focus::Content && app.modal.is_none(),
-        theme,
-    );
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    let focused = app.focus == Focus::Content && app.modal.is_none();
+    // Measure the pane before composing, then title it once the rows are known,
+    // so the header can say whether anything lies past the right edge.
+    let inner = panel_block(String::new(), focused, theme).inner(area);
     if inner.width == 0 || inner.height == 0 {
+        frame.render_widget(
+            panel_block(overview_title(app, showing_check), focused, theme),
+            area,
+        );
         return Vec::new();
     }
 
@@ -1410,6 +1426,20 @@ fn draw_pull_request_overview(
     } else {
         conversation_rows(app, width, theme)
     };
+    let content_width = rows
+        .iter()
+        .filter(|row| row.wide)
+        .map(|row| row.line.width())
+        .max()
+        .unwrap_or_default();
+    let overflow = content_width.saturating_sub(width);
+    app.horizontal_scroll = app.horizontal_scroll.min(overflow);
+
+    let mut title = overview_title(app, showing_check);
+    if overflow > 0 {
+        title.push_str(&format!("·  ←/→ {}/{overflow} ", app.horizontal_scroll));
+    }
+    frame.render_widget(panel_block(title, focused, theme), area);
 
     // Following the step cursor here keeps `[` and `]` useful on a log that is
     // far taller than the pane.
@@ -1441,7 +1471,12 @@ fn draw_pull_request_overview(
         let row_area = Rect::new(inner.x, inner.y + offset as u16, inner.width, 1);
         let selected = showing_check && row.step == Some(app.pull_request_step_cursor);
         frame.render_widget(
-            Paragraph::new(row.line.clone()).style(Style::default().bg(if selected {
+            Paragraph::new(if row.wide {
+                shift_line(&row.line, app.horizontal_scroll, width)
+            } else {
+                row.line.clone()
+            })
+            .style(Style::default().bg(if selected {
                 theme.selected
             } else {
                 theme.panel
@@ -1527,7 +1562,7 @@ fn conversation_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> 
     } else {
         pull_request.state.as_str()
     };
-    rows.push(ContentRow::plain(Line::from(vec![
+    rows.push(ContentRow::wide(Line::from(vec![
         Span::styled(
             format!("#{}  ", pull_request.number),
             Style::default()
@@ -1535,11 +1570,11 @@ fn conversation_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> 
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            truncate_end(&pull_request.title, width.saturating_sub(8)),
+            pull_request.title.clone(),
             Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
     ])));
-    rows.push(ContentRow::plain(detail_line(
+    rows.push(ContentRow::wide(detail_line(
         "State",
         format!(
             "{state}  ·  @{}  ·  opened {}  ·  updated {}",
@@ -1549,7 +1584,7 @@ fn conversation_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> 
         ),
         theme,
     )));
-    rows.push(ContentRow::plain(detail_line(
+    rows.push(ContentRow::wide(detail_line(
         "Source",
         format!(
             "{}{}",
@@ -1562,12 +1597,12 @@ fn conversation_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> 
         ),
         theme,
     )));
-    rows.push(ContentRow::plain(detail_line(
+    rows.push(ContentRow::wide(detail_line(
         "Destination",
         pull_request.base_label(),
         theme,
     )));
-    rows.push(ContentRow::plain(Line::from(vec![
+    rows.push(ContentRow::wide(Line::from(vec![
         Span::styled(
             format!("{:<DETAIL_LABEL_WIDTH$}", "Changes"),
             Style::default().fg(theme.muted),
@@ -1598,8 +1633,8 @@ fn conversation_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> 
                 .add_modifier(Modifier::BOLD),
         ),
     ])));
-    rows.push(ContentRow::plain(check_summary_line(app, theme)));
-    rows.push(ContentRow::plain(detail_line(
+    rows.push(ContentRow::wide(check_summary_line(app, theme)));
+    rows.push(ContentRow::wide(detail_line(
         "URL",
         pull_request.url.clone(),
         theme,
@@ -1616,12 +1651,7 @@ fn conversation_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> 
             Style::default().fg(theme.muted),
         ));
     } else {
-        for (style, text) in wrap_prose(&pull_request.description, width.saturating_sub(2)) {
-            rows.push(ContentRow::text(
-                format!("  {text}"),
-                prose_style(style, theme),
-            ));
-        }
+        push_prose(&mut rows, &pull_request.description, " ", width, theme);
     }
 
     rows.push(ContentRow::blank());
@@ -1668,22 +1698,25 @@ fn push_conversation_entry(
     theme: &Theme,
 ) {
     let (icon, color, action) = conversation_marker(entry, theme);
-    let mut header = vec![
+    let stamp = short_timestamp(&entry.timestamp);
+    let stamp = if stamp.is_empty() {
+        String::new()
+    } else {
+        format!("  ·  {stamp}")
+    };
+    // A header says who is speaking, so it stays anchored while their code
+    // scrolls underneath it. Only the action clause gives way when it has to.
+    let reserved = 3 + entry.actor.width() + stamp.width();
+    let action = truncate_end(&action, width.saturating_sub(reserved));
+    rows.push(ContentRow::plain(Line::from(vec![
         Span::styled(format!("{icon} "), Style::default().fg(color)),
         Span::styled(
             format!("@{}", entry.actor),
             Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
         Span::styled(format!(" {action}"), Style::default().fg(theme.muted)),
-    ];
-    let stamp = short_timestamp(&entry.timestamp);
-    if !stamp.is_empty() {
-        header.push(Span::styled(
-            format!("  ·  {stamp}"),
-            Style::default().fg(theme.muted),
-        ));
-    }
-    rows.push(ContentRow::plain(Line::from(header)));
+        Span::styled(stamp, Style::default().fg(theme.muted)),
+    ])));
 
     if !entry.context.is_empty() {
         for line in entry.context.lines().take(8) {
@@ -1692,10 +1725,10 @@ fn push_conversation_entry(
                 Some(b'-') => Style::default().fg(theme.removed),
                 _ => Style::default().fg(theme.muted),
             };
-            rows.push(ContentRow::text(
-                format!("    {}", truncate_end(line, width.saturating_sub(4))),
-                style,
-            ));
+            rows.push(ContentRow::wide(Line::from(vec![
+                Span::styled(" │ ▏ ", Style::default().fg(theme.border)),
+                Span::styled(line.to_owned(), style),
+            ])));
         }
     }
     // The opening post's body is the description, already shown above it.
@@ -1703,12 +1736,7 @@ fn push_conversation_entry(
         && entry.kind.has_body()
         && !entry.body.trim().is_empty()
     {
-        for (style, text) in wrap_prose(&entry.body, width.saturating_sub(4)) {
-            rows.push(ContentRow::text(
-                format!("    {text}"),
-                prose_style(style, theme),
-            ));
-        }
+        push_prose(rows, &entry.body, " │", width, theme);
     }
 }
 
@@ -1852,23 +1880,23 @@ fn check_run_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> {
         return rows;
     };
     let (icon, color) = pull_request_check_icon(check.status, theme);
-    rows.push(ContentRow::plain(Line::from(vec![
+    rows.push(ContentRow::wide(Line::from(vec![
         Span::styled(
             format!("{icon} "),
             Style::default().fg(color).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            truncate_end(&check.name, width.saturating_sub(4)),
+            check.name.clone(),
             Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
     ])));
-    rows.push(ContentRow::plain(detail_line(
+    rows.push(ContentRow::wide(detail_line(
         "Workflow",
         format!("{}  ·  {}", check.workflow, check.state.to_lowercase()),
         theme,
     )));
     if !check.started_at.is_empty() {
-        rows.push(ContentRow::plain(detail_line(
+        rows.push(ContentRow::wide(detail_line(
             "Ran",
             format!(
                 "{}{}",
@@ -1882,14 +1910,14 @@ fn check_run_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> {
         )));
     }
     if !check.description.is_empty() {
-        rows.push(ContentRow::plain(detail_line(
+        rows.push(ContentRow::wide(detail_line(
             "Details",
             check.description.clone(),
             theme,
         )));
     }
     if !check.link.is_empty() {
-        rows.push(ContentRow::plain(detail_line(
+        rows.push(ContentRow::wide(detail_line(
             "URL",
             check.link.clone(),
             theme,
@@ -1974,13 +2002,14 @@ fn check_step_row(step: &CheckStep, expanded: bool, width: usize, theme: &Theme)
             Span::styled(duration, Style::default().fg(theme.muted)),
         ]),
         step: Some(step.number),
+        wide: false,
     }
 }
 
 fn push_log_lines(rows: &mut Vec<ContentRow>, lines: &[CheckLogLine], width: usize, theme: &Theme) {
     if lines.is_empty() {
         rows.push(ContentRow::text(
-            "      no output",
+            "   │ no output",
             Style::default().fg(theme.muted),
         ));
         return;
@@ -2050,6 +2079,54 @@ fn prose_style(style: ProseStyle, theme: &Theme) -> Style {
     }
 }
 
+/// Render a body under its header behind a continuous gutter, so a long comment
+/// stays visibly attached to the person who wrote it. Code carries a second
+/// marker because it is the one kind of line that is not wrapped to the pane.
+fn push_prose(rows: &mut Vec<ContentRow>, body: &str, gutter: &str, width: usize, theme: &Theme) {
+    let available = width.saturating_sub(gutter.width() + 2);
+    for (style, text) in wrap_prose(body, available) {
+        let code = style == ProseStyle::Code;
+        let line = Line::from(vec![
+            Span::styled(
+                format!("{gutter}{}", if code { " ▏ " } else { "  " }),
+                Style::default().fg(theme.border),
+            ),
+            Span::styled(text, prose_style(style, theme)),
+        ]);
+        rows.push(if code {
+            ContentRow::wide(line)
+        } else {
+            ContentRow::plain(line)
+        });
+    }
+}
+
+/// Window a composed row horizontally, in display columns rather than bytes, so
+/// wide code and log lines can be read past the edge of the pane.
+fn shift_line(line: &Line<'static>, skip: usize, width: usize) -> Line<'static> {
+    let mut spans = Vec::with_capacity(line.spans.len());
+    let mut scanned = 0;
+    let mut used = 0;
+    for span in &line.spans {
+        if used >= width {
+            break;
+        }
+        let span_width = span.content.width();
+        if scanned + span_width <= skip {
+            scanned += span_width;
+            continue;
+        }
+        let text = slice_width(&span.content, skip.saturating_sub(scanned), width - used);
+        scanned += span_width;
+        if text.is_empty() {
+            continue;
+        }
+        used += text.width();
+        spans.push(Span::styled(text, span.style));
+    }
+    Line::from(spans)
+}
+
 /// Wrap a Markdown body to a fixed width, keeping paragraph breaks, list
 /// structure and fenced code intact. Code is truncated rather than wrapped so
 /// its own indentation still reads correctly.
@@ -2061,14 +2138,17 @@ fn wrap_prose(value: &str, width: usize) -> Vec<(ProseStyle, String)> {
     for raw_line in value.lines() {
         let trimmed = raw_line.trim_end();
         if trimmed.trim_start().starts_with("```") {
+            // The fence is punctuation for a parser, not content for a reader.
+            // Its own styling already says where the block starts and ends.
             fenced = !fenced;
-            previous_blank = false;
-            output.push((ProseStyle::Code, truncate_end(trimmed, width)));
             continue;
         }
         if fenced {
             previous_blank = false;
-            output.push((ProseStyle::Code, truncate_end(trimmed, width)));
+            // Code keeps its full width and its own indentation. Wrapping or
+            // truncating it would destroy the alignment that makes it readable;
+            // the pane scrolls sideways to reach the rest instead.
+            output.push((ProseStyle::Code, trimmed.to_owned()));
             continue;
         }
         if trimmed.trim().is_empty() {
@@ -5117,6 +5197,76 @@ terminal rows because that is what real pull-request comments look like in pract
             rows.iter()
                 .any(|row| row.line.to_string().contains("Older activity was omitted")),
             "a truncated thread says so rather than silently dropping history"
+        );
+    }
+
+    #[test]
+    fn a_comment_shows_its_code_intact_and_only_that_code_scrolls() {
+        let mut app = overview_app();
+        let wide = "│ ✓ Format, lint, and test (ubuntu-latest)   CI   passed in 33s   https://github.com/acme/widget/actions/runs/1/job/2 │";
+        app.pull_request_conversation = crate::git::github::PullRequestConversation {
+            truncated: false,
+            entries: vec![ConversationEntry {
+                kind: ConversationKind::Comment,
+                actor: "pulkitxm".to_owned(),
+                timestamp: "2026-08-14T20:08:00Z".to_owned(),
+                detail: String::new(),
+                body: format!(
+                    "webhook path, driven against this PR with a body long enough to wrap.\n\n```\n{wide}\n  short line\n```"
+                ),
+                url: String::new(),
+                reference: String::new(),
+                context: String::new(),
+            }],
+        };
+
+        let rows = conversation_rows(&app, 80, &Theme::default());
+        let text = |row: &ContentRow| row.line.to_string();
+
+        assert!(
+            !rows.iter().any(|row| text(row).contains("```")),
+            "fence markers are punctuation for a parser, never shown to a reader"
+        );
+        // Both the description's fenced block and the comment's survive, each
+        // carrying its exact source text.
+        let scrollable: Vec<String> = rows.iter().filter(|row| row.wide).map(text).collect();
+        assert!(scrollable.iter().any(|row| row.contains("cargo test")));
+        assert!(scrollable.iter().any(|row| row.contains("  short line")));
+        assert!(
+            scrollable
+                .iter()
+                .any(|row| row.contains("State") && row.contains("opened 2026-08-01")),
+            "a single-line value that outgrows the pane scrolls rather than being clipped"
+        );
+        let long = rows
+            .iter()
+            .find(|row| row.wide && text(row).contains(wide))
+            .expect("code keeps its full width rather than being cut at the pane");
+        assert!(
+            rows.iter()
+                .filter(|row| !row.wide)
+                .all(|row| row.line.width() <= 80),
+            "everything that is not code is wrapped to fit"
+        );
+
+        // Scrolling reaches past the pane on the code row and leaves prose alone.
+        let prose = rows
+            .iter()
+            .find(|row| !row.wide && text(row).contains("webhook path"))
+            .expect("the comment body is rendered");
+        assert_eq!(
+            shift_line(&prose.line, 0, 80).to_string(),
+            prose.line.to_string()
+        );
+        let shifted = shift_line(&long.line, 60, 80).to_string();
+        assert!(
+            shifted.contains("33s") && shifted.contains("job/2"),
+            "scrolling reaches the tail of a line the pane cannot hold: {shifted:?}"
+        );
+        assert!(!shifted.contains("Format, lint"));
+        assert!(
+            shift_line(&long.line, 0, 80).to_string().len() < long.line.to_string().len(),
+            "the unscrolled view is still clipped to the pane"
         );
     }
 
