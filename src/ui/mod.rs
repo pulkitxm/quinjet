@@ -5229,6 +5229,62 @@ terminal rows because that is what real pull-request comments look like in pract
     }
 
     #[test]
+    fn the_selected_step_is_the_row_that_is_highlighted() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = overview_app();
+        let theme = Theme::default();
+        app.pull_request_check_cursor = Some(0);
+        let step = |number: usize| CheckStep {
+            number,
+            name: format!("Run step {number}"),
+            status: PullRequestCheckStatus::Passed,
+            conclusion: "success".to_owned(),
+            started_at: "2026-08-02T10:00:00Z".to_owned(),
+            completed_at: "2026-08-02T10:00:01Z".to_owned(),
+            lines: Vec::new(),
+        };
+        app.pull_request_check_log = Some(crate::git::github::CheckRunLog {
+            steps: (1..=4).map(step).collect(),
+            loose_lines: Vec::new(),
+            truncated: false,
+            unavailable: None,
+            log_pending: false,
+        });
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+
+        let highlighted = |app: &mut App, terminal: &mut Terminal<TestBackend>| {
+            terminal.draw(|frame| draw(frame, app)).unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            (0..30)
+                .filter(|y| buffer[(60, *y)].style().bg == Some(theme.selected))
+                .map(|y| {
+                    (44..99)
+                        .map(|x| buffer[(x, y)].symbol())
+                        .collect::<String>()
+                        .trim()
+                        .to_owned()
+                })
+                .collect::<Vec<_>>()
+        };
+
+        for cursor in [2, 4, 1] {
+            app.pull_request_step_cursor = cursor;
+            let rows = highlighted(&mut app, &mut terminal);
+            assert_eq!(
+                rows.len(),
+                1,
+                "exactly one row is highlighted, not a range: {rows:?}"
+            );
+            assert!(
+                rows[0].contains(&format!("Run step {cursor}")),
+                "the highlight marks the step the cursor is on: {rows:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_running_check_shows_the_step_it_is_on_before_any_log_exists() {
         let mut app = overview_app();
         app.pull_request_check_cursor = Some(0);
