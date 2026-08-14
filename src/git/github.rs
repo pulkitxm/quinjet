@@ -22,16 +22,14 @@ const MAX_GH_METADATA_BYTES: usize = 2 * 1024 * 1024;
 const MAX_PULL_REQUEST_TITLE_BYTES: usize = 16 * 1024;
 const MAX_PULL_REQUEST_BODY_BYTES: usize = 256 * 1024;
 const MAX_GH_ERROR_BYTES: usize = 256 * 1024;
-const MAX_PR_PATH_BYTES: usize = 2 * 1024 * 1024;
-const MAX_PR_PATHS: usize = 4_096;
+const MAX_PR_PATH_BYTES: usize = 8 * 1024 * 1024;
+const MAX_PR_PATHS: usize = 16_384;
 const MAX_CACHE_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_CACHE_ENTRIES: usize = 256;
 const REPOSITORY_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const PULL_REQUEST_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
 const TEMPORARY_REPOSITORY_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 const CACHE_MAGIC: &[u8] = b"quinjet-gh-cache-v1\n";
-
-pub const DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE: usize = 20;
 
 const PULL_REQUEST_FIELDS: &str = "number,title,body,author,state,isDraft,updatedAt,url,baseRefName,baseRefOid,headRefName,headRefOid,headRepository,isCrossRepository,additions,deletions,changedFiles";
 const PULL_REQUEST_VIEW_TSV_JQ: &str = r#"[(.number|tostring), .title, (.body // ""), (.author.login // "ghost"), .state, (.isDraft|tostring), .updatedAt, .url, .baseRefName, .headRefName, (.headRepository.nameWithOwner // ""), (.isCrossRepository|tostring), (.additions|tostring), (.deletions|tostring), (.changedFiles|tostring), .baseRefOid, .headRefOid] | @tsv"#;
@@ -130,6 +128,54 @@ pub struct PullRequestSnapshot {
     pub from_cache: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PullRequestFileStatus {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+    Copied,
+    TypeChanged,
+    Unmerged,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestFile {
+    pub path: PathBuf,
+    pub old_path: Option<PathBuf>,
+    pub status: PullRequestFileStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestDiffIndex {
+    pub files: Vec<PullRequestFile>,
+    pub total_files: usize,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PullRequestCheckStatus {
+    Pending,
+    Passed,
+    Failed,
+    Skipped,
+    Cancelled,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestCheck {
+    pub name: String,
+    pub workflow: String,
+    pub state: String,
+    pub status: PullRequestCheckStatus,
+    pub description: String,
+    pub link: String,
+    pub started_at: String,
+    pub completed_at: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RemoteUrl {
     remote: String,
@@ -151,7 +197,6 @@ pub enum PullRequestProgress {
     FetchingHead,
     FindingMergeBase,
     EnumeratingFiles,
-    CalculatingDiff,
 }
 
 impl PullRequestProgress {
@@ -162,8 +207,7 @@ impl PullRequestProgress {
             Self::FetchingBase => 35,
             Self::FetchingHead => 50,
             Self::FindingMergeBase => 65,
-            Self::EnumeratingFiles => 80,
-            Self::CalculatingDiff => 92,
+            Self::EnumeratingFiles => 90,
         }
     }
 
@@ -175,8 +219,56 @@ impl PullRequestProgress {
             Self::FetchingHead => "Fetching the source commit",
             Self::FindingMergeBase => "Finding the merge base",
             Self::EnumeratingFiles => "Enumerating changed files",
-            Self::CalculatingDiff => "Calculating the diff",
         }
+    }
+}
+
+enum PreparedRepository {
+    Opened(PathBuf),
+    Temporary(TemporaryBareRepository),
+}
+
+impl PreparedRepository {
+    fn path(&self) -> &Path {
+        match self {
+            Self::Opened(path) => path,
+            Self::Temporary(repository) => &repository.path,
+        }
+    }
+}
+
+pub(crate) struct PreparedPullRequest {
+    repository: PreparedRepository,
+    pull_request: PullRequest,
+    merge_base: String,
+    head: String,
+    index: PullRequestDiffIndex,
+}
+
+impl PreparedPullRequest {
+    pub(crate) fn index(&self) -> PullRequestDiffIndex {
+        self.index.clone()
+    }
+
+    pub(crate) fn diff_file(&self, path: &Path) -> Result<DiffDocument> {
+        let file = self
+            .index
+            .files
+            .iter()
+            .find(|file| file.path == path)
+            .with_context(|| format!("{} is not part of this pull request", path.display()))?;
+        let (patch, truncated) = diff_selected_paths(
+            self.repository.path(),
+            &self.merge_base,
+            &self.head,
+            std::slice::from_ref(&file.path),
+        )?;
+        Ok(pull_request_file_document(
+            &patch,
+            &self.pull_request,
+            file,
+            truncated,
+        ))
     }
 }
 
@@ -232,36 +324,71 @@ impl Repository {
         })
     }
 
-    #[cfg(test)]
-    pub fn pull_request_diff(
+    pub(crate) fn prepare_pull_request_diff<F>(
         &self,
         pull_request: &PullRequest,
-        file_page: usize,
-        file_page_size: usize,
-    ) -> Result<DiffDocument> {
-        self.pull_request_diff_with_progress(pull_request, file_page, file_page_size, |_| {})
-    }
-
-    pub fn pull_request_diff_with_progress<F>(
-        &self,
-        pull_request: &PullRequest,
-        file_page: usize,
-        file_page_size: usize,
         mut progress: F,
-    ) -> Result<DiffDocument>
+    ) -> Result<PreparedPullRequest>
     where
         F: FnMut(PullRequestProgress),
     {
-        if self.has_commit(&pull_request.base_oid) && self.has_commit(&pull_request.head_oid) {
-            self.local_source_pull_request_diff(
-                pull_request,
-                file_page,
-                file_page_size,
-                &mut progress,
-            )
+        let (repository, merge_base, head) =
+            if self.has_commit(&pull_request.base_oid) && self.has_commit(&pull_request.head_oid) {
+                progress(PullRequestProgress::FindingMergeBase);
+                (
+                    PreparedRepository::Opened(self.root().to_path_buf()),
+                    self.merge_base(&pull_request.base_oid, &pull_request.head_oid)?,
+                    pull_request.head_oid.clone(),
+                )
+            } else {
+                progress(PullRequestProgress::PreparingRepository);
+                let temporary = TemporaryBareRepository::new()?;
+                let (merge_base, head) =
+                    fetch_pull_request(&temporary.path, pull_request, &mut progress)?;
+                (PreparedRepository::Temporary(temporary), merge_base, head)
+            };
+        progress(PullRequestProgress::EnumeratingFiles);
+        let (files, truncated) =
+            changed_files_in_repository(repository.path(), &merge_base, &head)?;
+        let total_files = if truncated {
+            pull_request.changed_files.max(files.len())
         } else {
-            self.local_pull_request_diff(pull_request, file_page, file_page_size, &mut progress)
+            files.len()
+        };
+        Ok(PreparedPullRequest {
+            repository,
+            pull_request: pull_request.clone(),
+            merge_base,
+            head,
+            index: PullRequestDiffIndex {
+                files,
+                total_files,
+                truncated,
+            },
+        })
+    }
+
+    pub(crate) fn pull_request_checks(
+        &self,
+        pull_request: &PullRequest,
+    ) -> Result<Vec<PullRequestCheck>> {
+        let output = self.run_gh(pull_request_checks_args(pull_request))?;
+        let accepted_status = output.status.success()
+            || matches!(output.status.code(), Some(1 | 8)) && !output.stdout.is_empty();
+        if output.stdout_truncated {
+            bail!("pull-request checks exceeded the metadata limit");
         }
+        if !accepted_status {
+            let error = String::from_utf8_lossy(&output.stderr);
+            if error.to_ascii_lowercase().contains("no checks") {
+                return Ok(Vec::new());
+            }
+            bail!(
+                "{}",
+                bounded_command_error("unable to load pull-request checks", &output)
+            );
+        }
+        parse_pull_request_checks(&output.stdout)
     }
 
     fn pull_request_metadata(
@@ -290,56 +417,6 @@ impl Repository {
             );
         }
         Ok((pull_requests.remove(0), response.disposition))
-    }
-
-    fn local_source_pull_request_diff(
-        &self,
-        pull_request: &PullRequest,
-        requested_file_page: usize,
-        requested_file_page_size: usize,
-        progress: &mut dyn FnMut(PullRequestProgress),
-    ) -> Result<DiffDocument> {
-        progress(PullRequestProgress::FindingMergeBase);
-        let merge_base = self.merge_base(&pull_request.base_oid, &pull_request.head_oid)?;
-        progress(PullRequestProgress::EnumeratingFiles);
-        let (paths, paths_truncated) =
-            changed_paths_in_repository(self.root(), &merge_base, &pull_request.head_oid)?;
-        progress(PullRequestProgress::CalculatingDiff);
-        build_pull_request_document(
-            self.root(),
-            pull_request,
-            &merge_base,
-            &pull_request.head_oid,
-            requested_file_page,
-            requested_file_page_size,
-            paths,
-            paths_truncated,
-        )
-    }
-
-    fn local_pull_request_diff(
-        &self,
-        pull_request: &PullRequest,
-        requested_file_page: usize,
-        requested_file_page_size: usize,
-        progress: &mut dyn FnMut(PullRequestProgress),
-    ) -> Result<DiffDocument> {
-        progress(PullRequestProgress::PreparingRepository);
-        let temporary = TemporaryBareRepository::new()?;
-        let (merge_base, head) = fetch_pull_request(&temporary.path, pull_request, progress)?;
-        progress(PullRequestProgress::EnumeratingFiles);
-        let (paths, paths_truncated) = changed_paths(&temporary.path, &merge_base, &head)?;
-        progress(PullRequestProgress::CalculatingDiff);
-        build_pull_request_document(
-            &temporary.path,
-            pull_request,
-            &merge_base,
-            &head,
-            requested_file_page,
-            requested_file_page_size,
-            paths,
-            paths_truncated,
-        )
     }
 
     fn merge_base(&self, base: &str, head: &str) -> Result<String> {
@@ -626,41 +703,18 @@ impl Repository {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn pull_request_document(
+fn pull_request_file_document(
     output: &[u8],
     pull_request: &PullRequest,
+    file: &PullRequestFile,
     truncated: bool,
-    file_page: usize,
-    file_page_size: usize,
-    displayed_files: usize,
-    total_files: usize,
-    has_previous_file_page: bool,
-    has_next_file_page: bool,
 ) -> DiffDocument {
-    let range_start = if displayed_files == 0 {
-        0
-    } else {
-        (file_page - 1)
-            .saturating_mul(file_page_size)
-            .saturating_add(1)
-    };
-    let range_end = range_start.saturating_add(displayed_files.saturating_sub(1));
-    let page_additions = count_patch_lines(output, b'+');
-    let page_deletions = count_patch_lines(output, b'-');
+    let file_additions = count_patch_lines(output, b'+');
+    let file_deletions = count_patch_lines(output, b'-');
     let mut document = parse_diff(
         output,
-        format!(
-            "PR #{} — {}  ·  {} → {}  ·  files {}–{} of {}",
-            pull_request.number,
-            pull_request.title,
-            pull_request.head_label(),
-            pull_request.base_label(),
-            range_start,
-            range_end,
-            total_files,
-        ),
-        None,
+        format!("PR #{}  ·  {}", pull_request.number, file.path.display()),
+        Some(&file.path),
         truncated,
     );
     document.truncated |= truncated;
@@ -691,17 +745,12 @@ fn pull_request_document(
         head_ref: pull_request.head_ref.clone(),
         head_remotes: pull_request.head_remotes.clone(),
         is_cross_repository: pull_request.is_cross_repository,
-        changed_files: pull_request.changed_files.max(total_files),
+        changed_files: pull_request.changed_files,
         additions: pull_request.additions,
         deletions: pull_request.deletions,
-        page_additions,
-        page_deletions,
-        file_page,
-        file_page_size,
-        displayed_files,
-        total_files,
-        has_previous_file_page,
-        has_next_file_page,
+        selected_file: Some(file.path.to_string_lossy().into_owned()),
+        selected_file_additions: file_additions,
+        selected_file_deletions: file_deletions,
     });
     document
 }
@@ -728,6 +777,55 @@ fn pull_request_view_args(repository: &GitHubRepository, number: u64) -> Vec<OsS
         OsString::from("--jq"),
         OsString::from(PULL_REQUEST_VIEW_TSV_JQ),
     ]
+}
+
+fn pull_request_checks_args(pull_request: &PullRequest) -> Vec<OsString> {
+    vec![
+        OsString::from("pr"),
+        OsString::from("checks"),
+        OsString::from(pull_request.number.to_string()),
+        OsString::from("--repo"),
+        OsString::from(pull_request.base_repository.selector()),
+        OsString::from("--json"),
+        OsString::from("bucket,completedAt,description,link,name,startedAt,state,workflow"),
+        OsString::from("--jq"),
+        OsString::from(
+            r#".[] | [.name, .workflow, .state, .bucket, (.description // ""), (.link // ""), (.startedAt // ""), (.completedAt // "")] | @tsv"#,
+        ),
+    ]
+}
+
+fn parse_pull_request_checks(output: &[u8]) -> Result<Vec<PullRequestCheck>> {
+    let mut checks = Vec::new();
+    for (index, record) in output.split(|byte| *byte == b'\n').enumerate() {
+        if record.is_empty() {
+            continue;
+        }
+        let fields = parse_tsv_record(record, 8)
+            .with_context(|| format!("invalid pull-request check record {}", index + 1))?;
+        let status = match fields[3].to_ascii_lowercase().as_str() {
+            "pass" => PullRequestCheckStatus::Passed,
+            "fail" => PullRequestCheckStatus::Failed,
+            "pending" => PullRequestCheckStatus::Pending,
+            "skipping" => PullRequestCheckStatus::Skipped,
+            "cancel" => PullRequestCheckStatus::Cancelled,
+            _ => PullRequestCheckStatus::Unknown,
+        };
+        checks.push(PullRequestCheck {
+            name: fields[0].clone(),
+            workflow: fields[1].clone(),
+            state: fields[2].clone(),
+            status,
+            description: fields[4].clone(),
+            link: fields[5].clone(),
+            started_at: fields[6].clone(),
+            completed_at: fields[7].clone(),
+        });
+    }
+    // Keep ordering independent of status so a pending check completing does not
+    // move rows underneath the user's cursor during a live refresh.
+    checks.sort_by_key(|check| (check.workflow.to_lowercase(), check.name.to_lowercase()));
+    Ok(checks)
 }
 
 fn parse_pull_requests(
@@ -1191,18 +1289,14 @@ fn try_merge_base(temporary: &Path, base: &str, head: &str) -> Result<Option<Str
     Ok((!merge_base.is_empty()).then_some(merge_base))
 }
 
-fn changed_paths(temporary: &Path, merge_base: &str, head: &str) -> Result<(Vec<OsString>, bool)> {
-    changed_paths_in_repository(temporary, merge_base, head)
-}
-
-fn changed_paths_in_repository(
+fn changed_files_in_repository(
     repository: &Path,
     merge_base: &str,
     head: &str,
-) -> Result<(Vec<OsString>, bool)> {
+) -> Result<(Vec<PullRequestFile>, bool)> {
     let args = [
         OsString::from("diff"),
-        OsString::from("--name-only"),
+        OsString::from("--name-status"),
         OsString::from("-z"),
         OsString::from("--find-renames"),
         OsString::from(merge_base),
@@ -1226,77 +1320,67 @@ fn changed_paths_in_repository(
     } else {
         &output.stdout
     };
-    let mut paths = Vec::new();
-    for path in complete_output.split(|byte| *byte == 0) {
-        if path.is_empty() {
-            continue;
-        }
-        if paths.len() >= MAX_PR_PATHS {
+    let records = complete_output
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+        .collect::<Vec<_>>();
+    let mut files = Vec::new();
+    let mut index = 0;
+    while index < records.len() {
+        if files.len() >= MAX_PR_PATHS {
             truncated = true;
             break;
         }
-        paths.push(OsString::from(String::from_utf8_lossy(path).into_owned()));
+        let status_record = records[index];
+        index += 1;
+        let status_code = status_record.first().copied().unwrap_or_default();
+        let status = match status_code {
+            b'A' => PullRequestFileStatus::Added,
+            b'M' => PullRequestFileStatus::Modified,
+            b'D' => PullRequestFileStatus::Deleted,
+            b'R' => PullRequestFileStatus::Renamed,
+            b'C' => PullRequestFileStatus::Copied,
+            b'T' => PullRequestFileStatus::TypeChanged,
+            b'U' => PullRequestFileStatus::Unmerged,
+            _ => PullRequestFileStatus::Unknown,
+        };
+        let rename_or_copy = matches!(
+            status,
+            PullRequestFileStatus::Renamed | PullRequestFileStatus::Copied
+        );
+        let Some(first_path) = records.get(index) else {
+            truncated = true;
+            break;
+        };
+        index += 1;
+        let first_path = PathBuf::from(String::from_utf8_lossy(first_path).into_owned());
+        let (old_path, path) = if rename_or_copy {
+            let Some(new_path) = records.get(index) else {
+                truncated = true;
+                break;
+            };
+            index += 1;
+            (
+                Some(first_path),
+                PathBuf::from(String::from_utf8_lossy(new_path).into_owned()),
+            )
+        } else {
+            (None, first_path)
+        };
+        files.push(PullRequestFile {
+            path,
+            old_path,
+            status,
+        });
     }
-    Ok((paths, truncated))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn build_pull_request_document(
-    repository: &Path,
-    pull_request: &PullRequest,
-    merge_base: &str,
-    head: &str,
-    requested_file_page: usize,
-    requested_file_page_size: usize,
-    paths: Vec<OsString>,
-    paths_truncated: bool,
-) -> Result<DiffDocument> {
-    let file_page_size =
-        requested_file_page_size.clamp(1, DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE.max(50));
-    let page_count = if paths.is_empty() {
-        1
-    } else {
-        paths.len().div_ceil(file_page_size)
-    };
-    let file_page = requested_file_page.max(1).min(page_count);
-    let offset = (file_page - 1).saturating_mul(file_page_size);
-    let selected_paths = paths
-        .iter()
-        .skip(offset)
-        .take(file_page_size)
-        .cloned()
-        .collect::<Vec<_>>();
-    let has_previous = file_page > 1;
-    let has_next = offset.saturating_add(selected_paths.len()) < paths.len();
-    let total_files = if paths_truncated {
-        pull_request.changed_files.max(paths.len())
-    } else {
-        paths.len()
-    };
-    let (patch, output_truncated) = if selected_paths.is_empty() {
-        (Vec::new(), false)
-    } else {
-        diff_selected_paths(repository, merge_base, head, &selected_paths)?
-    };
-    let truncated = output_truncated || paths_truncated;
-    Ok(pull_request_document(
-        &patch,
-        pull_request,
-        truncated,
-        file_page,
-        file_page_size,
-        selected_paths.len(),
-        total_files,
-        has_previous,
-        has_next,
-    ))
+    Ok((files, truncated))
 }
 
 fn diff_selected_paths(
     repository: &Path,
     merge_base: &str,
     head: &str,
-    paths: &[OsString],
+    paths: &[PathBuf],
 ) -> Result<(Vec<u8>, bool)> {
     let mut args = vec![
         OsString::from("diff"),
@@ -1309,7 +1393,7 @@ fn diff_selected_paths(
         OsString::from(head),
         OsString::from("--"),
     ];
-    args.extend(paths.iter().cloned());
+    args.extend(paths.iter().map(|path| path.as_os_str().to_owned()));
     let output = run_repository_git(repository, &args, MAX_DIFF_BYTES, MAX_GH_ERROR_BYTES)?;
     if !output.status.success() && !output.stdout_truncated {
         bail!(
@@ -1362,14 +1446,14 @@ fn run_repository_git(
         .with_context(|| format!("failed to execute Git in {}", repository.display()))
 }
 
-struct BoundedOutput {
-    status: ExitStatus,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
-    stdout_truncated: bool,
+pub(crate) struct BoundedOutput {
+    pub status: ExitStatus,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+    pub stdout_truncated: bool,
 }
 
-fn run_bounded_command(
+pub(crate) fn run_bounded_command(
     command: &mut Command,
     stdout_limit: usize,
     stderr_limit: usize,
@@ -1439,7 +1523,7 @@ fn read_and_drain(mut reader: impl Read, limit: usize) -> io::Result<Vec<u8>> {
     Ok(collected)
 }
 
-fn bounded_command_error(context: &str, output: &BoundedOutput) -> String {
+pub(crate) fn bounded_command_error(context: &str, output: &BoundedOutput) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
     let details = if !stderr.is_empty() { stderr } else { stdout };
@@ -1854,6 +1938,22 @@ mod tests {
     }
 
     #[test]
+    fn parses_live_pull_request_checks_in_stable_name_order() {
+        let output = b"tests\tCI\tSUCCESS\tpass\tall good\thttps://example.test/pass\tstart\tdone\nlint\tCI\tFAILURE\tfail\tbroken\thttps://example.test/fail\tstart\tdone\nbuild\tCI\tIN_PROGRESS\tpending\t\thttps://example.test/pending\tstart\t\n";
+
+        let checks = parse_pull_request_checks(output).unwrap();
+
+        assert_eq!(checks.len(), 3);
+        assert_eq!(checks[0].name, "build");
+        assert_eq!(checks[0].status, PullRequestCheckStatus::Pending);
+        assert_eq!(checks[1].name, "lint");
+        assert_eq!(checks[1].status, PullRequestCheckStatus::Failed);
+        assert_eq!(checks[2].name, "tests");
+        assert_eq!(checks[2].status, PullRequestCheckStatus::Passed);
+        assert_eq!(checks[2].description, "all good");
+    }
+
+    #[test]
     fn cache_round_trips_private_metadata_and_uses_stable_keys() {
         let directory = test_directory("cache");
         let cache = CacheStore::at(directory.0.clone());
@@ -1879,7 +1979,7 @@ mod tests {
     }
 
     #[test]
-    fn page_counts_include_raw_patch_lines_even_when_rendering_is_truncated() {
+    fn selected_file_counts_include_raw_patch_lines_when_rendering_is_truncated() {
         let base = repository("acme/widget", "https://github.com/acme/widget", &["origin"]);
         let mut request = pull_request(base, 9);
         request.changed_files = 1;
@@ -1887,11 +1987,59 @@ mod tests {
         request.deletions = 2;
         let patch = b"diff --git a/test.txt b/test.txt\n--- a/test.txt\n+++ b/test.txt\n@@ -1,2 +1,3 @@\n-old one\n-old two\n+new one\n+new two\n+new three\n";
 
-        let document = pull_request_document(patch, &request, true, 1, 20, 1, 1, false, false);
+        let file = PullRequestFile {
+            path: PathBuf::from("test.txt"),
+            old_path: None,
+            status: PullRequestFileStatus::Modified,
+        };
+        let document = pull_request_file_document(patch, &request, &file, true);
         let details = document.pull_request_details.unwrap();
 
-        assert_eq!((details.page_additions, details.page_deletions), (3, 2));
+        assert_eq!(
+            (
+                details.selected_file_additions,
+                details.selected_file_deletions
+            ),
+            (3, 2)
+        );
         assert_eq!((details.additions, details.deletions), (3, 2));
+    }
+
+    #[test]
+    fn changed_file_index_includes_add_modify_delete_and_rename_statuses() {
+        let repository = initialized_repository();
+        fs::write(repository.0.join("modified.txt"), "before\n").unwrap();
+        fs::write(repository.0.join("deleted.txt"), "delete me\n").unwrap();
+        fs::write(repository.0.join("renamed.txt"), "keep this content\n").unwrap();
+        repository.git(&["add", "."]);
+        repository.git(&["commit", "--message=fixtures"]);
+        let base = repository.git(&["rev-parse", "HEAD"]);
+
+        fs::write(repository.0.join("modified.txt"), "after\n").unwrap();
+        fs::remove_file(repository.0.join("deleted.txt")).unwrap();
+        fs::write(repository.0.join("added.txt"), "new\n").unwrap();
+        repository.git(&["mv", "renamed.txt", "moved.txt"]);
+        repository.git(&["add", "."]);
+        repository.git(&["commit", "--message=changes"]);
+        let head = repository.git(&["rev-parse", "HEAD"]);
+
+        let (files, truncated) = changed_files_in_repository(&repository.0, &base, &head).unwrap();
+
+        assert!(!truncated);
+        assert!(files.iter().any(|file| {
+            file.path == Path::new("added.txt") && file.status == PullRequestFileStatus::Added
+        }));
+        assert!(files.iter().any(|file| {
+            file.path == Path::new("modified.txt") && file.status == PullRequestFileStatus::Modified
+        }));
+        assert!(files.iter().any(|file| {
+            file.path == Path::new("deleted.txt") && file.status == PullRequestFileStatus::Deleted
+        }));
+        assert!(files.iter().any(|file| {
+            file.path == Path::new("moved.txt")
+                && file.old_path.as_deref() == Some(Path::new("renamed.txt"))
+                && file.status == PullRequestFileStatus::Renamed
+        }));
     }
 
     #[test]
@@ -1919,12 +2067,14 @@ mod tests {
         request.changed_files = 1;
 
         let started = std::time::Instant::now();
-        let document = git_repository
-            .pull_request_diff(&request, 1, DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE)
+        let workspace = git_repository
+            .prepare_pull_request_diff(&request, |_| {})
             .unwrap();
-
+        let index = workspace.index();
+        let document = workspace.diff_file(&index.files[0].path).unwrap();
         let elapsed = started.elapsed();
 
+        assert_eq!(index.files.len(), 1);
         assert_eq!(document.file_count(), 1);
         assert!(
             document
@@ -1936,7 +2086,7 @@ mod tests {
     }
 
     #[test]
-    fn disposable_pr_diff_does_not_checkout_or_add_source_refs() {
+    fn disposable_pr_workspace_indexes_all_files_and_does_not_mutate_the_source() {
         let source = initialized_repository();
         let remote = test_directory("remote.git");
         source.git(&["init", "--bare", remote.0.to_str().unwrap()]);
@@ -1965,62 +2115,39 @@ mod tests {
             repository("acme/widget", remote.0.to_str().unwrap(), &["test-origin"]),
             7,
         );
-        request.base_oid = source.git(&["rev-parse", "main"]);
-        request.head_oid = source.git(&["rev-parse", "feature/rocket"]);
+        // Empty OIDs force the isolated local workspace path even though this test
+        // repository happens to contain both commits.
+        request.base_oid.clear();
+        request.head_oid.clear();
         request.head_repository = None;
         request.changed_files = 21;
         request.additions = 21;
         request.deletions = 0;
 
-        let mut progress = |_| {};
-        let first_page = git_repository
-            .local_pull_request_diff(
-                &request,
-                1,
-                DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE,
-                &mut progress,
-            )
+        let workspace = git_repository
+            .prepare_pull_request_diff(&request, |_| {})
             .unwrap();
-        let second_page = git_repository
-            .local_pull_request_diff(
-                &request,
-                2,
-                DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE,
-                &mut progress,
-            )
-            .unwrap();
+        let temporary_path = match &workspace.repository {
+            PreparedRepository::Temporary(repository) => repository.path.clone(),
+            PreparedRepository::Opened(_) => panic!("expected an isolated PR workspace"),
+        };
+        let index = workspace.index();
+        assert_eq!(index.files.len(), 21);
+        assert_eq!(index.total_files, 21);
+        assert!(!index.truncated);
+        assert!(temporary_path.exists());
 
-        assert_eq!(first_page.file_count(), 20);
-        assert_eq!(second_page.file_count(), 1);
-        let first_page_counts = (first_page.addition_count(), first_page.deletion_count());
-        let second_page_counts = (second_page.addition_count(), second_page.deletion_count());
-        let first_details = first_page.pull_request_details.unwrap();
-        let second_details = second_page.pull_request_details.unwrap();
-        assert_eq!(
-            (first_details.page_additions, first_details.page_deletions),
-            first_page_counts
-        );
-        assert_eq!(
-            (second_details.page_additions, second_details.page_deletions),
-            second_page_counts
-        );
-        assert_eq!(
-            first_details.page_additions + second_details.page_additions,
-            request.additions
-        );
-        assert_eq!(
-            first_details.page_deletions + second_details.page_deletions,
-            request.deletions
-        );
-        assert_eq!(
-            (first_details.file_page, first_details.total_files),
-            (1, 21)
-        );
-        assert!(first_details.has_next_file_page);
-        assert!(!first_details.has_previous_file_page);
-        assert_eq!(second_details.file_page, 2);
-        assert!(!second_details.has_next_file_page);
-        assert!(second_details.has_previous_file_page);
+        let mut additions = 0;
+        let mut deletions = 0;
+        for file in &index.files {
+            let document = workspace.diff_file(&file.path).unwrap();
+            assert_eq!(document.file_count(), 1);
+            additions += document.addition_count();
+            deletions += document.deletion_count();
+        }
+        assert_eq!((additions, deletions), (21, 0));
+        drop(workspace);
+        assert!(!temporary_path.exists());
         assert_eq!(source.git(&["branch", "--show-current"]), before_branch);
         assert_eq!(source.git(&["status", "--porcelain"]), before_status);
         assert_eq!(source.git(&["show-ref"]), before_refs);

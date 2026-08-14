@@ -6,16 +6,21 @@ pub mod worker;
 
 use std::ffi::{OsStr, OsString};
 use std::fs;
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 
 use anyhow::{Context, Result, bail};
 
-use self::diff::{CommitDetails, DiffDocument, parse_diff};
+use self::diff::{CommitDetails, DiffDocument, DiffFileIndexEntry, DiffIndex, parse_diff};
+use self::github::{bounded_command_error, run_bounded_command};
 use self::history::{Commit, LOG_FORMAT, parse_log};
 use self::status::{Change, ChangeArea, ChangeStatus, RepoStatus, parse_porcelain_v2};
 
 const MAX_DIFF_BYTES: usize = 8 * 1024 * 1024;
+const MAX_DIFF_INDEX_BYTES: usize = 8 * 1024 * 1024;
+const MAX_DIFF_INDEX_FILES: usize = 16_384;
+const MAX_GIT_ERROR_BYTES: usize = 128 * 1024;
 const DEFAULT_HISTORY_PAGE: usize = 300;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +51,46 @@ pub struct Stash {
     pub branch: String,
     pub relative_date: String,
     pub short_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LocalDiffRequest {
+    Changes {
+        changes: Vec<Change>,
+        version: u64,
+        expanded: bool,
+    },
+    Commit {
+        commit: Box<Commit>,
+        expanded: bool,
+    },
+    Branch {
+        branch: Box<HistoryBranch>,
+        current: String,
+        current_oid: Option<String>,
+        expanded: bool,
+    },
+    Stash {
+        stash: Box<Stash>,
+        expanded: bool,
+    },
+}
+
+pub(crate) struct PreparedLocalDiff {
+    repository: Repository,
+    request: LocalDiffRequest,
+    index: DiffIndex,
+}
+
+impl PreparedLocalDiff {
+    pub fn index(&self) -> DiffIndex {
+        self.index.clone()
+    }
+
+    pub fn diff_file(&self, path: &Path) -> Result<DiffDocument> {
+        self.repository
+            .local_diff_file(&self.request, &self.index, path)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,38 +271,336 @@ impl Repository {
         Ok(parse_log(&output))
     }
 
-    pub fn diff_for_changes(&self, changes: &[Change], expanded: bool) -> Result<DiffDocument> {
-        let Some(first) = changes.first() else {
-            return Ok(DiffDocument::empty("Working Tree", "No changes selected"));
-        };
-        if changes.len() == 1 {
-            return self.diff_for_change(first, expanded);
+    pub fn prepare_local_diff(&self, request: &LocalDiffRequest) -> Result<PreparedLocalDiff> {
+        let index = self.local_diff_index(request)?;
+        Ok(PreparedLocalDiff {
+            repository: self.clone_for_worker(),
+            request: request.clone(),
+            index,
+        })
+    }
+
+    fn local_diff_index(&self, request: &LocalDiffRequest) -> Result<DiffIndex> {
+        match request {
+            LocalDiffRequest::Changes { changes, .. } => {
+                let title = changes.first().map_or_else(
+                    || "Working Tree".to_owned(),
+                    |first| {
+                        if changes.len() == 1 {
+                            format!(
+                                "{} — {} {}",
+                                first.display_path(),
+                                first.area.label(),
+                                first.status.label()
+                            )
+                        } else {
+                            format!("{}  {} files", first.area.label(), changes.len())
+                        }
+                    },
+                );
+                let files = changes
+                    .iter()
+                    .map(|change| DiffFileIndexEntry {
+                        path: change.path.clone(),
+                        old_path: change.original_path.clone(),
+                        status: change.status.label().to_ascii_lowercase(),
+                    })
+                    .collect();
+                Ok(DiffIndex {
+                    title,
+                    files,
+                    truncated: false,
+                    commit_details: None,
+                })
+            }
+            LocalDiffRequest::Commit { commit, .. } => {
+                let args = if let Some(parent) = commit.parent_ids.first() {
+                    diff_index_args(parent, &commit.id)
+                } else {
+                    vec![
+                        OsString::from("diff-tree"),
+                        OsString::from("--root"),
+                        OsString::from("--no-commit-id"),
+                        OsString::from("--name-status"),
+                        OsString::from("-z"),
+                        OsString::from("-r"),
+                        OsString::from("--find-renames"),
+                        OsString::from(&commit.id),
+                        OsString::from("--"),
+                    ]
+                };
+                let (files, truncated) = self.diff_index_files(args)?;
+                Ok(DiffIndex {
+                    title: format!("{} — {}", commit.short_id, commit.subject),
+                    files,
+                    truncated,
+                    commit_details: Some(commit_details(commit)),
+                })
+            }
+            LocalDiffRequest::Branch {
+                branch, current, ..
+            } => {
+                validate_history_reference(&branch.reference)?;
+                let (files, truncated) =
+                    self.diff_index_files(diff_index_args(&branch.reference, "HEAD"))?;
+                Ok(DiffIndex {
+                    title: format!("{} → {} — branch comparison", branch.name, current),
+                    files,
+                    truncated,
+                    commit_details: None,
+                })
+            }
+            LocalDiffRequest::Stash { stash, .. } => {
+                validate_stash_reference(&stash.reference)?;
+                let (files, truncated) = self.diff_index_files([
+                    OsString::from("stash"),
+                    OsString::from("show"),
+                    OsString::from("--name-status"),
+                    OsString::from("-z"),
+                    OsString::from("--include-untracked"),
+                    OsString::from(&stash.reference),
+                    OsString::from("--"),
+                ])?;
+                Ok(DiffIndex {
+                    title: format!("{} — {}", stash.reference, stash.message),
+                    files,
+                    truncated,
+                    commit_details: None,
+                })
+            }
         }
-        let area = first.area;
-        let mut patch = Vec::new();
-        let mut truncated = false;
-        for change in changes.iter().filter(|change| change.area == area) {
-            let document = self.raw_diff_for_change(change, expanded)?;
-            let remaining = MAX_DIFF_BYTES.saturating_sub(patch.len());
-            if document.len() > remaining {
-                let mut document = document;
-                truncated |= truncate(&mut document, remaining);
-                patch.extend(document);
+    }
+
+    fn diff_index_files<I, S>(&self, args: I) -> Result<(Vec<DiffFileIndexEntry>, bool)>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let (mut output, command_truncated) = self.checked_bounded(args, MAX_DIFF_INDEX_BYTES)?;
+        let mut truncated = command_truncated || truncate_diff_index(&mut output);
+        if command_truncated && !output.ends_with(&[0]) {
+            let boundary = output
+                .iter()
+                .rposition(|byte| *byte == 0)
+                .map_or(0, |index| index + 1);
+            output.truncate(boundary);
+        }
+        let records = output
+            .split(|byte| *byte == 0)
+            .filter(|record| !record.is_empty())
+            .collect::<Vec<_>>();
+        let mut files = Vec::new();
+        let mut cursor = 0;
+        while cursor < records.len() {
+            if files.len() >= MAX_DIFF_INDEX_FILES {
+                truncated = true;
                 break;
             }
-            patch.extend(document);
+            let status = records[cursor];
+            cursor += 1;
+            let status_code = status.first().copied().unwrap_or_default();
+            let rename_or_copy = matches!(status_code, b'R' | b'C');
+            let Some(first_path) = records.get(cursor) else {
+                truncated = true;
+                break;
+            };
+            cursor += 1;
+            let first_path = PathBuf::from(String::from_utf8_lossy(first_path).into_owned());
+            let (old_path, path) = if rename_or_copy {
+                let Some(new_path) = records.get(cursor) else {
+                    truncated = true;
+                    break;
+                };
+                cursor += 1;
+                (
+                    Some(first_path),
+                    PathBuf::from(String::from_utf8_lossy(new_path).into_owned()),
+                )
+            } else {
+                (None, first_path)
+            };
+            files.push(DiffFileIndexEntry {
+                path,
+                old_path,
+                status: diff_status_label(status_code).to_owned(),
+            });
         }
-        Ok(parse_diff(
-            &patch,
-            format!("{}  {} files", area.label(), changes.len()),
-            None,
-            truncated,
-        ))
+        Ok((files, truncated))
+    }
+
+    fn local_diff_file(
+        &self,
+        request: &LocalDiffRequest,
+        index: &DiffIndex,
+        path: &Path,
+    ) -> Result<DiffDocument> {
+        let file = index
+            .files
+            .iter()
+            .find(|file| file.path == path)
+            .with_context(|| format!("{} is not part of this diff", path.display()))?;
+        match request {
+            LocalDiffRequest::Changes {
+                changes, expanded, ..
+            } => {
+                let change = changes
+                    .iter()
+                    .find(|change| change.path == path)
+                    .with_context(|| format!("{} is no longer changed", path.display()))?;
+                self.diff_for_change(change, *expanded)
+            }
+            LocalDiffRequest::Commit { commit, expanded } => {
+                let mut document = if let Some(parent) = commit.parent_ids.first() {
+                    self.revision_diff_file(parent, &commit.id, file, *expanded, &index.title)?
+                } else {
+                    self.root_commit_diff_file(commit, file, *expanded, &index.title)?
+                };
+                document.commit_details = Some(commit_details(commit));
+                Ok(document)
+            }
+            LocalDiffRequest::Branch {
+                branch, expanded, ..
+            } => self.revision_diff_file(&branch.reference, "HEAD", file, *expanded, &index.title),
+            LocalDiffRequest::Stash { stash, expanded } => {
+                self.stash_diff_file(stash, file, *expanded, &index.title)
+            }
+        }
+    }
+
+    fn revision_diff_file(
+        &self,
+        base: &str,
+        head: &str,
+        file: &DiffFileIndexEntry,
+        expanded: bool,
+        title: &str,
+    ) -> Result<DiffDocument> {
+        let mut args = vec![
+            OsString::from("diff"),
+            OsString::from("--no-color"),
+            OsString::from("--no-ext-diff"),
+            OsString::from("--find-renames"),
+            OsString::from("--patch"),
+            OsString::from(if expanded {
+                "--unified=1000000"
+            } else {
+                "--unified=3"
+            }),
+            OsString::from(base),
+            OsString::from(head),
+            OsString::from("--"),
+        ];
+        append_diff_file_paths(&mut args, file);
+        self.diff_document_from_args(args, title, &file.path)
+    }
+
+    fn root_commit_diff_file(
+        &self,
+        commit: &Commit,
+        file: &DiffFileIndexEntry,
+        expanded: bool,
+        title: &str,
+    ) -> Result<DiffDocument> {
+        let mut args = vec![
+            OsString::from("show"),
+            OsString::from("--format="),
+            OsString::from("--no-color"),
+            OsString::from("--no-ext-diff"),
+            OsString::from("--find-renames"),
+            OsString::from("--patch"),
+            OsString::from(if expanded {
+                "--unified=1000000"
+            } else {
+                "--unified=3"
+            }),
+            OsString::from(&commit.id),
+            OsString::from("--"),
+        ];
+        append_diff_file_paths(&mut args, file);
+        self.diff_document_from_args(args, title, &file.path)
+    }
+
+    fn stash_diff_file(
+        &self,
+        stash: &Stash,
+        file: &DiffFileIndexEntry,
+        expanded: bool,
+        title: &str,
+    ) -> Result<DiffDocument> {
+        let context = if expanded {
+            "--unified=1000000"
+        } else {
+            "--unified=3"
+        };
+        let mut tracked_args = vec![
+            OsString::from("diff"),
+            OsString::from("--no-color"),
+            OsString::from("--no-ext-diff"),
+            OsString::from("--find-renames"),
+            OsString::from("--patch"),
+            OsString::from(context),
+            OsString::from(format!("{}^1", stash.reference)),
+            OsString::from(&stash.reference),
+            OsString::from("--"),
+        ];
+        append_diff_file_paths(&mut tracked_args, file);
+        let (mut output, mut truncated) = self.checked_bounded(tracked_args, MAX_DIFF_BYTES)?;
+
+        // `git stash` keeps untracked files in an optional third-parent root
+        // commit. `stash show` cannot path-filter on older Git versions, so read
+        // only the selected path from that root commit when it exists.
+        let untracked_commit = format!("{}^3", stash.reference);
+        let untracked_exists = self
+            .run([
+                OsString::from("rev-parse"),
+                OsString::from("--verify"),
+                OsString::from(format!("{untracked_commit}^{{commit}}")),
+            ])
+            .is_ok_and(|result| result.status.success());
+        if untracked_exists && !truncated {
+            let mut untracked_args = vec![
+                OsString::from("show"),
+                OsString::from("--format="),
+                OsString::from("--no-color"),
+                OsString::from("--no-ext-diff"),
+                OsString::from("--find-renames"),
+                OsString::from("--patch"),
+                OsString::from(context),
+                OsString::from(untracked_commit),
+                OsString::from("--"),
+            ];
+            append_diff_file_paths(&mut untracked_args, file);
+            let (untracked, untracked_truncated) =
+                self.checked_bounded(untracked_args, MAX_DIFF_BYTES.saturating_sub(output.len()))?;
+            output.extend(untracked);
+            truncated |= untracked_truncated;
+        }
+
+        if truncated {
+            truncate_to_complete_line(&mut output);
+        }
+        Ok(parse_diff(&output, title, Some(&file.path), truncated))
+    }
+
+    fn diff_document_from_args<I, S>(
+        &self,
+        args: I,
+        title: &str,
+        path: &Path,
+    ) -> Result<DiffDocument>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let (mut output, truncated) = self.checked_bounded(args, MAX_DIFF_BYTES)?;
+        if truncated {
+            truncate_to_complete_line(&mut output);
+        }
+        Ok(parse_diff(&output, title, Some(path), truncated))
     }
 
     pub fn diff_for_change(&self, change: &Change, expanded: bool) -> Result<DiffDocument> {
-        let mut output = self.raw_diff_for_change(change, expanded)?;
-        let truncated = truncate(&mut output, MAX_DIFF_BYTES);
+        let (output, truncated) = self.raw_diff_for_change(change, expanded)?;
         let title = format!(
             "{} — {} {}",
             change.display_path(),
@@ -267,7 +610,7 @@ impl Repository {
         Ok(parse_diff(&output, title, Some(&change.path), truncated))
     }
 
-    fn raw_diff_for_change(&self, change: &Change, expanded: bool) -> Result<Vec<u8>> {
+    fn raw_diff_for_change(&self, change: &Change, expanded: bool) -> Result<(Vec<u8>, bool)> {
         if change.status == ChangeStatus::Untracked {
             return self.untracked_patch(change);
         }
@@ -291,7 +634,11 @@ impl Repository {
         }
         args.push(OsString::from("--"));
         args.push(change.path.as_os_str().to_owned());
-        self.checked(args)
+        let (mut output, truncated) = self.checked_bounded(args, MAX_DIFF_BYTES)?;
+        if truncated {
+            truncate_to_complete_line(&mut output);
+        }
+        Ok((output, truncated))
     }
 
     pub fn has_commit(&self, oid: &str) -> bool {
@@ -303,36 +650,6 @@ impl Repository {
                     OsString::from(format!("{oid}^{{commit}}")),
                 ])
                 .is_ok_and(|output| output.status.success())
-    }
-
-    pub fn commit_detail(&self, commit: &Commit) -> Result<DiffDocument> {
-        let mut output = self.checked([
-            OsString::from("show"),
-            OsString::from("--no-color"),
-            OsString::from("--no-ext-diff"),
-            OsString::from("--find-renames"),
-            OsString::from("--patch"),
-            OsString::from("--format="),
-            OsString::from(&commit.id),
-        ])?;
-        let truncated = truncate(&mut output, MAX_DIFF_BYTES);
-        let mut document = parse_diff(
-            &output,
-            format!("{} — {}", commit.short_id, commit.subject),
-            None,
-            truncated,
-        );
-        document.commit_details = Some(CommitDetails {
-            id: commit.id.clone(),
-            subject: commit.subject.clone(),
-            author: commit.author.clone(),
-            author_email: commit.author_email.clone(),
-            authored_at: commit.authored_at.clone(),
-            committer: commit.committer.clone(),
-            committer_email: commit.committer_email.clone(),
-            committed_at: commit.committed_at.clone(),
-        });
-        Ok(document)
     }
 
     pub fn branches(&self) -> Result<Vec<Branch>> {
@@ -407,33 +724,6 @@ impl Repository {
         Ok(branches)
     }
 
-    pub fn branch_diff(&self, branch: &HistoryBranch, expanded: bool) -> Result<DiffDocument> {
-        validate_history_reference(&branch.reference)?;
-        let current = self.status()?.branch.head;
-        let current = if current.is_empty() { "HEAD" } else { &current };
-        let mut output = self.checked([
-            OsString::from("diff"),
-            OsString::from("--no-color"),
-            OsString::from("--no-ext-diff"),
-            OsString::from("--find-renames"),
-            OsString::from("--patch"),
-            OsString::from(if expanded {
-                "--unified=1000000"
-            } else {
-                "--unified=3"
-            }),
-            OsString::from(format!("{}..HEAD", branch.reference)),
-            OsString::from("--"),
-        ])?;
-        let truncated = truncate(&mut output, MAX_DIFF_BYTES);
-        Ok(parse_diff(
-            &output,
-            format!("{} → {} — branch comparison", branch.name, current),
-            None,
-            truncated,
-        ))
-    }
-
     pub fn stashes(&self) -> Result<Vec<Stash>> {
         let output = self.checked([
             OsString::from("stash"),
@@ -465,27 +755,6 @@ impl Repository {
             });
         }
         Ok(stashes)
-    }
-
-    pub fn stash_diff(&self, stash: &Stash) -> Result<DiffDocument> {
-        validate_stash_reference(&stash.reference)?;
-        let mut output = self.checked([
-            OsString::from("stash"),
-            OsString::from("show"),
-            OsString::from("--patch"),
-            OsString::from("--include-untracked"),
-            OsString::from("--no-color"),
-            OsString::from("--no-ext-diff"),
-            OsString::from("--find-renames"),
-            OsString::from(&stash.reference),
-        ])?;
-        let truncated = truncate(&mut output, MAX_DIFF_BYTES);
-        Ok(parse_diff(
-            &output,
-            format!("{} — {}", stash.reference, stash.message),
-            None,
-            truncated,
-        ))
     }
 
     pub fn perform(&self, operation: &GitOperation) -> Result<String> {
@@ -654,25 +923,31 @@ impl Repository {
         }
     }
 
-    fn untracked_patch(&self, change: &Change) -> Result<Vec<u8>> {
+    fn untracked_patch(&self, change: &Change) -> Result<(Vec<u8>, bool)> {
         let path = safe_worktree_path(&self.root, &change.path)?;
         let metadata = fs::symlink_metadata(&path)
             .with_context(|| format!("failed to read {}", change.display_path()))?;
         let display_path = change.display_path();
-        if !metadata.is_file() {
-            return Ok(format!(
+        let binary_patch = || {
+            format!(
                 "diff --git a/{display_path} b/{display_path}\nnew file mode 100644\nBinary files /dev/null and b/{display_path} differ\n"
             )
-            .into_bytes());
+            .into_bytes()
+        };
+        if !metadata.is_file() {
+            return Ok((binary_patch(), false));
         }
 
-        let contents =
-            fs::read(&path).with_context(|| format!("failed to read {}", change.display_path()))?;
+        let mut contents = Vec::with_capacity(64 * 1024);
+        fs::File::open(&path)
+            .with_context(|| format!("failed to read {}", change.display_path()))?
+            .take(MAX_DIFF_BYTES as u64 + 1)
+            .read_to_end(&mut contents)
+            .with_context(|| format!("failed to read {}", change.display_path()))?;
+        let input_truncated = contents.len() > MAX_DIFF_BYTES;
+        contents.truncate(MAX_DIFF_BYTES);
         if contents.contains(&0) {
-            return Ok(format!(
-                "diff --git a/{display_path} b/{display_path}\nnew file mode 100644\nBinary files /dev/null and b/{display_path} differ\n"
-            )
-            .into_bytes());
+            return Ok((binary_patch(), input_truncated));
         }
 
         let body = String::from_utf8_lossy(&contents);
@@ -688,7 +963,9 @@ impl Repository {
             patch.push('\n');
             patch.push_str("\\ No newline at end of file\n");
         }
-        Ok(patch.into_bytes())
+        let mut patch = patch.into_bytes();
+        let patch_truncated = truncate(&mut patch, MAX_DIFF_BYTES);
+        Ok((patch, input_truncated || patch_truncated))
     }
 
     fn discard(&self, changes: &[Change]) -> Result<()> {
@@ -782,6 +1059,28 @@ impl Repository {
         self.checked(args)
     }
 
+    fn checked_bounded<I, S>(&self, args: I, limit: usize) -> Result<(Vec<u8>, bool)>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let mut command = Command::new("git");
+        command
+            .arg("-C")
+            .arg(&self.root)
+            .args(["-c", "core.quotepath=false"])
+            .args(args)
+            .env("LC_ALL", "C")
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .env("GIT_TERMINAL_PROMPT", "0");
+        let output = run_bounded_command(&mut command, limit, MAX_GIT_ERROR_BYTES)
+            .with_context(|| format!("failed to execute Git in {}", self.root.display()))?;
+        if !output.status.success() && !output.stdout_truncated {
+            bail!("{}", bounded_command_error("Git command failed", &output));
+        }
+        Ok((output.stdout, output.stdout_truncated))
+    }
+
     fn checked<I, S>(&self, args: I) -> Result<Vec<u8>>
     where
         I: IntoIterator<Item = S>,
@@ -811,6 +1110,63 @@ impl Repository {
         command
             .output()
             .with_context(|| format!("failed to execute Git in {}", self.root.display()))
+    }
+}
+
+fn diff_index_args(base: &str, head: &str) -> Vec<OsString> {
+    vec![
+        OsString::from("diff"),
+        OsString::from("--name-status"),
+        OsString::from("-z"),
+        OsString::from("--find-renames"),
+        OsString::from(base),
+        OsString::from(head),
+        OsString::from("--"),
+    ]
+}
+
+fn truncate_diff_index(output: &mut Vec<u8>) -> bool {
+    if output.len() <= MAX_DIFF_INDEX_BYTES {
+        return false;
+    }
+    let boundary = output[..MAX_DIFF_INDEX_BYTES]
+        .iter()
+        .rposition(|byte| *byte == 0)
+        .map_or(0, |index| index + 1);
+    output.truncate(boundary);
+    true
+}
+
+fn diff_status_label(status: u8) -> &'static str {
+    match status {
+        b'A' => "added",
+        b'M' => "modified",
+        b'D' => "deleted",
+        b'R' => "renamed",
+        b'C' => "copied",
+        b'T' => "type changed",
+        b'U' => "unmerged",
+        _ => "changed",
+    }
+}
+
+fn append_diff_file_paths(args: &mut Vec<OsString>, file: &DiffFileIndexEntry) {
+    if let Some(old_path) = &file.old_path {
+        args.push(old_path.as_os_str().to_owned());
+    }
+    args.push(file.path.as_os_str().to_owned());
+}
+
+fn commit_details(commit: &Commit) -> CommitDetails {
+    CommitDetails {
+        id: commit.id.clone(),
+        subject: commit.subject.clone(),
+        author: commit.author.clone(),
+        author_email: commit.author_email.clone(),
+        authored_at: commit.authored_at.clone(),
+        committer: commit.committer.clone(),
+        committer_email: commit.committer_email.clone(),
+        committed_at: commit.committed_at.clone(),
     }
 }
 
@@ -886,10 +1242,14 @@ fn truncate(bytes: &mut Vec<u8>, maximum: usize) -> bool {
         return false;
     }
     bytes.truncate(maximum);
+    truncate_to_complete_line(bytes);
+    true
+}
+
+fn truncate_to_complete_line(bytes: &mut Vec<u8>) {
     while bytes.last().is_some_and(|byte| *byte != b'\n') {
         bytes.pop();
     }
-    true
 }
 
 fn trim_ascii(mut value: &[u8]) -> &[u8] {
@@ -1203,7 +1563,8 @@ mod tests {
         let repository = test_repository.repository();
         run_test_git(&test_repository.path, ["switch", "-c", "topic"]);
         fs::write(test_repository.path.join("topic.txt"), "topic\n").unwrap();
-        run_test_git(&test_repository.path, ["add", "topic.txt"]);
+        fs::write(test_repository.path.join("second.txt"), "second\n").unwrap();
+        run_test_git(&test_repository.path, ["add", "topic.txt", "second.txt"]);
         run_test_git(
             &test_repository.path,
             [
@@ -1217,27 +1578,35 @@ mod tests {
         );
         run_test_git(&test_repository.path, ["switch", "main"]);
 
-        let document = repository
-            .branch_diff(
-                &HistoryBranch {
+        let prepared = repository
+            .prepare_local_diff(&LocalDiffRequest::Branch {
+                branch: Box::new(HistoryBranch {
                     name: "topic".to_owned(),
                     reference: "refs/heads/topic".to_owned(),
                     current: false,
                     remote: false,
                     relative_date: "now".to_owned(),
                     short_id: "abcdef0".to_owned(),
-                },
-                false,
-            )
+                }),
+                current: "main".to_owned(),
+                current_oid: None,
+                expanded: false,
+            })
             .unwrap();
+        let index = prepared.index();
+        assert_eq!(index.files.len(), 2);
+        let document = prepared.diff_file(&index.files[0].path).unwrap();
 
         assert!(document.title.contains("topic"));
-        assert!(
-            document
-                .lines
-                .iter()
-                .any(|line| line.text().contains("topic.txt"))
+        assert_eq!(
+            document.file_count(),
+            1,
+            "only the selected path is patched"
         );
+        assert!(document.lines.iter().any(|line| {
+            line.text()
+                .contains(index.files[0].path.to_string_lossy().as_ref())
+        }));
         assert_eq!(
             run_test_git(&test_repository.path, ["branch", "--show-current"]),
             "main"
@@ -1265,8 +1634,21 @@ mod tests {
         assert_eq!(stashes[0].reference, "stash@{0}");
         assert_eq!(stashes[0].message, "save launch work");
         assert_eq!(stashes[0].branch, "main");
-        let document = repository.stash_diff(&stashes[0]).unwrap();
-        assert_eq!(document.file_count(), 2);
+        let prepared = repository
+            .prepare_local_diff(&LocalDiffRequest::Stash {
+                stash: Box::new(stashes[0].clone()),
+                expanded: false,
+            })
+            .unwrap();
+        let index = prepared.index();
+        assert_eq!(index.files.len(), 2);
+        assert_eq!(
+            prepared
+                .diff_file(&index.files[0].path)
+                .unwrap()
+                .file_count(),
+            1
+        );
 
         repository
             .perform(&GitOperation::StashApply(stashes[0].reference.clone()))

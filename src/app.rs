@@ -1,19 +1,22 @@
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
-use crate::git::diff::{DiffDocument, DiffLineKind, PullRequestDetails};
+use crate::git::diff::{DiffDocument, DiffIndex, DiffLineKind, PullRequestDetails};
 use crate::git::github::{
-    DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE, GitHubRepository, PullRequest, PullRequestProgress,
+    GitHubRepository, PullRequest, PullRequestCheck, PullRequestDiffIndex, PullRequestFile,
+    PullRequestFileStatus, PullRequestProgress,
 };
 use crate::git::history::Commit;
 use crate::git::status::{Change, ChangeArea, RepoStatus};
 use crate::git::worker::{WorkerCommand, WorkerEvent};
-use crate::git::{Branch, ConflictChoice, GitOperation, HistoryBranch, Stash};
+use crate::git::{Branch, ConflictChoice, GitOperation, HistoryBranch, LocalDiffRequest, Stash};
 
 const PREVIEW_DEBOUNCE: Duration = Duration::from_millis(45);
+const RESIZE_DOUBLE_TAP_INTERVAL: Duration = Duration::from_millis(450);
 const TOAST_DURATION: Duration = Duration::from_secs(4);
 const HISTORY_PAGE_SIZE: usize = 300;
 const MAX_PULL_REQUEST_NUMBER_DIGITS: usize = 20;
@@ -41,6 +44,32 @@ pub enum Focus {
 pub enum DiffLayout {
     Unified,
     SideBySide,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PullRequestSection {
+    Files,
+    Checks,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PullRequestFileView {
+    AllFiles,
+    SingleFile,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PullRequestTreeEntry {
+    Directory { path: PathBuf, depth: usize },
+    File { index: usize, depth: usize },
+}
+
+impl PullRequestTreeEntry {
+    pub const fn depth(&self) -> usize {
+        match self {
+            Self::Directory { depth, .. } | Self::File { depth, .. } => *depth,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -416,6 +445,19 @@ pub enum SidebarHit {
     ChangeGroup(ChangeArea),
     Change(usize),
     Commit(usize),
+    PullRequestFiles,
+    PullRequestChecks,
+    PullRequestChooseRepository,
+    PullRequestLookup,
+    PullRequestDirectory(PathBuf),
+    PullRequestFile(usize),
+    PullRequestCheck(usize),
+}
+
+#[derive(Debug, Clone)]
+pub struct SidebarHitArea {
+    pub area: Rect,
+    pub target: SidebarHit,
 }
 
 #[derive(Debug, Clone)]
@@ -466,7 +508,7 @@ pub struct UiGeometry {
     pub sidebar_divider: Rect,
     pub content: Rect,
     pub diff_divider: Option<Rect>,
-    pub sidebar_hits: Vec<(u16, SidebarHit)>,
+    pub sidebar_hits: Vec<SidebarHitArea>,
     pub scm_action_hits: Vec<ScmActionHit>,
     pub content_file_hits: Vec<ContentFileHit>,
 }
@@ -497,7 +539,18 @@ pub struct App {
     pub history_branches_loaded: bool,
     pub pull_request_lookup: TextBuffer,
     pub pull_request_lookup_active: bool,
-    pub pull_request_file_page: usize,
+    pub pull_request_section: PullRequestSection,
+    pub pull_request_file_view: PullRequestFileView,
+    pub pull_request_files: Vec<PullRequestFile>,
+    pub pull_request_total_files: usize,
+    pub pull_request_files_truncated: bool,
+    pub pull_request_file_cursor: usize,
+    pub pull_request_tree_cursor: usize,
+    pub collapsed_pull_request_directories: HashSet<PathBuf>,
+    pub pull_request_checks: Vec<PullRequestCheck>,
+    pub pull_request_check_cursor: usize,
+    pub pull_request_checks_loading: bool,
+    pub pull_request_checks_error: Option<String>,
     pub pull_request_progress: Option<PullRequestProgress>,
     pub auxiliary_preview: Option<AuxiliaryPreview>,
     pub document: DiffDocument,
@@ -516,6 +569,7 @@ pub struct App {
     pub diff_split_percent: u16,
     pub expanded_diff: bool,
     pub files_collapsed: bool,
+    collapse_preference_set: bool,
     pub resize_target: Option<ResizeTarget>,
     pub filter: String,
     pub modal: Option<Modal>,
@@ -529,9 +583,19 @@ pub struct App {
     pub last_refresh: Option<Instant>,
     pub geometry: UiGeometry,
     status_generation: u64,
+    changes_diff_version: u64,
     diff_generation: u64,
     history_generation: u64,
     pull_request_generation: u64,
+    pull_request_workspace_generation: Option<u64>,
+    pull_request_documents: HashMap<PathBuf, DiffDocument>,
+    pull_request_loading_path: Option<PathBuf>,
+    pull_request_checks_generation: u64,
+    local_diff_request: Option<LocalDiffRequest>,
+    local_diff_workspace_generation: Option<u64>,
+    local_diff_index: Option<DiffIndex>,
+    local_diff_documents: HashMap<PathBuf, DiffDocument>,
+    local_diff_loading_path: Option<PathBuf>,
     branch_generation: u64,
     history_branch_generation: u64,
     stash_generation: u64,
@@ -540,6 +604,7 @@ pub struct App {
     history_refresh_again: bool,
     preview_due: Option<Instant>,
     pending_g: Option<Instant>,
+    last_resize_tap: Option<(ResizeTarget, Instant)>,
 }
 
 impl App {
@@ -564,15 +629,26 @@ impl App {
             history_branches_loaded: false,
             pull_request_lookup: TextBuffer::default(),
             pull_request_lookup_active: false,
-            pull_request_file_page: 1,
+            pull_request_section: PullRequestSection::Files,
+            pull_request_file_view: PullRequestFileView::AllFiles,
+            pull_request_files: Vec::new(),
+            pull_request_total_files: 0,
+            pull_request_files_truncated: false,
+            pull_request_file_cursor: 0,
+            pull_request_tree_cursor: 0,
+            collapsed_pull_request_directories: HashSet::new(),
+            pull_request_checks: Vec::new(),
+            pull_request_check_cursor: 0,
+            pull_request_checks_loading: false,
+            pull_request_checks_error: None,
             pull_request_progress: None,
             auxiliary_preview: None,
             document: DiffDocument::empty("Working Tree", "Loading changes…"),
             selected_change_group: Some(ChangeArea::Unstaged),
             selected_preview_file: None,
             preview_file_cursor: 0,
-            collapsed_preview_files: std::collections::HashSet::new(),
-            expanded_preview_files: std::collections::HashSet::new(),
+            collapsed_preview_files: HashSet::new(),
+            expanded_preview_files: HashSet::new(),
             change_cursor: 0,
             history_cursor: 0,
             sidebar_offset: 0,
@@ -583,6 +659,7 @@ impl App {
             diff_split_percent: DEFAULT_DIFF_SPLIT_PERCENT,
             expanded_diff: false,
             files_collapsed: false,
+            collapse_preference_set: false,
             resize_target: None,
             filter: String::new(),
             modal: None,
@@ -596,9 +673,19 @@ impl App {
             last_refresh: None,
             geometry: UiGeometry::default(),
             status_generation: 0,
+            changes_diff_version: 0,
             diff_generation: 0,
             history_generation: 0,
             pull_request_generation: 0,
+            pull_request_workspace_generation: None,
+            pull_request_documents: HashMap::new(),
+            pull_request_loading_path: None,
+            pull_request_checks_generation: 0,
+            local_diff_request: None,
+            local_diff_workspace_generation: None,
+            local_diff_index: None,
+            local_diff_documents: HashMap::new(),
+            local_diff_loading_path: None,
             branch_generation: 0,
             history_branch_generation: 0,
             stash_generation: 0,
@@ -607,6 +694,7 @@ impl App {
             history_refresh_again: false,
             preview_due: None,
             pending_g: None,
+            last_resize_tap: None,
         }
     }
 
@@ -673,6 +761,181 @@ impl App {
         self.pull_request.as_ref()
     }
 
+    pub fn selected_pull_request_file(&self) -> Option<&PullRequestFile> {
+        self.pull_request_files.get(self.pull_request_file_cursor)
+    }
+
+    pub fn selected_pull_request_check(&self) -> Option<&PullRequestCheck> {
+        self.pull_request_checks.get(self.pull_request_check_cursor)
+    }
+
+    pub fn pull_request_tree_entries(&self) -> Vec<PullRequestTreeEntry> {
+        let mut entries = Vec::with_capacity(self.pull_request_files.len().saturating_mul(2));
+        let mut seen_directories = BTreeSet::new();
+        for (index, file) in self.pull_request_files.iter().enumerate() {
+            let components = file.path.components().collect::<Vec<_>>();
+            let mut directory = PathBuf::new();
+            let mut hidden = false;
+            for (depth, component) in components
+                .iter()
+                .take(components.len().saturating_sub(1))
+                .enumerate()
+            {
+                directory.push(component.as_os_str());
+                if seen_directories.insert(directory.clone()) {
+                    entries.push(PullRequestTreeEntry::Directory {
+                        path: directory.clone(),
+                        depth,
+                    });
+                }
+                if self.collapsed_pull_request_directories.contains(&directory) {
+                    hidden = true;
+                    break;
+                }
+            }
+            if !hidden {
+                entries.push(PullRequestTreeEntry::File {
+                    index,
+                    depth: components.len().saturating_sub(1),
+                });
+            }
+        }
+        entries
+    }
+
+    pub fn pull_request_directory_collapsed(&self, path: &Path) -> bool {
+        self.collapsed_pull_request_directories.contains(path)
+    }
+
+    fn sync_pull_request_tree_cursor_to_file(&mut self) {
+        self.pull_request_tree_cursor = self
+            .pull_request_tree_entries()
+            .iter()
+            .position(|entry| {
+                matches!(
+                    entry,
+                    PullRequestTreeEntry::File { index, .. }
+                        if *index == self.pull_request_file_cursor
+                )
+            })
+            .unwrap_or_default();
+    }
+
+    fn select_pull_request_tree_entry(&mut self, cursor: usize, now: Instant) {
+        let entries = self.pull_request_tree_entries();
+        let Some(entry) = entries.get(cursor.min(entries.len().saturating_sub(1))) else {
+            self.pull_request_tree_cursor = 0;
+            return;
+        };
+        self.pull_request_tree_cursor = cursor.min(entries.len() - 1);
+        if let PullRequestTreeEntry::File { index, .. } = entry {
+            let changed_file = *index != self.pull_request_file_cursor;
+            let entering_single_file =
+                self.pull_request_file_view != PullRequestFileView::SingleFile;
+            if changed_file || entering_single_file {
+                self.pull_request_file_cursor = *index;
+                self.pull_request_file_view = PullRequestFileView::SingleFile;
+                self.content_scroll = 0;
+                self.horizontal_scroll = 0;
+                self.schedule_preview(now);
+            }
+        }
+    }
+
+    fn toggle_pull_request_directory(&mut self, path: PathBuf) {
+        if !self.collapsed_pull_request_directories.remove(&path) {
+            self.collapsed_pull_request_directories.insert(path.clone());
+        }
+        self.pull_request_tree_cursor = self
+            .pull_request_tree_entries()
+            .iter()
+            .position(|entry| {
+                matches!(entry, PullRequestTreeEntry::Directory { path: entry_path, .. } if entry_path == &path)
+            })
+            .unwrap_or_default();
+    }
+
+    fn toggle_selected_pull_request_directory(&mut self) -> bool {
+        if self.view != View::PullRequests
+            || self.pull_request_section != PullRequestSection::Files
+            || self.focus != Focus::Sidebar
+        {
+            return false;
+        }
+        let Some(PullRequestTreeEntry::Directory { path, .. }) = self
+            .pull_request_tree_entries()
+            .get(self.pull_request_tree_cursor)
+            .cloned()
+        else {
+            return false;
+        };
+        self.toggle_pull_request_directory(path);
+        true
+    }
+
+    fn navigate_pull_request_tree_horizontal(&mut self, expand: bool, now: Instant) {
+        let entries = self.pull_request_tree_entries();
+        let Some(entry) = entries.get(self.pull_request_tree_cursor).cloned() else {
+            return;
+        };
+        match entry {
+            PullRequestTreeEntry::Directory { path, depth } => {
+                let collapsed = self.pull_request_directory_collapsed(&path);
+                if (expand && collapsed) || (!expand && !collapsed) {
+                    self.toggle_pull_request_directory(path);
+                } else if expand {
+                    let child = self.pull_request_tree_cursor.saturating_add(1);
+                    if entries
+                        .get(child)
+                        .is_some_and(|entry| entry.depth() > depth)
+                    {
+                        self.select_pull_request_tree_entry(child, now);
+                    }
+                } else {
+                    let parent_cursor = path
+                        .parent()
+                        .filter(|parent| !parent.as_os_str().is_empty())
+                        .and_then(|parent| {
+                            entries.iter().position(|entry| {
+                                matches!(
+                                    entry,
+                                    PullRequestTreeEntry::Directory { path, .. }
+                                        if path == parent
+                                )
+                            })
+                        });
+                    if let Some(cursor) = parent_cursor {
+                        self.pull_request_tree_cursor = cursor;
+                    }
+                }
+            }
+            PullRequestTreeEntry::File { index, .. } if !expand => {
+                let parent_cursor =
+                    self.pull_request_files[index]
+                        .path
+                        .parent()
+                        .and_then(|parent| {
+                            entries.iter().position(|entry| {
+                                matches!(
+                                    entry,
+                                    PullRequestTreeEntry::Directory { path, .. } if path == parent
+                                )
+                            })
+                        });
+                if let Some(cursor) = parent_cursor {
+                    self.pull_request_tree_cursor = cursor;
+                }
+            }
+            PullRequestTreeEntry::File { .. } => {}
+        }
+    }
+
+    pub fn local_diff_load_progress(&self) -> Option<(usize, usize)> {
+        self.local_diff_index
+            .as_ref()
+            .map(|index| (self.local_diff_documents.len(), index.files.len()))
+    }
+
     pub fn selected_change(&self) -> Option<&Change> {
         let visible = self.visible_change_indices();
         visible
@@ -730,7 +993,20 @@ impl App {
             .is_some_and(|selected| selected.to_string_lossy() == path)
     }
 
+    pub fn preview_files_collapsible(&self) -> bool {
+        self.document
+            .lines
+            .iter()
+            .filter(|line| line.kind == DiffLineKind::FileHeader)
+            .take(2)
+            .count()
+            > 1
+    }
+
     pub fn preview_file_collapsed(&self, path: &str) -> bool {
+        if !self.preview_files_collapsible() {
+            return false;
+        }
         if self.files_collapsed {
             !self.expanded_preview_files.contains(Path::new(path))
         } else {
@@ -739,13 +1015,21 @@ impl App {
     }
 
     fn toggle_all_preview_files(&mut self) {
-        self.files_collapsed = !self.files_collapsed;
+        if !self.preview_files_collapsible() {
+            return;
+        }
+        self.files_collapsed = !self.preview_files_all_collapsed();
+        self.collapse_preference_set = true;
         self.collapsed_preview_files.clear();
         self.expanded_preview_files.clear();
         self.content_scroll = 0;
     }
 
-    fn toggle_preview_file(&mut self, path: PathBuf) {
+    fn toggle_preview_file(&mut self, path: PathBuf, effects: &mut Vec<AppEffect>) {
+        if !self.preview_files_collapsible() {
+            return;
+        }
+        let was_collapsed = self.preview_file_collapsed(&path.to_string_lossy());
         let overrides = if self.files_collapsed {
             &mut self.expanded_preview_files
         } else {
@@ -760,6 +1044,23 @@ impl App {
             .iter()
             .position(|candidate| candidate == &path)
             .unwrap_or_default();
+        if was_collapsed && !self.preview_file_collapsed(&path.to_string_lossy()) {
+            if self.view == View::PullRequests
+                && self.pull_request_file_view == PullRequestFileView::AllFiles
+            {
+                self.request_pull_request_diff_file(path, false, effects);
+            } else {
+                self.request_local_diff_file(path, effects);
+            }
+        }
+    }
+
+    pub fn preview_files_all_collapsed(&self) -> bool {
+        let paths = self.preview_file_paths();
+        paths.len() > 1
+            && paths
+                .iter()
+                .all(|path| self.preview_file_collapsed(&path.to_string_lossy()))
     }
 
     fn preview_file_paths(&self) -> Vec<PathBuf> {
@@ -969,9 +1270,28 @@ impl App {
                 self.queue_operation(GitOperation::UnstageAll, &mut effects);
             }
             KeyCode::Char('s') | KeyCode::Char(' ')
-                if self.view == View::Changes && self.selected_change_group.is_none() =>
+                if self.view == View::Changes
+                    && self.focus == Focus::Sidebar
+                    && self.selected_change_group.is_none() =>
             {
                 self.toggle_stage_selected(&mut effects);
+            }
+            KeyCode::Char(' ')
+                if self.view == View::PullRequests
+                    && self.pull_request_section == PullRequestSection::Files
+                    && self.focus == Focus::Sidebar =>
+            {
+                self.toggle_selected_pull_request_directory();
+            }
+            KeyCode::Char(' ')
+                if self.focus == Focus::Content
+                    && (self.local_diff_index.is_some()
+                        || (self.view == View::PullRequests
+                            && self.pull_request_file_view == PullRequestFileView::AllFiles)) =>
+            {
+                if let Some(path) = self.selected_preview_file.clone() {
+                    self.toggle_preview_file(path, &mut effects);
+                }
             }
             KeyCode::Char('u')
                 if self.view == View::Changes && self.selected_change_group.is_none() =>
@@ -983,16 +1303,30 @@ impl App {
             {
                 self.confirm_discard();
             }
+            KeyCode::Char('C') if self.view == View::PullRequests => {
+                self.select_pull_request_section(PullRequestSection::Checks, &mut effects)
+            }
+            KeyCode::Char('F') if self.view == View::PullRequests => {
+                self.select_pull_request_section(PullRequestSection::Files, &mut effects)
+            }
             KeyCode::Char('C') if self.view == View::History => self.confirm_cherry_pick(),
             KeyCode::Char('R') if self.view == View::History => self.confirm_revert(),
             KeyCode::Char('n') if self.view == View::History => self.prompt_branch_at_commit(),
             KeyCode::Char('f') => self.queue_operation(GitOperation::Fetch, &mut effects),
             KeyCode::Char('p') => self.queue_operation(GitOperation::Push, &mut effects),
-            KeyCode::Char('l') if self.focus == Focus::Sidebar => {
+            KeyCode::Char('l')
+                if self.focus == Focus::Sidebar
+                    && !(self.view == View::PullRequests
+                        && self.pull_request_section == PullRequestSection::Files) =>
+            {
                 self.queue_operation(GitOperation::Pull, &mut effects);
             }
             KeyCode::Char('y') => self.queue_operation(GitOperation::Sync, &mut effects),
-            KeyCode::Enter if !self.sidebar_hidden => self.toggle_focus(),
+            KeyCode::Enter if !self.sidebar_hidden => {
+                if !self.toggle_selected_pull_request_directory() {
+                    self.toggle_focus();
+                }
+            }
             KeyCode::Esc => {
                 if self.auxiliary_preview.take().is_some() {
                     self.request_preview(&mut effects);
@@ -1002,6 +1336,7 @@ impl App {
                     self.invalidate_preview();
                     self.pull_request_exact_number = None;
                     self.pull_request = None;
+                    self.reset_pull_request_runtime();
                     self.pull_request_warnings.clear();
                     self.pull_request_progress = None;
                     self.pull_request_lookup = TextBuffer::default();
@@ -1036,23 +1371,23 @@ impl App {
                 }
             }
             KeyCode::Char('G') => self.go_to_edge(true, now),
-            KeyCode::Char('z') => {
-                self.sidebar_hidden = !self.sidebar_hidden;
-                self.focus = if self.sidebar_hidden {
-                    Focus::Content
-                } else {
-                    Focus::Sidebar
-                };
-                self.resize_target = None;
-            }
-            KeyCode::Char(',') if self.view == View::PullRequests => {
-                self.change_pull_request_file_page(false, &mut effects)
-            }
-            KeyCode::Char('.') if self.view == View::PullRequests => {
-                self.change_pull_request_file_page(true, &mut effects)
-            }
+            KeyCode::Char('z') => self.toggle_sidebar(),
             KeyCode::Char('[') => self.jump_hunk(false),
             KeyCode::Char(']') => self.jump_hunk(true),
+            KeyCode::Left | KeyCode::Char('h')
+                if self.focus == Focus::Sidebar
+                    && self.view == View::PullRequests
+                    && self.pull_request_section == PullRequestSection::Files =>
+            {
+                self.navigate_pull_request_tree_horizontal(false, now);
+            }
+            KeyCode::Right | KeyCode::Char('l')
+                if self.focus == Focus::Sidebar
+                    && self.view == View::PullRequests
+                    && self.pull_request_section == PullRequestSection::Files =>
+            {
+                self.navigate_pull_request_tree_horizontal(true, now);
+            }
             KeyCode::Left | KeyCode::Char('h') if self.focus == Focus::Content => {
                 self.horizontal_scroll = self.horizontal_scroll.saturating_sub(4);
             }
@@ -1092,7 +1427,9 @@ impl App {
 
     pub fn handle_mouse(&mut self, event: MouseEvent, now: Instant) -> Vec<AppEffect> {
         let mut effects = Vec::new();
-        if self.modal.is_some() {
+        // Shift is the standard terminal override for native text selection while
+        // mouse reporting is enabled. Never activate a Quinjet control during it.
+        if self.modal.is_some() || event.modifiers.contains(KeyModifiers::SHIFT) {
             return effects;
         }
 
@@ -1103,106 +1440,147 @@ impl App {
                     .sidebar_divider
                     .contains((event.column, event.row).into())
                 {
-                    self.resize_target = Some(ResizeTarget::Sidebar);
-                    self.resize_sidebar(event.column);
+                    self.begin_resize(ResizeTarget::Sidebar, event.column, now);
                 } else if self
                     .geometry
                     .diff_divider
                     .is_some_and(|divider| divider.contains((event.column, event.row).into()))
                 {
-                    self.resize_target = Some(ResizeTarget::Diff);
-                    self.resize_diff(event.column);
-                } else if self
-                    .geometry
-                    .changes_tab
-                    .contains((event.column, event.row).into())
-                {
-                    self.switch_view(View::Changes, &mut effects);
-                } else if self
-                    .geometry
-                    .history_tab
-                    .contains((event.column, event.row).into())
-                {
-                    self.switch_view(View::History, &mut effects);
-                } else if self
-                    .geometry
-                    .pull_requests_tab
-                    .contains((event.column, event.row).into())
-                {
-                    self.switch_view(View::PullRequests, &mut effects);
-                } else if let Some(action) = self
-                    .geometry
-                    .scm_action_hits
-                    .iter()
-                    .find(|hit| hit.area.contains((event.column, event.row).into()))
-                    .map(|hit| hit.action.clone())
-                {
-                    self.handle_scm_action(action, &mut effects);
-                } else if self
-                    .geometry
-                    .sidebar
-                    .contains((event.column, event.row).into())
-                {
-                    self.focus = Focus::Sidebar;
-                    if let Some((_, hit)) = self
+                    self.begin_resize(ResizeTarget::Diff, event.column, now);
+                } else {
+                    self.last_resize_tap = None;
+                    if self
                         .geometry
-                        .sidebar_hits
-                        .iter()
-                        .find(|(row, _)| *row == event.row)
-                        .cloned()
+                        .changes_tab
+                        .contains((event.column, event.row).into())
                     {
-                        match hit {
-                            SidebarHit::ChangeGroup(group) => {
-                                self.auxiliary_preview = None;
-                                self.selected_change_group = Some(group);
-                                self.schedule_preview(now);
-                            }
-                            SidebarHit::Change(index) => {
-                                if let Some(cursor) = self
-                                    .visible_change_indices()
-                                    .iter()
-                                    .position(|visible| *visible == index)
-                                {
+                        self.switch_view(View::Changes, &mut effects);
+                    } else if self
+                        .geometry
+                        .history_tab
+                        .contains((event.column, event.row).into())
+                    {
+                        self.switch_view(View::History, &mut effects);
+                    } else if self
+                        .geometry
+                        .pull_requests_tab
+                        .contains((event.column, event.row).into())
+                    {
+                        self.switch_view(View::PullRequests, &mut effects);
+                    } else if let Some(action) = self
+                        .geometry
+                        .scm_action_hits
+                        .iter()
+                        .find(|hit| hit.area.contains((event.column, event.row).into()))
+                        .map(|hit| hit.action.clone())
+                    {
+                        self.handle_scm_action(action, &mut effects);
+                    } else if self
+                        .geometry
+                        .sidebar
+                        .contains((event.column, event.row).into())
+                    {
+                        self.focus = Focus::Sidebar;
+                        if let Some(hit) = self
+                            .geometry
+                            .sidebar_hits
+                            .iter()
+                            .find(|hit| hit.area.contains((event.column, event.row).into()))
+                            .map(|hit| hit.target.clone())
+                        {
+                            match hit {
+                                SidebarHit::ChangeGroup(group) => {
                                     self.auxiliary_preview = None;
-                                    self.selected_change_group = None;
-                                    self.change_cursor = cursor;
+                                    self.selected_change_group = Some(group);
                                     self.schedule_preview(now);
                                 }
-                            }
-                            SidebarHit::Commit(index) => {
-                                if let Some(cursor) = self
-                                    .visible_commit_indices()
-                                    .iter()
-                                    .position(|visible| *visible == index)
-                                {
-                                    self.history_cursor = cursor;
-                                    self.schedule_preview(now);
+                                SidebarHit::Change(index) => {
+                                    if let Some(cursor) = self
+                                        .visible_change_indices()
+                                        .iter()
+                                        .position(|visible| *visible == index)
+                                    {
+                                        self.auxiliary_preview = None;
+                                        self.selected_change_group = None;
+                                        self.change_cursor = cursor;
+                                        self.schedule_preview(now);
+                                    }
+                                }
+                                SidebarHit::Commit(index) => {
+                                    if let Some(cursor) = self
+                                        .visible_commit_indices()
+                                        .iter()
+                                        .position(|visible| *visible == index)
+                                    {
+                                        self.history_cursor = cursor;
+                                        self.schedule_preview(now);
+                                    }
+                                }
+                                SidebarHit::PullRequestFiles => self.select_pull_request_section(
+                                    PullRequestSection::Files,
+                                    &mut effects,
+                                ),
+                                SidebarHit::PullRequestChecks => self.select_pull_request_section(
+                                    PullRequestSection::Checks,
+                                    &mut effects,
+                                ),
+                                SidebarHit::PullRequestChooseRepository => {
+                                    self.open_pull_request_repositories(&mut effects);
+                                }
+                                SidebarHit::PullRequestLookup => {
+                                    self.pull_request_lookup_active = true;
+                                }
+                                SidebarHit::PullRequestDirectory(path) => {
+                                    self.toggle_pull_request_directory(path);
+                                }
+                                SidebarHit::PullRequestFile(index) => {
+                                    if let Some(cursor) =
+                                        self.pull_request_tree_entries().iter().position(|entry| {
+                                            matches!(
+                                                entry,
+                                                PullRequestTreeEntry::File {
+                                                    index: entry_index,
+                                                    ..
+                                                } if *entry_index == index
+                                            )
+                                        })
+                                    {
+                                        self.select_pull_request_tree_entry(cursor, now);
+                                    }
+                                }
+                                SidebarHit::PullRequestCheck(index) => {
+                                    if index < self.pull_request_checks.len() {
+                                        self.pull_request_check_cursor = index;
+                                    }
                                 }
                             }
                         }
-                    }
-                } else if self
-                    .geometry
-                    .content
-                    .contains((event.column, event.row).into())
-                {
-                    self.focus = Focus::Content;
-                    if let Some(path) = self
+                    } else if self
                         .geometry
-                        .content_file_hits
-                        .iter()
-                        .find(|hit| hit.area.contains((event.column, event.row).into()))
-                        .map(|hit| hit.path.clone())
+                        .content
+                        .contains((event.column, event.row).into())
                     {
-                        self.toggle_preview_file(path);
+                        self.focus = Focus::Content;
+                        if let Some(path) = self
+                            .geometry
+                            .content_file_hits
+                            .iter()
+                            .find(|hit| hit.area.contains((event.column, event.row).into()))
+                            .map(|hit| hit.path.clone())
+                        {
+                            self.toggle_preview_file(path, &mut effects);
+                        }
                     }
                 }
             }
-            MouseEventKind::Drag(MouseButton::Left) => match self.resize_target {
-                Some(ResizeTarget::Sidebar) => self.resize_sidebar(event.column),
-                Some(ResizeTarget::Diff) => self.resize_diff(event.column),
-                None => {}
-            },
+            MouseEventKind::Drag(MouseButton::Left) => {
+                self.last_resize_tap = None;
+                match self.resize_target {
+                    Some(ResizeTarget::Sidebar) => self.resize_sidebar(event.column),
+                    Some(ResizeTarget::Diff) => self.resize_diff(event.column),
+                    None => {}
+                }
+            }
             MouseEventKind::Up(MouseButton::Left) => self.resize_target = None,
             MouseEventKind::ScrollDown => {
                 if self
@@ -1268,11 +1646,19 @@ impl App {
     }
 
     pub fn filesystem_changed(&mut self, effects: &mut Vec<AppEffect>) {
+        self.changes_diff_version = self.changes_diff_version.wrapping_add(1);
+        if self.view == View::Changes && self.auxiliary_preview.is_none() {
+            self.invalidate_preview();
+            self.local_diff_loading_path = None;
+        }
         self.request_refresh(effects);
     }
 
     pub fn periodic_refresh(&mut self, effects: &mut Vec<AppEffect>) {
         self.request_refresh(effects);
+        if self.view == View::PullRequests && self.pull_request.is_some() {
+            self.request_pull_request_checks(effects);
+        }
     }
 
     pub fn handle_worker_event(&mut self, event: WorkerEvent, now: Instant) -> Vec<AppEffect> {
@@ -1318,33 +1704,160 @@ impl App {
                     self.request_refresh(&mut effects);
                 }
             }
-            WorkerEvent::Diff { generation, result }
-            | WorkerEvent::CommitDetail { generation, result }
-            | WorkerEvent::BranchDiff { generation, result }
-            | WorkerEvent::StashDiff { generation, result }
-            | WorkerEvent::PullRequestDiff { generation, result } => {
+            WorkerEvent::LocalDiffIndex { generation, result } => {
+                if generation != self.diff_generation {
+                    return effects;
+                }
+                self.document_loading = false;
+                self.local_diff_loading_path = None;
+                match result {
+                    Ok(index) => {
+                        let selected_path = self.selected_preview_file.clone().filter(|selected| {
+                            index.files.iter().any(|file| &file.path == selected)
+                        });
+                        self.local_diff_workspace_generation = Some(generation);
+                        self.local_diff_documents.clear();
+                        self.collapsed_preview_files.clear();
+                        self.expanded_preview_files.clear();
+                        if index.files.len() > 1
+                            && !self.files_collapsed
+                            && !self.collapse_preference_set
+                        {
+                            self.collapsed_preview_files
+                                .extend(index.files.iter().map(|file| file.path.clone()));
+                        }
+                        self.selected_preview_file = selected_path
+                            .or_else(|| index.files.first().map(|file| file.path.clone()));
+                        self.preview_file_cursor = self
+                            .selected_preview_file
+                            .as_ref()
+                            .and_then(|selected| {
+                                index.files.iter().position(|file| &file.path == selected)
+                            })
+                            .unwrap_or_default();
+                        let first_path = self.selected_preview_file.clone();
+                        self.local_diff_index = Some(index);
+                        self.rebuild_local_diff_document();
+                        self.content_scroll = 0;
+                        self.horizontal_scroll = 0;
+                        if let Some(path) = first_path {
+                            self.request_local_diff_file(path, &mut effects);
+                        }
+                    }
+                    Err(error) => {
+                        self.reset_local_diff_runtime();
+                        self.document = DiffDocument::empty("Preview Error", error.clone());
+                        self.show_toast(error, ToastLevel::Error, now);
+                    }
+                }
+            }
+            WorkerEvent::LocalDiffFile {
+                generation,
+                path,
+                result,
+            } => {
+                if generation != self.diff_generation {
+                    return effects;
+                }
+                self.local_diff_loading_path = None;
+                match result {
+                    Ok(document) => {
+                        self.local_diff_documents.insert(path, document);
+                        self.rebuild_local_diff_document();
+                    }
+                    Err(error) => self.show_toast(error, ToastLevel::Error, now),
+                }
+            }
+            WorkerEvent::PullRequestIndex { generation, result } => {
+                if generation != self.diff_generation {
+                    return effects;
+                }
+                self.pull_request_progress = None;
+                match result {
+                    Ok(index) => {
+                        self.apply_pull_request_index(index);
+                        self.pull_request_workspace_generation = Some(generation);
+                        self.sidebar_offset = 0;
+                        self.content_scroll = 0;
+                        self.horizontal_scroll = 0;
+                        self.document_loading = false;
+                        if let Some(path) = self
+                            .pull_request_files
+                            .first()
+                            .map(|file| file.path.clone())
+                        {
+                            self.request_pull_request_diff_file(path, false, &mut effects);
+                        }
+                    }
+                    Err(error) => {
+                        self.document_loading = false;
+                        self.pull_request_workspace_generation = None;
+                        self.document = DiffDocument::empty("Preview Error", error.clone());
+                        self.show_toast(error, ToastLevel::Error, now);
+                    }
+                }
+            }
+            WorkerEvent::PullRequestDiff { generation, result } => {
                 if generation != self.diff_generation {
                     return effects;
                 }
                 self.document_loading = false;
                 self.pull_request_progress = None;
+                let requested_path = self.pull_request_loading_path.take();
                 match result {
                     Ok(document) => {
-                        if let Some(details) = document.pull_request_details.as_ref() {
-                            self.pull_request_file_page = details.file_page.max(1);
+                        let path = requested_path.or_else(|| {
+                            document
+                                .pull_request_details
+                                .as_ref()
+                                .and_then(|details| details.selected_file.as_ref())
+                                .map(PathBuf::from)
+                        });
+                        if let Some(path) = path {
+                            self.pull_request_documents
+                                .insert(path.clone(), document.clone());
                         }
-                        self.document = document;
-                        self.selected_preview_file = None;
-                        self.preview_file_cursor = 0;
-                        self.collapsed_preview_files.clear();
-                        self.expanded_preview_files.clear();
-                        self.content_scroll = 0;
-                        self.horizontal_scroll = 0;
+                        match self.pull_request_file_view {
+                            PullRequestFileView::AllFiles => {
+                                self.rebuild_pull_request_all_files_document();
+                            }
+                            PullRequestFileView::SingleFile => {
+                                self.document = document;
+                                self.selected_preview_file = None;
+                                self.preview_file_cursor = 0;
+                                self.content_scroll = 0;
+                                self.horizontal_scroll = 0;
+                            }
+                        }
                     }
-                    Err(error) => {
-                        self.document = DiffDocument::empty("Preview Error", error.clone());
-                        self.show_toast(error, ToastLevel::Error, now);
+                    Err(error) => self.show_toast(error, ToastLevel::Error, now),
+                }
+            }
+            WorkerEvent::PullRequestChecks { generation, result } => {
+                if generation != self.pull_request_checks_generation {
+                    return effects;
+                }
+                self.pull_request_checks_loading = false;
+                match result {
+                    Ok(checks) => {
+                        let selected = self
+                            .selected_pull_request_check()
+                            .map(|check| (check.workflow.clone(), check.name.clone()));
+                        self.pull_request_checks = checks;
+                        self.pull_request_check_cursor = selected
+                            .and_then(|selected| {
+                                self.pull_request_checks.iter().position(|check| {
+                                    (check.workflow.as_str(), check.name.as_str())
+                                        == (selected.0.as_str(), selected.1.as_str())
+                                })
+                            })
+                            .unwrap_or_else(|| {
+                                self.pull_request_check_cursor
+                                    .min(self.pull_request_checks.len().saturating_sub(1))
+                            });
+                        self.pull_request_checks_error = None;
                     }
+                    Err(error) => self.pull_request_checks_error = Some(error),
                 }
             }
             WorkerEvent::History {
@@ -1443,7 +1956,8 @@ impl App {
                         self.pull_request_warnings = snapshot.warnings;
                         self.pull_request_exact_number = snapshot.exact_number;
                         self.pull_request_from_cache = snapshot.from_cache;
-                        self.pull_request_file_page = 1;
+                        self.reset_pull_request_runtime();
+                        self.request_pull_request_checks(&mut effects);
                         if self.view == View::PullRequests {
                             self.preview_due = None;
                             self.request_preview(&mut effects);
@@ -1885,6 +2399,7 @@ impl App {
                             .cloned()
                         {
                             self.auxiliary_preview = Some(AuxiliaryPreview::Branch(branch));
+                            self.focus = Focus::Content;
                             self.content_scroll = 0;
                             self.request_preview(&mut effects);
                         }
@@ -1919,6 +2434,7 @@ impl App {
                     KeyCode::Enter if !*loading => {
                         if let Some(stash) = selected_stash {
                             self.auxiliary_preview = Some(AuxiliaryPreview::Stash(stash));
+                            self.focus = Focus::Content;
                             self.content_scroll = 0;
                             self.request_preview(&mut effects);
                         }
@@ -2117,6 +2633,37 @@ impl App {
         }
     }
 
+    fn begin_resize(&mut self, target: ResizeTarget, column: u16, now: Instant) {
+        let double_tap = self.last_resize_tap.is_some_and(|(previous, tapped)| {
+            previous == target
+                && now.saturating_duration_since(tapped) <= RESIZE_DOUBLE_TAP_INTERVAL
+        });
+        if double_tap {
+            match target {
+                ResizeTarget::Sidebar => {
+                    let maximum = self
+                        .geometry
+                        .main
+                        .width
+                        .saturating_sub(MIN_CONTENT_WIDTH)
+                        .max(MIN_SIDEBAR_WIDTH);
+                    self.sidebar_width = DEFAULT_SIDEBAR_WIDTH.clamp(MIN_SIDEBAR_WIDTH, maximum);
+                }
+                ResizeTarget::Diff => self.diff_split_percent = DEFAULT_DIFF_SPLIT_PERCENT,
+            }
+            self.resize_target = None;
+            self.last_resize_tap = None;
+            return;
+        }
+
+        self.last_resize_tap = Some((target, now));
+        self.resize_target = Some(target);
+        match target {
+            ResizeTarget::Sidebar => self.resize_sidebar(column),
+            ResizeTarget::Diff => self.resize_diff(column),
+        }
+    }
+
     fn resize_sidebar(&mut self, column: u16) {
         let main = self.geometry.main;
         let maximum = main
@@ -2148,6 +2695,10 @@ impl App {
         }
         self.view = view;
         self.auxiliary_preview = None;
+        self.reset_local_diff_runtime();
+        self.selected_preview_file = None;
+        self.collapsed_preview_files.clear();
+        self.expanded_preview_files.clear();
         self.focus = Focus::Sidebar;
         self.sidebar_offset = 0;
         self.content_scroll = 0;
@@ -2190,7 +2741,6 @@ impl App {
                         pull_request,
                         self.pull_request_progress
                             .map_or("Calculating pull-request diff…", PullRequestProgress::label),
-                        self.pull_request_file_page,
                     )
                 },
             ),
@@ -2204,6 +2754,19 @@ impl App {
         };
     }
 
+    fn toggle_sidebar(&mut self) {
+        self.sidebar_hidden = !self.sidebar_hidden;
+        self.focus = if self.sidebar_hidden {
+            Focus::Content
+        } else {
+            Focus::Sidebar
+        };
+        self.resize_target = None;
+        if self.sidebar_hidden {
+            self.pull_request_lookup_active = false;
+        }
+    }
+
     fn toggle_diff_layout(&mut self) {
         self.diff_layout = match self.diff_layout {
             DiffLayout::Unified => DiffLayout::SideBySide,
@@ -2215,7 +2778,7 @@ impl App {
 
     fn navigate(&mut self, amount: isize, now: Instant) {
         if self.focus == Focus::Content {
-            if self.files_collapsed && self.expanded_preview_files.is_empty() {
+            if self.preview_files_all_collapsed() {
                 self.navigate_preview_file(amount);
             } else if amount < 0 {
                 self.content_scroll = self.content_scroll.saturating_sub(amount.unsigned_abs());
@@ -2225,9 +2788,9 @@ impl App {
             return;
         }
 
+        let preserve_auxiliary_preview = self.auxiliary_preview.is_some();
         match self.view {
             View::Changes => {
-                self.auxiliary_preview = None;
                 let targets = self.change_targets();
                 if targets.is_empty() {
                     self.selected_change_group = Some(ChangeArea::Unstaged);
@@ -2257,9 +2820,43 @@ impl App {
                     (self.history_cursor + amount as usize).min(length - 1)
                 };
             }
-            View::PullRequests => return,
+            View::PullRequests => {
+                match self.pull_request_section {
+                    PullRequestSection::Files => {
+                        let entries = self.pull_request_tree_entries();
+                        if entries.is_empty() {
+                            self.pull_request_file_cursor = 0;
+                            self.pull_request_tree_cursor = 0;
+                            return;
+                        }
+                        let cursor = if amount < 0 {
+                            self.pull_request_tree_cursor
+                                .saturating_sub(amount.unsigned_abs())
+                        } else {
+                            (self.pull_request_tree_cursor + amount as usize).min(entries.len() - 1)
+                        };
+                        self.select_pull_request_tree_entry(cursor, now);
+                    }
+                    PullRequestSection::Checks => {
+                        if self.pull_request_checks.is_empty() {
+                            self.pull_request_check_cursor = 0;
+                        } else {
+                            self.pull_request_check_cursor = if amount < 0 {
+                                self.pull_request_check_cursor
+                                    .saturating_sub(amount.unsigned_abs())
+                            } else {
+                                (self.pull_request_check_cursor + amount as usize)
+                                    .min(self.pull_request_checks.len() - 1)
+                            };
+                        }
+                    }
+                }
+                return;
+            }
         }
-        self.schedule_preview(now);
+        if !preserve_auxiliary_preview {
+            self.schedule_preview(now);
+        }
     }
 
     fn page(&mut self, direction: isize, now: Instant) {
@@ -2285,9 +2882,9 @@ impl App {
             };
             return;
         }
+        let preserve_auxiliary_preview = self.auxiliary_preview.is_some();
         match self.view {
             View::Changes => {
-                self.auxiliary_preview = None;
                 let targets = self.change_targets();
                 if let Some(target) = if end { targets.last() } else { targets.first() } {
                     self.select_change_target(*target);
@@ -2297,9 +2894,31 @@ impl App {
                 let length = self.visible_commit_indices().len();
                 self.history_cursor = if end { length.saturating_sub(1) } else { 0 };
             }
-            View::PullRequests => return,
+            View::PullRequests => {
+                match self.pull_request_section {
+                    PullRequestSection::Files => {
+                        let entries = self.pull_request_tree_entries();
+                        let cursor = if end {
+                            entries.len().saturating_sub(1)
+                        } else {
+                            0
+                        };
+                        self.select_pull_request_tree_entry(cursor, now);
+                    }
+                    PullRequestSection::Checks => {
+                        self.pull_request_check_cursor = if end {
+                            self.pull_request_checks.len().saturating_sub(1)
+                        } else {
+                            0
+                        };
+                    }
+                }
+                return;
+            }
         }
-        self.schedule_preview(now);
+        if !preserve_auxiliary_preview {
+            self.schedule_preview(now);
+        }
     }
 
     fn scroll_content_half(&mut self, down: bool) {
@@ -2618,6 +3237,7 @@ impl App {
     fn handle_pull_request_lookup_key(&mut self, key: KeyEvent, now: Instant) -> Vec<AppEffect> {
         let mut effects = Vec::new();
         match key.code {
+            KeyCode::Char('z') if key.modifiers == KeyModifiers::NONE => self.toggle_sidebar(),
             KeyCode::Esc => self.pull_request_lookup_active = false,
             KeyCode::Char('o') => {
                 self.pull_request_lookup_active = false;
@@ -2628,7 +3248,6 @@ impl App {
                 match value.parse::<u64>() {
                     Ok(number) if number > 0 => {
                         self.pull_request_lookup_active = false;
-                        self.pull_request_file_page = 1;
                         self.request_pull_request_lookup(number, false, &mut effects);
                     }
                     _ => self.show_toast(
@@ -2662,23 +3281,237 @@ impl App {
         effects
     }
 
-    fn change_pull_request_file_page(&mut self, forward: bool, effects: &mut Vec<AppEffect>) {
-        let Some(details) = self.document.pull_request_details.as_ref() else {
+    fn reset_local_diff_runtime(&mut self) {
+        self.local_diff_request = None;
+        self.local_diff_workspace_generation = None;
+        self.local_diff_index = None;
+        self.local_diff_documents.clear();
+        self.local_diff_loading_path = None;
+    }
+
+    fn rebuild_local_diff_document(&mut self) {
+        if let Some(index) = &self.local_diff_index {
+            self.document = index.document(&self.local_diff_documents);
+            if index.files.is_empty()
+                && matches!(
+                    self.local_diff_request.as_ref(),
+                    Some(LocalDiffRequest::Changes { .. })
+                )
+            {
+                self.document = DiffDocument::empty(
+                    &index.title,
+                    if self.status.changes.is_empty() {
+                        "Working tree clean — no changes"
+                    } else {
+                        "No changes match the current filter"
+                    },
+                );
+            }
+        }
+    }
+
+    fn request_local_diff_file(&mut self, path: PathBuf, effects: &mut Vec<AppEffect>) {
+        let Some(workspace_generation) = self.local_diff_workspace_generation else {
             return;
         };
-        if forward {
-            if !details.has_next_file_page {
-                return;
-            }
-            self.pull_request_file_page = self.pull_request_file_page.saturating_add(1);
-        } else {
-            if !details.has_previous_file_page {
-                return;
-            }
-            self.pull_request_file_page = self.pull_request_file_page.saturating_sub(1).max(1);
+        let indexed = self
+            .local_diff_index
+            .as_ref()
+            .is_some_and(|index| index.files.iter().any(|file| file.path == path));
+        if !indexed
+            || self.local_diff_documents.contains_key(&path)
+            || self.local_diff_loading_path.as_ref() == Some(&path)
+        {
+            return;
         }
+        self.diff_generation = self.diff_generation.wrapping_add(1);
+        self.local_diff_loading_path = Some(path.clone());
+        effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadLocalDiffFile {
+            generation: self.diff_generation,
+            workspace_generation,
+            path,
+        })));
+    }
+
+    fn reset_pull_request_runtime(&mut self) {
+        self.pull_request_workspace_generation = None;
+        self.pull_request_documents.clear();
+        self.pull_request_loading_path = None;
+        self.pull_request_section = PullRequestSection::Files;
+        self.pull_request_file_view = PullRequestFileView::AllFiles;
+        self.pull_request_files.clear();
+        self.pull_request_total_files = 0;
+        self.pull_request_files_truncated = false;
+        self.pull_request_file_cursor = 0;
+        self.pull_request_tree_cursor = 0;
+        self.collapsed_pull_request_directories.clear();
+        self.pull_request_checks.clear();
+        self.pull_request_check_cursor = 0;
+        self.pull_request_checks_loading = false;
+        self.pull_request_checks_error = None;
+        self.pull_request_checks_generation = self.pull_request_checks_generation.wrapping_add(1);
+        self.sidebar_offset = 0;
+    }
+
+    fn apply_pull_request_index(&mut self, index: PullRequestDiffIndex) {
+        self.pull_request_file_view = PullRequestFileView::AllFiles;
+        self.pull_request_documents.clear();
+        self.pull_request_loading_path = None;
+        self.pull_request_files = index.files;
+        self.pull_request_total_files = index.total_files;
+        self.pull_request_files_truncated = index.truncated;
+        self.pull_request_file_cursor = self
+            .pull_request_file_cursor
+            .min(self.pull_request_files.len().saturating_sub(1));
+        self.sync_pull_request_tree_cursor_to_file();
+        self.collapsed_preview_files.clear();
+        self.expanded_preview_files.clear();
+        if self.pull_request_files.len() > 1
+            && !self.files_collapsed
+            && !self.collapse_preference_set
+        {
+            self.collapsed_preview_files
+                .extend(self.pull_request_files.iter().map(|file| file.path.clone()));
+        }
+        self.selected_preview_file = self
+            .selected_pull_request_file()
+            .map(|file| file.path.clone());
+        self.preview_file_cursor = self.pull_request_file_cursor;
+        self.rebuild_pull_request_all_files_document();
+    }
+
+    fn rebuild_pull_request_all_files_document(&mut self) {
+        let Some(pull_request) = self.pull_request.as_ref() else {
+            return;
+        };
+        let title = format!(
+            "PR #{} — All Files · {} changed",
+            pull_request.number, self.pull_request_total_files
+        );
+        if self.pull_request_files.is_empty() {
+            let mut document = DiffDocument::empty(
+                title,
+                if self.pull_request_files_truncated {
+                    "The changed-file index was truncated before any paths were read"
+                } else {
+                    "This pull request has no changed files"
+                },
+            );
+            document.pull_request_details = Some(pull_request_details(pull_request));
+            self.document = document;
+            return;
+        }
+        let index = DiffIndex {
+            title,
+            files: self
+                .pull_request_files
+                .iter()
+                .map(|file| crate::git::diff::DiffFileIndexEntry {
+                    path: file.path.clone(),
+                    old_path: file.old_path.clone(),
+                    status: pull_request_file_status_label(file.status).to_owned(),
+                })
+                .collect(),
+            truncated: self.pull_request_files_truncated,
+            commit_details: None,
+        };
+        let mut document = index.document(&self.pull_request_documents);
+        document.pull_request_details = Some(pull_request_details(pull_request));
+        self.document = document;
+    }
+
+    fn show_pull_request_all_files(&mut self) {
+        self.pull_request_file_view = PullRequestFileView::AllFiles;
+        self.pull_request_loading_path = None;
+        self.document_loading = false;
+        self.selected_preview_file = self
+            .selected_pull_request_file()
+            .map(|file| file.path.clone());
+        self.preview_file_cursor = self.pull_request_file_cursor;
+        self.rebuild_pull_request_all_files_document();
+    }
+
+    fn select_pull_request_section(
+        &mut self,
+        section: PullRequestSection,
+        effects: &mut Vec<AppEffect>,
+    ) {
+        if section == PullRequestSection::Files {
+            if self.pull_request_section == PullRequestSection::Files
+                && self.pull_request_file_view == PullRequestFileView::AllFiles
+            {
+                return;
+            }
+            self.invalidate_preview();
+            self.pull_request_section = PullRequestSection::Files;
+            self.sidebar_offset = 0;
+            self.content_scroll = 0;
+            self.horizontal_scroll = 0;
+            self.show_pull_request_all_files();
+            self.request_preview(effects);
+            return;
+        }
+        if self.pull_request_section == section {
+            return;
+        }
+        self.pull_request_section = section;
+        self.sidebar_offset = 0;
         self.content_scroll = 0;
-        self.request_preview(effects);
+        self.horizontal_scroll = 0;
+        self.request_pull_request_checks(effects);
+    }
+
+    fn request_pull_request_diff_file(
+        &mut self,
+        path: PathBuf,
+        show_loading: bool,
+        effects: &mut Vec<AppEffect>,
+    ) {
+        let Some(workspace_generation) = self.pull_request_workspace_generation else {
+            return;
+        };
+        if !self.pull_request_files.iter().any(|file| file.path == path) {
+            return;
+        }
+        if let Some(document) = self.pull_request_documents.get(&path).cloned() {
+            self.document_loading = false;
+            if self.pull_request_file_view == PullRequestFileView::SingleFile {
+                self.document = document;
+                self.selected_preview_file = None;
+                self.preview_file_cursor = 0;
+            } else {
+                self.rebuild_pull_request_all_files_document();
+            }
+            return;
+        }
+        self.diff_generation = self.diff_generation.wrapping_add(1);
+        self.pull_request_loading_path = Some(path.clone());
+        self.document_loading = show_loading;
+        self.pull_request_progress = None;
+        effects.push(AppEffect::Git(Box::new(
+            WorkerCommand::LoadPullRequestFile {
+                generation: self.diff_generation,
+                workspace_generation,
+                path,
+            },
+        )));
+    }
+
+    fn request_pull_request_checks(&mut self, effects: &mut Vec<AppEffect>) {
+        if self.pull_request_checks_loading {
+            return;
+        }
+        let Some(pull_request) = self.pull_request.clone() else {
+            return;
+        };
+        self.pull_request_checks_generation = self.pull_request_checks_generation.wrapping_add(1);
+        self.pull_request_checks_loading = true;
+        effects.push(AppEffect::Git(Box::new(
+            WorkerCommand::LoadPullRequestChecks {
+                generation: self.pull_request_checks_generation,
+                pull_request: Box::new(pull_request),
+            },
+        )));
     }
 
     fn queue_operation(&mut self, operation: GitOperation, effects: &mut Vec<AppEffect>) {
@@ -2694,6 +3527,11 @@ impl App {
     }
 
     fn request_active_refresh(&mut self, effects: &mut Vec<AppEffect>) {
+        if self.view == View::Changes && self.auxiliary_preview.is_none() {
+            self.changes_diff_version = self.changes_diff_version.wrapping_add(1);
+            self.invalidate_preview();
+            self.local_diff_loading_path = None;
+        }
         self.request_refresh(effects);
         if !self.history_branches_loading {
             self.request_history_branches(effects);
@@ -2733,6 +3571,7 @@ impl App {
         self.pull_request_progress = Some(PullRequestProgress::LoadingMetadata);
         self.pull_request_warnings.clear();
         self.pull_request = None;
+        self.reset_pull_request_runtime();
         self.document = DiffDocument::empty(
             format!("Opening Pull Request #{number}"),
             PullRequestProgress::LoadingMetadata.label(),
@@ -2765,121 +3604,126 @@ impl App {
         })));
     }
 
-    fn request_preview(&mut self, effects: &mut Vec<AppEffect>) {
-        self.diff_generation = self.diff_generation.wrapping_add(1);
-        let generation = self.diff_generation;
+    fn local_diff_request_for_view(&self) -> Option<LocalDiffRequest> {
         match self.view {
             View::Changes => {
                 if let Some(preview) = self.auxiliary_preview.clone() {
-                    self.document_loading = true;
-                    match preview {
-                        AuxiliaryPreview::Branch(branch) => {
-                            self.document = DiffDocument::empty(
-                                format!("Compare HEAD with {}", branch.name),
-                                "Calculating branch diff…",
-                            );
-                            effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadBranchDiff {
-                                generation,
-                                branch: Box::new(branch),
-                                expanded: self.expanded_diff,
-                            })));
-                        }
-                        AuxiliaryPreview::Stash(stash) => {
-                            self.document = DiffDocument::empty(
-                                format!("{} — {}", stash.reference, stash.message),
-                                "Loading stash diff…",
-                            );
-                            effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadStashDiff {
-                                generation,
-                                stash: Box::new(stash),
-                            })));
-                        }
-                    }
-                    return;
+                    return Some(match preview {
+                        AuxiliaryPreview::Branch(branch) => LocalDiffRequest::Branch {
+                            branch: Box::new(branch),
+                            current: if self.status.branch.head.is_empty() {
+                                "HEAD".to_owned()
+                            } else {
+                                self.status.branch.head.clone()
+                            },
+                            current_oid: self.status.branch.oid.clone(),
+                            expanded: self.expanded_diff,
+                        },
+                        AuxiliaryPreview::Stash(stash) => LocalDiffRequest::Stash {
+                            stash: Box::new(stash),
+                            expanded: self.expanded_diff,
+                        },
+                    });
                 }
                 let changes = if self.selected_change_group.is_some() {
                     self.selected_group_changes()
                 } else {
                     self.selected_change().cloned().into_iter().collect()
                 };
-                if changes.is_empty() {
-                    self.document_loading = false;
-                    self.document = DiffDocument::empty(
-                        "Working Tree",
-                        if self.status.changes.is_empty() {
-                            "Working tree clean — no changes"
-                        } else {
-                            "No changes match the current filter"
-                        },
-                    );
-                } else {
-                    self.document_loading = true;
-                    effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadDiff {
-                        generation,
-                        changes,
-                        expanded: self.expanded_diff,
-                    })));
-                }
+                Some(LocalDiffRequest::Changes {
+                    changes,
+                    version: self.changes_diff_version,
+                    expanded: self.expanded_diff,
+                })
             }
             View::History => {
-                if let Some(commit) = self.selected_commit().cloned() {
-                    self.document_loading = true;
-                    effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadCommit {
-                        generation,
+                self.selected_commit()
+                    .cloned()
+                    .map(|commit| LocalDiffRequest::Commit {
                         commit: Box::new(commit),
-                    })));
-                    let visible_len = self.visible_commit_indices().len();
-                    if self.history_cursor + 20 >= visible_len
-                        && !self.history_loading
-                        && !self.history_complete
-                        && self.filter.is_empty()
-                    {
-                        self.request_history(false, effects);
-                    }
-                } else {
-                    self.document_loading = false;
-                    self.document = DiffDocument::empty(
-                        "Commit History",
-                        if self.history.is_empty() {
-                            "No commits in this repository"
-                        } else {
-                            "No commits match the current filter"
-                        },
-                    );
+                        expanded: self.expanded_diff,
+                    })
+            }
+            View::PullRequests => None,
+        }
+    }
+
+    fn prepare_local_diff(&mut self, request: LocalDiffRequest, effects: &mut Vec<AppEffect>) {
+        if self.local_diff_request.as_ref() == Some(&request)
+            && (self.local_diff_workspace_generation.is_some() || self.document_loading)
+        {
+            return;
+        }
+        let title = match &request {
+            LocalDiffRequest::Changes { changes, .. } => changes
+                .first()
+                .map_or_else(|| "Working Tree".to_owned(), |change| change.display_path()),
+            LocalDiffRequest::Commit { commit, .. } => {
+                format!("{} — {}", commit.short_id, commit.subject)
+            }
+            LocalDiffRequest::Branch { branch, .. } => {
+                format!("Compare HEAD with {}", branch.name)
+            }
+            LocalDiffRequest::Stash { stash, .. } => {
+                format!("{} — {}", stash.reference, stash.message)
+            }
+        };
+        self.diff_generation = self.diff_generation.wrapping_add(1);
+        let generation = self.diff_generation;
+        self.reset_local_diff_runtime();
+        self.local_diff_request = Some(request.clone());
+        self.document_loading = true;
+        if self.document.file_count() == 0 {
+            self.selected_preview_file = None;
+            self.preview_file_cursor = 0;
+            self.collapsed_preview_files.clear();
+            self.expanded_preview_files.clear();
+            self.document = DiffDocument::empty(title, "Indexing changed files…");
+        }
+        effects.push(AppEffect::Git(Box::new(WorkerCommand::PrepareLocalDiff {
+            generation,
+            request: Box::new(request),
+        })));
+    }
+
+    fn request_preview(&mut self, effects: &mut Vec<AppEffect>) {
+        if let Some(request) = self.local_diff_request_for_view() {
+            self.prepare_local_diff(request, effects);
+            if self.view == View::History {
+                let visible_len = self.visible_commit_indices().len();
+                if self.history_cursor + 20 >= visible_len
+                    && !self.history_loading
+                    && !self.history_complete
+                    && self.filter.is_empty()
+                {
+                    self.request_history(false, effects);
                 }
             }
-            View::PullRequests => {
-                if let Some(pull_request) = self.selected_pull_request().cloned() {
-                    let preview_required =
-                        self.document
-                            .pull_request_details
-                            .as_ref()
-                            .is_none_or(|details| {
-                                details.number != pull_request.number
-                                    || details.file_page != self.pull_request_file_page
-                                    || !self
-                                        .document
-                                        .title
-                                        .contains(&pull_request.base_repository.display_name())
-                            });
-                    if !preview_required {
-                        self.document_loading = false;
-                        return;
-                    }
-                    self.document_loading = true;
-                    self.pull_request_progress = Some(PullRequestProgress::PreparingRepository);
-                    self.document = pull_request_loading_document(
-                        &pull_request,
-                        PullRequestProgress::PreparingRepository.label(),
-                        self.pull_request_file_page,
-                    );
-                    effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadPullRequest {
-                        generation,
-                        pull_request: Box::new(pull_request),
-                        file_page: self.pull_request_file_page,
-                        file_page_size: DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE,
-                    })));
+            return;
+        }
+
+        if self.view == View::History {
+            self.reset_local_diff_runtime();
+            self.document_loading = false;
+            self.document = DiffDocument::empty(
+                "Commit History",
+                if self.history.is_empty() {
+                    "No commits in this repository"
                 } else {
+                    "No commits match the current filter"
+                },
+            );
+            return;
+        }
+
+        match self.view {
+            View::Changes | View::History => unreachable!("local diff views returned above"),
+            View::PullRequests => {
+                if self.pull_request_section == PullRequestSection::Checks {
+                    self.document_loading = false;
+                    return;
+                }
+                let Some(pull_request) = self.selected_pull_request().cloned() else {
                     self.document_loading = false;
                     self.document = DiffDocument::empty(
                         "Open Pull Request",
@@ -2889,6 +3733,47 @@ impl App {
                             "Enter a pull-request number and press Enter"
                         },
                     );
+                    return;
+                };
+                if self.pull_request_workspace_generation.is_none() {
+                    self.diff_generation = self.diff_generation.wrapping_add(1);
+                    let generation = self.diff_generation;
+                    self.document_loading = true;
+                    self.pull_request_progress = Some(PullRequestProgress::PreparingRepository);
+                    self.document = pull_request_loading_document(
+                        &pull_request,
+                        PullRequestProgress::PreparingRepository.label(),
+                    );
+                    effects.push(AppEffect::Git(Box::new(
+                        WorkerCommand::PreparePullRequest {
+                            generation,
+                            pull_request: Box::new(pull_request),
+                        },
+                    )));
+                    return;
+                }
+
+                match self.pull_request_file_view {
+                    PullRequestFileView::AllFiles => {
+                        self.show_pull_request_all_files();
+                        if let Some(path) = self
+                            .pull_request_files
+                            .first()
+                            .map(|file| file.path.clone())
+                        {
+                            self.request_pull_request_diff_file(path, false, effects);
+                        }
+                    }
+                    PullRequestFileView::SingleFile => {
+                        let Some(path) = self
+                            .selected_pull_request_file()
+                            .map(|file| file.path.clone())
+                        else {
+                            self.show_pull_request_all_files();
+                            return;
+                        };
+                        self.request_pull_request_diff_file(path, true, effects);
+                    }
                 }
             }
         }
@@ -2902,7 +3787,9 @@ impl App {
 
     fn schedule_preview(&mut self, now: Instant) {
         self.invalidate_preview();
-        self.document = self.loading_document_for_view(self.view);
+        if self.view != View::PullRequests {
+            self.document = self.loading_document_for_view(self.view);
+        }
         self.preview_due = Some(now + PREVIEW_DEBOUNCE);
     }
 
@@ -2955,11 +3842,7 @@ impl App {
     }
 }
 
-fn pull_request_loading_document(
-    pull_request: &PullRequest,
-    message: &str,
-    file_page: usize,
-) -> DiffDocument {
+fn pull_request_loading_document(pull_request: &PullRequest, message: &str) -> DiffDocument {
     let mut document = DiffDocument::empty(
         format!(
             "PR #{} — {}  ·  {} → {}",
@@ -2970,7 +3853,12 @@ fn pull_request_loading_document(
         ),
         message,
     );
-    document.pull_request_details = Some(PullRequestDetails {
+    document.pull_request_details = Some(pull_request_details(pull_request));
+    document
+}
+
+fn pull_request_details(pull_request: &PullRequest) -> PullRequestDetails {
+    PullRequestDetails {
         number: pull_request.number,
         title: pull_request.title.clone(),
         description: pull_request.description.clone(),
@@ -2989,16 +3877,23 @@ fn pull_request_loading_document(
         changed_files: pull_request.changed_files,
         additions: pull_request.additions,
         deletions: pull_request.deletions,
-        page_additions: 0,
-        page_deletions: 0,
-        file_page: file_page.max(1),
-        file_page_size: DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE,
-        displayed_files: 0,
-        total_files: pull_request.changed_files,
-        has_previous_file_page: file_page > 1,
-        has_next_file_page: false,
-    });
-    document
+        selected_file: None,
+        selected_file_additions: 0,
+        selected_file_deletions: 0,
+    }
+}
+
+const fn pull_request_file_status_label(status: PullRequestFileStatus) -> &'static str {
+    match status {
+        PullRequestFileStatus::Added => "added",
+        PullRequestFileStatus::Modified => "modified",
+        PullRequestFileStatus::Deleted => "deleted",
+        PullRequestFileStatus::Renamed => "renamed",
+        PullRequestFileStatus::Copied => "copied",
+        PullRequestFileStatus::TypeChanged => "type changed",
+        PullRequestFileStatus::Unmerged => "unmerged",
+        PullRequestFileStatus::Unknown => "changed",
+    }
 }
 
 fn edit_text(input: &mut TextBuffer, key: KeyEvent, multiline: bool) {
@@ -3126,6 +4021,23 @@ mod tests {
         app
     }
 
+    fn indexed_document(paths: &[&str]) -> DiffDocument {
+        DiffIndex {
+            title: "Diff".to_owned(),
+            files: paths
+                .iter()
+                .map(|path| crate::git::diff::DiffFileIndexEntry {
+                    path: PathBuf::from(path),
+                    old_path: None,
+                    status: "modified".to_owned(),
+                })
+                .collect(),
+            truncated: false,
+            commit_details: None,
+        }
+        .document(&HashMap::new())
+    }
+
     #[test]
     fn text_buffer_edits_unicode_on_character_boundaries() {
         let mut buffer = TextBuffer::new("a🚀b");
@@ -3168,6 +4080,54 @@ mod tests {
     }
 
     #[test]
+    fn double_tapping_each_divider_restores_its_default_size() {
+        fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+            MouseEvent {
+                kind,
+                column,
+                row,
+                modifiers: KeyModifiers::NONE,
+            }
+        }
+
+        let mut app = App::new("/tmp/repo", "repo");
+        app.geometry.main = Rect::new(5, 3, 120, 30);
+        app.geometry.sidebar_divider = Rect::new(82, 3, 1, 30);
+        app.geometry.content = Rect::new(48, 3, 77, 30);
+        app.geometry.diff_divider = Some(Rect::new(109, 3, 1, 30));
+        app.sidebar_width = 77;
+        app.diff_split_percent = 80;
+        let now = Instant::now();
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 82, 10), now);
+        app.handle_mouse(
+            mouse(MouseEventKind::Up(MouseButton::Left), 82, 10),
+            now + Duration::from_millis(20),
+        );
+        app.handle_mouse(
+            mouse(MouseEventKind::Down(MouseButton::Left), 82, 10),
+            now + Duration::from_millis(120),
+        );
+        assert_eq!(app.sidebar_width, DEFAULT_SIDEBAR_WIDTH);
+        assert_eq!(app.resize_target, None);
+
+        app.handle_mouse(
+            mouse(MouseEventKind::Down(MouseButton::Left), 109, 10),
+            now + Duration::from_millis(600),
+        );
+        app.handle_mouse(
+            mouse(MouseEventKind::Up(MouseButton::Left), 109, 10),
+            now + Duration::from_millis(620),
+        );
+        app.handle_mouse(
+            mouse(MouseEventKind::Down(MouseButton::Left), 109, 10),
+            now + Duration::from_millis(720),
+        );
+        assert_eq!(app.diff_split_percent, DEFAULT_DIFF_SPLIT_PERCENT);
+        assert_eq!(app.resize_target, None);
+    }
+
+    #[test]
     fn filters_changes_without_losing_underlying_index() {
         let mut app = app_with_changes();
         app.filter = "read".to_owned();
@@ -3197,6 +4157,23 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE), now);
         assert!(app.sidebar_hidden);
         assert_eq!(app.focus, Focus::Content);
+        app.handle_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE), now);
+        assert!(!app.sidebar_hidden);
+        assert_eq!(app.focus, Focus::Sidebar);
+    }
+
+    #[test]
+    fn z_works_while_the_pull_request_number_input_has_focus() {
+        let mut app = App::new("/tmp/repo", "repo");
+        let now = Instant::now();
+        app.switch_view(View::PullRequests, &mut Vec::new());
+        assert!(app.pull_request_lookup_active);
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE), now);
+        assert!(app.sidebar_hidden);
+        assert_eq!(app.focus, Focus::Content);
+        assert!(!app.pull_request_lookup_active);
+
         app.handle_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE), now);
         assert!(!app.sidebar_hidden);
         assert_eq!(app.focus, Focus::Sidebar);
@@ -3247,6 +4224,7 @@ mod tests {
     #[test]
     fn clicking_a_file_header_toggles_only_that_file() {
         let mut app = App::new("/tmp/repo", "repo");
+        app.document = indexed_document(&["src/main.rs", "src/lib.rs"]);
         app.geometry.content = Rect::new(20, 4, 80, 20);
         app.geometry.content_file_hits = vec![ContentFileHit {
             area: Rect::new(20, 8, 80, 1),
@@ -3269,6 +4247,26 @@ mod tests {
             !app.collapsed_preview_files
                 .contains(Path::new("src/main.rs"))
         );
+    }
+
+    #[test]
+    fn single_file_views_cannot_be_collapsed() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.document = indexed_document(&["src/main.rs"]);
+        app.selected_preview_file = Some(PathBuf::from("src/main.rs"));
+        let now = Instant::now();
+
+        assert!(!app.preview_files_collapsible());
+        assert!(!app.preview_file_collapsed("src/main.rs"));
+        assert!(!app.preview_files_all_collapsed());
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('E'), KeyModifiers::SHIFT), now);
+        app.toggle_preview_file(PathBuf::from("src/main.rs"), &mut Vec::new());
+
+        assert!(!app.files_collapsed);
+        assert!(app.collapsed_preview_files.is_empty());
+        assert!(app.expanded_preview_files.is_empty());
+        assert!(!app.preview_file_collapsed("src/main.rs"));
     }
 
     #[test]
@@ -3379,7 +4377,7 @@ mod tests {
     }
 
     #[test]
-    fn loaded_metadata_immediately_queues_the_background_diff() {
+    fn loaded_metadata_immediately_queues_the_file_index_and_checks() {
         let mut app = App::new("/tmp/repo", "repo");
         app.view = View::PullRequests;
         app.pull_request_generation = 3;
@@ -3402,18 +4400,23 @@ mod tests {
             Instant::now(),
         );
 
-        assert!(matches!(
-            effects.as_slice(),
-            [AppEffect::Git(command)] if matches!(
+        assert_eq!(effects.len(), 2);
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            AppEffect::Git(command) if matches!(
                 command.as_ref(),
-                WorkerCommand::LoadPullRequest {
-                    pull_request,
-                    file_page: 1,
-                    file_page_size: DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE,
-                    ..
-                } if pull_request.number == 8
+                WorkerCommand::PreparePullRequest { pull_request, .. }
+                    if pull_request.number == 8
             )
-        ));
+        )));
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            AppEffect::Git(command) if matches!(
+                command.as_ref(),
+                WorkerCommand::LoadPullRequestChecks { pull_request, .. }
+                    if pull_request.number == 8
+            )
+        )));
         assert_eq!(
             app.pull_request_progress,
             Some(PullRequestProgress::PreparingRepository)
@@ -3426,6 +4429,291 @@ mod tests {
                 .description,
             "A detailed pull-request description"
         );
+    }
+
+    #[test]
+    fn local_diff_index_prefetches_one_file_then_loads_only_an_expanded_path() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.diff_generation = 5;
+        let effects = app.handle_worker_event(
+            WorkerEvent::LocalDiffIndex {
+                generation: 5,
+                result: Ok(DiffIndex {
+                    title: "Branch comparison".to_owned(),
+                    files: ["src/first.rs", "src/second.rs"]
+                        .into_iter()
+                        .map(|path| crate::git::diff::DiffFileIndexEntry {
+                            path: PathBuf::from(path),
+                            old_path: None,
+                            status: "modified".to_owned(),
+                        })
+                        .collect(),
+                    truncated: false,
+                    commit_details: None,
+                }),
+            },
+            Instant::now(),
+        );
+
+        assert_eq!(app.document.file_count(), 2);
+        assert!(app.preview_files_all_collapsed());
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Git(command)] if matches!(
+                command.as_ref(),
+                WorkerCommand::LoadLocalDiffFile {
+                    workspace_generation: 5,
+                    path,
+                    ..
+                } if path == Path::new("src/first.rs")
+            )
+        ));
+
+        let first_generation = app.diff_generation;
+        app.handle_worker_event(
+            WorkerEvent::LocalDiffFile {
+                generation: first_generation,
+                path: PathBuf::from("src/first.rs"),
+                result: Ok(DiffDocument::empty("first", "loaded")),
+            },
+            Instant::now(),
+        );
+        let mut effects = Vec::new();
+        app.toggle_preview_file(PathBuf::from("src/second.rs"), &mut effects);
+
+        assert_eq!(app.document.file_count(), 2);
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Git(command)] if matches!(
+                command.as_ref(),
+                WorkerCommand::LoadLocalDiffFile {
+                    workspace_generation: 5,
+                    path,
+                    ..
+                } if path == Path::new("src/second.rs")
+            )
+        ));
+    }
+
+    #[test]
+    fn pull_request_folders_are_selectable_and_collapsible() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.view = View::PullRequests;
+        app.focus = Focus::Sidebar;
+        app.pull_request_files = ["src/app.rs", "src/git/diff.rs", "tests/ui.rs"]
+            .into_iter()
+            .map(|path| PullRequestFile {
+                path: PathBuf::from(path),
+                old_path: None,
+                status: crate::git::github::PullRequestFileStatus::Modified,
+            })
+            .collect();
+        app.sync_pull_request_tree_cursor_to_file();
+
+        let entries = app.pull_request_tree_entries();
+        assert!(matches!(
+            entries.get(app.pull_request_tree_cursor),
+            Some(PullRequestTreeEntry::File { index: 0, .. })
+        ));
+
+        app.handle_key(
+            KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+            Instant::now(),
+        );
+        assert!(matches!(
+            app.pull_request_tree_entries()
+                .get(app.pull_request_tree_cursor),
+            Some(PullRequestTreeEntry::Directory { path, .. }) if path == Path::new("src")
+        ));
+
+        app.handle_key(
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            Instant::now(),
+        );
+        assert!(app.pull_request_directory_collapsed(Path::new("src")));
+        assert_eq!(
+            app.pull_request_tree_entries()
+                .iter()
+                .filter(|entry| matches!(entry, PullRequestTreeEntry::File { .. }))
+                .count(),
+            1
+        );
+
+        app.handle_key(
+            KeyEvent::new(KeyCode::Right, KeyModifiers::NONE),
+            Instant::now(),
+        );
+        assert!(!app.pull_request_directory_collapsed(Path::new("src")));
+        assert_eq!(
+            app.pull_request_tree_entries()
+                .iter()
+                .filter(|entry| matches!(entry, PullRequestTreeEntry::File { .. }))
+                .count(),
+            3
+        );
+
+        app.geometry.sidebar = Rect::new(0, 0, 40, 10);
+        app.geometry.sidebar_hits = vec![SidebarHitArea {
+            area: Rect::new(0, 2, 40, 1),
+            target: SidebarHit::PullRequestDirectory(PathBuf::from("src/git")),
+        }];
+        app.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 5,
+                row: 2,
+                modifiers: KeyModifiers::SHIFT,
+            },
+            Instant::now(),
+        );
+        assert!(!app.pull_request_directory_collapsed(Path::new("src/git")));
+
+        app.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 5,
+                row: 2,
+                modifiers: KeyModifiers::NONE,
+            },
+            Instant::now(),
+        );
+        assert!(app.pull_request_directory_collapsed(Path::new("src/git")));
+        assert!(
+            !app.pull_request_tree_entries()
+                .iter()
+                .any(|entry| { matches!(entry, PullRequestTreeEntry::File { index: 1, .. }) })
+        );
+    }
+
+    #[test]
+    fn pull_request_defaults_to_all_files_then_files_tab_restores_it_from_single_file() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.view = View::PullRequests;
+        app.focus = Focus::Sidebar;
+        app.pull_request = Some(pull_request(8, "Large change", "acme/widget"));
+        app.diff_generation = 10;
+        let files = ["src/first.rs", "src/second.rs"]
+            .into_iter()
+            .map(|path| PullRequestFile {
+                path: PathBuf::from(path),
+                old_path: None,
+                status: PullRequestFileStatus::Modified,
+            })
+            .collect();
+        let now = Instant::now();
+
+        let effects = app.handle_worker_event(
+            WorkerEvent::PullRequestIndex {
+                generation: 10,
+                result: Ok(PullRequestDiffIndex {
+                    files,
+                    total_files: 2,
+                    truncated: false,
+                }),
+            },
+            now,
+        );
+
+        assert_eq!(app.pull_request_file_view, PullRequestFileView::AllFiles);
+        assert_eq!(app.document.file_count(), 2);
+        assert!(app.preview_files_all_collapsed());
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Git(command)] if matches!(
+                command.as_ref(),
+                WorkerCommand::LoadPullRequestFile {
+                    workspace_generation: 10,
+                    path,
+                    ..
+                } if path == Path::new("src/first.rs")
+            )
+        ));
+
+        let first_generation = app.diff_generation;
+        app.handle_worker_event(
+            WorkerEvent::PullRequestDiff {
+                generation: first_generation,
+                result: Ok(indexed_document(&["src/first.rs"])),
+            },
+            now,
+        );
+        assert_eq!(app.document.file_count(), 2);
+
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), now);
+        assert_eq!(app.pull_request_file_cursor, 1);
+        assert_eq!(app.pull_request_file_view, PullRequestFileView::SingleFile);
+        assert_eq!(app.document.file_count(), 2);
+        let (effects, _) = app.tick(now + PREVIEW_DEBOUNCE);
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Git(command)] if matches!(
+                command.as_ref(),
+                WorkerCommand::LoadPullRequestFile {
+                    workspace_generation: 10,
+                    path,
+                    ..
+                } if path == Path::new("src/second.rs")
+            )
+        ));
+
+        let second_generation = app.diff_generation;
+        app.handle_worker_event(
+            WorkerEvent::PullRequestDiff {
+                generation: second_generation,
+                result: Ok(indexed_document(&["src/second.rs"])),
+            },
+            now,
+        );
+        assert_eq!(app.document.file_count(), 1);
+        assert!(!app.preview_files_collapsible());
+
+        app.geometry.sidebar = Rect::new(0, 0, 20, 10);
+        app.geometry.sidebar_hits = vec![SidebarHitArea {
+            area: Rect::new(1, 1, 8, 1),
+            target: SidebarHit::PullRequestFiles,
+        }];
+        let effects = app.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 2,
+                row: 1,
+                modifiers: KeyModifiers::NONE,
+            },
+            now,
+        );
+
+        assert!(effects.is_empty(), "the prefetched first file is cached");
+        assert_eq!(app.pull_request_file_view, PullRequestFileView::AllFiles);
+        assert_eq!(app.document.file_count(), 2);
+        assert!(app.preview_files_all_collapsed());
+    }
+
+    #[test]
+    fn periodic_refresh_updates_checks_without_clearing_them() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.view = View::PullRequests;
+        app.pull_request = Some(pull_request(8, "Checks", "acme/widget"));
+        app.pull_request_checks = vec![PullRequestCheck {
+            name: "CI".to_owned(),
+            workflow: "CI".to_owned(),
+            state: "SUCCESS".to_owned(),
+            status: crate::git::github::PullRequestCheckStatus::Passed,
+            description: String::new(),
+            link: String::new(),
+            started_at: String::new(),
+            completed_at: String::new(),
+        }];
+        let mut effects = Vec::new();
+
+        app.periodic_refresh(&mut effects);
+
+        assert_eq!(app.pull_request_checks.len(), 1);
+        assert!(app.pull_request_checks_loading);
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            AppEffect::Git(command)
+                if matches!(command.as_ref(), WorkerCommand::LoadPullRequestChecks { .. })
+        )));
     }
 
     #[test]
@@ -3472,8 +4760,9 @@ mod tests {
 
         app.schedule_preview(Instant::now());
         let effects = app.handle_worker_event(
-            WorkerEvent::Diff {
+            WorkerEvent::LocalDiffFile {
                 generation: 7,
+                path: PathBuf::from("stale.rs"),
                 result: Ok(DiffDocument::empty("Stale", "replace me")),
             },
             Instant::now(),
@@ -3664,11 +4953,12 @@ mod tests {
     #[test]
     fn collapse_preference_survives_documents_selections_and_views() {
         let mut app = app_with_changes();
+        app.document = indexed_document(&["src/main.rs", "README.md"]);
         let now = Instant::now();
 
         app.handle_key(KeyEvent::new(KeyCode::Char('E'), KeyModifiers::SHIFT), now);
         assert!(app.files_collapsed);
-        app.toggle_preview_file(PathBuf::from("src/main.rs"));
+        app.toggle_preview_file(PathBuf::from("src/main.rs"), &mut Vec::new());
         assert!(
             app.files_collapsed,
             "a one-file override must not reset the preference"
@@ -3676,14 +4966,6 @@ mod tests {
         assert!(!app.preview_file_collapsed("src/main.rs"));
 
         app.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE), now);
-        let generation = app.diff_generation;
-        app.handle_worker_event(
-            WorkerEvent::CommitDetail {
-                generation,
-                result: Ok(DiffDocument::empty("commit", "loaded")),
-            },
-            now,
-        );
         assert!(app.files_collapsed);
         assert!(app.expanded_preview_files.is_empty());
 
@@ -3768,13 +5050,109 @@ mod tests {
             effects.as_slice(),
             [AppEffect::Git(command)] if matches!(
                 command.as_ref(),
-                WorkerCommand::LoadBranchDiff { branch, .. } if branch.name == "topic"
+                WorkerCommand::PrepareLocalDiff { request, .. }
+                    if matches!(request.as_ref(), LocalDiffRequest::Branch { branch, .. } if branch.name == "topic")
             )
         ));
         assert!(matches!(
             app.auxiliary_preview,
             Some(AuxiliaryPreview::Branch(ref branch)) if branch.name == "topic"
         ));
+        assert_eq!(app.focus, Focus::Content);
+    }
+
+    #[test]
+    fn background_status_and_collapse_do_not_restart_a_branch_comparison() {
+        let mut app = app_with_changes();
+        app.history_branches_loaded = true;
+        app.history_branches = vec![HistoryBranch {
+            name: "topic".to_owned(),
+            reference: "refs/heads/topic".to_owned(),
+            current: false,
+            remote: false,
+            relative_date: "now".to_owned(),
+            short_id: "bbbbbbb".to_owned(),
+        }];
+        let now = Instant::now();
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE), now);
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Git(command)]
+                if matches!(command.as_ref(), WorkerCommand::PrepareLocalDiff { .. })
+        ));
+        let index_generation = app.diff_generation;
+        let effects = app.handle_worker_event(
+            WorkerEvent::LocalDiffIndex {
+                generation: index_generation,
+                result: Ok(DiffIndex {
+                    title: "topic → HEAD — branch comparison".to_owned(),
+                    files: ["src/main.rs", "src/lib.rs"]
+                        .into_iter()
+                        .map(|path| crate::git::diff::DiffFileIndexEntry {
+                            path: PathBuf::from(path),
+                            old_path: None,
+                            status: "modified".to_owned(),
+                        })
+                        .collect(),
+                    truncated: false,
+                    commit_details: None,
+                }),
+            },
+            now,
+        );
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Git(command)]
+                if matches!(command.as_ref(), WorkerCommand::LoadLocalDiffFile { .. })
+        ));
+        let stable_generation = app.diff_generation;
+
+        assert!(
+            app.handle_key(KeyEvent::new(KeyCode::Char('E'), KeyModifiers::SHIFT), now)
+                .is_empty()
+        );
+        assert!(
+            !app.files_collapsed,
+            "first press expands the initial index"
+        );
+        assert!(
+            app.handle_key(KeyEvent::new(KeyCode::Char('E'), KeyModifiers::SHIFT), now)
+                .is_empty()
+        );
+        assert!(app.files_collapsed, "second press collapses every file");
+        app.focus = Focus::Sidebar;
+        assert!(
+            app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), now)
+                .is_empty()
+        );
+        assert_eq!(app.diff_generation, stable_generation);
+        assert!(matches!(
+            app.auxiliary_preview,
+            Some(AuxiliaryPreview::Branch(ref branch)) if branch.name == "topic"
+        ));
+
+        app.status_generation = 4;
+        let effects = app.handle_worker_event(
+            WorkerEvent::Status {
+                generation: 4,
+                result: Ok(app.status.clone()),
+            },
+            now + Duration::from_secs(10),
+        );
+
+        assert!(effects.iter().all(|effect| !matches!(
+            effect,
+            AppEffect::Git(command)
+                if matches!(command.as_ref(), WorkerCommand::PrepareLocalDiff { .. })
+        )));
+        assert_eq!(app.diff_generation, stable_generation);
+        assert!(matches!(
+            app.auxiliary_preview,
+            Some(AuxiliaryPreview::Branch(ref branch)) if branch.name == "topic"
+        ));
+        assert_eq!(app.document.file_count(), 2);
     }
 
     #[test]
