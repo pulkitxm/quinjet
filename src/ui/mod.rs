@@ -4019,6 +4019,7 @@ mod tests {
                 path: std::path::PathBuf::from(path),
                 old_path: None,
                 status: PullRequestFileStatus::Modified,
+                counts: None,
             })
             .collect();
         let backend = TestBackend::new(40, 8);
@@ -4079,6 +4080,7 @@ mod tests {
                 )),
                 old_path: None,
                 status: PullRequestFileStatus::Modified,
+                counts: None,
             })
             .collect();
         app.pull_request_total_files = app.pull_request_files.len();
@@ -4247,6 +4249,7 @@ mod tests {
             path: std::path::PathBuf::from("src/rocket.rs"),
             old_path: None,
             status: PullRequestFileStatus::Added,
+            counts: None,
         }];
         app.pull_request_total_files = 1;
         app.document = DiffDocument {

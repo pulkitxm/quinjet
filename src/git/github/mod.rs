@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, OpenOptions};
@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, bail};
 
-use super::diff::{DiffDocument, PullRequestDetails, parse_diff};
+use super::diff::{DiffDocument, DiffLineCounts, PullRequestDetails, parse_diff, parse_numstat};
 use super::{MAX_DIFF_BYTES, Repository, text, trim_ascii};
 
 const MAX_GIT_REMOTES: usize = 32;
@@ -145,6 +145,7 @@ pub struct PullRequestFile {
     pub path: PathBuf,
     pub old_path: Option<PathBuf>,
     pub status: PullRequestFileStatus,
+    pub counts: Option<DiffLineCounts>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1303,6 +1304,7 @@ fn changed_files_in_repository(
         OsString::from(head),
         OsString::from("--"),
     ];
+    let counts = numstat_counts(repository, merge_base, head);
     let output = run_repository_git(repository, &args, MAX_PR_PATH_BYTES, 128 * 1024)?;
     if !output.status.success() && !output.stdout_truncated {
         bail!(
@@ -1367,13 +1369,39 @@ fn changed_files_in_repository(
         } else {
             (None, first_path)
         };
+        let file_counts = counts.get(&path).copied();
         files.push(PullRequestFile {
             path,
             old_path,
             status,
+            counts: file_counts,
         });
     }
     Ok((files, truncated))
+}
+
+/// Read exact per-file totals alongside the changed-path listing. One extra
+/// `--numstat` pass over the same range lets every file header render its real
+/// `+n -n` immediately, so the list never fills in unevenly as patches load.
+fn numstat_counts(
+    repository: &Path,
+    merge_base: &str,
+    head: &str,
+) -> HashMap<PathBuf, DiffLineCounts> {
+    let args = [
+        OsString::from("diff"),
+        OsString::from("--numstat"),
+        OsString::from("-z"),
+        OsString::from("--find-renames"),
+        OsString::from(merge_base),
+        OsString::from(head),
+        OsString::from("--"),
+    ];
+    run_repository_git(repository, &args, MAX_PR_PATH_BYTES, 128 * 1024)
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| parse_numstat(&output.stdout))
+        .unwrap_or_default()
 }
 
 fn diff_selected_paths(
@@ -1991,6 +2019,7 @@ mod tests {
             path: PathBuf::from("test.txt"),
             old_path: None,
             status: PullRequestFileStatus::Modified,
+            counts: None,
         };
         let document = pull_request_file_document(patch, &request, &file, true);
         let details = document.pull_request_details.unwrap();
@@ -2040,6 +2069,28 @@ mod tests {
                 && file.old_path.as_deref() == Some(Path::new("renamed.txt"))
                 && file.status == PullRequestFileStatus::Renamed
         }));
+
+        // Every entry carries its exact totals straight from the index, so no
+        // header has to wait for its own patch before it can show `+n -n`.
+        assert!(files.iter().all(|file| file.counts.is_some()));
+        assert_eq!(
+            files
+                .iter()
+                .find(|file| file.path == Path::new("modified.txt"))
+                .and_then(|file| file.counts),
+            Some(DiffLineCounts {
+                additions: 1,
+                deletions: 1,
+                binary: false,
+            })
+        );
+        assert_eq!(
+            files
+                .iter()
+                .find(|file| file.path == Path::new("moved.txt"))
+                .and_then(|file| file.counts),
+            Some(DiffLineCounts::default())
+        );
     }
 
     #[test]

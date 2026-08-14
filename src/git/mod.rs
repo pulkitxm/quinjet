@@ -4,6 +4,7 @@ pub mod history;
 pub mod status;
 pub mod worker;
 
+use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::Read;
@@ -12,7 +13,10 @@ use std::process::{Command, Output};
 
 use anyhow::{Context, Result, bail};
 
-use self::diff::{CommitDetails, DiffDocument, DiffFileIndexEntry, DiffIndex, parse_diff};
+use self::diff::{
+    CommitDetails, DiffDocument, DiffFileIndexEntry, DiffIndex, DiffLineCounts, parse_diff,
+    parse_numstat,
+};
 use self::github::{bounded_command_error, run_bounded_command};
 use self::history::{Commit, LOG_FORMAT, parse_log};
 use self::status::{Change, ChangeArea, ChangeStatus, RepoStatus, parse_porcelain_v2};
@@ -298,14 +302,17 @@ impl Repository {
                         }
                     },
                 );
-                let files = changes
+                let mut files: Vec<_> = changes
                     .iter()
-                    .map(|change| DiffFileIndexEntry {
-                        path: change.path.clone(),
-                        old_path: change.original_path.clone(),
-                        status: change.status.label().to_ascii_lowercase(),
+                    .map(|change| {
+                        DiffFileIndexEntry::new(
+                            change.path.clone(),
+                            change.original_path.clone(),
+                            change.status.label().to_ascii_lowercase(),
+                        )
                     })
                     .collect();
+                self.apply_worktree_counts(&mut files, changes);
                 Ok(DiffIndex {
                     title,
                     files,
@@ -352,7 +359,7 @@ impl Repository {
             }
             LocalDiffRequest::Stash { stash, .. } => {
                 validate_stash_reference(&stash.reference)?;
-                let (files, truncated) = self.diff_index_files([
+                let (files, truncated) = self.diff_index_files(vec![
                     OsString::from("stash"),
                     OsString::from("show"),
                     OsString::from("--name-status"),
@@ -371,11 +378,60 @@ impl Repository {
         }
     }
 
-    fn diff_index_files<I, S>(&self, args: I) -> Result<(Vec<DiffFileIndexEntry>, bool)>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
+    /// Working-tree changes are already known from the status snapshot, so the
+    /// index needs only their totals. One `--numstat` read per populated area
+    /// keeps that to at most two extra Git calls regardless of file count.
+    fn apply_worktree_counts(&self, files: &mut [DiffFileIndexEntry], changes: &[Change]) {
+        let counts_for = |staged: bool| {
+            let mut args = vec![OsString::from("diff"), OsString::from("--numstat")];
+            if staged {
+                args.push(OsString::from("--cached"));
+            }
+            args.extend([
+                OsString::from("-z"),
+                OsString::from("--find-renames"),
+                OsString::from("--"),
+            ]);
+            self.numstat_counts(args)
+        };
+        let staged = if changes
+            .iter()
+            .any(|change| change.area == ChangeArea::Staged)
+        {
+            counts_for(true)
+        } else {
+            HashMap::new()
+        };
+        let unstaged = if changes
+            .iter()
+            .any(|change| change.area != ChangeArea::Staged)
+        {
+            counts_for(false)
+        } else {
+            HashMap::new()
+        };
+        for (file, change) in files.iter_mut().zip(changes) {
+            let counts = if change.area == ChangeArea::Staged {
+                &staged
+            } else {
+                &unstaged
+            };
+            file.counts = counts.get(&file.path).copied();
+        }
+    }
+
+    /// Counts are a rendering enhancement, never a correctness requirement, so a
+    /// failed or bounded read simply leaves the affected headers unresolved.
+    fn numstat_counts(&self, args: Vec<OsString>) -> HashMap<PathBuf, DiffLineCounts> {
+        self.checked_bounded(args, MAX_DIFF_INDEX_BYTES)
+            .map(|(output, _)| parse_numstat(&output))
+            .unwrap_or_default()
+    }
+
+    fn diff_index_files(&self, args: Vec<OsString>) -> Result<(Vec<DiffFileIndexEntry>, bool)> {
+        let counts = numstat_args(&args)
+            .map(|args| self.numstat_counts(args))
+            .unwrap_or_default();
         let (mut output, command_truncated) = self.checked_bounded(args, MAX_DIFF_INDEX_BYTES)?;
         let mut truncated = command_truncated || truncate_diff_index(&mut output);
         if command_truncated && !output.ends_with(&[0]) {
@@ -419,10 +475,12 @@ impl Repository {
             } else {
                 (None, first_path)
             };
+            let counts = counts.get(&path).copied();
             files.push(DiffFileIndexEntry {
                 path,
                 old_path,
                 status: diff_status_label(status_code).to_owned(),
+                counts,
             });
         }
         Ok((files, truncated))
@@ -1125,6 +1183,23 @@ fn diff_index_args(base: &str, head: &str) -> Vec<OsString> {
     ]
 }
 
+/// Reuse an index command's own revision range for its totals by swapping the
+/// listing option. This keeps the two reads describing exactly the same diff.
+fn numstat_args(args: &[OsString]) -> Option<Vec<OsString>> {
+    let name_status = OsStr::new("--name-status");
+    args.iter().any(|arg| arg == name_status).then(|| {
+        args.iter()
+            .map(|arg| {
+                if arg == name_status {
+                    OsString::from("--numstat")
+                } else {
+                    arg.clone()
+                }
+            })
+            .collect()
+    })
+}
+
 fn truncate_diff_index(output: &mut Vec<u8>) -> bool {
     if output.len() <= MAX_DIFF_INDEX_BYTES {
         return false;
@@ -1558,6 +1633,57 @@ mod tests {
     }
 
     #[test]
+    fn working_tree_index_reads_totals_for_the_area_each_change_belongs_to() {
+        let test_repository = TestRepository::new();
+        let repository = test_repository.repository();
+        fs::write(test_repository.path.join("staged.txt"), "one\ntwo\n").unwrap();
+        run_test_git(&test_repository.path, ["add", "staged.txt"]);
+        fs::write(
+            test_repository.path.join("README.md"),
+            "test repository\nmore\n",
+        )
+        .unwrap();
+        fs::write(test_repository.path.join("untracked.txt"), "fresh\n").unwrap();
+        let status = repository.status().unwrap();
+
+        let prepared = repository
+            .prepare_local_diff(&LocalDiffRequest::Changes {
+                changes: status.changes.clone(),
+                version: 0,
+                expanded: false,
+            })
+            .unwrap();
+        let index = prepared.index();
+        let counts_for = |name: &str| {
+            index
+                .files
+                .iter()
+                .find(|file| file.path == Path::new(name))
+                .and_then(|file| file.counts)
+        };
+
+        assert_eq!(
+            counts_for("staged.txt"),
+            Some(DiffLineCounts {
+                additions: 2,
+                deletions: 0,
+                binary: false,
+            })
+        );
+        assert_eq!(
+            counts_for("README.md"),
+            Some(DiffLineCounts {
+                additions: 1,
+                deletions: 0,
+                binary: false,
+            })
+        );
+        // An untracked path is in no diff yet, so its header stays unresolved
+        // rather than claiming a total Git never reported.
+        assert_eq!(counts_for("untracked.txt"), None);
+    }
+
+    #[test]
     fn compares_head_with_another_branch_without_checkout() {
         let test_repository = TestRepository::new();
         let repository = test_repository.repository();
@@ -1595,6 +1721,22 @@ mod tests {
             .unwrap();
         let index = prepared.index();
         assert_eq!(index.files.len(), 2);
+        assert_eq!(
+            index
+                .files
+                .iter()
+                .map(|file| file.counts)
+                .collect::<Vec<_>>(),
+            vec![
+                Some(DiffLineCounts {
+                    additions: 0,
+                    deletions: 1,
+                    binary: false,
+                });
+                2
+            ],
+            "a branch index must know every file's totals before any patch is read"
+        );
         let document = prepared.diff_file(&index.files[0].path).unwrap();
 
         assert!(document.title.contains("topic"));

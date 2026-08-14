@@ -3467,6 +3467,7 @@ impl App {
                     path: file.path.clone(),
                     old_path: file.old_path.clone(),
                     status: pull_request_file_status_label(file.status).to_owned(),
+                    counts: file.counts,
                 })
                 .collect(),
             truncated: self.pull_request_files_truncated,
@@ -4130,6 +4131,7 @@ mod tests {
                     path: PathBuf::from(path),
                     old_path: None,
                     status: "modified".to_owned(),
+                    counts: None,
                 })
                 .collect(),
             truncated: false,
@@ -4546,6 +4548,7 @@ mod tests {
                             path: PathBuf::from(path),
                             old_path: None,
                             status: "modified".to_owned(),
+                            counts: None,
                         })
                         .collect(),
                     truncated: false,
@@ -4606,6 +4609,7 @@ mod tests {
                 path: PathBuf::from(path),
                 old_path: None,
                 status: crate::git::github::PullRequestFileStatus::Modified,
+                counts: None,
             })
             .collect();
         app.sync_pull_request_tree_cursor_to_file();
@@ -4698,6 +4702,7 @@ mod tests {
                 path: PathBuf::from(path),
                 old_path: None,
                 status: PullRequestFileStatus::Modified,
+                counts: None,
             })
             .collect();
         let now = Instant::now();
@@ -5194,6 +5199,7 @@ mod tests {
                             path: PathBuf::from(path),
                             old_path: None,
                             status: "modified".to_owned(),
+                            counts: None,
                         })
                         .collect(),
                     truncated: false,
