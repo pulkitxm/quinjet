@@ -2,7 +2,10 @@ use std::ffi::OsString;
 
 use anyhow::{Context, Result, bail};
 
-use super::{PullRequest, Repository, bounded_command_error, bounded_text, parse_tsv_record};
+use super::{
+    CacheLife, PullRequest, Repository, bounded_command_error, bounded_text, cache_read,
+    cache_write, parse_tsv_record,
+};
 
 /// The renderer wraps every entry to the pane width on each redraw, so this cap
 /// is what keeps that work bounded. It is far above any real thread; the entries
@@ -132,11 +135,23 @@ impl Repository {
         &self,
         pull_request: &PullRequest,
     ) -> Result<PullRequestConversation> {
+        // GitHub moves `updatedAt` whenever anything in the thread changes, so
+        // it names this exact conversation. Keying on it means an unchanged
+        // thread is served without a request, and any activity asks a different
+        // question rather than aging an old answer out.
+        let stamp = format!(
+            "{}\n{}\n{}",
+            pull_request.base_repository.url.trim_end_matches('/'),
+            pull_request.number,
+            pull_request.updated_at
+        );
         let (timeline, timeline_truncated) = self.conversation_records(
+            &format!("conversation-timeline-v1\n{stamp}"),
             timeline_args(pull_request),
             "unable to load the pull-request timeline",
         )?;
         let (comments, comments_truncated) = self.conversation_records(
+            &format!("conversation-comments-v1\n{stamp}"),
             review_comment_args(pull_request),
             "unable to load pull-request review comments",
         )?;
@@ -168,9 +183,16 @@ impl Repository {
 
     fn conversation_records(
         &self,
+        key: &str,
         args: Vec<OsString>,
         error_context: &str,
     ) -> Result<(Vec<ConversationEntry>, bool)> {
+        if let Some(data) = cache_read(key, CacheLife::Immutable) {
+            return Ok((
+                parse_conversation(&data).context(error_context.to_owned())?,
+                false,
+            ));
+        }
         let output = self.run_gh(args)?;
         if !output.status.success() && !output.stdout_truncated {
             bail!("{}", bounded_command_error(error_context, &output));
@@ -184,6 +206,9 @@ impl Repository {
             }
         }
         let entries = parse_conversation(&data).context(error_context.to_owned())?;
+        if !output.stdout_truncated {
+            cache_write(key, &data);
+        }
         Ok((entries, output.stdout_truncated))
     }
 }
