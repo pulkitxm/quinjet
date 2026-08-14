@@ -27,6 +27,12 @@ const MAX_PREFETCHED_PULL_REQUEST_FILES: usize = 400;
 const PULL_REQUEST_ACTIVE_POLL: Duration = Duration::from_secs(5);
 const PULL_REQUEST_IDLE_POLL: Duration = Duration::from_secs(20);
 const PULL_REQUEST_BACKGROUND_POLL: Duration = Duration::from_secs(120);
+/// Each live stream costs its own GitHub requests, so the tick cadence is a
+/// ceiling rather than a schedule: check state is the only thing worth reading
+/// as often as the tick fires. Metadata, the conversation and a growing log all
+/// change on human or build timescales and hold their own floor.
+const PULL_REQUEST_DETAIL_POLL: Duration = Duration::from_secs(20);
+const PULL_REQUEST_LOG_POLL: Duration = Duration::from_secs(15);
 const MAX_PULL_REQUEST_NUMBER_DIGITS: usize = 20;
 const DEFAULT_SIDEBAR_WIDTH: u16 = 42;
 const MIN_SIDEBAR_WIDTH: u16 = 22;
@@ -648,6 +654,9 @@ pub struct App {
     history_refresh_again: bool,
     preview_due: Option<Instant>,
     pull_request_poll_due: Option<Instant>,
+    pull_request_checks_read_at: Option<Instant>,
+    pull_request_detail_read_at: Option<Instant>,
+    pull_request_log_read_at: Option<Instant>,
     pending_g: Option<Instant>,
     last_resize_tap: Option<(ResizeTarget, Instant)>,
 }
@@ -754,6 +763,9 @@ impl App {
             history_refresh_again: false,
             preview_due: None,
             pull_request_poll_due: None,
+            pull_request_checks_read_at: None,
+            pull_request_detail_read_at: None,
+            pull_request_log_read_at: None,
             pending_g: None,
             last_resize_tap: None,
         }
@@ -1745,7 +1757,7 @@ impl App {
             changed = true;
         }
         if self.pull_request_poll_due.is_some_and(|due| now >= due) {
-            self.refresh_pull_request_live(now, &mut effects);
+            self.refresh_pull_request_live(now, false, &mut effects);
             changed = true;
         }
         (effects, changed)
@@ -1757,7 +1769,7 @@ impl App {
     pub fn webhook_delivered(&mut self, now: Instant) -> Vec<AppEffect> {
         let mut effects = Vec::new();
         if self.pull_request.is_some() {
-            self.refresh_pull_request_live(now, &mut effects);
+            self.refresh_pull_request_live(now, true, &mut effects);
         }
         effects
     }
@@ -1791,7 +1803,18 @@ impl App {
             .then(|| now + self.pull_request_poll_interval());
     }
 
-    fn refresh_pull_request_live(&mut self, now: Instant, effects: &mut Vec<AppEffect>) {
+    /// Run whichever live reads are due. `force` is a webhook delivery saying
+    /// something definitely changed, so every stream reads at once.
+    ///
+    /// Each read is independent, so a single failing endpoint never stalls the
+    /// others, and every one of them coalesces if a previous poll is still in
+    /// flight.
+    fn refresh_pull_request_live(
+        &mut self,
+        now: Instant,
+        force: bool,
+        effects: &mut Vec<AppEffect>,
+    ) {
         self.schedule_pull_request_poll(now);
         let Some(number) = self.pull_request_exact_number else {
             return;
@@ -1799,14 +1822,41 @@ impl App {
         if self.pull_request.is_none() {
             return;
         }
-        // Each read is independent so a single failing endpoint never stalls the
-        // others; every one of them coalesces if a previous poll is still in
-        // flight.
-        self.request_pull_request_lookup(number, true, true, effects);
-        self.request_pull_request_checks(true, effects);
-        self.request_pull_request_conversation(true, effects);
-        if self.pull_request_check_cursor.is_some() {
+        let due = |last: Option<Instant>, interval: Duration| {
+            force || last.is_none_or(|last| now.duration_since(last) >= interval)
+        };
+
+        // A stream that coalesced into a request already in flight is left
+        // unstamped, so it is due again on the next tick rather than skipped.
+        if due(
+            self.pull_request_checks_read_at,
+            self.pull_request_poll_interval(),
+        ) {
+            let issued = effects.len();
+            self.request_pull_request_checks(true, effects);
+            if effects.len() > issued {
+                self.pull_request_checks_read_at = Some(now);
+            }
+        }
+        if due(self.pull_request_detail_read_at, PULL_REQUEST_DETAIL_POLL) {
+            let issued = effects.len();
+            self.request_pull_request_lookup(number, true, true, effects);
+            self.request_pull_request_conversation(true, effects);
+            if effects.len() > issued {
+                self.pull_request_detail_read_at = Some(now);
+            }
+        }
+        // A finished run's log is immutable; only a job still writing output is
+        // worth re-reading.
+        let running = self
+            .selected_pull_request_check()
+            .is_some_and(|check| check.status.is_running());
+        if running && due(self.pull_request_log_read_at, PULL_REQUEST_LOG_POLL) {
+            let issued = effects.len();
             self.request_check_run_log(true, effects);
+            if effects.len() > issued {
+                self.pull_request_log_read_at = Some(now);
+            }
         }
     }
 
@@ -3666,6 +3716,9 @@ impl App {
             self.pull_request_check_log_generation.wrapping_add(1);
         self.expanded_check_steps.clear();
         self.pull_request_step_cursor = 0;
+        self.pull_request_checks_read_at = None;
+        self.pull_request_detail_read_at = None;
+        self.pull_request_log_read_at = None;
         self.sidebar_offset = 0;
     }
 
@@ -5305,7 +5358,7 @@ mod tests {
         app.content_scroll = 40;
 
         let mut effects = Vec::new();
-        app.refresh_pull_request_live(now, &mut effects);
+        app.refresh_pull_request_live(now, false, &mut effects);
 
         assert!(effects.iter().any(|effect| matches!(
             effect,
@@ -5314,25 +5367,24 @@ mod tests {
                 WorkerCommand::LookupPullRequest { number: 8, refresh: true, .. }
             )
         )));
-        for expected in ["checks", "conversation", "log"] {
-            assert!(
-                effects.iter().any(|effect| matches!(
-                    effect,
-                    AppEffect::Git(command) if match expected {
-                        "checks" => matches!(
-                            command.as_ref(),
-                            WorkerCommand::LoadPullRequestChecks { .. }
-                        ),
-                        "conversation" => matches!(
-                            command.as_ref(),
-                            WorkerCommand::LoadPullRequestConversation { .. }
-                        ),
-                        _ => matches!(command.as_ref(), WorkerCommand::LoadCheckRunLog { .. }),
-                    }
-                )),
-                "a poll refreshes the {expected}"
-            );
-        }
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            AppEffect::Git(command)
+                if matches!(command.as_ref(), WorkerCommand::LoadPullRequestChecks { .. })
+        )));
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            AppEffect::Git(command)
+                if matches!(command.as_ref(), WorkerCommand::LoadPullRequestConversation { .. })
+        )));
+        assert!(
+            !effects.iter().any(|effect| matches!(
+                effect,
+                AppEffect::Git(command)
+                    if matches!(command.as_ref(), WorkerCommand::LoadCheckRunLog { .. })
+            )),
+            "a finished run's log never changes, so a poll does not re-read it"
+        );
         assert!(
             app.pull_request.is_some(),
             "the loaded pull request stays on screen while the poll runs"
@@ -5340,6 +5392,66 @@ mod tests {
         assert_eq!(app.pull_request_section, PullRequestSection::Files);
         assert_eq!(app.content_scroll, 40);
         assert!(app.pull_request_progress.is_none());
+    }
+
+    #[test]
+    fn a_fast_tick_only_speeds_up_the_reads_that_change_that_fast() {
+        let mut app = App::new("/tmp/repo", "repo");
+        let start = Instant::now();
+        app.view = View::PullRequests;
+        app.pull_request = Some(pull_request(8, "Running", "acme/widget"));
+        app.pull_request_exact_number = Some(8);
+        app.pull_request_checks = vec![check("build", PullRequestCheckStatus::Pending)];
+        app.pull_request_check_cursor = Some(0);
+
+        let mut first = Vec::new();
+        app.refresh_pull_request_live(start, false, &mut first);
+        let command_count = |effects: &[AppEffect], name: &str| {
+            effects
+                .iter()
+                .filter(|effect| match effect {
+                    AppEffect::Git(command) => match name {
+                        "checks" => {
+                            matches!(
+                                command.as_ref(),
+                                WorkerCommand::LoadPullRequestChecks { .. }
+                            )
+                        }
+                        "conversation" => matches!(
+                            command.as_ref(),
+                            WorkerCommand::LoadPullRequestConversation { .. }
+                        ),
+                        _ => matches!(command.as_ref(), WorkerCommand::LoadCheckRunLog { .. }),
+                    },
+                    AppEffect::Quit => false,
+                })
+                .count()
+        };
+        assert_eq!(command_count(&first, "checks"), 1);
+        assert_eq!(command_count(&first, "conversation"), 1);
+        assert_eq!(command_count(&first, "log"), 1);
+
+        // Pretend every in-flight read landed, then tick again one active
+        // interval later: only the check state is due.
+        app.pull_request_checks_loading = false;
+        app.pull_request_conversation_loading = false;
+        app.pull_request_check_log_loading = false;
+        app.pull_request_loading = false;
+        let mut second = Vec::new();
+        app.refresh_pull_request_live(start + PULL_REQUEST_ACTIVE_POLL, false, &mut second);
+
+        assert_eq!(command_count(&second, "checks"), 1);
+        assert_eq!(
+            command_count(&second, "conversation"),
+            0,
+            "the conversation holds its own floor rather than following the tick"
+        );
+        assert_eq!(command_count(&second, "log"), 0);
+
+        // A delivery says something definitely changed, so nothing waits.
+        let forced = app.webhook_delivered(start + PULL_REQUEST_ACTIVE_POLL);
+        assert_eq!(command_count(&forced, "conversation"), 1);
+        assert_eq!(command_count(&forced, "log"), 1);
     }
 
     #[test]
