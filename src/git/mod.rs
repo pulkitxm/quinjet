@@ -39,6 +39,15 @@ pub struct HistoryBranch {
     pub short_id: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Stash {
+    pub reference: String,
+    pub message: String,
+    pub branch: String,
+    pub relative_date: String,
+    pub short_id: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictChoice {
     Ours,
@@ -70,8 +79,15 @@ pub enum GitOperation {
         new: String,
     },
     DeleteBranch(String),
-    Stash,
-    StashPop,
+    StashPush {
+        message: String,
+        include_untracked: bool,
+        staged: bool,
+    },
+    StashApply(String),
+    StashPop(Option<String>),
+    StashDrop(String),
+    StashClear,
     ResolveConflict {
         path: PathBuf,
         choice: ConflictChoice,
@@ -98,8 +114,11 @@ impl GitOperation {
             Self::CreateBranch { .. } => "Creating branch",
             Self::RenameBranch { .. } => "Renaming branch",
             Self::DeleteBranch(_) => "Deleting branch",
-            Self::Stash => "Stashing changes",
-            Self::StashPop => "Applying stash",
+            Self::StashPush { .. } => "Stashing changes",
+            Self::StashApply(_) => "Applying stash",
+            Self::StashPop(_) => "Popping stash",
+            Self::StashDrop(_) => "Dropping stash",
+            Self::StashClear => "Dropping all stashes",
             Self::ResolveConflict { .. } => "Resolving conflict",
             Self::CherryPick(_) => "Cherry-picking commit",
             Self::Revert(_) => "Reverting commit",
@@ -388,6 +407,87 @@ impl Repository {
         Ok(branches)
     }
 
+    pub fn branch_diff(&self, branch: &HistoryBranch, expanded: bool) -> Result<DiffDocument> {
+        validate_history_reference(&branch.reference)?;
+        let current = self.status()?.branch.head;
+        let current = if current.is_empty() { "HEAD" } else { &current };
+        let mut output = self.checked([
+            OsString::from("diff"),
+            OsString::from("--no-color"),
+            OsString::from("--no-ext-diff"),
+            OsString::from("--find-renames"),
+            OsString::from("--patch"),
+            OsString::from(if expanded {
+                "--unified=1000000"
+            } else {
+                "--unified=3"
+            }),
+            OsString::from(format!("{}..HEAD", branch.reference)),
+            OsString::from("--"),
+        ])?;
+        let truncated = truncate(&mut output, MAX_DIFF_BYTES);
+        Ok(parse_diff(
+            &output,
+            format!("{} → {} — branch comparison", branch.name, current),
+            None,
+            truncated,
+        ))
+    }
+
+    pub fn stashes(&self) -> Result<Vec<Stash>> {
+        let output = self.checked([
+            OsString::from("stash"),
+            OsString::from("list"),
+            OsString::from("--format=%gd%x1f%gs%x1f%cr%x1f%h%x1e"),
+        ])?;
+        let mut stashes = Vec::new();
+        for record in output.split(|byte| *byte == 0x1e) {
+            let record = trim_ascii(record);
+            if record.is_empty() {
+                continue;
+            }
+            let fields: Vec<_> = record.split(|byte| *byte == 0x1f).collect();
+            if fields.len() < 4 {
+                continue;
+            }
+            let reference = text(fields[0]);
+            if !valid_stash_reference(&reference) {
+                continue;
+            }
+            let subject = text(fields[1]);
+            let (branch, message) = parse_stash_subject(&subject);
+            stashes.push(Stash {
+                reference,
+                message,
+                branch,
+                relative_date: text(fields[2]),
+                short_id: text(fields[3]),
+            });
+        }
+        Ok(stashes)
+    }
+
+    pub fn stash_diff(&self, stash: &Stash) -> Result<DiffDocument> {
+        validate_stash_reference(&stash.reference)?;
+        let mut output = self.checked([
+            OsString::from("stash"),
+            OsString::from("show"),
+            OsString::from("--patch"),
+            OsString::from("--include-untracked"),
+            OsString::from("--no-color"),
+            OsString::from("--no-ext-diff"),
+            OsString::from("--find-renames"),
+            OsString::from(&stash.reference),
+        ])?;
+        let truncated = truncate(&mut output, MAX_DIFF_BYTES);
+        Ok(parse_diff(
+            &output,
+            format!("{} — {}", stash.reference, stash.message),
+            None,
+            truncated,
+        ))
+    }
+
     pub fn perform(&self, operation: &GitOperation) -> Result<String> {
         match operation {
             GitOperation::Stage(paths) => {
@@ -485,19 +585,54 @@ impl Repository {
                 self.checked(strings(["branch", "--delete", "--", branch]))?;
                 Ok(format!("Deleted {branch}"))
             }
-            GitOperation::Stash => {
-                self.checked(strings([
-                    "stash",
-                    "push",
-                    "--include-untracked",
-                    "--message",
-                    "Quinjet stash",
-                ]))?;
+            GitOperation::StashPush {
+                message,
+                include_untracked,
+                staged,
+            } => {
+                let mut args = vec![OsString::from("stash"), OsString::from("push")];
+                if *include_untracked {
+                    args.push(OsString::from("--include-untracked"));
+                }
+                if *staged {
+                    args.push(OsString::from("--staged"));
+                }
+                if !message.trim().is_empty() {
+                    args.push(OsString::from("--message"));
+                    args.push(OsString::from(message.trim()));
+                }
+                self.checked(args)?;
                 Ok("Changes stashed".to_owned())
             }
-            GitOperation::StashPop => {
-                self.checked(strings(["stash", "pop"]))?;
-                Ok("Stash applied".to_owned())
+            GitOperation::StashApply(reference) => {
+                validate_stash_reference(reference)?;
+                self.checked(strings(["stash", "apply", "--index", reference]))?;
+                Ok(format!("Applied {reference}"))
+            }
+            GitOperation::StashPop(reference) => {
+                let mut args = vec![
+                    OsString::from("stash"),
+                    OsString::from("pop"),
+                    OsString::from("--index"),
+                ];
+                if let Some(reference) = reference {
+                    validate_stash_reference(reference)?;
+                    args.push(OsString::from(reference));
+                }
+                self.checked(args)?;
+                Ok(reference.as_ref().map_or_else(
+                    || "Popped latest stash".to_owned(),
+                    |reference| format!("Popped {reference}"),
+                ))
+            }
+            GitOperation::StashDrop(reference) => {
+                validate_stash_reference(reference)?;
+                self.checked(strings(["stash", "drop", reference]))?;
+                Ok(format!("Dropped {reference}"))
+            }
+            GitOperation::StashClear => {
+                self.checked(strings(["stash", "clear"]))?;
+                Ok("Dropped all stashes".to_owned())
             }
             GitOperation::ResolveConflict { path, choice } => {
                 let side = match choice {
@@ -677,6 +812,41 @@ impl Repository {
             .output()
             .with_context(|| format!("failed to execute Git in {}", self.root.display()))
     }
+}
+
+fn validate_history_reference(reference: &str) -> Result<()> {
+    if reference.starts_with("refs/heads/") || reference.starts_with("refs/remotes/") {
+        Ok(())
+    } else {
+        bail!("refusing to compare an invalid branch reference")
+    }
+}
+
+fn valid_stash_reference(reference: &str) -> bool {
+    reference
+        .strip_prefix("stash@{")
+        .and_then(|value| value.strip_suffix('}'))
+        .is_some_and(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+fn validate_stash_reference(reference: &str) -> Result<()> {
+    if valid_stash_reference(reference) {
+        Ok(())
+    } else {
+        bail!("refusing to use an invalid stash reference")
+    }
+}
+
+fn parse_stash_subject(subject: &str) -> (String, String) {
+    let subject = subject.trim();
+    for prefix in ["WIP on ", "On "] {
+        if let Some(rest) = subject.strip_prefix(prefix) {
+            if let Some((branch, message)) = rest.split_once(": ") {
+                return (branch.to_owned(), message.to_owned());
+            }
+        }
+    }
+    (String::new(), subject.to_owned())
 }
 
 fn strings<const N: usize>(values: [&str; N]) -> [OsString; N] {
@@ -990,6 +1160,169 @@ mod tests {
                 .status
                 .success()
         );
+    }
+
+    #[test]
+    fn stages_and_unstages_one_file_without_touching_another() {
+        let test_repository = TestRepository::new();
+        let repository = test_repository.repository();
+        fs::write(test_repository.path.join("README.md"), "changed\n").unwrap();
+        fs::write(test_repository.path.join("other.txt"), "other\n").unwrap();
+
+        repository
+            .perform(&GitOperation::Stage(vec![PathBuf::from("README.md")]))
+            .unwrap();
+        let status = repository.status().unwrap();
+        assert!(status.changes.iter().any(|change| {
+            change.path == Path::new("README.md") && change.area == ChangeArea::Staged
+        }));
+        assert!(status.changes.iter().any(|change| {
+            change.path == Path::new("other.txt") && change.area == ChangeArea::Unstaged
+        }));
+
+        repository
+            .perform(&GitOperation::Unstage(vec![PathBuf::from("README.md")]))
+            .unwrap();
+        let status = repository.status().unwrap();
+        assert!(!status.changes.iter().any(|change| {
+            change.path == Path::new("README.md") && change.area == ChangeArea::Staged
+        }));
+        assert_eq!(
+            status
+                .changes
+                .iter()
+                .filter(|change| change.area == ChangeArea::Unstaged)
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn compares_head_with_another_branch_without_checkout() {
+        let test_repository = TestRepository::new();
+        let repository = test_repository.repository();
+        run_test_git(&test_repository.path, ["switch", "-c", "topic"]);
+        fs::write(test_repository.path.join("topic.txt"), "topic\n").unwrap();
+        run_test_git(&test_repository.path, ["add", "topic.txt"]);
+        run_test_git(
+            &test_repository.path,
+            [
+                "-c",
+                "user.name=Quinjet Test",
+                "-c",
+                "user.email=quinjet@example.com",
+                "commit",
+                "--message=topic",
+            ],
+        );
+        run_test_git(&test_repository.path, ["switch", "main"]);
+
+        let document = repository
+            .branch_diff(
+                &HistoryBranch {
+                    name: "topic".to_owned(),
+                    reference: "refs/heads/topic".to_owned(),
+                    current: false,
+                    remote: false,
+                    relative_date: "now".to_owned(),
+                    short_id: "abcdef0".to_owned(),
+                },
+                false,
+            )
+            .unwrap();
+
+        assert!(document.title.contains("topic"));
+        assert!(
+            document
+                .lines
+                .iter()
+                .any(|line| line.text().contains("topic.txt"))
+        );
+        assert_eq!(
+            run_test_git(&test_repository.path, ["branch", "--show-current"]),
+            "main"
+        );
+    }
+
+    #[test]
+    fn creates_lists_previews_applies_and_drops_stashes() {
+        let test_repository = TestRepository::new();
+        let repository = test_repository.repository();
+        fs::write(test_repository.path.join("README.md"), "stashed\n").unwrap();
+        fs::write(test_repository.path.join("untracked.txt"), "also stashed\n").unwrap();
+
+        repository
+            .perform(&GitOperation::StashPush {
+                message: "save launch work".to_owned(),
+                include_untracked: true,
+                staged: false,
+            })
+            .unwrap();
+        assert!(repository.status().unwrap().changes.is_empty());
+
+        let stashes = repository.stashes().unwrap();
+        assert_eq!(stashes.len(), 1);
+        assert_eq!(stashes[0].reference, "stash@{0}");
+        assert_eq!(stashes[0].message, "save launch work");
+        assert_eq!(stashes[0].branch, "main");
+        let document = repository.stash_diff(&stashes[0]).unwrap();
+        assert_eq!(document.file_count(), 2);
+
+        repository
+            .perform(&GitOperation::StashApply(stashes[0].reference.clone()))
+            .unwrap();
+        assert!(!repository.status().unwrap().changes.is_empty());
+        run_test_git(&test_repository.path, ["reset", "--hard", "HEAD"]);
+        run_test_git(&test_repository.path, ["clean", "-fd"]);
+        repository
+            .perform(&GitOperation::StashDrop(stashes[0].reference.clone()))
+            .unwrap();
+        assert!(repository.stashes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn staged_only_stash_leaves_unstaged_worktree_changes_in_place() {
+        let test_repository = TestRepository::new();
+        let repository = test_repository.repository();
+        fs::write(test_repository.path.join("other.txt"), "base\n").unwrap();
+        run_test_git(&test_repository.path, ["add", "other.txt"]);
+        run_test_git(
+            &test_repository.path,
+            [
+                "-c",
+                "user.name=Quinjet Test",
+                "-c",
+                "user.email=quinjet@example.com",
+                "commit",
+                "--message=track other",
+            ],
+        );
+        fs::write(test_repository.path.join("README.md"), "staged\n").unwrap();
+        fs::write(test_repository.path.join("other.txt"), "unstaged\n").unwrap();
+        run_test_git(&test_repository.path, ["add", "README.md"]);
+
+        repository
+            .perform(&GitOperation::StashPush {
+                message: "index only".to_owned(),
+                include_untracked: false,
+                staged: true,
+            })
+            .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(test_repository.path.join("README.md")).unwrap(),
+            "test repository\n"
+        );
+        assert_eq!(
+            fs::read_to_string(test_repository.path.join("other.txt")).unwrap(),
+            "unstaged\n"
+        );
+        let status = repository.status().unwrap();
+        assert_eq!(status.staged_count(), 0);
+        assert!(status.changes.iter().any(|change| {
+            change.path == Path::new("other.txt") && change.area == ChangeArea::Unstaged
+        }));
+        assert_eq!(repository.stashes().unwrap()[0].message, "index only");
     }
 
     #[test]

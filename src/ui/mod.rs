@@ -11,15 +11,15 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget, Wra
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{
-    App, ContentFileHit, DiffLayout, Focus, Modal, PaletteCommand, SidebarHit, ToastLevel,
-    UiGeometry, View,
+    App, ContentFileHit, DiffLayout, Focus, Modal, PaletteCommand, ScmAction, ScmActionHit,
+    SidebarHit, ToastLevel, UiGeometry, View,
 };
 use crate::git::diff::{
     CommitDetails, DiffDocument, DiffLine, DiffLineKind, HighlightSpan, PullRequestDetails,
 };
 use crate::git::github::GitHubRepository;
 use crate::git::status::{Change, ChangeArea, ChangeStatus};
-use crate::git::{Branch, HistoryBranch};
+use crate::git::{Branch, HistoryBranch, Stash};
 
 use self::theme::Theme;
 
@@ -40,9 +40,12 @@ const HELP_LINES: &[(&str, &str)] = &[
     ("", ""),
     ("Changes", ""),
     ("s / u", "Stage / unstage selected file"),
+    ("[+] / [−]", "Click an individual file or group action"),
     ("a / U", "Stage all / unstage all"),
     ("x", "Discard selected change (asks first)"),
     ("c", "Commit staged changes"),
+    ("S", "View and manage stashes"),
+    ("d", "Compare current branch with another branch"),
     ("b / B", "Branch picker / checkout branch picker"),
     ("", ""),
     ("History", ""),
@@ -51,12 +54,11 @@ const HELP_LINES: &[(&str, &str)] = &[
     ("n", "Create branch at selected commit"),
     ("", ""),
     ("Pull Requests", ""),
-    ("3", "Progressively load all PR states with progress"),
-    ("/", "Focus exact numeric PR lookup"),
-    ("o", "Choose the base GitHub repository"),
-    ("← / →", "Previous / next bounded PR page"),
+    ("3", "Open the on-demand PR view (no automatic fetch)"),
+    ("/", "Focus the numeric PR field; Enter opens it"),
+    ("o", "Discover or choose the base repository"),
     (", / .", "Previous / next changed-file page"),
-    ("r", "Refresh PR metadata, bypassing cache"),
+    ("r", "Refetch this PR only, bypassing cache"),
     ("", ""),
     ("Repository", ""),
     ("r / Ctrl+R", "Refresh"),
@@ -103,8 +105,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     };
 
     let (changes_tab, history_tab, pull_requests_tab) = draw_tabs(frame, tabs, app, &theme);
-    let sidebar_hits = if app.sidebar_hidden {
-        Vec::new()
+    let (sidebar_hits, scm_action_hits) = if app.sidebar_hidden {
+        (Vec::new(), Vec::new())
     } else {
         draw_sidebar(frame, sidebar_area, app, &theme)
     };
@@ -124,6 +126,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         content: content_area,
         diff_divider,
         sidebar_hits,
+        scm_action_hits,
         content_file_hits,
     };
 
@@ -288,11 +291,14 @@ fn draw_sidebar(
     area: Rect,
     app: &mut App,
     theme: &Theme,
-) -> Vec<(u16, SidebarHit)> {
+) -> (Vec<(u16, SidebarHit)>, Vec<ScmActionHit>) {
     match app.view {
         View::Changes => draw_changes_sidebar(frame, area, app, theme),
-        View::History => draw_history_sidebar(frame, area, app, theme),
-        View::PullRequests => draw_pull_requests_sidebar(frame, area, app, theme),
+        View::History => (draw_history_sidebar(frame, area, app, theme), Vec::new()),
+        View::PullRequests => (
+            draw_pull_requests_sidebar(frame, area, app, theme),
+            Vec::new(),
+        ),
     }
 }
 
@@ -301,7 +307,7 @@ fn draw_changes_sidebar(
     area: Rect,
     app: &mut App,
     theme: &Theme,
-) -> Vec<(u16, SidebarHit)> {
+) -> (Vec<(u16, SidebarHit)>, Vec<ScmActionHit>) {
     let block = panel_block(
         if app.filter.is_empty() {
             format!(" Changes  {} ", app.status.changes.len())
@@ -314,10 +320,16 @@ fn draw_changes_sidebar(
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.height == 0 {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
 
-    let list_area = inner;
+    let controls_height = inner.height.min(3);
+    let list_area = Rect::new(
+        inner.x,
+        inner.y,
+        inner.width,
+        inner.height.saturating_sub(controls_height),
+    );
     let visible = app.visible_change_indices();
     let row_count = change_row_count(app, &visible);
     let height = list_area.height as usize;
@@ -325,6 +337,7 @@ fn draw_changes_sidebar(
     ensure_offset(&mut app.sidebar_offset, selected_row, height, row_count);
     let rows = build_change_rows(app, &visible);
     let mut hits = Vec::new();
+    let mut action_hits = Vec::new();
     let end = (app.sidebar_offset + height).min(rows.len());
     for (y, row) in
         (list_area.y..list_area.bottom()).zip(rows.iter().take(end).skip(app.sidebar_offset))
@@ -349,6 +362,23 @@ fn draw_changes_sidebar(
                     .style(Style::default().bg(background)),
                     Rect::new(list_area.x, y, list_area.width, 1),
                 );
+                let (label, action) = match group {
+                    ChangeArea::Staged => ("[−]", ScmAction::UnstageGroup(*group)),
+                    ChangeArea::Conflict | ChangeArea::Unstaged => {
+                        ("[+]", ScmAction::StageGroup(*group))
+                    }
+                };
+                let action_area = Rect::new(list_area.right().saturating_sub(4), y, 4, 1);
+                frame.render_widget(
+                    Paragraph::new(label)
+                        .alignment(Alignment::Right)
+                        .style(Style::default().fg(theme.accent).bg(background)),
+                    action_area,
+                );
+                action_hits.push(ScmActionHit {
+                    area: action_area,
+                    action,
+                });
                 hits.push((y, SidebarHit::ChangeGroup(*group)));
             }
             ChangeRow::Change {
@@ -363,7 +393,7 @@ fn draw_changes_sidebar(
                     Style::default().bg(theme.panel)
                 };
                 let path = change.parent_path();
-                let available = list_area.width.saturating_sub(8) as usize;
+                let available = list_area.width.saturating_sub(11) as usize;
                 let name = truncate_middle(
                     &change.file_name(),
                     available.saturating_sub(path.width() + 1),
@@ -392,27 +422,46 @@ fn draw_changes_sidebar(
                 ]);
                 frame.render_widget(
                     Paragraph::new(line).style(row_style),
-                    Rect::new(list_area.x, y, list_area.width.saturating_sub(4), 1),
+                    Rect::new(list_area.x, y, list_area.width.saturating_sub(7), 1),
                 );
-                let action = match change.area {
-                    ChangeArea::Staged => "−",
-                    ChangeArea::Conflict => "!",
-                    ChangeArea::Unstaged => "+",
+                let (action_label, action) = match change.area {
+                    ChangeArea::Staged => ("[−]", ScmAction::Unstage(*index)),
+                    ChangeArea::Conflict => ("[!]", ScmAction::Resolve(*index)),
+                    ChangeArea::Unstaged => ("[+]", ScmAction::Stage(*index)),
                 };
-                let badge = format!("{action} {} ", change.status.code());
+                let background = if selected {
+                    theme.selected
+                } else {
+                    theme.panel
+                };
+                let status_area = Rect::new(list_area.right().saturating_sub(7), y, 3, 1);
                 frame.render_widget(
-                    Paragraph::new(badge).alignment(Alignment::Right).style(
-                        Style::default()
-                            .fg(status_color(change.status, theme))
-                            .bg(if selected {
-                                theme.selected
-                            } else {
-                                theme.panel
-                            })
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Rect::new(list_area.right().saturating_sub(5), y, 5, 1),
+                    Paragraph::new(change.status.code())
+                        .alignment(Alignment::Right)
+                        .style(
+                            Style::default()
+                                .fg(status_color(change.status, theme))
+                                .bg(background)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    status_area,
                 );
+                let action_area = Rect::new(list_area.right().saturating_sub(4), y, 4, 1);
+                frame.render_widget(
+                    Paragraph::new(action_label)
+                        .alignment(Alignment::Right)
+                        .style(
+                            Style::default()
+                                .fg(theme.accent)
+                                .bg(background)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    action_area,
+                );
+                action_hits.push(ScmActionHit {
+                    area: action_area,
+                    action,
+                });
                 hits.push((y, SidebarHit::Change(*index)));
             }
         }
@@ -437,7 +486,66 @@ fn draw_changes_sidebar(
             list_area,
         );
     }
-    hits
+
+    let controls_y = list_area.bottom();
+    if controls_height >= 1 {
+        let row = Rect::new(inner.x, controls_y, inner.width, 1);
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(" [c] Commit", Style::default().fg(theme.accent)),
+                Span::styled("   [S] Stashes", Style::default().fg(theme.modified)),
+            ]))
+            .style(Style::default().bg(theme.panel_alt)),
+            row,
+        );
+        action_hits.push(ScmActionHit {
+            area: Rect::new(row.x, row.y, 12.min(row.width), 1),
+            action: ScmAction::Commit,
+        });
+        action_hits.push(ScmActionHit {
+            area: Rect::new(
+                row.x.saturating_add(12).min(row.right()),
+                row.y,
+                row.width.saturating_sub(12),
+                1,
+            ),
+            action: ScmAction::Stashes,
+        });
+    }
+    if controls_height >= 2 {
+        let row = Rect::new(inner.x, controls_y + 1, inner.width, 1);
+        frame.render_widget(
+            Paragraph::new(" [a] Stage All")
+                .style(Style::default().fg(theme.added).bg(theme.panel_alt)),
+            row,
+        );
+        action_hits.push(ScmActionHit {
+            area: row,
+            action: ScmAction::StageAll,
+        });
+    }
+    if controls_height >= 3 {
+        let row = Rect::new(inner.x, controls_y + 2, inner.width, 1);
+        frame.render_widget(
+            Paragraph::new(" [U] Unstage All   [d] Compare Branch")
+                .style(Style::default().fg(theme.muted).bg(theme.panel_alt)),
+            row,
+        );
+        action_hits.push(ScmActionHit {
+            area: Rect::new(row.x, row.y, 17.min(row.width), 1),
+            action: ScmAction::UnstageAll,
+        });
+        action_hits.push(ScmActionHit {
+            area: Rect::new(
+                row.x.saturating_add(17).min(row.right()),
+                row.y,
+                row.width.saturating_sub(17),
+                1,
+            ),
+            action: ScmAction::CompareBranch,
+        });
+    }
+    (hits, action_hits)
 }
 
 #[derive(Clone)]
@@ -672,29 +780,20 @@ fn draw_pull_requests_sidebar(
     } else {
         format!("  ⚠{}", app.pull_request_warnings.len())
     };
-    let loading = if app.pull_requests_loading {
-        format!("  · {}%", app.pull_request_load_percent())
-    } else {
-        String::new()
-    };
+    let loading = app
+        .pull_request_progress
+        .map_or_else(String::new, |progress| {
+            format!("  · {}%", progress.percent())
+        });
     let cache = if app.pull_request_from_cache {
         "  · cached"
     } else {
         ""
     };
     let title = if let Some(number) = app.pull_request_exact_number {
-        format!(" Pull Requests  exact #{number}{cache}{warning} ")
+        format!(" Pull Request #{number}{loading}{cache}{warning} ")
     } else {
-        format!(
-            " PRs  {}/{}  · {}/{}{}{}{} ",
-            app.pull_request_fetched,
-            app.pull_request_total.max(app.pull_request_fetched),
-            app.pull_request_page,
-            app.pull_request_page_count(),
-            loading,
-            cache,
-            warning
-        )
+        format!(" Open Pull Request · on demand{loading}{warning} ")
     };
     let block = panel_block(
         title,
@@ -714,94 +813,53 @@ fn draw_pull_requests_sidebar(
         inner.width,
         inner.height.saturating_sub(controls_height),
     );
-    let visible = app.visible_pull_request_indices();
-    let height = list_area.height as usize;
-    ensure_offset(
-        &mut app.sidebar_offset,
-        app.pull_request_cursor,
-        height,
-        visible.len(),
-    );
-    let end = (app.sidebar_offset + height).min(visible.len());
-    let mut hits = Vec::new();
-    for (row_offset, index) in visible
-        .iter()
-        .take(end)
-        .skip(app.sidebar_offset)
-        .enumerate()
-    {
-        let cursor = app.sidebar_offset + row_offset;
-        let pull_request = &app.pull_requests[*index];
-        let selected = cursor == app.pull_request_cursor;
-        let y = list_area.y + row_offset as u16;
-        let background = if selected {
-            theme.selected
+    if let Some(pull_request) = app.selected_pull_request() {
+        let state = if pull_request.is_draft {
+            "DRAFT"
         } else {
-            theme.panel
+            pull_request.state.as_str()
         };
-        let number = format!("#{}", pull_request.number);
-        let reserved = 7 + number.width();
-        let title = truncate_middle(
-            &pull_request.title,
-            (list_area.width as usize).saturating_sub(reserved),
-        );
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
+        let description = if pull_request.description.trim().is_empty() {
+            "No description provided".to_owned()
+        } else {
+            pull_request.description.replace(['\r', '\n'], " ")
+        };
+        let lines = vec![
+            Line::from(vec![
                 Span::styled(
-                    if selected { " › " } else { "   " },
-                    Style::default().fg(theme.accent),
+                    format!(" #{}  ", pull_request.number),
+                    Style::default()
+                        .fg(theme.accent)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    match (pull_request.is_draft, pull_request.state.as_str()) {
-                        (true, _) => "◌ ",
-                        (_, "MERGED") => "◆ ",
-                        (_, "CLOSED") => "× ",
-                        _ => "● ",
-                    },
-                    Style::default().fg(
-                        match (pull_request.is_draft, pull_request.state.as_str()) {
-                            (true, _) => theme.modified,
-                            (_, "MERGED") => theme.accent,
-                            (_, "CLOSED") => theme.removed,
-                            _ => theme.added,
-                        },
+                    truncate_middle(
+                        &pull_request.title,
+                        list_area.width.saturating_sub(10) as usize,
                     ),
+                    Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(
-                    title,
-                    Style::default().fg(theme.text).add_modifier(if selected {
-                        Modifier::BOLD
-                    } else {
-                        Modifier::empty()
-                    }),
-                ),
-            ]))
-            .style(Style::default().bg(background)),
-            Rect::new(
-                list_area.x,
-                y,
-                list_area.width.saturating_sub(number.width() as u16 + 2),
-                1,
+            ]),
+            detail_line(
+                "Status",
+                format!("{state} · @{}", pull_request.author),
+                theme,
             ),
-        );
+            detail_line("Description", description, theme),
+            detail_line("Source", pull_request.head_label(), theme),
+            detail_line("Destination", pull_request.base_label(), theme),
+        ];
         frame.render_widget(
-            Paragraph::new(number)
-                .alignment(Alignment::Right)
-                .style(Style::default().fg(theme.accent).bg(background)),
-            Rect::new(
-                list_area.right().saturating_sub(9),
-                y,
-                8.min(list_area.width),
-                1,
-            ),
+            Paragraph::new(lines)
+                .style(Style::default().bg(theme.panel))
+                .wrap(Wrap { trim: true }),
+            list_area,
         );
-        hits.push((y, SidebarHit::PullRequest(*index)));
-    }
-    if app.pull_requests_loading && list_area.height > visible.len() as u16 {
-        let skeleton_count = (list_area.height as usize - visible.len()).min(6);
+    } else if app.pull_request_loading {
+        let skeleton_count = list_area.height.min(6);
         for offset in 0..skeleton_count {
-            let y = list_area.y + visible.len() as u16 + offset as u16;
-            let width = list_area.width.saturating_sub(8 + (offset % 3) as u16 * 5);
+            let y = list_area.y + offset;
+            let width = list_area.width.saturating_sub(8 + (offset % 3) * 5);
             frame.render_widget(
                 Paragraph::new(format!(
                     "   ◌ {}",
@@ -811,16 +869,11 @@ fn draw_pull_requests_sidebar(
                 Rect::new(list_area.x, y, list_area.width, 1),
             );
         }
-    }
-    draw_scrollbar(frame, list_area, app.sidebar_offset, visible.len(), theme);
-    if visible.is_empty() && !app.pull_requests_loading && list_area.height > 0 {
-        let message = if app.pull_request_exact_number.is_some() {
-            "\n  Pull request not found"
-        } else {
-            "\n  No pull requests in this repository"
-        };
+    } else if list_area.height > 0 {
         frame.render_widget(
-            Paragraph::new(message).style(Style::default().fg(theme.muted)),
+            Paragraph::new("\n  Enter a pull-request number below\n\n  Nothing is fetched until you press Enter.")
+                .style(Style::default().fg(theme.muted))
+                .wrap(Wrap { trim: false }),
             list_area,
         );
     }
@@ -830,12 +883,11 @@ fn draw_pull_requests_sidebar(
         .pull_request_repository
         .as_ref()
         .map(GitHubRepository::display_name)
-        .unwrap_or_else(|| "discovering repository…".to_owned());
+        .unwrap_or_else(|| "auto-detect from remotes".to_owned());
     if controls_height >= 1 {
-        let (open, merged, closed) = app.pull_request_state_counts();
         frame.render_widget(
             Paragraph::new(truncate_middle(
-                &format!(" repo {repository_name}  [o]  ●{open} ◆{merged} ×{closed}"),
+                &format!(" repo {repository_name}  [o choose]"),
                 inner.width as usize,
             ))
             .style(Style::default().fg(theme.text).bg(theme.panel_alt)),
@@ -882,27 +934,17 @@ fn draw_pull_requests_sidebar(
         }
     }
     if controls_height >= 3 {
-        let progress = if app.pull_requests_loading {
-            format!(
-                "{}% {}/{}",
-                app.pull_request_load_percent(),
-                app.pull_request_fetched,
-                app.pull_request_total.max(app.pull_request_fetched)
-            )
-        } else {
-            "done".to_owned()
-        };
+        let progress = app.pull_request_progress.map_or_else(
+            || "ready".to_owned(),
+            |progress| format!("{}% {}", progress.percent(), progress.label()),
+        );
         frame.render_widget(
-            Paragraph::new(format!(
-                " ←/→ {}/{}  ,/. files  r refresh  {progress}",
-                app.pull_request_page,
-                app.pull_request_page_count()
-            ))
-            .style(Style::default().fg(theme.muted).bg(theme.panel_alt)),
+            Paragraph::new(format!(" ,/. files  r refetch  {progress}"))
+                .style(Style::default().fg(theme.muted).bg(theme.panel_alt)),
             Rect::new(inner.x, controls_y + 2, inner.width, 1),
         );
     }
-    hits
+    Vec::new()
 }
 
 fn draw_content(
@@ -920,10 +962,20 @@ fn draw_content(
     } else {
         ""
     };
+    let loading = app.pull_request_progress.map_or_else(
+        || {
+            if app.document_loading {
+                "  ⟳".to_owned()
+            } else {
+                String::new()
+            }
+        },
+        |progress| format!("  ⟳ {}%", progress.percent()),
+    );
     let title = format!(
         " {}{}{} ",
-        truncate_middle(&app.document.title, area.width.saturating_sub(34) as usize),
-        if app.document_loading { "  ⟳" } else { "" },
+        truncate_middle(&app.document.title, area.width.saturating_sub(38) as usize),
+        loading,
         file_action,
     );
     let block = panel_block(
@@ -1018,7 +1070,7 @@ fn commit_details_row_count(available_height: u16) -> usize {
 }
 
 fn pull_request_details_row_count(available_height: u16) -> usize {
-    9.min(available_height.saturating_sub(3)) as usize
+    12.min(available_height.saturating_sub(3)) as usize
 }
 
 fn draw_commit_details_scrolled(
@@ -1117,10 +1169,7 @@ fn draw_pull_request_details_scrolled(
     theme: &Theme,
 ) {
     let block = Block::default()
-        .title(format!(
-            " Pull request #{} · page vs PR totals ",
-            details.number
-        ))
+        .title(format!(" Pull request #{} · details ", details.number))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.border))
         .style(Style::default().bg(theme.panel_alt).fg(theme.text));
@@ -1134,7 +1183,7 @@ fn draw_pull_request_details_scrolled(
         details.state.as_str()
     };
     let head_repository = details.head_repository.as_deref().unwrap_or("deleted fork");
-    let lines = vec![
+    let mut lines = vec![
         Line::from(Span::styled(
             details.title.as_str(),
             Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
@@ -1147,18 +1196,24 @@ fn draw_pull_request_details_scrolled(
             ),
             theme,
         ),
-        detail_line(
-            "Base",
-            format!(
-                "{}:{}{}",
-                details.base_repository,
-                details.base_ref,
-                remote_suffix(&details.base_remotes)
-            ),
+    ];
+    for (index, description) in description_preview_lines(
+        &details.description,
+        inner.width.saturating_sub(12) as usize,
+        3,
+    )
+    .into_iter()
+    .enumerate()
+    {
+        lines.push(detail_line(
+            if index == 0 { "Description" } else { "" },
+            description,
             theme,
-        ),
+        ));
+    }
+    lines.extend([
         detail_line(
-            "Head",
+            "Source",
             format!(
                 "{}:{}{}{}",
                 head_repository,
@@ -1169,6 +1224,16 @@ fn draw_pull_request_details_scrolled(
                 } else {
                     ""
                 }
+            ),
+            theme,
+        ),
+        detail_line(
+            "Destination",
+            format!(
+                "{}:{}{}",
+                details.base_repository,
+                details.base_ref,
+                remote_suffix(&details.base_remotes)
             ),
             theme,
         ),
@@ -1227,7 +1292,7 @@ fn draw_pull_request_details_scrolled(
                     .add_modifier(Modifier::BOLD),
             ),
         ]),
-    ];
+    ]);
     Paragraph::new(lines).render(inner, &mut buffer);
 
     for destination_row in 0..area.height {
@@ -1245,6 +1310,36 @@ fn draw_pull_request_details_scrolled(
             }
         }
     }
+}
+
+fn description_preview_lines(value: &str, width: usize, maximum_lines: usize) -> Vec<String> {
+    let width = width.max(1);
+    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    let normalized = if normalized.is_empty() {
+        "No description provided".to_owned()
+    } else {
+        normalized
+    };
+    let mut lines = Vec::with_capacity(maximum_lines);
+    let mut skipped = 0;
+    while skipped < normalized.width() && lines.len() < maximum_lines {
+        let line = slice_width(&normalized, skipped, width);
+        let used = line.width();
+        if used == 0 {
+            break;
+        }
+        skipped = skipped.saturating_add(used);
+        lines.push(line);
+    }
+    if skipped < normalized.width() {
+        if let Some(last) = lines.last_mut() {
+            *last = format!("{}…", slice_width(last, 0, width.saturating_sub(1)));
+        }
+    }
+    while lines.len() < maximum_lines {
+        lines.push(String::new());
+    }
+    lines
 }
 
 fn remote_suffix(remotes: &[String]) -> String {
@@ -2060,6 +2155,27 @@ fn draw_footer(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) {
             ),
             Span::styled(busy, Style::default().fg(theme.text)),
         ])
+    } else if let Some(progress) = app.pull_request_progress {
+        Line::from(vec![
+            Span::styled(
+                " ⟳ ",
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{}  ", progress.label()),
+                Style::default().fg(theme.text),
+            ),
+            Span::styled(
+                progress_bar(progress.percent(), 12),
+                Style::default().fg(theme.accent),
+            ),
+            Span::styled(
+                format!("  {}%", progress.percent()),
+                Style::default().fg(theme.muted),
+            ),
+        ])
     } else if app.refreshing {
         Line::from(vec![
             Span::styled(" ⟳ ", Style::default().fg(theme.accent)),
@@ -2117,11 +2233,24 @@ fn draw_modal(frame: &mut Frame<'_>, modal: &Modal, app: &App, theme: &Theme) {
             query,
             loading,
         } => draw_history_branches(frame, items, *selected, query, *loading, theme),
+        Modal::CompareBranches {
+            items,
+            selected,
+            query,
+            loading,
+        } => draw_compare_branches(frame, items, *selected, query, *loading, theme),
+        Modal::Stashes {
+            items,
+            selected,
+            query,
+            loading,
+        } => draw_stashes(frame, items, *selected, query, *loading, theme),
         Modal::PullRequestRepositories {
             items,
             selected,
             query,
-        } => draw_pull_request_repositories(frame, items, *selected, query, theme),
+            loading,
+        } => draw_pull_request_repositories(frame, items, *selected, query, *loading, theme),
         Modal::CommandPalette { query, selected } => {
             draw_palette(frame, app, query, *selected, theme);
         }
@@ -2506,11 +2635,235 @@ fn draw_history_branches(
     );
 }
 
+fn draw_compare_branches(
+    frame: &mut Frame<'_>,
+    items: &[HistoryBranch],
+    selected: usize,
+    query: &crate::app::TextBuffer,
+    loading: bool,
+    theme: &Theme,
+) {
+    let height = frame.area().height.saturating_sub(8).min(25);
+    let area = centered_rect(
+        frame.area().width.saturating_sub(12).min(82),
+        height,
+        frame.area(),
+    );
+    frame.render_widget(Clear, area);
+    let block = modal_block(" Compare Current Branch With… ", theme);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let query_area = Rect::new(inner.x, inner.y, inner.width, 1);
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(" / ", Style::default().fg(theme.accent)),
+            Span::styled(query.value.as_str(), Style::default().fg(theme.text)),
+        ]))
+        .style(Style::default().bg(theme.panel_alt)),
+        query_area,
+    );
+    set_text_cursor(
+        frame,
+        Rect::new(
+            query_area.x + 3,
+            query_area.y,
+            query_area.width.saturating_sub(3),
+            1,
+        ),
+        query,
+        false,
+    );
+    let list_area = Rect::new(
+        inner.x,
+        inner.y + 2,
+        inner.width,
+        inner.height.saturating_sub(4),
+    );
+    if loading {
+        frame.render_widget(
+            Paragraph::new("Loading local and remote-tracking branches…")
+                .style(Style::default().fg(theme.muted)),
+            list_area,
+        );
+    } else {
+        let visible = App::filtered_history_branches(items, &query.value)
+            .into_iter()
+            .filter(|index| !items[*index].current)
+            .collect::<Vec<_>>();
+        let offset = selected.saturating_sub(list_area.height.saturating_sub(1) as usize);
+        let lines = visible
+            .iter()
+            .skip(offset)
+            .take(list_area.height as usize)
+            .enumerate()
+            .filter_map(|(visible_offset, index)| {
+                let branch = items.get(*index)?;
+                let active = offset + visible_offset == selected;
+                let background = if active { theme.selected } else { theme.panel };
+                Some(Line::from(vec![
+                    Span::styled(
+                        if active { " › " } else { "   " },
+                        Style::default().fg(theme.accent).bg(background),
+                    ),
+                    Span::styled(
+                        truncate_middle(&branch.name, list_area.width.saturating_sub(34) as usize),
+                        Style::default()
+                            .fg(theme.text)
+                            .bg(background)
+                            .add_modifier(if active {
+                                Modifier::BOLD
+                            } else {
+                                Modifier::empty()
+                            }),
+                    ),
+                    Span::styled(
+                        format!(
+                            "  {}  {}  {}",
+                            if branch.remote { "remote" } else { "local" },
+                            branch.short_id,
+                            branch.relative_date
+                        ),
+                        Style::default().fg(theme.muted).bg(background),
+                    ),
+                ]))
+            })
+            .collect::<Vec<_>>();
+        frame.render_widget(Paragraph::new(lines), list_area);
+        if visible.is_empty() {
+            frame.render_widget(
+                Paragraph::new("No other branches match this filter")
+                    .style(Style::default().fg(theme.muted)),
+                list_area,
+            );
+        }
+    }
+    draw_modal_hint(
+        frame,
+        area,
+        "Enter calculate diff against HEAD   Esc close",
+        theme,
+    );
+}
+
+fn draw_stashes(
+    frame: &mut Frame<'_>,
+    items: &[Stash],
+    selected: usize,
+    query: &crate::app::TextBuffer,
+    loading: bool,
+    theme: &Theme,
+) {
+    let height = frame.area().height.saturating_sub(6).min(27);
+    let area = centered_rect(
+        frame.area().width.saturating_sub(10).min(88),
+        height,
+        frame.area(),
+    );
+    frame.render_widget(Clear, area);
+    let block = modal_block(" Stashes ", theme);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let query_area = Rect::new(inner.x, inner.y, inner.width, 1);
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(" / ", Style::default().fg(theme.accent)),
+            Span::styled(query.value.as_str(), Style::default().fg(theme.text)),
+        ]))
+        .style(Style::default().bg(theme.panel_alt)),
+        query_area,
+    );
+    set_text_cursor(
+        frame,
+        Rect::new(
+            query_area.x + 3,
+            query_area.y,
+            query_area.width.saturating_sub(3),
+            1,
+        ),
+        query,
+        false,
+    );
+    let list_area = Rect::new(
+        inner.x,
+        inner.y + 2,
+        inner.width,
+        inner.height.saturating_sub(5),
+    );
+    if loading {
+        frame.render_widget(
+            Paragraph::new("Loading stashes…").style(Style::default().fg(theme.muted)),
+            list_area,
+        );
+    } else {
+        let visible = App::filtered_stashes(items, &query.value);
+        let offset = selected.saturating_sub(list_area.height.saturating_sub(1) as usize);
+        let lines = visible
+            .iter()
+            .skip(offset)
+            .take(list_area.height as usize)
+            .enumerate()
+            .filter_map(|(visible_offset, index)| {
+                let stash = items.get(*index)?;
+                let active = offset + visible_offset == selected;
+                let background = if active { theme.selected } else { theme.panel };
+                let branch = if stash.branch.is_empty() {
+                    String::new()
+                } else {
+                    format!(" on {}", stash.branch)
+                };
+                Some(Line::from(vec![
+                    Span::styled(
+                        if active { " › " } else { "   " },
+                        Style::default().fg(theme.accent).bg(background),
+                    ),
+                    Span::styled(
+                        format!("{}  ", stash.reference),
+                        Style::default()
+                            .fg(theme.modified)
+                            .bg(background)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        truncate_middle(
+                            &stash.message,
+                            list_area.width.saturating_sub(40) as usize,
+                        ),
+                        Style::default().fg(theme.text).bg(background),
+                    ),
+                    Span::styled(
+                        format!("{branch}  {}  {}", stash.short_id, stash.relative_date),
+                        Style::default().fg(theme.muted).bg(background),
+                    ),
+                ]))
+            })
+            .collect::<Vec<_>>();
+        frame.render_widget(Paragraph::new(lines), list_area);
+        if visible.is_empty() {
+            frame.render_widget(
+                Paragraph::new(if items.is_empty() {
+                    "No stashes — Ctrl+n creates one"
+                } else {
+                    "No stashes match this filter"
+                })
+                .style(Style::default().fg(theme.muted)),
+                list_area,
+            );
+        }
+    }
+    draw_modal_hint(
+        frame,
+        area,
+        "Enter preview  Ctrl+n new  Ctrl+u +untracked  Ctrl+s staged  Alt+a apply  Alt+p pop  Del drop",
+        theme,
+    );
+}
+
 fn draw_pull_request_repositories(
     frame: &mut Frame<'_>,
     items: &[GitHubRepository],
     selected: usize,
     query: &crate::app::TextBuffer,
+    loading: bool,
     theme: &Theme,
 ) {
     let height = (items.len() as u16 + 7)
@@ -2593,11 +2946,23 @@ fn draw_pull_request_repositories(
             ]))
         })
         .collect::<Vec<_>>();
-    frame.render_widget(Paragraph::new(lines), list_area);
+    if loading {
+        frame.render_widget(
+            Paragraph::new("Discovering GitHub repositories from configured remotes…")
+                .style(Style::default().fg(theme.muted)),
+            list_area,
+        );
+    } else {
+        frame.render_widget(Paragraph::new(lines), list_area);
+    }
     draw_modal_hint(
         frame,
         area,
-        "Enter select repository and progressively load all PRs   Esc close",
+        if loading {
+            "Discovering repositories…   Esc close"
+        } else {
+            "Enter select repository and reopen only the entered PR   Esc close"
+        },
         theme,
     );
 }
@@ -2688,6 +3053,15 @@ fn palette_line(command: PaletteCommand, selected: bool, theme: &Theme) -> Line<
                 }),
         ),
     ])
+}
+
+fn progress_bar(percent: u16, width: usize) -> String {
+    let filled = usize::from(percent.min(100)).saturating_mul(width) / 100;
+    format!(
+        "{}{}",
+        "█".repeat(filled),
+        "░".repeat(width.saturating_sub(filled))
+    )
 }
 
 fn draw_toast(frame: &mut Frame<'_>, message: &str, level: ToastLevel, theme: &Theme) {
@@ -2918,6 +3292,59 @@ mod tests {
     }
 
     #[test]
+    fn changes_view_exposes_vscode_style_file_group_and_toolbar_actions() {
+        use std::path::PathBuf;
+
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = App::new("/tmp/repo", "repo");
+        app.status.changes = vec![
+            Change {
+                path: PathBuf::from("src/main.rs"),
+                original_path: None,
+                area: ChangeArea::Unstaged,
+                status: ChangeStatus::Modified,
+            },
+            Change {
+                path: PathBuf::from("README.md"),
+                original_path: None,
+                area: ChangeArea::Staged,
+                status: ChangeStatus::Modified,
+            },
+        ];
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+
+        assert!(rendered.contains("[+]"));
+        assert!(rendered.contains("[−]"));
+        assert!(rendered.contains("[c] Commit"));
+        assert!(rendered.contains("[S] Stashes"));
+        assert!(rendered.contains("[d] Compare Branch"));
+        assert!(
+            app.geometry
+                .scm_action_hits
+                .iter()
+                .any(|hit| matches!(hit.action, ScmAction::Stage(0)))
+        );
+        assert!(
+            app.geometry
+                .scm_action_hits
+                .iter()
+                .any(|hit| matches!(hit.action, ScmAction::Unstage(1)))
+        );
+    }
+
+    #[test]
     fn middle_truncation_respects_display_width() {
         let result = truncate_middle("src/a-very-long-file-name.rs", 14);
         assert!(result.width() <= 14);
@@ -3052,36 +3479,33 @@ mod tests {
         let mut app = App::new("/tmp/repo", "repo");
         app.view = View::PullRequests;
         app.focus = Focus::Content;
-        app.pull_requests_loaded = true;
-        app.pull_request_page = 2;
-        app.pull_request_total = 50;
-        app.pull_request_fetched = 50;
-        app.pull_requests = (1..=50)
-            .map(|number| crate::git::github::PullRequest {
-                number,
-                title: format!("PR {number}"),
-                author: "octocat".to_owned(),
-                state: "OPEN".to_owned(),
-                is_draft: false,
-                updated_at: String::new(),
-                url: format!("https://github.com/acme/widget/pull/{number}"),
-                base_ref: "main".to_owned(),
-                base_oid: String::new(),
-                head_ref: "topic".to_owned(),
-                head_oid: String::new(),
-                base_repository: GitHubRepository {
-                    name_with_owner: "acme/widget".to_owned(),
-                    url: "https://github.com/acme/widget".to_owned(),
-                    remotes: vec!["upstream".to_owned()],
-                },
-                head_repository: Some("acme/widget".to_owned()),
-                head_remotes: vec!["upstream".to_owned()],
-                is_cross_repository: false,
-                additions: 0,
-                deletions: 0,
-                changed_files: 0,
-            })
-            .collect();
+        app.pull_request_exact_number = Some(42);
+        app.pull_request_lookup = crate::app::TextBuffer::new("42");
+        app.pull_request = Some(crate::git::github::PullRequest {
+            number: 42,
+            title: "Ship the rocket".to_owned(),
+            description: "Launch safely after all checks pass".to_owned(),
+            author: "octocat".to_owned(),
+            state: "OPEN".to_owned(),
+            is_draft: false,
+            updated_at: String::new(),
+            url: "https://github.com/acme/widget/pull/42".to_owned(),
+            base_ref: "main".to_owned(),
+            base_oid: String::new(),
+            head_ref: "topic".to_owned(),
+            head_oid: String::new(),
+            base_repository: GitHubRepository {
+                name_with_owner: "acme/widget".to_owned(),
+                url: "https://github.com/acme/widget".to_owned(),
+                remotes: vec!["upstream".to_owned()],
+            },
+            head_repository: Some("acme/widget".to_owned()),
+            head_remotes: vec!["upstream".to_owned()],
+            is_cross_repository: false,
+            additions: 101,
+            deletions: 20,
+            changed_files: 1,
+        });
         app.pull_request_repository = Some(GitHubRepository {
             name_with_owner: "acme/widget".to_owned(),
             url: "https://github.com/acme/widget".to_owned(),
@@ -3094,6 +3518,7 @@ mod tests {
             pull_request_details: Some(PullRequestDetails {
                 number: 42,
                 title: "Ship the rocket".to_owned(),
+                description: "Launch safely after all checks pass".to_owned(),
                 author: "octocat".to_owned(),
                 state: "OPEN".to_owned(),
                 is_draft: false,
@@ -3140,11 +3565,15 @@ mod tests {
         assert!(rendered.contains("Pull Requests"));
         assert!(rendered.contains("PR #"));
         assert!(rendered.contains("acme/widget"));
-        assert!(rendered.contains("←/→ 2/2"));
+        assert!(!rendered.contains("←/→"));
         assert_eq!(rendered.matches("Pull request #42").count(), 1);
-        assert!(rendered.contains("page vs PR totals"));
+        assert!(rendered.contains("details"));
+        assert!(rendered.contains("Description"));
+        assert!(rendered.contains("Launch safely"));
+        assert!(rendered.contains("Destination"));
         assert!(rendered.contains("acme/widget:main"));
         assert!(rendered.contains("remote upstream"));
+        assert!(rendered.contains("Source"));
         assert!(rendered.contains("octocat/widget:feature/rocket"));
         assert!(rendered.contains("remotes origin, publish"));
         assert!(rendered.contains("fork"));
@@ -3157,45 +3586,16 @@ mod tests {
     }
 
     #[test]
-    fn pull_request_loading_renders_bottom_controls_progress_and_skeletons() {
+    fn pull_request_loading_renders_on_demand_progress_and_skeletons() {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
 
         let mut app = App::new("/tmp/repo", "repo");
         app.view = View::PullRequests;
-        app.pull_requests_loading = true;
-        app.pull_request_total = 100;
-        app.pull_request_fetched = 2;
-        app.pull_requests = (1..=2)
-            .map(|number| crate::git::github::PullRequest {
-                number,
-                title: format!("Pull request {number}"),
-                author: "ada".to_owned(),
-                state: "OPEN".to_owned(),
-                is_draft: false,
-                updated_at: String::new(),
-                url: format!("https://github.com/acme/widget/pull/{number}"),
-                base_ref: "main".to_owned(),
-                base_oid: String::new(),
-                head_ref: "topic".to_owned(),
-                head_oid: String::new(),
-                base_repository: GitHubRepository {
-                    name_with_owner: "acme/widget".to_owned(),
-                    url: "https://github.com/acme/widget".to_owned(),
-                    remotes: vec!["origin".to_owned()],
-                },
-                head_repository: Some("acme/widget".to_owned()),
-                head_remotes: vec!["origin".to_owned()],
-                is_cross_repository: false,
-                additions: 0,
-                deletions: 0,
-                changed_files: 0,
-            })
-            .collect();
-        app.pull_request_repository = app
-            .pull_requests
-            .first()
-            .map(|pull_request| pull_request.base_repository.clone());
+        app.pull_request_loading = true;
+        app.pull_request_exact_number = Some(42);
+        app.pull_request_lookup = crate::app::TextBuffer::new("42");
+        app.pull_request_progress = Some(crate::git::github::PullRequestProgress::FetchingHead);
         let backend = TestBackend::new(120, 30);
         let mut terminal = Terminal::new(backend).unwrap();
 
@@ -3206,10 +3606,10 @@ mod tests {
             .flat_map(|row| (0..42).map(move |column| buffer[(column, row)].symbol()))
             .collect::<String>();
 
-        assert!(rendered.contains("2%"));
-        assert!(rendered.contains("2/100"));
-        assert!(rendered.contains("──"));
-        assert!(bottom.contains("repo acme/widget"));
+        assert!(rendered.contains("50%"));
+        assert!(rendered.contains("Fetching the source commit"));
+        assert!(rendered.contains('█'));
+        assert!(bottom.contains("auto-detect"));
         assert!(bottom.contains("PR #"));
     }
 
@@ -3249,9 +3649,18 @@ mod tests {
         assert_eq!(commit_details_row_count(30), 7);
         assert_eq!(commit_details_row_count(8), 5);
         assert_eq!(commit_details_row_count(3), 0);
-        assert_eq!(pull_request_details_row_count(30), 9);
+        assert_eq!(pull_request_details_row_count(30), 12);
         assert_eq!(pull_request_details_row_count(9), 6);
         assert_eq!(pull_request_details_row_count(3), 0);
+    }
+
+    #[test]
+    fn pull_request_description_preview_is_bounded_and_marks_truncation() {
+        let lines =
+            description_preview_lines("one two three four five six seven eight nine ten", 10, 3);
+        assert_eq!(lines.len(), 3);
+        assert!(lines.last().unwrap().ends_with('…'));
+        assert!(lines.iter().all(|line| line.width() <= 10));
     }
 
     #[test]
