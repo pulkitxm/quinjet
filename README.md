@@ -20,7 +20,7 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 - Paginated, branch-scoped commit history with a view-only local/remote branch picker that never checks out
 - On-demand pull-request lookup by number—no startup prefetch and no repository-wide PR listing
 - PR title, source/destination branches, state, totals, description, and the whole conversation: comments, reviews and their inline replies, pushed commits, force pushes, and every lifecycle event
-- Foldable GitHub Actions logs per check run, with each step's output attached to the step that produced it
+- Foldable GitHub Actions logs per check run, with each step's output attached to the step that produced it, tailing while the job is still running
 - Adaptive live refresh that watches a running pull request closely and a settled one loosely, plus optional instant refresh from forwarded webhooks
 - Exact per-file line counts the moment a diff is indexed, and a virtualized changed-file tree with batched background patches
 - Reused local PR workspaces across multiple fetch/push remotes and forks—no checkout or persistent source refs
@@ -122,7 +122,9 @@ History starts at the currently checked-out branch instead of mixing every ref i
 
 Press `3`, enter a positive PR number, and press Enter. That explicit action is the first time Quinjet performs any GitHub request: startup and tab switching never list, prefetch, or auto-fetch pull requests. Quinjet lazily discovers the most appropriate configured GitHub repository and fetches only that PR's metadata.
 
-The view has two halves. **Pull request** (`P`) lists the conversation and every check run on the left. With the conversation selected, the right side is the pull request itself: title, state, author, source and destination, totals, check summary, description, and the full thread of comments, reviews and their inline replies, pushed commits, force pushes, renames, labels, and merges. Selecting a check replaces the right side with that run's steps, each showing its status and duration and folding open to the log lines that step produced; `[` and `]` move between steps, `Space` folds one, and `e` folds them all. The failing step opens on its own.
+The view has two halves. **Pull request** (`P`) lists the conversation and every check run on the left. With the conversation selected, the right side is the pull request itself: title, state, author, source and destination, totals, check summary, description, and the full thread of comments, reviews and their inline replies, pushed commits, force pushes, renames, labels, and merges. Selecting a check replaces the right side with that run's steps, each showing its status and duration and folding open to the log lines that step produced. `j`/`k` move through the steps, `Space` folds one, `e` folds them all, and `PgUp`/`PgDn` or the wheel scroll an unfolded step's output.
+
+A run still in progress is shown as it happens rather than as a placeholder: finished steps carry their durations, the step in flight counts up, and its output is re-read often enough to tail. The view stays on the newest lines while you sit at the end and holds still once you scroll up to read something earlier. The step that failed, or the one still running, opens on its own.
 
 Prose is wrapped to the pane and stays put. Code blocks, log output and diff context keep their original width instead, and `h`/`l` or `←`/`→` scroll only those, so a pasted terminal capture or a long log line can be read without the surrounding comment sliding away. The panel title shows how far the widest line extends past the edge.
 
@@ -163,7 +165,7 @@ The UI intentionally stays uncluttered; press `?` for the complete shortcut refe
 | `b` elsewhere / `B` | Checkout branch picker; `F2`/`Ctrl+R` renames a local branch |
 | `o` in Pull Requests | Discover/select a repository and reopen the entered PR |
 | `P` / `F` in Pull Requests | The pull request and its checks/all changed files |
-| `[` / `]` in a check log | Previous/next step |
+| `j` / `k`, `[` / `]` in a check log | Previous/next step |
 | `Space` / `e` in a check log | Fold the selected step/every step |
 | `←` / `→`, `h` / `l`, `Enter`, or `Space` on a PR folder | Collapse/expand that folder |
 | `r` | Refresh status; refetch the opened PR and checks in the PR view |
@@ -187,7 +189,7 @@ Text fields support Unicode-safe editing plus familiar terminal and macOS motion
 - Syntax grammar work is bounded to 512 KiB per patch and 32 KiB per row. Larger generated patches retain diff coloring but use plain source spans, preventing highlighting—not Git—from dominating load time; collapsed cached files also keep only their headers in the combined document.
 - History is paginated for one explicit branch revision; choosing another branch is read-only.
 - No pull-request command is queued at startup or when the PR tab opens. Only an explicit positive-number lookup contacts GitHub, and refreshing refetches only that PR.
-- Once a pull request is open it refreshes on an adaptive schedule: check state every 5 seconds while a run is in progress, every 20 seconds once it settles, and every 2 minutes from another view. Metadata and the conversation hold a 20-second floor and a growing log a 15-second floor regardless of the tick, so a fast cadence costs one extra request rather than five. A finished run's log is never re-read, each read is independent so one failing endpoint never stalls the others, and a moved head reindexes only the diff. A forwarded webhook bypasses every floor.
+- Once a pull request is open it refreshes on an adaptive schedule: check state every 5 seconds while a run is in progress, every 20 seconds once it settles, and every 2 minutes from another view. Metadata and the conversation hold a 20-second floor and a growing log an 8-second floor regardless of the tick, so a fast cadence costs one extra request rather than five. A finished run's log is never re-read, each read is independent so one failing endpoint never stalls the others, and a moved head reindexes only the diff. A forwarded webhook bypasses every floor.
 - Conversations are bounded to 500 entries and check logs to 8 MiB / 200,000 lines, read through the same capped pipes as every other subprocess.
 - On-demand repository discovery inspects at most 32 Git remotes, 64 configured fetch/push URL entries (32 distinct URLs), and 16 GitHub repositories.
 - PR file indexes are capped at 16,384 paths / 8 MiB. Each selected file has an independent 8 MiB patch cap; the full PR patch is never materialized. Potentially large subprocess output is streamed and the child is terminated at the cap.
