@@ -122,13 +122,13 @@ History starts at the currently checked-out branch instead of mixing every ref i
 
 Press `3`, enter a positive PR number, and press Enter. That explicit action is the first time Quinjet performs any GitHub request: startup and tab switching never list, prefetch, or auto-fetch pull requests. Quinjet lazily discovers the most appropriate configured GitHub repository and fetches only that PR's metadata.
 
-The view has two halves. **Pull request** (`P`) lists the conversation and every check run on the left. With the conversation selected, the right side is the pull request itself: title, state, author, source and destination, totals, check summary, description, and the full thread of comments, reviews and their inline replies, pushed commits, force pushes, renames, labels, and merges. Selecting a check replaces the right side with that run's steps, each showing its status and duration and folding open to the log lines that step produced. `j`/`k` move through the steps, `Space` folds one, `e` folds them all, and `PgUp`/`PgDn` or the wheel scroll an unfolded step's output.
+The view has two halves. **PR** (`Shift+P`) lists the conversation and every check run on the left. With the conversation selected, the right side is the pull request itself: title, state, author, source and destination, totals, check summary, description, and the full thread of comments, reviews and their inline replies, pushed commits, force pushes, renames, labels, and merges. Selecting a check replaces the right side with that run's steps, each showing its status and duration and folding open to the log lines that step produced. `j`/`k` move through the steps, `Space` folds one, `e` folds them all, and `PgUp`/`PgDn` or the wheel scroll an unfolded step's output.
 
 A run still in progress is shown as it happens rather than as a placeholder: finished steps carry their durations, the step in flight counts up, and its output is re-read often enough to tail. The view stays on the newest lines while you sit at the end and holds still once you scroll up to read something earlier. The step that failed, or the one still running, opens on its own.
 
 Prose is wrapped to the pane and stays put. Code blocks, log output and diff context keep their original width instead, and `h`/`l` or `←`/`→` scroll only those, so a pasted terminal capture or a long log line can be read without the surrounding comment sliding away. The panel title shows how far the widest line extends past the edge.
 
-**Files** (`F`) is the changed-file tree. Quinjet prepares a local Git comparison as soon as a PR opens and indexes every changed path together with its exact line counts, so headers read `+40 -0` immediately rather than resolving one file at a time. Patches then stream in behind batched reads, and anything you select is usually already there. Every file and folder is selectable; click a folder or use `Left`/`Right`, `h`/`l`, `Enter`, or `Space` to collapse and expand it. Rapid selections coalesce and stale results are discarded, so a PR with one file and a PR with thousands use the same stable layout.
+**Files** (`Shift+F`) is the changed-file tree. Quinjet prepares a local Git comparison as soon as a PR opens and indexes every changed path together with its exact line counts, so headers read `+40 -0` immediately rather than resolving one file at a time. Patches then stream in behind batched reads, and anything you select is usually already there. Every file and folder is selectable; click a folder or use `Left`/`Right`, `h`/`l`, `Enter`, or `Space` to collapse and expand it. Rapid selections coalesce and stale results are discarded, so a PR with one file and a PR with thousands use the same stable layout.
 
 Press `o` to discover or choose a configured remote repository, and `r` to refetch the current PR immediately.
 
@@ -164,7 +164,7 @@ The UI intentionally stays uncluttered; press `?` for the complete shortcut refe
 | `b` in History | View another local/remote branch without checkout |
 | `b` elsewhere / `B` | Checkout branch picker; `F2`/`Ctrl+R` renames a local branch |
 | `o` in Pull Requests | Discover/select a repository and reopen the entered PR |
-| `P` / `F` in Pull Requests | The pull request and its checks/all changed files |
+| `Shift+P` / `Shift+F` in Pull Requests | The PR and its checks/all changed files |
 | `j` / `k`, `[` / `]` in a check log | Previous/next step |
 | `Space` / `e` in a check log | Fold the selected step/every step |
 | `←` / `→`, `h` / `l`, `Enter`, or `Space` on a PR folder | Collapse/expand that folder |
