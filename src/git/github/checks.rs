@@ -54,6 +54,10 @@ pub struct PullRequestCheck {
 }
 
 impl PullRequestCheck {
+    pub fn duration_label(&self) -> String {
+        elapsed_label(&self.started_at, &self.completed_at)
+    }
+
     /// GitHub Actions check links end in `/actions/runs/<run>/job/<job>`, which
     /// is the only place a check run exposes the job identity its logs need.
     pub fn job_id(&self) -> Option<u64> {
@@ -92,7 +96,7 @@ pub struct CheckStep {
 
 impl CheckStep {
     pub fn duration_label(&self) -> String {
-        duration_label(&self.started_at, &self.completed_at)
+        elapsed_label(&self.started_at, &self.completed_at)
     }
 }
 
@@ -445,7 +449,9 @@ fn assign_lines_to_steps(steps: &mut [CheckStep], lines: Vec<CheckLogLine>) -> V
     loose
 }
 
-fn duration_label(started_at: &str, completed_at: &str) -> String {
+/// Render an elapsed span between two RFC 3339 stamps, or nothing when either
+/// is missing or the pair does not describe a forward span.
+pub fn elapsed_label(started_at: &str, completed_at: &str) -> String {
     let Some(seconds) = elapsed_seconds(started_at, completed_at) else {
         return String::new();
     };
@@ -712,22 +718,22 @@ untimestamped trailing output\n";
     #[test]
     fn measures_elapsed_time_across_month_and_year_boundaries() {
         assert_eq!(
-            duration_label("2026-02-28T23:59:30Z", "2026-03-01T00:00:30Z"),
+            elapsed_label("2026-02-28T23:59:30Z", "2026-03-01T00:00:30Z"),
             "1m 0s",
             "February ends on the 28th outside a leap year"
         );
         assert_eq!(
-            duration_label("2024-02-28T12:00:00Z", "2024-03-01T12:30:00Z"),
+            elapsed_label("2024-02-28T12:00:00Z", "2024-03-01T12:30:00Z"),
             "48h 30m",
             "a leap year adds the extra day between the same two dates"
         );
         assert_eq!(
-            duration_label("2025-12-31T23:00:00Z", "2026-01-01T01:15:00Z"),
+            elapsed_label("2025-12-31T23:00:00Z", "2026-01-01T01:15:00Z"),
             "2h 15m"
         );
-        assert_eq!(duration_label("bad", "worse"), "");
+        assert_eq!(elapsed_label("bad", "worse"), "");
         assert_eq!(
-            duration_label("2026-08-14T18:00:00Z", "2026-08-14T17:00:00Z"),
+            elapsed_label("2026-08-14T18:00:00Z", "2026-08-14T17:00:00Z"),
             "",
             "a completion before its start is reported as unknown, never negative"
         );
