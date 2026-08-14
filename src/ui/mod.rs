@@ -2075,7 +2075,11 @@ fn wrap_prose(value: &str, width: usize) -> Vec<(ProseStyle, String)> {
             ""
         };
         let available = width.saturating_sub(indent.width() + prefix.width());
-        for (index, wrapped) in wrap_words(body, available).into_iter().enumerate() {
+        // Emphasis markers carry no meaning once the line is styled. Backticks
+        // stay because a terminal has no other way to set inline code apart, and
+        // underscores stay because they are ordinary characters in identifiers.
+        let body = body.replace('*', "");
+        for (index, wrapped) in wrap_words(&body, available).into_iter().enumerate() {
             let lead = if index == 0 {
                 format!("{indent}{prefix}")
             } else {
@@ -5003,6 +5007,200 @@ mod tests {
         assert!(
             rendered.contains("Launch"),
             "the pull-request body is part of the default view"
+        );
+    }
+
+    fn overview_app() -> App {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.view = View::PullRequests;
+        app.pull_request_exact_number = Some(42);
+        app.pull_request = Some(crate::git::github::PullRequest {
+            number: 42,
+            title: "Ship the rocket".to_owned(),
+            description: "## Summary\n- Launch **safely**\n\n```sh\ncargo test\n```".to_owned(),
+            author: "octocat".to_owned(),
+            state: "OPEN".to_owned(),
+            is_draft: false,
+            created_at: "2026-08-01T09:00:00Z".to_owned(),
+            updated_at: "2026-08-02T10:30:00Z".to_owned(),
+            url: "https://github.com/acme/widget/pull/42".to_owned(),
+            base_ref: "main".to_owned(),
+            base_oid: String::new(),
+            head_ref: "feature/rocket".to_owned(),
+            head_oid: String::new(),
+            base_repository: GitHubRepository {
+                name_with_owner: "acme/widget".to_owned(),
+                url: "https://github.com/acme/widget".to_owned(),
+                remotes: vec!["origin".to_owned()],
+            },
+            head_repository: Some("acme/widget".to_owned()),
+            head_remotes: vec!["origin".to_owned()],
+            is_cross_repository: false,
+            additions: 101,
+            deletions: 20,
+            changed_files: 3,
+        });
+        app.pull_request_checks = vec![PullRequestCheck {
+            name: "Format, lint, and test".to_owned(),
+            workflow: "CI".to_owned(),
+            state: "FAILURE".to_owned(),
+            status: PullRequestCheckStatus::Failed,
+            description: String::new(),
+            link: "https://github.com/acme/widget/actions/runs/9/job/12".to_owned(),
+            started_at: "2026-08-02T10:00:00Z".to_owned(),
+            completed_at: "2026-08-02T10:02:30Z".to_owned(),
+        }];
+        app
+    }
+
+    #[test]
+    fn pull_request_overview_reads_as_a_conversation_beside_its_checks() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = overview_app();
+        app.pull_request_conversation = crate::git::github::PullRequestConversation {
+            truncated: false,
+            entries: vec![
+                ConversationEntry {
+                    kind: ConversationKind::Opened,
+                    actor: "octocat".to_owned(),
+                    timestamp: "2026-08-01T09:00:00Z".to_owned(),
+                    detail: "feature/rocket into main".to_owned(),
+                    body: "## Summary".to_owned(),
+                    url: String::new(),
+                    reference: String::new(),
+                    context: String::new(),
+                },
+                ConversationEntry {
+                    kind: ConversationKind::ForcePush,
+                    actor: "octocat".to_owned(),
+                    timestamp: "2026-08-02T09:10:00Z".to_owned(),
+                    detail: String::new(),
+                    body: String::new(),
+                    url: String::new(),
+                    reference: "deadbeefcafe".to_owned(),
+                    context: String::new(),
+                },
+                ConversationEntry {
+                    kind: ConversationKind::ReviewComment,
+                    actor: "reviewer".to_owned(),
+                    timestamp: "2026-08-02T09:30:00Z".to_owned(),
+                    detail: "src/main.rs:42".to_owned(),
+                    body: "Extract this into a helper".to_owned(),
+                    url: String::new(),
+                    reference: String::new(),
+                    context: "@@ -1 +1 @@\n-old\n+new".to_owned(),
+                },
+            ],
+        };
+        let mut terminal = Terminal::new(TestBackend::new(150, 40)).unwrap();
+
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+
+        assert!(rendered.contains("[P] Pull request"));
+        assert!(rendered.contains("Conversation"));
+        assert!(rendered.contains("Format, lint, and test"));
+        assert!(rendered.contains("#42"));
+        assert!(rendered.contains("acme/widget:main"));
+        assert!(rendered.contains("2026-08-01 09:00"));
+        assert!(rendered.contains("Description"));
+        assert!(
+            rendered.contains("Launch safely"),
+            "the body renders as prose, not as raw Markdown"
+        );
+        assert!(rendered.contains("cargo test"), "fenced code survives");
+        assert!(rendered.contains("opened this pull request"));
+        assert!(rendered.contains("force-pushed to deadbee"));
+        assert!(rendered.contains("commented on src/main.rs:42"));
+        assert!(rendered.contains("Extract this into a helper"));
+        assert!(
+            !rendered.contains("## Summary"),
+            "the opening post never repeats the description above it"
+        );
+    }
+
+    #[test]
+    fn selecting_a_check_shows_its_steps_and_opens_the_failure() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = overview_app();
+        app.pull_request_check_cursor = Some(0);
+        app.pull_request_step_cursor = 2;
+        app.expanded_check_steps.insert(2);
+        app.pull_request_check_log = Some(crate::git::github::CheckRunLog {
+            truncated: false,
+            unavailable: None,
+            loose_lines: vec![CheckLogLine {
+                timestamp: "2026-08-02T10:02:31Z".to_owned(),
+                text: "Cleaning up runner".to_owned(),
+                severity: CheckLogSeverity::Normal,
+            }],
+            steps: vec![
+                CheckStep {
+                    number: 1,
+                    name: "Set up job".to_owned(),
+                    status: PullRequestCheckStatus::Passed,
+                    conclusion: "success".to_owned(),
+                    started_at: "2026-08-02T10:00:00Z".to_owned(),
+                    completed_at: "2026-08-02T10:00:02Z".to_owned(),
+                    lines: vec![CheckLogLine {
+                        timestamp: "2026-08-02T10:00:01Z".to_owned(),
+                        text: "hidden while folded".to_owned(),
+                        severity: CheckLogSeverity::Normal,
+                    }],
+                },
+                CheckStep {
+                    number: 2,
+                    name: "Run cargo test".to_owned(),
+                    status: PullRequestCheckStatus::Failed,
+                    conclusion: "failure".to_owned(),
+                    started_at: "2026-08-02T10:00:02Z".to_owned(),
+                    completed_at: "2026-08-02T10:02:30Z".to_owned(),
+                    lines: vec![CheckLogLine {
+                        timestamp: "2026-08-02T10:02:29Z".to_owned(),
+                        text: "test tests::rockets ... FAILED".to_owned(),
+                        severity: CheckLogSeverity::Error,
+                    }],
+                },
+            ],
+        });
+        let mut terminal = Terminal::new(TestBackend::new(150, 40)).unwrap();
+
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+
+        assert!(rendered.contains("2 steps"));
+        assert!(rendered.contains("Set up job"));
+        assert!(rendered.contains("Run cargo test"));
+        assert!(
+            rendered.contains("2m 28s"),
+            "a step reports how long it ran"
+        );
+        assert!(rendered.contains("test tests::rockets ... FAILED"));
+        assert!(
+            !rendered.contains("hidden while folded"),
+            "a folded step keeps its output out of the way"
+        );
+        assert!(rendered.contains("Runner output"));
+        assert!(rendered.contains("Cleaning up runner"));
+        assert!(
+            !app.geometry.content_step_hits.is_empty(),
+            "step rows stay clickable"
         );
     }
 
