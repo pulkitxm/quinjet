@@ -1,9 +1,16 @@
+use std::borrow::Cow;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle, Theme, ThemeSet};
 use syntect::parsing::{SyntaxReference, SyntaxSet};
+use unicode_width::UnicodeWidthChar;
+
+const TAB_WIDTH: usize = 4;
+const MAX_SYNTAX_HIGHLIGHT_PATCH_BYTES: usize = 512 * 1024;
+const MAX_SYNTAX_HIGHLIGHT_LINE_BYTES: usize = 32 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiffLineKind {
@@ -69,10 +76,139 @@ pub struct CommitDetails {
     pub committed_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiffFileIndexEntry {
+    pub path: PathBuf,
+    pub old_path: Option<PathBuf>,
+    pub status: String,
+}
+
+impl DiffFileIndexEntry {
+    fn label(&self) -> String {
+        let mut label = self.path.display().to_string();
+        if let Some(old_path) = self.old_path.as_ref().filter(|old| *old != &self.path) {
+            label.push_str(&format!("  · renamed from {}", old_path.display()));
+        } else if !self.status.is_empty() {
+            label.push_str(&format!("  · {}", self.status));
+        }
+        label
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DiffIndex {
+    pub title: String,
+    pub files: Vec<DiffFileIndexEntry>,
+    pub truncated: bool,
+    pub commit_details: Option<CommitDetails>,
+}
+
+impl DiffIndex {
+    #[cfg(test)]
+    pub fn document(&self, loaded: &HashMap<PathBuf, DiffDocument>) -> DiffDocument {
+        self.document_with_visibility(loaded, |_| true)
+    }
+
+    pub fn document_with_visibility(
+        &self,
+        loaded: &HashMap<PathBuf, DiffDocument>,
+        mut visible: impl FnMut(&Path) -> bool,
+    ) -> DiffDocument {
+        if self.files.is_empty() {
+            let mut document = DiffDocument::empty(&self.title, "No file changes to display");
+            document.commit_details.clone_from(&self.commit_details);
+            return document;
+        }
+
+        let mut lines = Vec::with_capacity(self.files.len().saturating_mul(3));
+        let mut truncated = self.truncated;
+        for file in &self.files {
+            let loaded_document = loaded.get(&file.path);
+            let show_body = visible(&file.path);
+            truncated |= loaded_document.is_some_and(|document| document.truncated);
+            let loaded_header = loaded_document.and_then(|document| {
+                document
+                    .lines
+                    .iter()
+                    .find(|line| line.kind == DiffLineKind::FileHeader)
+            });
+            if show_body {
+                if let Some(document) = loaded_document.filter(|_| loaded_header.is_some()) {
+                    let mut file_lines = document.lines.clone();
+                    if let Some(label) = file_lines
+                        .iter_mut()
+                        .find(|line| line.kind == DiffLineKind::FileHeader)
+                        .and_then(|header| header.spans.first_mut())
+                    {
+                        label.text = file.label();
+                    }
+                    lines.extend(file_lines);
+                    continue;
+                }
+            }
+
+            let mut header = index_file_header(file);
+            if let Some(loaded_header) = loaded_header {
+                for span_index in 1..=2 {
+                    if let (Some(target), Some(source)) = (
+                        header.spans.get_mut(span_index),
+                        loaded_header.spans.get(span_index),
+                    ) {
+                        target.text.clone_from(&source.text);
+                    }
+                }
+            }
+            lines.push(header);
+            if show_body {
+                if let Some(document) = loaded_document {
+                    lines.extend(document.lines.clone());
+                } else {
+                    lines.push(meta_line(
+                        DiffLineKind::Meta,
+                        "Diff loads only when this file is expanded",
+                    ));
+                }
+            } else {
+                lines.push(meta_line(
+                    DiffLineKind::Meta,
+                    if loaded_document.is_some() {
+                        "Diff loaded — expand this file to display it"
+                    } else {
+                        "Diff loads only when this file is expanded"
+                    },
+                ));
+            }
+            lines.push(meta_line(DiffLineKind::FileFooter, ""));
+        }
+
+        DiffDocument {
+            title: self.title.clone(),
+            lines,
+            truncated,
+            commit_details: self.commit_details.clone(),
+            pull_request_details: None,
+        }
+    }
+}
+
+fn index_file_header(file: &DiffFileIndexEntry) -> DiffLine {
+    DiffLine {
+        kind: DiffLineKind::FileHeader,
+        old_line: None,
+        new_line: None,
+        spans: vec![
+            HighlightSpan::plain(file.label()),
+            HighlightSpan::plain("+?"),
+            HighlightSpan::plain("-?"),
+        ],
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PullRequestDetails {
     pub number: u64,
     pub title: String,
+    pub description: String,
     pub author: String,
     pub state: String,
     pub is_draft: bool,
@@ -86,18 +222,11 @@ pub struct PullRequestDetails {
     pub head_remotes: Vec<String>,
     pub is_cross_repository: bool,
     pub changed_files: usize,
-    /// Whole-PR totals reported by GitHub.
     pub additions: usize,
     pub deletions: usize,
-    /// Counts represented by the currently rendered file page.
-    pub page_additions: usize,
-    pub page_deletions: usize,
-    pub file_page: usize,
-    pub file_page_size: usize,
-    pub displayed_files: usize,
-    pub total_files: usize,
-    pub has_previous_file_page: bool,
-    pub has_next_file_page: bool,
+    pub selected_file: Option<String>,
+    pub selected_file_additions: usize,
+    pub selected_file_deletions: usize,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -182,11 +311,14 @@ pub fn parse_diff(
         return DiffDocument::empty(title, "No textual diff to display");
     }
 
-    let assets = highlight_assets();
+    // Syntect is intentionally bounded. Raw Git patch generation is generally fast,
+    // but grammar parsing can dominate large or generated files by several seconds.
+    // Large patches retain diff coloring and line numbers while using plain source
+    // spans; ordinary patches keep full syntax highlighting.
+    let assets = (raw.len() <= MAX_SYNTAX_HIGHLIGHT_PATCH_BYTES).then(highlight_assets);
     let mut active_path = path_hint.map(Path::to_path_buf);
-    let mut syntax = syntax_for_path(&assets.syntaxes, active_path.as_deref());
-    let mut old_highlighter = HighlightLines::new(syntax, &assets.theme);
-    let mut new_highlighter = HighlightLines::new(syntax, &assets.theme);
+    let mut old_highlighter = highlighter_for_path(assets, active_path.as_deref());
+    let mut new_highlighter = highlighter_for_path(assets, active_path.as_deref());
     let mut old_line = None;
     let mut new_line = None;
     let mut current_file: Option<FileBuilder> = None;
@@ -201,9 +333,8 @@ pub fn parse_diff(
             let (old_path, new_path) = diff_header_paths(header);
             current_file = Some(FileBuilder::new(old_path, new_path, path_hint));
             active_path = current_file.as_ref().and_then(FileBuilder::syntax_path);
-            syntax = syntax_for_path(&assets.syntaxes, active_path.as_deref());
-            old_highlighter = HighlightLines::new(syntax, &assets.theme);
-            new_highlighter = HighlightLines::new(syntax, &assets.theme);
+            old_highlighter = highlighter_for_path(assets, active_path.as_deref());
+            new_highlighter = highlighter_for_path(assets, active_path.as_deref());
             old_line = None;
             new_line = None;
             continue;
@@ -218,9 +349,8 @@ pub fn parse_diff(
             let path = Some(PathBuf::from(decode_git_path(path)));
             current_file = Some(FileBuilder::new(path.clone(), path, path_hint));
             active_path = current_file.as_ref().and_then(FileBuilder::syntax_path);
-            syntax = syntax_for_path(&assets.syntaxes, active_path.as_deref());
-            old_highlighter = HighlightLines::new(syntax, &assets.theme);
-            new_highlighter = HighlightLines::new(syntax, &assets.theme);
+            old_highlighter = highlighter_for_path(assets, active_path.as_deref());
+            new_highlighter = highlighter_for_path(assets, active_path.as_deref());
             old_line = None;
             new_line = None;
             continue;
@@ -264,9 +394,8 @@ pub fn parse_diff(
             file_mut(&mut current_file, path_hint).new_path = new_path.clone();
             active_path =
                 new_path.or_else(|| current_file.as_ref().and_then(|file| file.old_path.clone()));
-            syntax = syntax_for_path(&assets.syntaxes, active_path.as_deref());
-            old_highlighter = HighlightLines::new(syntax, &assets.theme);
-            new_highlighter = HighlightLines::new(syntax, &assets.theme);
+            old_highlighter = highlighter_for_path(assets, active_path.as_deref());
+            new_highlighter = highlighter_for_path(assets, active_path.as_deref());
             continue;
         }
         if raw_line.starts_with("old mode ") || raw_line.starts_with("new mode ") {
@@ -301,7 +430,8 @@ pub fn parse_diff(
         if let Some(content) = raw_line.strip_prefix('+') {
             let number = new_line;
             new_line = new_line.map(|line| line + 1);
-            let spans = highlight(&mut new_highlighter, content, &assets.syntaxes);
+            let content = expand_tabs(content);
+            let spans = highlight_optional(&mut new_highlighter, &content, assets);
             let file = file_mut(&mut current_file, path_hint);
             file.additions += 1;
             file.lines.push(DiffLine {
@@ -313,7 +443,8 @@ pub fn parse_diff(
         } else if let Some(content) = raw_line.strip_prefix('-') {
             let number = old_line;
             old_line = old_line.map(|line| line + 1);
-            let spans = highlight(&mut old_highlighter, content, &assets.syntaxes);
+            let content = expand_tabs(content);
+            let spans = highlight_optional(&mut old_highlighter, &content, assets);
             let file = file_mut(&mut current_file, path_hint);
             file.deletions += 1;
             file.lines.push(DiffLine {
@@ -327,10 +458,11 @@ pub fn parse_diff(
             let new_number = new_line;
             old_line = old_line.map(|line| line + 1);
             new_line = new_line.map(|line| line + 1);
-            let spans = highlight(&mut new_highlighter, content, &assets.syntaxes);
+            let content = expand_tabs(content);
+            let spans = highlight_optional(&mut new_highlighter, &content, assets);
             // Advance the old parser too. Its spans are normally identical, while its
             // state can differ after a replacement block.
-            let _ = old_highlighter.highlight_line(content, &assets.syntaxes);
+            advance_highlighter(&mut old_highlighter, &content, assets);
             file_mut(&mut current_file, path_hint).lines.push(DiffLine {
                 kind: DiffLineKind::Context,
                 old_line: old_number,
@@ -511,6 +643,46 @@ fn decode_git_path(value: &str) -> String {
     String::from_utf8_lossy(&output).into_owned()
 }
 
+fn highlighter_for_path<'a>(
+    assets: Option<&'a HighlightAssets>,
+    path: Option<&Path>,
+) -> Option<HighlightLines<'a>> {
+    let assets = assets?;
+    Some(HighlightLines::new(
+        syntax_for_path(&assets.syntaxes, path),
+        &assets.theme,
+    ))
+}
+
+fn highlight_optional<'a>(
+    highlighter: &mut Option<HighlightLines<'a>>,
+    line: &str,
+    assets: Option<&'a HighlightAssets>,
+) -> Vec<HighlightSpan> {
+    if line.len() > MAX_SYNTAX_HIGHLIGHT_LINE_BYTES {
+        *highlighter = None;
+        return vec![HighlightSpan::plain(line)];
+    }
+    match (highlighter.as_mut(), assets) {
+        (Some(highlighter), Some(assets)) => highlight(highlighter, line, &assets.syntaxes),
+        _ => vec![HighlightSpan::plain(line)],
+    }
+}
+
+fn advance_highlighter<'a>(
+    highlighter: &mut Option<HighlightLines<'a>>,
+    line: &str,
+    assets: Option<&'a HighlightAssets>,
+) {
+    if line.len() > MAX_SYNTAX_HIGHLIGHT_LINE_BYTES {
+        *highlighter = None;
+        return;
+    }
+    if let (Some(highlighter), Some(assets)) = (highlighter.as_mut(), assets) {
+        let _ = highlighter.highlight_line(line, &assets.syntaxes);
+    }
+}
+
 fn syntax_for_path<'a>(syntaxes: &'a SyntaxSet, path: Option<&Path>) -> &'a SyntaxReference {
     path.and_then(|path| syntaxes.find_syntax_for_file(path).ok().flatten())
         .unwrap_or_else(|| syntaxes.find_syntax_plain_text())
@@ -533,6 +705,29 @@ fn highlight(
             .collect(),
         Err(_) => vec![HighlightSpan::plain(line)],
     }
+}
+
+fn expand_tabs(line: &str) -> Cow<'_, str> {
+    if !line.contains('\t') {
+        return Cow::Borrowed(line);
+    }
+
+    // Terminal cells do not have tab stops, and ratatui treats a literal tab as a
+    // zero-width control character. Expanding it keeps indentation visible and
+    // aligns syntax spans and horizontal scrolling with what is rendered.
+    let mut expanded = String::with_capacity(line.len());
+    let mut column = 0;
+    for character in line.chars() {
+        if character == '\t' {
+            let spaces = TAB_WIDTH - column % TAB_WIDTH;
+            expanded.extend(std::iter::repeat_n(' ', spaces));
+            column += spaces;
+        } else {
+            expanded.push(character);
+            column += UnicodeWidthChar::width(character).unwrap_or_default();
+        }
+    }
+    Cow::Owned(expanded)
 }
 
 fn meta_line(kind: DiffLineKind, text: &str) -> DiffLine {
@@ -601,6 +796,59 @@ mod tests {
     }
 
     #[test]
+    fn lazy_index_keeps_all_headers_while_merging_one_loaded_file() {
+        let index = DiffIndex {
+            title: "Branch comparison".to_owned(),
+            files: vec![
+                DiffFileIndexEntry {
+                    path: PathBuf::from("src/first.rs"),
+                    old_path: None,
+                    status: "modified".to_owned(),
+                },
+                DiffFileIndexEntry {
+                    path: PathBuf::from("src/second.rs"),
+                    old_path: None,
+                    status: "added".to_owned(),
+                },
+            ],
+            truncated: false,
+            commit_details: None,
+        };
+        let mut loaded = HashMap::new();
+        let skeleton = index.document(&loaded);
+        assert_eq!(skeleton.file_count(), 2);
+        assert!(skeleton.lines[0].text().contains("+?"));
+
+        loaded.insert(
+            PathBuf::from("src/first.rs"),
+            parse_diff(
+                b"diff --git a/src/first.rs b/src/first.rs\n--- a/src/first.rs\n+++ b/src/first.rs\n@@ -1 +1 @@\n-old();\n+new();\n",
+                "first",
+                Some(Path::new("src/first.rs")),
+                false,
+            ),
+        );
+        let document = index.document(&loaded);
+
+        assert_eq!(document.file_count(), 2);
+        assert_eq!(document.addition_count(), 1);
+        assert_eq!(document.deletion_count(), 1);
+        assert!(document.lines.iter().any(|line| line.text() == "new();"));
+        assert!(
+            document
+                .lines
+                .iter()
+                .any(|line| line.text().contains("src/second.rs") && line.text().contains("+?"))
+        );
+
+        let collapsed = index.document_with_visibility(&loaded, |_| false);
+        assert_eq!(collapsed.file_count(), 2);
+        assert_eq!(collapsed.addition_count(), 0);
+        assert!(!collapsed.lines.iter().any(|line| line.text() == "new();"));
+        assert!(collapsed.lines[0].text().contains("+1"));
+    }
+
+    #[test]
     fn highlights_typescript_and_hides_git_transport_headers() {
         let raw = b"diff --git a/widget.tsx b/widget.tsx\nindex aaaaaaa..bbbbbbb 100644\n--- a/widget.tsx\n+++ b/widget.tsx\n@@ -1 +1 @@\n-const oldValue: number = 1;\n+const newValue: number = 2;\n";
         let document = parse_diff(raw, "widget.tsx", Some(Path::new("widget.tsx")), false);
@@ -620,6 +868,74 @@ mod tests {
                 > 1
         );
         assert_eq!(document.lines[4].kind, DiffLineKind::FileFooter);
+    }
+
+    #[test]
+    fn skips_syntax_grammar_work_for_large_patches() {
+        let mut raw = String::from(
+            "diff --git a/generated.rs b/generated.rs\n--- a/generated.rs\n+++ b/generated.rs\n@@ -0,0 +1 @@\n",
+        );
+        while raw.len() <= MAX_SYNTAX_HIGHLIGHT_PATCH_BYTES {
+            raw.push_str("+pub const GENERATED: usize = 1;\n");
+        }
+
+        let document = parse_diff(
+            raw.as_bytes(),
+            "generated.rs",
+            Some(Path::new("generated.rs")),
+            false,
+        );
+        let added = document
+            .lines
+            .iter()
+            .find(|line| line.kind == DiffLineKind::Added)
+            .unwrap();
+
+        assert!(added.spans.iter().all(|span| span.foreground.is_none()));
+    }
+
+    #[test]
+    fn skips_syntax_grammar_work_for_very_long_lines() {
+        let content = "x".repeat(MAX_SYNTAX_HIGHLIGHT_LINE_BYTES + 1);
+        let raw = format!(
+            "diff --git a/generated.rs b/generated.rs\n--- a/generated.rs\n+++ b/generated.rs\n@@ -0,0 +1 @@\n+{content}\n"
+        );
+
+        let document = parse_diff(
+            raw.as_bytes(),
+            "generated.rs",
+            Some(Path::new("generated.rs")),
+            false,
+        );
+        let added = document
+            .lines
+            .iter()
+            .find(|line| line.kind == DiffLineKind::Added)
+            .unwrap();
+
+        assert!(added.spans.iter().all(|span| span.foreground.is_none()));
+    }
+
+    #[test]
+    fn preserves_space_indentation_and_expands_tabs_to_tab_stops() {
+        let raw = b"diff --git a/widget.tsx b/widget.tsx\n--- a/widget.tsx\n+++ b/widget.tsx\n@@ -1,2 +1,2 @@\n-  oldValue,\n+\tnewValue,\n \t  nestedValue,\n";
+        let document = parse_diff(raw, "widget.tsx", Some(Path::new("widget.tsx")), false);
+        let content = document
+            .lines
+            .iter()
+            .filter(|line| {
+                matches!(
+                    line.kind,
+                    DiffLineKind::Context | DiffLineKind::Added | DiffLineKind::Removed
+                )
+            })
+            .map(DiffLine::text)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            content,
+            vec!["  oldValue,", "    newValue,", "      nestedValue,"]
+        );
     }
 
     #[test]
