@@ -7,8 +7,8 @@ use ratatui::layout::Rect;
 
 use crate::git::diff::{DiffDocument, DiffIndex, DiffLineKind, PullRequestDetails};
 use crate::git::github::{
-    GitHubRepository, PullRequest, PullRequestCheck, PullRequestConversation, PullRequestDiffIndex,
-    PullRequestFile, PullRequestFileStatus, PullRequestProgress,
+    CheckRunLog, GitHubRepository, PullRequest, PullRequestCheck, PullRequestConversation,
+    PullRequestDiffIndex, PullRequestFile, PullRequestFileStatus, PullRequestProgress,
 };
 use crate::git::history::Commit;
 use crate::git::status::{Change, ChangeArea, RepoStatus};
@@ -21,6 +21,12 @@ const TOAST_DURATION: Duration = Duration::from_secs(4);
 const HISTORY_PAGE_SIZE: usize = 300;
 const PULL_REQUEST_PREFETCH_BATCH: usize = 12;
 const MAX_PREFETCHED_PULL_REQUEST_FILES: usize = 400;
+/// Poll cadences for an open pull request. A run in progress changes state in
+/// seconds and is worth watching closely; a settled pull request only needs to
+/// notice new comments; a pull request nobody is looking at needs less again.
+const PULL_REQUEST_ACTIVE_POLL: Duration = Duration::from_secs(5);
+const PULL_REQUEST_IDLE_POLL: Duration = Duration::from_secs(20);
+const PULL_REQUEST_BACKGROUND_POLL: Duration = Duration::from_secs(120);
 const MAX_PULL_REQUEST_NUMBER_DIGITS: usize = 20;
 const DEFAULT_SIDEBAR_WIDTH: u16 = 42;
 const MIN_SIDEBAR_WIDTH: u16 = 22;
@@ -48,10 +54,13 @@ pub enum DiffLayout {
     SideBySide,
 }
 
+/// The two halves of the pull-request view. `Overview` lists the pull request's
+/// checks beside its conversation; `Files` lists the changed files beside their
+/// diffs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PullRequestSection {
+    Overview,
     Files,
-    Checks,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -448,7 +457,8 @@ pub enum SidebarHit {
     Change(usize),
     Commit(usize),
     PullRequestFiles,
-    PullRequestChecks,
+    PullRequestOverview,
+    PullRequestConversation,
     PullRequestChooseRepository,
     PullRequestLookup,
     PullRequestDirectory(PathBuf),
@@ -466,6 +476,12 @@ pub struct SidebarHitArea {
 pub struct ContentFileHit {
     pub area: Rect,
     pub path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct ContentStepHit {
+    pub area: Rect,
+    pub step: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -513,6 +529,7 @@ pub struct UiGeometry {
     pub sidebar_hits: Vec<SidebarHitArea>,
     pub scm_action_hits: Vec<ScmActionHit>,
     pub content_file_hits: Vec<ContentFileHit>,
+    pub content_step_hits: Vec<ContentStepHit>,
 }
 
 #[derive(Debug)]
@@ -550,12 +567,19 @@ pub struct App {
     pub pull_request_tree_cursor: usize,
     pub collapsed_pull_request_directories: HashSet<PathBuf>,
     pub pull_request_checks: Vec<PullRequestCheck>,
-    pub pull_request_check_cursor: usize,
+    /// `None` keeps the content pane on the pull request itself; selecting a
+    /// check replaces it with that run's steps and log.
+    pub pull_request_check_cursor: Option<usize>,
     pub pull_request_checks_loading: bool,
     pub pull_request_checks_error: Option<String>,
     pub pull_request_conversation: PullRequestConversation,
     pub pull_request_conversation_loading: bool,
     pub pull_request_conversation_error: Option<String>,
+    pub pull_request_check_log: Option<CheckRunLog>,
+    pub pull_request_check_log_loading: bool,
+    pub pull_request_check_log_error: Option<String>,
+    pub expanded_check_steps: HashSet<usize>,
+    pub pull_request_step_cursor: usize,
     pub pull_request_progress: Option<PullRequestProgress>,
     pub auxiliary_preview: Option<AuxiliaryPreview>,
     pub document: DiffDocument,
@@ -602,6 +626,10 @@ pub struct App {
     pull_request_prefetching: bool,
     pull_request_checks_generation: u64,
     pull_request_conversation_generation: u64,
+    pull_request_check_log_generation: u64,
+    /// Workflow and name of the check the loaded log belongs to, so a live
+    /// refresh can tell a new selection from an update of the same run.
+    pull_request_check_log_target: Option<(String, String)>,
     local_diff_request: Option<LocalDiffRequest>,
     local_diff_workspace_generation: Option<u64>,
     local_diff_index: Option<DiffIndex>,
@@ -615,6 +643,7 @@ pub struct App {
     refresh_again: bool,
     history_refresh_again: bool,
     preview_due: Option<Instant>,
+    pull_request_poll_due: Option<Instant>,
     pending_g: Option<Instant>,
     last_resize_tap: Option<(ResizeTarget, Instant)>,
 }
@@ -641,7 +670,7 @@ impl App {
             history_branches_loaded: false,
             pull_request_lookup: TextBuffer::default(),
             pull_request_lookup_active: false,
-            pull_request_section: PullRequestSection::Files,
+            pull_request_section: PullRequestSection::Overview,
             pull_request_file_view: PullRequestFileView::AllFiles,
             pull_request_files: Vec::new(),
             pull_request_total_files: 0,
@@ -650,12 +679,17 @@ impl App {
             pull_request_tree_cursor: 0,
             collapsed_pull_request_directories: HashSet::new(),
             pull_request_checks: Vec::new(),
-            pull_request_check_cursor: 0,
+            pull_request_check_cursor: None,
             pull_request_checks_loading: false,
             pull_request_checks_error: None,
             pull_request_conversation: PullRequestConversation::default(),
             pull_request_conversation_loading: false,
             pull_request_conversation_error: None,
+            pull_request_check_log: None,
+            pull_request_check_log_loading: false,
+            pull_request_check_log_error: None,
+            expanded_check_steps: HashSet::new(),
+            pull_request_step_cursor: 0,
             pull_request_progress: None,
             auxiliary_preview: None,
             document: DiffDocument::empty("Working Tree", "Loading changes…"),
@@ -699,6 +733,8 @@ impl App {
             pull_request_prefetching: false,
             pull_request_checks_generation: 0,
             pull_request_conversation_generation: 0,
+            pull_request_check_log_generation: 0,
+            pull_request_check_log_target: None,
             local_diff_request: None,
             local_diff_workspace_generation: None,
             local_diff_index: None,
@@ -712,6 +748,7 @@ impl App {
             refresh_again: false,
             history_refresh_again: false,
             preview_due: None,
+            pull_request_poll_due: None,
             pending_g: None,
             last_resize_tap: None,
         }
@@ -785,7 +822,8 @@ impl App {
     }
 
     pub fn selected_pull_request_check(&self) -> Option<&PullRequestCheck> {
-        self.pull_request_checks.get(self.pull_request_check_cursor)
+        self.pull_request_check_cursor
+            .and_then(|cursor| self.pull_request_checks.get(cursor))
     }
 
     pub fn pull_request_tree_entries(&self) -> Vec<PullRequestTreeEntry> {
@@ -1274,6 +1312,9 @@ impl App {
                 });
             }
             KeyCode::Char('v') => self.toggle_diff_layout(),
+            KeyCode::Char('e') | KeyCode::Char('E') if self.check_log_visible() => {
+                self.toggle_all_check_steps();
+            }
             KeyCode::Char('e') | KeyCode::Char('E') => self.toggle_all_preview_files(),
             KeyCode::Char('t') | KeyCode::Char('T') => {
                 self.expanded_diff = !self.expanded_diff;
@@ -1317,6 +1358,9 @@ impl App {
             {
                 self.toggle_selected_pull_request_directory();
             }
+            KeyCode::Char(' ') if self.check_log_visible() => {
+                self.toggle_check_step(self.pull_request_step_cursor);
+            }
             KeyCode::Char(' ')
                 if self.focus == Focus::Content
                     && (self.local_diff_index.is_some()
@@ -1337,8 +1381,8 @@ impl App {
             {
                 self.confirm_discard();
             }
-            KeyCode::Char('C') if self.view == View::PullRequests => {
-                self.select_pull_request_section(PullRequestSection::Checks, &mut effects)
+            KeyCode::Char('P') if self.view == View::PullRequests => {
+                self.select_pull_request_section(PullRequestSection::Overview, &mut effects)
             }
             KeyCode::Char('F') if self.view == View::PullRequests => {
                 self.select_pull_request_section(PullRequestSection::Files, &mut effects)
@@ -1356,6 +1400,9 @@ impl App {
                 self.queue_operation(GitOperation::Pull, &mut effects);
             }
             KeyCode::Char('y') => self.queue_operation(GitOperation::Sync, &mut effects),
+            KeyCode::Enter if self.check_log_visible() && self.focus == Focus::Content => {
+                self.toggle_check_step(self.pull_request_step_cursor);
+            }
             KeyCode::Enter if !self.sidebar_hidden => {
                 if !self.toggle_selected_pull_request_directory() {
                     self.toggle_focus();
@@ -1406,6 +1453,8 @@ impl App {
             }
             KeyCode::Char('G') => self.go_to_edge(true, now),
             KeyCode::Char('z') => self.toggle_sidebar(),
+            KeyCode::Char('[') if self.check_log_visible() => self.move_check_step_cursor(false),
+            KeyCode::Char(']') if self.check_log_visible() => self.move_check_step_cursor(true),
             KeyCode::Char('[') => self.jump_hunk(false),
             KeyCode::Char(']') => self.jump_hunk(true),
             KeyCode::Left | KeyCode::Char('h')
@@ -1554,10 +1603,14 @@ impl App {
                                     PullRequestSection::Files,
                                     &mut effects,
                                 ),
-                                SidebarHit::PullRequestChecks => self.select_pull_request_section(
-                                    PullRequestSection::Checks,
-                                    &mut effects,
-                                ),
+                                SidebarHit::PullRequestOverview => self
+                                    .select_pull_request_section(
+                                        PullRequestSection::Overview,
+                                        &mut effects,
+                                    ),
+                                SidebarHit::PullRequestConversation => {
+                                    self.select_pull_request_check(None, &mut effects);
+                                }
                                 SidebarHit::PullRequestChooseRepository => {
                                     self.open_pull_request_repositories(&mut effects);
                                 }
@@ -1584,7 +1637,7 @@ impl App {
                                 }
                                 SidebarHit::PullRequestCheck(index) => {
                                     if index < self.pull_request_checks.len() {
-                                        self.pull_request_check_cursor = index;
+                                        self.select_pull_request_check(Some(index), &mut effects);
                                     }
                                 }
                             }
@@ -1595,7 +1648,15 @@ impl App {
                         .contains((event.column, event.row).into())
                     {
                         self.focus = Focus::Content;
-                        if let Some(path) = self
+                        if let Some(step) = self
+                            .geometry
+                            .content_step_hits
+                            .iter()
+                            .find(|hit| hit.area.contains((event.column, event.row).into()))
+                            .map(|hit| hit.step)
+                        {
+                            self.toggle_check_step(step);
+                        } else if let Some(path) = self
                             .geometry
                             .content_file_hits
                             .iter()
@@ -1676,7 +1737,70 @@ impl App {
             self.request_preview(&mut effects);
             changed = true;
         }
+        if self.pull_request_poll_due.is_some_and(|due| now >= due) {
+            self.refresh_pull_request_live(now, &mut effects);
+            changed = true;
+        }
         (effects, changed)
+    }
+
+    /// A GitHub webhook was forwarded to this session. The payload is only a
+    /// hint that something changed, so the poller runs immediately rather than
+    /// trying to apply the delivery itself.
+    pub fn webhook_delivered(&mut self, now: Instant) -> Vec<AppEffect> {
+        let mut effects = Vec::new();
+        if self.pull_request.is_some() {
+            self.refresh_pull_request_live(now, &mut effects);
+        }
+        effects
+    }
+
+    pub fn live_refresh_label(&self) -> String {
+        format!("every {}s", self.pull_request_poll_interval().as_secs())
+    }
+
+    /// Watch a running pull request closely and a settled one loosely. The
+    /// interval also stretches when the reader is somewhere else, so a loaded
+    /// pull request stays fresh without spending requests on an unseen pane.
+    fn pull_request_poll_interval(&self) -> Duration {
+        if self.view != View::PullRequests {
+            return PULL_REQUEST_BACKGROUND_POLL;
+        }
+        if self
+            .pull_request_checks
+            .iter()
+            .any(|check| check.status.is_running())
+        {
+            PULL_REQUEST_ACTIVE_POLL
+        } else {
+            PULL_REQUEST_IDLE_POLL
+        }
+    }
+
+    fn schedule_pull_request_poll(&mut self, now: Instant) {
+        self.pull_request_poll_due = self
+            .pull_request
+            .is_some()
+            .then(|| now + self.pull_request_poll_interval());
+    }
+
+    fn refresh_pull_request_live(&mut self, now: Instant, effects: &mut Vec<AppEffect>) {
+        self.schedule_pull_request_poll(now);
+        let Some(number) = self.pull_request_exact_number else {
+            return;
+        };
+        if self.pull_request.is_none() {
+            return;
+        }
+        // Each read is independent so a single failing endpoint never stalls the
+        // others; every one of them coalesces if a previous poll is still in
+        // flight.
+        self.request_pull_request_lookup(number, true, true, effects);
+        self.request_pull_request_checks(effects);
+        self.request_pull_request_conversation(effects);
+        if self.pull_request_check_cursor.is_some() {
+            self.request_check_run_log(effects);
+        }
     }
 
     pub fn filesystem_changed(&mut self, effects: &mut Vec<AppEffect>) {
@@ -1902,24 +2026,58 @@ impl App {
                 self.pull_request_checks_loading = false;
                 match result {
                     Ok(checks) => {
+                        // A live refresh can add, drop or reorder runs. Follow the
+                        // selected check by identity so a completing run never
+                        // pulls a different one under the reader's cursor.
                         let selected = self
                             .selected_pull_request_check()
                             .map(|check| (check.workflow.clone(), check.name.clone()));
+                        let was_running = self
+                            .selected_pull_request_check()
+                            .is_some_and(|check| check.status.is_running());
                         self.pull_request_checks = checks;
-                        self.pull_request_check_cursor = selected
-                            .and_then(|selected| {
-                                self.pull_request_checks.iter().position(|check| {
-                                    (check.workflow.as_str(), check.name.as_str())
-                                        == (selected.0.as_str(), selected.1.as_str())
-                                })
+                        self.pull_request_check_cursor = selected.and_then(|selected| {
+                            self.pull_request_checks.iter().position(|check| {
+                                (check.workflow.as_str(), check.name.as_str())
+                                    == (selected.0.as_str(), selected.1.as_str())
                             })
-                            .unwrap_or_else(|| {
-                                self.pull_request_check_cursor
-                                    .min(self.pull_request_checks.len().saturating_sub(1))
-                            });
+                        });
                         self.pull_request_checks_error = None;
+                        if was_running {
+                            self.request_check_run_log(&mut effects);
+                        }
                     }
                     Err(error) => self.pull_request_checks_error = Some(error),
+                }
+            }
+            WorkerEvent::CheckRunLog { generation, result } => {
+                if generation != self.pull_request_check_log_generation {
+                    return effects;
+                }
+                self.pull_request_check_log_loading = false;
+                match result {
+                    Ok(log) => {
+                        // A failure is the reason anyone opens a log, so open that
+                        // step for them. The cursor follows so `space` folds it
+                        // again without any navigation first.
+                        if self.expanded_check_steps.is_empty()
+                            && let Some(step) = log.failed_step()
+                        {
+                            self.expanded_check_steps.insert(step.number);
+                            self.pull_request_step_cursor = step.number;
+                        }
+                        if self.pull_request_step_cursor == 0
+                            && let Some(step) = log.steps.first()
+                        {
+                            self.pull_request_step_cursor = step.number;
+                        }
+                        self.pull_request_check_log = Some(log);
+                        self.pull_request_check_log_error = None;
+                    }
+                    Err(error) => {
+                        self.pull_request_check_log = None;
+                        self.pull_request_check_log_error = Some(error);
+                    }
                 }
             }
             WorkerEvent::PullRequestConversation { generation, result } => {
@@ -2029,15 +2187,33 @@ impl App {
                         if !snapshot.repositories.is_empty() {
                             self.github_repositories = snapshot.repositories;
                         }
+                        let previous = self.pull_request.replace(snapshot.pull_request);
+                        let current = self.pull_request.as_ref().expect("just assigned");
+                        let same = previous.as_ref().is_some_and(|previous| {
+                            previous.number == current.number
+                                && previous
+                                    .base_repository
+                                    .url
+                                    .eq_ignore_ascii_case(&current.base_repository.url)
+                        });
+                        // A force push or a new commit replaces the head, which
+                        // invalidates the prepared diff but nothing else the
+                        // reader is looking at.
+                        let head_moved =
+                            previous.is_some_and(|previous| previous.head_oid != current.head_oid);
                         self.pull_request_repository = snapshot.selected_repository;
-                        self.pull_request = Some(snapshot.pull_request);
                         self.pull_request_warnings = snapshot.warnings;
                         self.pull_request_exact_number = snapshot.exact_number;
                         self.pull_request_from_cache = snapshot.from_cache;
-                        self.reset_pull_request_runtime();
+                        if !same {
+                            self.reset_pull_request_runtime();
+                        } else if head_moved {
+                            self.reset_pull_request_diff_runtime();
+                        }
+                        self.schedule_pull_request_poll(now);
                         self.request_pull_request_checks(&mut effects);
                         self.request_pull_request_conversation(&mut effects);
-                        if self.view == View::PullRequests {
+                        if !same || head_moved {
                             self.preview_due = None;
                             self.request_preview(&mut effects);
                         }
@@ -2605,7 +2781,12 @@ impl App {
                             if let Some(number) = self.pull_request_exact_number.or_else(|| {
                                 self.pull_request_lookup.value.trim().parse::<u64>().ok()
                             }) {
-                                self.request_pull_request_lookup(number, false, &mut effects);
+                                self.request_pull_request_lookup(
+                                    number,
+                                    false,
+                                    false,
+                                    &mut effects,
+                                );
                             }
                         }
                         return effects;
@@ -2916,18 +3097,11 @@ impl App {
                         };
                         self.select_pull_request_tree_entry(cursor, now);
                     }
-                    PullRequestSection::Checks => {
-                        if self.pull_request_checks.is_empty() {
-                            self.pull_request_check_cursor = 0;
-                        } else {
-                            self.pull_request_check_cursor = if amount < 0 {
-                                self.pull_request_check_cursor
-                                    .saturating_sub(amount.unsigned_abs())
-                            } else {
-                                (self.pull_request_check_cursor + amount as usize)
-                                    .min(self.pull_request_checks.len() - 1)
-                            };
-                        }
+                    PullRequestSection::Overview => {
+                        self.move_check_cursor(amount);
+                        // Reuse the preview debounce so holding j or k walks the
+                        // list without firing a log request per keystroke.
+                        self.schedule_preview(now);
                     }
                 }
                 return;
@@ -2984,12 +3158,15 @@ impl App {
                         };
                         self.select_pull_request_tree_entry(cursor, now);
                     }
-                    PullRequestSection::Checks => {
+                    PullRequestSection::Overview => {
                         self.pull_request_check_cursor = if end {
-                            self.pull_request_checks.len().saturating_sub(1)
+                            self.pull_request_checks.len().checked_sub(1)
                         } else {
-                            0
+                            // Home returns to the pull request itself, which sits
+                            // above the first check in the sidebar.
+                            None
                         };
+                        self.schedule_preview(now);
                     }
                 }
                 return;
@@ -3327,7 +3504,7 @@ impl App {
                 match value.parse::<u64>() {
                     Ok(number) if number > 0 => {
                         self.pull_request_lookup_active = false;
-                        self.request_pull_request_lookup(number, false, &mut effects);
+                        self.request_pull_request_lookup(number, false, false, &mut effects);
                     }
                     _ => self.show_toast(
                         "Enter a positive numeric pull-request number".to_owned(),
@@ -3441,13 +3618,19 @@ impl App {
         })));
     }
 
-    fn reset_pull_request_runtime(&mut self) {
+    /// Drop only the prepared diff. The section, cursors, checks and
+    /// conversation stay exactly where the reader left them.
+    fn reset_pull_request_diff_runtime(&mut self) {
         self.pull_request_workspace_generation = None;
         self.pull_request_documents.clear();
         self.pull_request_loading_path = None;
         self.pull_request_single_file = None;
         self.pull_request_prefetching = false;
-        self.pull_request_section = PullRequestSection::Files;
+    }
+
+    fn reset_pull_request_runtime(&mut self) {
+        self.reset_pull_request_diff_runtime();
+        self.pull_request_section = PullRequestSection::Overview;
         self.pull_request_file_view = PullRequestFileView::AllFiles;
         self.pull_request_files.clear();
         self.pull_request_total_files = 0;
@@ -3456,7 +3639,7 @@ impl App {
         self.pull_request_tree_cursor = 0;
         self.collapsed_pull_request_directories.clear();
         self.pull_request_checks.clear();
-        self.pull_request_check_cursor = 0;
+        self.pull_request_check_cursor = None;
         self.pull_request_checks_loading = false;
         self.pull_request_checks_error = None;
         self.pull_request_checks_generation = self.pull_request_checks_generation.wrapping_add(1);
@@ -3465,6 +3648,14 @@ impl App {
         self.pull_request_conversation_error = None;
         self.pull_request_conversation_generation =
             self.pull_request_conversation_generation.wrapping_add(1);
+        self.pull_request_check_log = None;
+        self.pull_request_check_log_loading = false;
+        self.pull_request_check_log_error = None;
+        self.pull_request_check_log_target = None;
+        self.pull_request_check_log_generation =
+            self.pull_request_check_log_generation.wrapping_add(1);
+        self.expanded_check_steps.clear();
+        self.pull_request_step_cursor = 0;
         self.sidebar_offset = 0;
     }
 
@@ -3601,11 +3792,14 @@ impl App {
         if self.pull_request_section == section {
             return;
         }
+        self.invalidate_preview();
         self.pull_request_section = section;
         self.sidebar_offset = 0;
         self.content_scroll = 0;
         self.horizontal_scroll = 0;
         self.request_pull_request_checks(effects);
+        self.request_pull_request_conversation(effects);
+        self.request_check_run_log(effects);
     }
 
     fn request_pull_request_diff_file(
@@ -3707,6 +3901,123 @@ impl App {
         )));
     }
 
+    /// The overview sidebar is the pull request itself followed by its checks, so
+    /// the cursor walks one row above index zero and stops there.
+    fn move_check_cursor(&mut self, amount: isize) {
+        if self.pull_request_checks.is_empty() {
+            self.pull_request_check_cursor = None;
+            return;
+        }
+        let last = self.pull_request_checks.len() - 1;
+        let row = self
+            .pull_request_check_cursor
+            .map_or(0, |cursor| cursor.saturating_add(1));
+        let next = if amount < 0 {
+            row.saturating_sub(amount.unsigned_abs())
+        } else {
+            row.saturating_add(amount as usize).min(last + 1)
+        };
+        self.pull_request_check_cursor = next.checked_sub(1);
+    }
+
+    pub fn check_log_visible(&self) -> bool {
+        self.view == View::PullRequests
+            && self.pull_request_section == PullRequestSection::Overview
+            && self.pull_request_check_cursor.is_some()
+    }
+
+    fn check_step_numbers(&self) -> Vec<usize> {
+        self.pull_request_check_log
+            .as_ref()
+            .map(|log| log.steps.iter().map(|step| step.number).collect())
+            .unwrap_or_default()
+    }
+
+    pub fn check_step_expanded(&self, step: usize) -> bool {
+        self.expanded_check_steps.contains(&step)
+    }
+
+    fn toggle_check_step(&mut self, step: usize) {
+        if !self.expanded_check_steps.remove(&step) {
+            self.expanded_check_steps.insert(step);
+        }
+        self.pull_request_step_cursor = step;
+    }
+
+    fn toggle_all_check_steps(&mut self) {
+        let steps = self.check_step_numbers();
+        if self.expanded_check_steps.is_empty() {
+            self.expanded_check_steps.extend(steps);
+        } else {
+            self.expanded_check_steps.clear();
+        }
+        self.content_scroll = 0;
+    }
+
+    /// Move between steps the way `[` and `]` move between diff hunks, so a long
+    /// log can be walked without scrolling through it.
+    fn move_check_step_cursor(&mut self, forward: bool) {
+        let steps = self.check_step_numbers();
+        if steps.is_empty() {
+            return;
+        }
+        let current = steps
+            .iter()
+            .position(|step| *step == self.pull_request_step_cursor)
+            .unwrap_or_default();
+        let next = if forward {
+            (current + 1).min(steps.len() - 1)
+        } else {
+            current.saturating_sub(1)
+        };
+        self.pull_request_step_cursor = steps[next];
+    }
+
+    fn select_pull_request_check(&mut self, cursor: Option<usize>, effects: &mut Vec<AppEffect>) {
+        if self.pull_request_check_cursor == cursor {
+            return;
+        }
+        self.pull_request_check_cursor = cursor;
+        self.content_scroll = 0;
+        self.horizontal_scroll = 0;
+        self.request_check_run_log(effects);
+    }
+
+    /// Fetch the selected check's steps and log. A selection change starts from a
+    /// clean slate; a live refresh of the same run updates in place so the reader
+    /// keeps their scroll position while a job is still writing output.
+    fn request_check_run_log(&mut self, effects: &mut Vec<AppEffect>) {
+        let (Some(pull_request), Some(check)) = (
+            self.pull_request.clone(),
+            self.selected_pull_request_check().cloned(),
+        ) else {
+            self.pull_request_check_log = None;
+            self.pull_request_check_log_error = None;
+            self.pull_request_check_log_loading = false;
+            self.pull_request_check_log_target = None;
+            self.pull_request_check_log_generation =
+                self.pull_request_check_log_generation.wrapping_add(1);
+            return;
+        };
+        let target = (check.workflow.clone(), check.name.clone());
+        if self.pull_request_check_log_target.as_ref() != Some(&target) {
+            self.pull_request_check_log = None;
+            self.pull_request_check_log_error = None;
+            self.expanded_check_steps.clear();
+            self.pull_request_check_log_target = Some(target);
+        } else if self.pull_request_check_log_loading {
+            return;
+        }
+        self.pull_request_check_log_generation =
+            self.pull_request_check_log_generation.wrapping_add(1);
+        self.pull_request_check_log_loading = true;
+        effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadCheckRunLog {
+            generation: self.pull_request_check_log_generation,
+            pull_request: Box::new(pull_request),
+            check: Box::new(check),
+        })));
+    }
+
     fn request_pull_request_conversation(&mut self, effects: &mut Vec<AppEffect>) {
         if self.pull_request_conversation_loading {
             return;
@@ -3752,7 +4063,7 @@ impl App {
                 .pull_request_exact_number
                 .or_else(|| self.pull_request_lookup.value.trim().parse::<u64>().ok())
             {
-                self.request_pull_request_lookup(number, true, effects);
+                self.request_pull_request_lookup(number, true, false, effects);
             }
         }
     }
@@ -3769,24 +4080,33 @@ impl App {
         })));
     }
 
+    /// A `silent` lookup is a background poll: it keeps the loaded pull request,
+    /// its section, its cursors and its diff on screen, and only replaces them
+    /// once fresher metadata actually arrives.
     fn request_pull_request_lookup(
         &mut self,
         number: u64,
         refresh: bool,
+        silent: bool,
         effects: &mut Vec<AppEffect>,
     ) {
+        if silent && self.pull_request_loading {
+            return;
+        }
         self.pull_request_generation = self.pull_request_generation.wrapping_add(1);
-        self.invalidate_preview();
         self.pull_request_loading = true;
         self.pull_request_exact_number = Some(number);
-        self.pull_request_progress = Some(PullRequestProgress::LoadingMetadata);
-        self.pull_request_warnings.clear();
-        self.pull_request = None;
-        self.reset_pull_request_runtime();
-        self.document = DiffDocument::empty(
-            format!("Opening Pull Request #{number}"),
-            PullRequestProgress::LoadingMetadata.label(),
-        );
+        if !silent {
+            self.invalidate_preview();
+            self.pull_request_progress = Some(PullRequestProgress::LoadingMetadata);
+            self.pull_request_warnings.clear();
+            self.pull_request = None;
+            self.reset_pull_request_runtime();
+            self.document = DiffDocument::empty(
+                format!("Opening Pull Request #{number}"),
+                PullRequestProgress::LoadingMetadata.label(),
+            );
+        }
         effects.push(AppEffect::Git(Box::new(WorkerCommand::LookupPullRequest {
             generation: self.pull_request_generation,
             repositories: self.github_repositories.clone(),
@@ -3930,37 +4250,35 @@ impl App {
         match self.view {
             View::Changes | View::History => unreachable!("local diff views returned above"),
             View::PullRequests => {
-                if self.pull_request_section == PullRequestSection::Checks {
-                    self.document_loading = false;
-                    return;
-                }
                 let Some(pull_request) = self.selected_pull_request().cloned() else {
                     self.document_loading = false;
-                    self.document = DiffDocument::empty(
-                        "Open Pull Request",
-                        if self.pull_request_loading {
-                            "Fetching pull-request metadata…"
-                        } else {
-                            "Enter a pull-request number and press Enter"
-                        },
-                    );
+                    if self.pull_request_section == PullRequestSection::Files {
+                        self.document = DiffDocument::empty(
+                            "Open Pull Request",
+                            if self.pull_request_loading {
+                                "Fetching pull-request metadata…"
+                            } else {
+                                "Enter a pull-request number and press Enter"
+                            },
+                        );
+                    }
                     return;
                 };
-                if self.pull_request_workspace_generation.is_none() {
-                    self.diff_generation = self.diff_generation.wrapping_add(1);
-                    let generation = self.diff_generation;
-                    self.document_loading = true;
-                    self.pull_request_progress = Some(PullRequestProgress::PreparingRepository);
+                // Index the diff as soon as a pull request is open, whichever
+                // half is on screen. Opening a pull request is the commitment;
+                // the files should already be there when they are asked for.
+                let preparing = self.prepare_pull_request_workspace(&pull_request, effects);
+                if self.pull_request_section == PullRequestSection::Overview {
+                    // The overview pane renders app state directly rather than a
+                    // diff document; only a selected check needs fetching.
+                    self.request_check_run_log(effects);
+                    return;
+                }
+                if preparing {
                     self.document = pull_request_loading_document(
                         &pull_request,
                         PullRequestProgress::PreparingRepository.label(),
                     );
-                    effects.push(AppEffect::Git(Box::new(
-                        WorkerCommand::PreparePullRequest {
-                            generation,
-                            pull_request: Box::new(pull_request),
-                        },
-                    )));
                     return;
                 }
 
@@ -3982,6 +4300,31 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Queue the isolated diff workspace unless one is already prepared or in
+    /// flight. Returns whether the caller still has to wait for its index.
+    fn prepare_pull_request_workspace(
+        &mut self,
+        pull_request: &PullRequest,
+        effects: &mut Vec<AppEffect>,
+    ) -> bool {
+        if self.pull_request_workspace_generation.is_some() {
+            return false;
+        }
+        if self.document_loading && self.pull_request_progress.is_some() {
+            return true;
+        }
+        self.diff_generation = self.diff_generation.wrapping_add(1);
+        self.document_loading = true;
+        self.pull_request_progress = Some(PullRequestProgress::PreparingRepository);
+        effects.push(AppEffect::Git(Box::new(
+            WorkerCommand::PreparePullRequest {
+                generation: self.diff_generation,
+                pull_request: Box::new(pull_request.clone()),
+            },
+        )));
+        true
     }
 
     fn invalidate_preview(&mut self) {
@@ -4637,11 +4980,12 @@ mod tests {
             Some(PullRequestProgress::PreparingRepository)
         );
         assert_eq!(
-            app.document
-                .pull_request_details
-                .as_ref()
-                .unwrap()
-                .description,
+            app.pull_request_section,
+            PullRequestSection::Overview,
+            "an opened pull request lands on itself, not on its files"
+        );
+        assert_eq!(
+            app.pull_request.as_ref().unwrap().description,
             "A detailed pull-request description"
         );
     }
@@ -4715,6 +5059,7 @@ mod tests {
     fn pull_request_folders_are_selectable_and_collapsible() {
         let mut app = App::new("/tmp/repo", "repo");
         app.view = View::PullRequests;
+        app.pull_request_section = PullRequestSection::Files;
         app.focus = Focus::Sidebar;
         app.pull_request_files = ["src/app.rs", "src/git/diff.rs", "tests/ui.rs"]
             .into_iter()
@@ -4806,6 +5151,7 @@ mod tests {
     fn pull_request_defaults_to_all_files_then_files_tab_restores_it_from_single_file() {
         let mut app = App::new("/tmp/repo", "repo");
         app.view = View::PullRequests;
+        app.pull_request_section = PullRequestSection::Files;
         app.focus = Focus::Sidebar;
         app.pull_request = Some(pull_request(8, "Large change", "acme/widget"));
         app.diff_generation = 10;
