@@ -4,7 +4,10 @@ use anyhow::{Context, Result, bail};
 
 use super::{PullRequest, Repository, bounded_command_error, bounded_text, parse_tsv_record};
 
-const MAX_CONVERSATION_ENTRIES: usize = 2_000;
+/// The renderer wraps every entry to the pane width on each redraw, so this cap
+/// is what keeps that work bounded. It is far above any real thread; the entries
+/// dropped are the oldest, and the view says so.
+const MAX_CONVERSATION_ENTRIES: usize = 500;
 const MAX_CONVERSATION_BODY_BYTES: usize = 64 * 1024;
 const MAX_CONVERSATION_CONTEXT_BYTES: usize = 8 * 1024;
 const CONVERSATION_FIELDS: usize = 8;
