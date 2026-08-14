@@ -19,6 +19,8 @@ const PREVIEW_DEBOUNCE: Duration = Duration::from_millis(45);
 const RESIZE_DOUBLE_TAP_INTERVAL: Duration = Duration::from_millis(450);
 const TOAST_DURATION: Duration = Duration::from_secs(4);
 const HISTORY_PAGE_SIZE: usize = 300;
+const PULL_REQUEST_PREFETCH_BATCH: usize = 12;
+const MAX_PREFETCHED_PULL_REQUEST_FILES: usize = 400;
 const MAX_PULL_REQUEST_NUMBER_DIGITS: usize = 20;
 const DEFAULT_SIDEBAR_WIDTH: u16 = 42;
 const MIN_SIDEBAR_WIDTH: u16 = 22;
@@ -590,6 +592,11 @@ pub struct App {
     pull_request_workspace_generation: Option<u64>,
     pull_request_documents: HashMap<PathBuf, DiffDocument>,
     pull_request_loading_path: Option<PathBuf>,
+    /// The path whose patch currently occupies `document` in single-file view.
+    /// Tracking it explicitly keeps the cache authoritative about which files
+    /// already have a patch, wherever that patch happens to be held.
+    pull_request_single_file: Option<PathBuf>,
+    pull_request_prefetching: bool,
     pull_request_checks_generation: u64,
     local_diff_request: Option<LocalDiffRequest>,
     local_diff_workspace_generation: Option<u64>,
@@ -681,6 +688,8 @@ impl App {
             pull_request_workspace_generation: None,
             pull_request_documents: HashMap::new(),
             pull_request_loading_path: None,
+            pull_request_single_file: None,
+            pull_request_prefetching: false,
             pull_request_checks_generation: 0,
             local_diff_request: None,
             local_diff_workspace_generation: None,
@@ -1807,13 +1816,7 @@ impl App {
                         self.content_scroll = 0;
                         self.horizontal_scroll = 0;
                         self.document_loading = false;
-                        if let Some(path) = self
-                            .pull_request_files
-                            .first()
-                            .map(|file| file.path.clone())
-                        {
-                            self.request_pull_request_diff_file(path, false, &mut effects);
-                        }
+                        self.request_pull_request_prefetch(&mut effects);
                     }
                     Err(error) => {
                         self.document_loading = false;
@@ -1851,6 +1854,7 @@ impl App {
                             PullRequestFileView::SingleFile => {
                                 self.cache_current_pull_request_single_document();
                                 self.document = document;
+                                self.pull_request_single_file = path;
                                 self.selected_preview_file = None;
                                 self.preview_file_cursor = 0;
                                 self.content_scroll = 0;
@@ -1859,6 +1863,28 @@ impl App {
                         }
                     }
                     Err(error) => self.show_toast(error, ToastLevel::Error, now),
+                }
+                self.request_pull_request_prefetch(&mut effects);
+            }
+            WorkerEvent::PullRequestDiffBatch {
+                workspace_generation,
+                result,
+            } => {
+                if Some(workspace_generation) != self.pull_request_workspace_generation {
+                    return effects;
+                }
+                self.pull_request_prefetching = false;
+                // Background fill is best-effort. Individual files still load on
+                // demand, so a failed batch must neither raise an error to the
+                // reader nor retry in a loop.
+                if let Ok(documents) = result {
+                    for (path, document) in documents {
+                        self.pull_request_documents.entry(path).or_insert(document);
+                    }
+                    if self.pull_request_file_view == PullRequestFileView::AllFiles {
+                        self.rebuild_pull_request_all_files_document();
+                    }
+                    self.request_pull_request_prefetch(&mut effects);
                 }
             }
             WorkerEvent::PullRequestChecks { generation, result } => {
@@ -3394,6 +3420,8 @@ impl App {
         self.pull_request_workspace_generation = None;
         self.pull_request_documents.clear();
         self.pull_request_loading_path = None;
+        self.pull_request_single_file = None;
+        self.pull_request_prefetching = false;
         self.pull_request_section = PullRequestSection::Files;
         self.pull_request_file_view = PullRequestFileView::AllFiles;
         self.pull_request_files.clear();
@@ -3414,6 +3442,8 @@ impl App {
         self.pull_request_file_view = PullRequestFileView::AllFiles;
         self.pull_request_documents.clear();
         self.pull_request_loading_path = None;
+        self.pull_request_single_file = None;
+        self.pull_request_prefetching = false;
         self.pull_request_files = index.files;
         self.pull_request_total_files = index.total_files;
         self.pull_request_files_truncated = index.truncated;
@@ -3496,16 +3526,7 @@ impl App {
     }
 
     fn cache_current_pull_request_single_document(&mut self) {
-        if self.pull_request_file_view != PullRequestFileView::SingleFile {
-            return;
-        }
-        let Some(path) = self
-            .document
-            .pull_request_details
-            .as_ref()
-            .and_then(|details| details.selected_file.as_ref())
-            .map(PathBuf::from)
-        else {
+        let Some(path) = self.pull_request_single_file.take() else {
             return;
         };
         if self.pull_request_documents.contains_key(&path) {
@@ -3573,6 +3594,7 @@ impl App {
             if let Some(document) = self.pull_request_documents.remove(&path) {
                 self.document_loading = false;
                 self.document = document;
+                self.pull_request_single_file = Some(path);
                 self.selected_preview_file = None;
                 self.preview_file_cursor = 0;
                 return;
@@ -3594,6 +3616,46 @@ impl App {
                 generation: self.diff_generation,
                 workspace_generation,
                 path,
+            },
+        )));
+    }
+
+    /// A path still needs its patch unless it is already cached, already in
+    /// flight, or currently occupying the single-file document.
+    fn pull_request_file_needs_patch(&self, path: &Path) -> bool {
+        !self.pull_request_documents.contains_key(path)
+            && self.pull_request_loading_path.as_deref() != Some(path)
+            && self.pull_request_single_file.as_deref() != Some(path)
+    }
+
+    /// Walk the index in batches until every file has a patch. Each batch is one
+    /// Git invocation and lands as soon as it is parsed, so the diff fills in
+    /// progressively instead of a file at a time on demand.
+    fn request_pull_request_prefetch(&mut self, effects: &mut Vec<AppEffect>) {
+        if self.pull_request_prefetching {
+            return;
+        }
+        let Some(workspace_generation) = self.pull_request_workspace_generation else {
+            return;
+        };
+        if self.pull_request_documents.len() >= MAX_PREFETCHED_PULL_REQUEST_FILES {
+            return;
+        }
+        let paths: Vec<PathBuf> = self
+            .pull_request_files
+            .iter()
+            .map(|file| file.path.clone())
+            .filter(|path| self.pull_request_file_needs_patch(path))
+            .take(PULL_REQUEST_PREFETCH_BATCH)
+            .collect();
+        if paths.is_empty() {
+            return;
+        }
+        self.pull_request_prefetching = true;
+        effects.push(AppEffect::Git(Box::new(
+            WorkerCommand::LoadPullRequestFileBatch {
+                workspace_generation,
+                paths,
             },
         )));
     }
@@ -3857,13 +3919,7 @@ impl App {
                 match self.pull_request_file_view {
                     PullRequestFileView::AllFiles => {
                         self.show_pull_request_all_files();
-                        if let Some(path) = self
-                            .pull_request_files
-                            .first()
-                            .map(|file| file.path.clone())
-                        {
-                            self.request_pull_request_diff_file(path, false, effects);
-                        }
+                        self.request_pull_request_prefetch(effects);
                     }
                     PullRequestFileView::SingleFile => {
                         let Some(path) = self
@@ -4722,52 +4778,46 @@ mod tests {
         assert_eq!(app.pull_request_file_view, PullRequestFileView::AllFiles);
         assert_eq!(app.document.file_count(), 2);
         assert!(app.preview_files_all_collapsed());
-        assert!(matches!(
-            effects.as_slice(),
-            [AppEffect::Git(command)] if matches!(
-                command.as_ref(),
-                WorkerCommand::LoadPullRequestFile {
-                    workspace_generation: 10,
-                    path,
-                    ..
-                } if path == Path::new("src/first.rs")
-            )
-        ));
+        assert!(
+            matches!(
+                effects.as_slice(),
+                [AppEffect::Git(command)] if matches!(
+                    command.as_ref(),
+                    WorkerCommand::LoadPullRequestFileBatch {
+                        workspace_generation: 10,
+                        paths,
+                    } if paths == &[PathBuf::from("src/first.rs"), PathBuf::from("src/second.rs")]
+                )
+            ),
+            "the whole index is fetched in one batch rather than a file at a time"
+        );
 
-        let first_generation = app.diff_generation;
-        app.handle_worker_event(
-            WorkerEvent::PullRequestDiff {
-                generation: first_generation,
-                result: Ok(indexed_document(&["src/first.rs"])),
+        let effects = app.handle_worker_event(
+            WorkerEvent::PullRequestDiffBatch {
+                workspace_generation: 10,
+                result: Ok(vec![
+                    (
+                        PathBuf::from("src/first.rs"),
+                        indexed_document(&["src/first.rs"]),
+                    ),
+                    (
+                        PathBuf::from("src/second.rs"),
+                        indexed_document(&["src/second.rs"]),
+                    ),
+                ]),
             },
             now,
         );
+        assert!(effects.is_empty(), "no file is left to fetch");
         assert_eq!(app.document.file_count(), 2);
 
         app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), now);
         assert_eq!(app.pull_request_file_cursor, 1);
         assert_eq!(app.pull_request_file_view, PullRequestFileView::SingleFile);
-        assert_eq!(app.document.file_count(), 2);
         let (effects, _) = app.tick(now + PREVIEW_DEBOUNCE);
-        assert!(matches!(
-            effects.as_slice(),
-            [AppEffect::Git(command)] if matches!(
-                command.as_ref(),
-                WorkerCommand::LoadPullRequestFile {
-                    workspace_generation: 10,
-                    path,
-                    ..
-                } if path == Path::new("src/second.rs")
-            )
-        ));
-
-        let second_generation = app.diff_generation;
-        app.handle_worker_event(
-            WorkerEvent::PullRequestDiff {
-                generation: second_generation,
-                result: Ok(indexed_document(&["src/second.rs"])),
-            },
-            now,
+        assert!(
+            effects.is_empty(),
+            "a prefetched file opens without another Git round trip"
         );
         assert_eq!(app.document.file_count(), 1);
         assert!(!app.preview_files_collapsible());

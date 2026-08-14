@@ -56,6 +56,14 @@ pub enum WorkerCommand {
         workspace_generation: u64,
         path: PathBuf,
     },
+    /// Background fill for the rest of a prepared pull request. It carries no
+    /// preview generation because it never replaces what the reader is looking
+    /// at; the workspace it was prepared against is the only thing that can
+    /// make its results stale.
+    LoadPullRequestFileBatch {
+        workspace_generation: u64,
+        paths: Vec<PathBuf>,
+    },
     LoadPullRequestChecks {
         generation: u64,
         pull_request: Box<PullRequest>,
@@ -117,6 +125,10 @@ pub enum WorkerEvent {
         generation: u64,
         result: Result<DiffDocument, String>,
     },
+    PullRequestDiffBatch {
+        workspace_generation: u64,
+        result: Result<Vec<(PathBuf, DiffDocument)>, String>,
+    },
     PullRequestChecks {
         generation: u64,
         result: Result<Vec<PullRequestCheck>, String>,
@@ -149,6 +161,7 @@ struct Mailbox {
     preview: Option<WorkerCommand>,
     history: Option<WorkerCommand>,
     pull_request: Option<WorkerCommand>,
+    prefetch: Option<WorkerCommand>,
     checks: Option<WorkerCommand>,
     shutdown: bool,
 }
@@ -168,6 +181,11 @@ impl Mailbox {
                 // Only the newest preview matters. This makes key-repeat constant-space
                 // even when a large diff is slower than navigation.
                 self.preview = Some(command);
+            }
+            // Background fill occupies its own slot so a queued batch can never
+            // displace the preview the reader is waiting for.
+            command @ WorkerCommand::LoadPullRequestFileBatch { .. } => {
+                self.prefetch = Some(command);
             }
             command @ WorkerCommand::LoadHistory { .. } => self.history = Some(command),
             command @ (WorkerCommand::LoadGitHubRepositories { .. }
@@ -189,6 +207,7 @@ impl Mailbox {
             .or_else(|| self.refresh.take())
             .or_else(|| self.checks.take())
             .or_else(|| self.history.take())
+            .or_else(|| self.prefetch.take())
     }
 }
 
@@ -213,9 +232,9 @@ fn worker_lane(command: &WorkerCommand) -> WorkerLane {
         WorkerCommand::LoadGitHubRepositories { .. }
         | WorkerCommand::LookupPullRequest { .. }
         | WorkerCommand::LoadPullRequestChecks { .. } => WorkerLane::GitHubMetadata,
-        WorkerCommand::PreparePullRequest { .. } | WorkerCommand::LoadPullRequestFile { .. } => {
-            WorkerLane::PullRequestPreview
-        }
+        WorkerCommand::PreparePullRequest { .. }
+        | WorkerCommand::LoadPullRequestFile { .. }
+        | WorkerCommand::LoadPullRequestFileBatch { .. } => WorkerLane::PullRequestPreview,
         _ => WorkerLane::Background,
     }
 }
@@ -449,6 +468,17 @@ fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sende
                     .ok_or_else(|| "Pull-request diff workspace is no longer available".to_owned())
                     .and_then(|(_, workspace)| workspace.diff_file(&path).map_err(format_error)),
             },
+            WorkerCommand::LoadPullRequestFileBatch {
+                workspace_generation,
+                paths,
+            } => WorkerEvent::PullRequestDiffBatch {
+                workspace_generation,
+                result: pull_request_workspace
+                    .as_ref()
+                    .filter(|(prepared_generation, _)| *prepared_generation == workspace_generation)
+                    .ok_or_else(|| "Pull-request diff workspace is no longer available".to_owned())
+                    .and_then(|(_, workspace)| workspace.diff_files(&paths).map_err(format_error)),
+            },
             WorkerCommand::LoadPullRequestChecks {
                 generation,
                 pull_request,
@@ -653,6 +683,38 @@ mod tests {
             }),
             WorkerLane::GitHubMetadata
         );
+    }
+
+    #[test]
+    fn background_prefetch_never_displaces_the_preview_a_reader_is_waiting_for() {
+        let mut mailbox = Mailbox::default();
+        mailbox.push(WorkerCommand::LoadPullRequestFileBatch {
+            workspace_generation: 1,
+            paths: vec![PathBuf::from("a.rs"), PathBuf::from("b.rs")],
+        });
+        mailbox.push(WorkerCommand::LoadPullRequestFile {
+            generation: 5,
+            workspace_generation: 1,
+            path: PathBuf::from("selected.rs"),
+        });
+        mailbox.push(WorkerCommand::LoadPullRequestFileBatch {
+            workspace_generation: 1,
+            paths: vec![PathBuf::from("c.rs")],
+        });
+
+        assert!(matches!(
+            mailbox.pop(),
+            Some(WorkerCommand::LoadPullRequestFile { generation: 5, .. })
+        ));
+        assert!(
+            matches!(
+                mailbox.pop(),
+                Some(WorkerCommand::LoadPullRequestFileBatch { paths, .. })
+                    if paths == vec![PathBuf::from("c.rs")]
+            ),
+            "only the newest background batch survives, and it runs after the preview"
+        );
+        assert!(mailbox.pop().is_none());
     }
 
     #[test]

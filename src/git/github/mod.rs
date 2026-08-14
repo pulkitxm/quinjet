@@ -11,7 +11,10 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, bail};
 
-use super::diff::{DiffDocument, DiffLineCounts, PullRequestDetails, parse_diff, parse_numstat};
+use super::diff::{
+    DiffDocument, DiffLineCounts, PullRequestDetails, parse_diff, parse_numstat,
+    split_patch_by_file,
+};
 use super::{MAX_DIFF_BYTES, Repository, text, trim_ascii};
 
 const MAX_GIT_REMOTES: usize = 32;
@@ -270,6 +273,42 @@ impl PreparedPullRequest {
             file,
             truncated,
         ))
+    }
+
+    /// Produce many file documents from a single `git diff`. Spawning one Git
+    /// process per file dominates the cost of a wide pull request, so batching
+    /// is what lets the whole diff arrive while the reader is still reading the
+    /// first file.
+    pub(crate) fn diff_files(&self, paths: &[PathBuf]) -> Result<Vec<(PathBuf, DiffDocument)>> {
+        let files: Vec<&PullRequestFile> = paths
+            .iter()
+            .filter_map(|path| self.index.files.iter().find(|file| &file.path == path))
+            .collect();
+        if files.is_empty() {
+            return Ok(Vec::new());
+        }
+        let requested: Vec<PathBuf> = files.iter().map(|file| file.path.clone()).collect();
+        let (patch, truncated) = diff_selected_paths(
+            self.repository.path(),
+            &self.merge_base,
+            &self.head,
+            &requested,
+        )?;
+        let sections = split_patch_by_file(&patch);
+        Ok(files
+            .into_iter()
+            .map(|file| {
+                let body = sections
+                    .iter()
+                    .find(|section| section.matches(&file.path))
+                    .map(|section| section.body)
+                    .unwrap_or_default();
+                (
+                    file.path.clone(),
+                    pull_request_file_document(body, &self.pull_request, file, truncated),
+                )
+            })
+            .collect())
     }
 }
 
@@ -2197,6 +2236,33 @@ mod tests {
             deletions += document.deletion_count();
         }
         assert_eq!((additions, deletions), (21, 0));
+
+        // One batched read answers for the whole index and produces exactly the
+        // same per-file documents as the file-at-a-time path.
+        let paths: Vec<PathBuf> = index.files.iter().map(|file| file.path.clone()).collect();
+        let batch = workspace.diff_files(&paths).unwrap();
+        assert_eq!(batch.len(), 21);
+        assert_eq!(
+            batch
+                .iter()
+                .map(|(path, _)| path.clone())
+                .collect::<Vec<_>>(),
+            paths
+        );
+        assert!(batch.iter().all(|(_, document)| document.file_count() == 1));
+        assert_eq!(
+            batch
+                .iter()
+                .map(|(_, document)| document.addition_count())
+                .sum::<usize>(),
+            21
+        );
+        assert_eq!(
+            workspace
+                .diff_files(&[PathBuf::from("never-changed.txt")])
+                .unwrap(),
+            Vec::new()
+        );
         drop(workspace);
         assert!(!temporary_path.exists());
         assert_eq!(source.git(&["branch", "--show-current"]), before_branch);
