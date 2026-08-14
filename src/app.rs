@@ -596,6 +596,7 @@ pub struct App {
     local_diff_index: Option<DiffIndex>,
     local_diff_documents: HashMap<PathBuf, DiffDocument>,
     local_diff_loading_path: Option<PathBuf>,
+    local_diff_single_loaded: bool,
     branch_generation: u64,
     history_branch_generation: u64,
     stash_generation: u64,
@@ -686,6 +687,7 @@ impl App {
             local_diff_index: None,
             local_diff_documents: HashMap::new(),
             local_diff_loading_path: None,
+            local_diff_single_loaded: false,
             branch_generation: 0,
             history_branch_generation: 0,
             stash_generation: 0,
@@ -931,9 +933,14 @@ impl App {
     }
 
     pub fn local_diff_load_progress(&self) -> Option<(usize, usize)> {
-        self.local_diff_index
-            .as_ref()
-            .map(|index| (self.local_diff_documents.len(), index.files.len()))
+        self.local_diff_index.as_ref().map(|index| {
+            let loaded = if index.files.len() == 1 && self.local_diff_single_loaded {
+                1
+            } else {
+                self.local_diff_documents.len()
+            };
+            (loaded, index.files.len())
+        })
     }
 
     pub fn selected_change(&self) -> Option<&Change> {
@@ -994,6 +1001,13 @@ impl App {
     }
 
     pub fn preview_files_collapsible(&self) -> bool {
+        if let Some(index) = self.local_diff_index.as_ref() {
+            return index.files.len() > 1;
+        }
+        if self.view == View::PullRequests {
+            return self.pull_request_file_view == PullRequestFileView::AllFiles
+                && self.pull_request_files.len() > 1;
+        }
         self.document
             .lines
             .iter()
@@ -1023,6 +1037,7 @@ impl App {
         self.collapsed_preview_files.clear();
         self.expanded_preview_files.clear();
         self.content_scroll = 0;
+        self.rebuild_indexed_preview_document();
     }
 
     fn toggle_preview_file(&mut self, path: PathBuf, effects: &mut Vec<AppEffect>) {
@@ -1044,7 +1059,9 @@ impl App {
             .iter()
             .position(|candidate| candidate == &path)
             .unwrap_or_default();
-        if was_collapsed && !self.preview_file_collapsed(&path.to_string_lossy()) {
+        let is_collapsed = self.preview_file_collapsed(&path.to_string_lossy());
+        self.rebuild_indexed_preview_document();
+        if was_collapsed && !is_collapsed {
             if self.view == View::PullRequests
                 && self.pull_request_file_view == PullRequestFileView::AllFiles
             {
@@ -1762,8 +1779,17 @@ impl App {
                 self.local_diff_loading_path = None;
                 match result {
                     Ok(document) => {
-                        self.local_diff_documents.insert(path, document);
-                        self.rebuild_local_diff_document();
+                        if self
+                            .local_diff_index
+                            .as_ref()
+                            .is_some_and(|index| index.files.len() == 1)
+                        {
+                            self.document = document;
+                            self.local_diff_single_loaded = true;
+                        } else {
+                            self.local_diff_documents.insert(path, document);
+                            self.rebuild_local_diff_document();
+                        }
                     }
                     Err(error) => self.show_toast(error, ToastLevel::Error, now),
                 }
@@ -1813,15 +1839,17 @@ impl App {
                                 .and_then(|details| details.selected_file.as_ref())
                                 .map(PathBuf::from)
                         });
-                        if let Some(path) = path {
-                            self.pull_request_documents
-                                .insert(path.clone(), document.clone());
-                        }
                         match self.pull_request_file_view {
                             PullRequestFileView::AllFiles => {
-                                self.rebuild_pull_request_all_files_document();
+                                if let Some(path) = path {
+                                    self.pull_request_documents.insert(path, document);
+                                    self.rebuild_pull_request_all_files_document();
+                                } else {
+                                    self.document = document;
+                                }
                             }
                             PullRequestFileView::SingleFile => {
+                                self.cache_current_pull_request_single_document();
                                 self.document = document;
                                 self.selected_preview_file = None;
                                 self.preview_file_cursor = 0;
@@ -3287,11 +3315,40 @@ impl App {
         self.local_diff_index = None;
         self.local_diff_documents.clear();
         self.local_diff_loading_path = None;
+        self.local_diff_single_loaded = false;
+    }
+
+    fn rebuild_indexed_preview_document(&mut self) {
+        if self.view == View::PullRequests
+            && self.pull_request_file_view == PullRequestFileView::AllFiles
+        {
+            self.rebuild_pull_request_all_files_document();
+        } else if self.local_diff_index.is_some() {
+            self.rebuild_local_diff_document();
+        }
     }
 
     fn rebuild_local_diff_document(&mut self) {
         if let Some(index) = &self.local_diff_index {
-            self.document = index.document(&self.local_diff_documents);
+            let visible = if index.files.len() <= 1 {
+                index
+                    .files
+                    .iter()
+                    .map(|file| file.path.clone())
+                    .collect::<HashSet<_>>()
+            } else if self.files_collapsed {
+                self.expanded_preview_files.clone()
+            } else {
+                index
+                    .files
+                    .iter()
+                    .filter(|file| !self.collapsed_preview_files.contains(&file.path))
+                    .map(|file| file.path.clone())
+                    .collect()
+            };
+            self.document = index.document_with_visibility(&self.local_diff_documents, |path| {
+                visible.contains(path)
+            });
             if index.files.is_empty()
                 && matches!(
                     self.local_diff_request.as_ref(),
@@ -3415,12 +3472,50 @@ impl App {
             truncated: self.pull_request_files_truncated,
             commit_details: None,
         };
-        let mut document = index.document(&self.pull_request_documents);
+        let visible = if index.files.len() <= 1 {
+            index
+                .files
+                .iter()
+                .map(|file| file.path.clone())
+                .collect::<HashSet<_>>()
+        } else if self.files_collapsed {
+            self.expanded_preview_files.clone()
+        } else {
+            index
+                .files
+                .iter()
+                .filter(|file| !self.collapsed_preview_files.contains(&file.path))
+                .map(|file| file.path.clone())
+                .collect()
+        };
+        let mut document = index
+            .document_with_visibility(&self.pull_request_documents, |path| visible.contains(path));
         document.pull_request_details = Some(pull_request_details(pull_request));
         self.document = document;
     }
 
+    fn cache_current_pull_request_single_document(&mut self) {
+        if self.pull_request_file_view != PullRequestFileView::SingleFile {
+            return;
+        }
+        let Some(path) = self
+            .document
+            .pull_request_details
+            .as_ref()
+            .and_then(|details| details.selected_file.as_ref())
+            .map(PathBuf::from)
+        else {
+            return;
+        };
+        if self.pull_request_documents.contains_key(&path) {
+            return;
+        }
+        self.pull_request_documents
+            .insert(path, std::mem::take(&mut self.document));
+    }
+
     fn show_pull_request_all_files(&mut self) {
+        self.cache_current_pull_request_single_document();
         self.pull_request_file_view = PullRequestFileView::AllFiles;
         self.pull_request_loading_path = None;
         self.document_loading = false;
@@ -3467,23 +3562,28 @@ impl App {
         show_loading: bool,
         effects: &mut Vec<AppEffect>,
     ) {
-        let Some(workspace_generation) = self.pull_request_workspace_generation else {
-            return;
-        };
         if !self.pull_request_files.iter().any(|file| file.path == path) {
             return;
         }
-        if let Some(document) = self.pull_request_documents.get(&path).cloned() {
-            self.document_loading = false;
-            if self.pull_request_file_view == PullRequestFileView::SingleFile {
+        if self.pull_request_file_view == PullRequestFileView::SingleFile {
+            if self.pull_request_documents.contains_key(&path) {
+                self.cache_current_pull_request_single_document();
+            }
+            if let Some(document) = self.pull_request_documents.remove(&path) {
+                self.document_loading = false;
                 self.document = document;
                 self.selected_preview_file = None;
                 self.preview_file_cursor = 0;
-            } else {
-                self.rebuild_pull_request_all_files_document();
+                return;
             }
+        } else if self.pull_request_documents.contains_key(&path) {
+            self.document_loading = false;
+            self.rebuild_pull_request_all_files_document();
             return;
         }
+        let Some(workspace_generation) = self.pull_request_workspace_generation else {
+            return;
+        };
         self.diff_generation = self.diff_generation.wrapping_add(1);
         self.pull_request_loading_path = Some(path.clone());
         self.document_loading = show_loading;

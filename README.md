@@ -163,6 +163,7 @@ Text fields support Unicode-safe editing plus familiar terminal and macOS motion
 - Filesystem event storms collapse into authoritative status snapshots.
 - Preview requests carry generations so stale replies are ignored.
 - Working-tree groups, commits, branch comparisons, and stashes first use bounded path indexes; only selected files produce patches, through capped subprocess pipes.
+- Syntax grammar work is bounded to 512 KiB per patch and 32 KiB per row. Larger generated patches retain diff coloring but use plain source spans, preventing highlighting—not Git—from dominating load time; collapsed cached files also keep only their headers in the combined document.
 - History is paginated for one explicit branch revision; choosing another branch is read-only.
 - No pull-request command is queued at startup or when the PR tab opens. Only an explicit positive-number lookup contacts GitHub, and refreshing refetches only that PR.
 - On-demand repository discovery inspects at most 32 Git remotes, 64 configured fetch/push URL entries (32 distinct URLs), and 16 GitHub repositories.

@@ -27,6 +27,7 @@ use crate::git::{Branch, HistoryBranch, Stash};
 use self::theme::Theme;
 
 const DETAIL_LABEL_WIDTH: usize = 12;
+const MAX_INTRALINE_SOURCE_BYTES: usize = 32 * 1024;
 
 const HELP_LINES: &[(&str, &str)] = &[
     ("Navigation", ""),
@@ -2467,6 +2468,17 @@ fn paired_intraline_emphasis(
     if old_line.kind != DiffLineKind::Removed || new_line.kind != DiffLineKind::Added {
         return (None, None);
     }
+    let old_bytes = old_line
+        .spans
+        .iter()
+        .fold(0usize, |total, span| total.saturating_add(span.text.len()));
+    let new_bytes = new_line
+        .spans
+        .iter()
+        .fold(0usize, |total, span| total.saturating_add(span.text.len()));
+    if old_bytes.max(new_bytes) > MAX_INTRALINE_SOURCE_BYTES {
+        return (None, None);
+    }
     changed_ranges(&old_line.text(), &new_line.text())
 }
 
@@ -4379,6 +4391,23 @@ mod tests {
         assert!(!rendered.contains('›'));
         assert_eq!(buffer[(addition_column as u16, 0)].fg, theme.added);
         assert_eq!(buffer[(deletion_column as u16, 0)].fg, theme.removed);
+    }
+
+    #[test]
+    fn skips_intraline_work_for_very_long_rows() {
+        let old = test_line(
+            DiffLineKind::Removed,
+            &"a".repeat(MAX_INTRALINE_SOURCE_BYTES + 1),
+        );
+        let new = test_line(
+            DiffLineKind::Added,
+            &"b".repeat(MAX_INTRALINE_SOURCE_BYTES + 1),
+        );
+
+        assert_eq!(
+            paired_intraline_emphasis(Some(&old), Some(&new)),
+            (None, None)
+        );
     }
 
     #[test]
