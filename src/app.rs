@@ -2210,6 +2210,9 @@ impl App {
                         } else if head_moved {
                             self.reset_pull_request_diff_runtime();
                         }
+                        // Metadata has landed; anything still to do reports its
+                        // own progress from here.
+                        self.pull_request_progress = None;
                         self.schedule_pull_request_poll(now);
                         self.request_pull_request_checks(&mut effects);
                         self.request_pull_request_conversation(&mut effects);
@@ -3159,13 +3162,12 @@ impl App {
                         self.select_pull_request_tree_entry(cursor, now);
                     }
                     PullRequestSection::Overview => {
-                        self.pull_request_check_cursor = if end {
-                            self.pull_request_checks.len().checked_sub(1)
-                        } else {
-                            // Home returns to the pull request itself, which sits
-                            // above the first check in the sidebar.
-                            None
-                        };
+                        // Home returns to the pull request itself, which sits
+                        // above the first check in the sidebar.
+                        let cursor = end
+                            .then(|| self.pull_request_checks.len().checked_sub(1))
+                            .flatten();
+                        self.set_check_cursor(cursor);
                         self.schedule_preview(now);
                     }
                 }
@@ -3905,7 +3907,7 @@ impl App {
     /// the cursor walks one row above index zero and stops there.
     fn move_check_cursor(&mut self, amount: isize) {
         if self.pull_request_checks.is_empty() {
-            self.pull_request_check_cursor = None;
+            self.set_check_cursor(None);
             return;
         }
         let last = self.pull_request_checks.len() - 1;
@@ -3917,7 +3919,19 @@ impl App {
         } else {
             row.saturating_add(amount as usize).min(last + 1)
         };
-        self.pull_request_check_cursor = next.checked_sub(1);
+        self.set_check_cursor(next.checked_sub(1));
+    }
+
+    /// Every row in the overview sidebar shows a different document on the right,
+    /// so a new selection always starts at the top of it.
+    fn set_check_cursor(&mut self, cursor: Option<usize>) -> bool {
+        if self.pull_request_check_cursor == cursor {
+            return false;
+        }
+        self.pull_request_check_cursor = cursor;
+        self.content_scroll = 0;
+        self.horizontal_scroll = 0;
+        true
     }
 
     pub fn check_log_visible(&self) -> bool {
@@ -3974,13 +3988,9 @@ impl App {
     }
 
     fn select_pull_request_check(&mut self, cursor: Option<usize>, effects: &mut Vec<AppEffect>) {
-        if self.pull_request_check_cursor == cursor {
-            return;
+        if self.set_check_cursor(cursor) {
+            self.request_check_run_log(effects);
         }
-        self.pull_request_check_cursor = cursor;
-        self.content_scroll = 0;
-        self.horizontal_scroll = 0;
-        self.request_check_run_log(effects);
     }
 
     /// Fetch the selected check's steps and log. A selection change starts from a
