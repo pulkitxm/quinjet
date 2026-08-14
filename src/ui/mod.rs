@@ -18,12 +18,12 @@ use crate::app::{
 #[cfg(test)]
 use crate::git::diff::CommitDetails;
 use crate::git::diff::{DiffDocument, DiffLine, DiffLineKind, HighlightSpan, PullRequestDetails};
-#[cfg(test)]
-use crate::git::github::PullRequestFile;
 use crate::git::github::{
     CheckLogLine, CheckLogSeverity, CheckStep, ConversationEntry, ConversationKind,
-    GitHubRepository, PullRequestCheck, PullRequestCheckStatus, PullRequestFileStatus,
+    GitHubRepository, PullRequestCheckStatus, PullRequestFileStatus,
 };
+#[cfg(test)]
+use crate::git::github::{PullRequestCheck, PullRequestFile};
 use crate::git::status::{Change, ChangeArea, ChangeStatus};
 use crate::git::{Branch, HistoryBranch, Stash};
 
@@ -1873,7 +1873,7 @@ fn check_run_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> {
             format!(
                 "{}{}",
                 short_timestamp(&check.started_at),
-                match check_duration(check) {
+                match check.duration_label() {
                     duration if duration.is_empty() => String::new(),
                     duration => format!("  ·  {duration}"),
                 }
@@ -1929,27 +1929,7 @@ fn check_run_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> {
     )));
     for step in &log.steps {
         let expanded = app.check_step_expanded(step.number);
-        let (icon, color) = pull_request_check_icon(step.status, theme);
-        let duration = step.duration_label();
-        let reserved = 8 + duration.width();
-        let name = truncate_end(&step.name, width.saturating_sub(reserved));
-        let padding = width
-            .saturating_sub(reserved)
-            .saturating_sub(name.width())
-            .saturating_add(1);
-        rows.push(ContentRow {
-            line: Line::from(vec![
-                Span::styled(
-                    if expanded { " ⌄ " } else { " › " },
-                    Style::default().fg(theme.muted),
-                ),
-                Span::styled(format!("{icon} "), Style::default().fg(color)),
-                Span::styled(name, Style::default().fg(theme.text)),
-                Span::styled(" ".repeat(padding), Style::default()),
-                Span::styled(duration, Style::default().fg(theme.muted)),
-            ]),
-            step: Some(step.number),
-        });
+        rows.push(check_step_row(step, expanded, width, theme));
         if expanded {
             push_log_lines(&mut rows, &step.lines, width, theme);
         }
@@ -1969,6 +1949,32 @@ fn check_run_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> {
         ));
     }
     rows
+}
+
+/// A step reads as one row: fold state, outcome, name, and how long it took,
+/// with the duration pushed to the right edge the way a run page shows it.
+fn check_step_row(step: &CheckStep, expanded: bool, width: usize, theme: &Theme) -> ContentRow {
+    let (icon, color) = pull_request_check_icon(step.status, theme);
+    let duration = step.duration_label();
+    let reserved = 8 + duration.width();
+    let name = truncate_end(&step.name, width.saturating_sub(reserved));
+    let padding = width
+        .saturating_sub(reserved)
+        .saturating_sub(name.width())
+        .saturating_add(1);
+    ContentRow {
+        line: Line::from(vec![
+            Span::styled(
+                if expanded { " ⌄ " } else { " › " },
+                Style::default().fg(theme.muted),
+            ),
+            Span::styled(format!("{icon} "), Style::default().fg(color)),
+            Span::styled(name, Style::default().fg(theme.text)),
+            Span::styled(" ".repeat(padding), Style::default()),
+            Span::styled(duration, Style::default().fg(theme.muted)),
+        ]),
+        step: Some(step.number),
+    }
 }
 
 fn push_log_lines(rows: &mut Vec<ContentRow>, lines: &[CheckLogLine], width: usize, theme: &Theme) {
@@ -1998,19 +2004,6 @@ fn log_severity_color(severity: CheckLogSeverity, theme: &Theme) -> Color {
         CheckLogSeverity::Warning => theme.modified,
         CheckLogSeverity::Error => theme.error,
     }
-}
-
-fn check_duration(check: &PullRequestCheck) -> String {
-    CheckStep {
-        number: 0,
-        name: String::new(),
-        status: check.status,
-        conclusion: String::new(),
-        started_at: check.started_at.clone(),
-        completed_at: check.completed_at.clone(),
-        lines: Vec::new(),
-    }
-    .duration_label()
 }
 
 fn section_rule(label: &str, width: usize, theme: &Theme) -> Line<'static> {

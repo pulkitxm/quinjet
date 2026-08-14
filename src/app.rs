@@ -1803,10 +1803,10 @@ impl App {
         // others; every one of them coalesces if a previous poll is still in
         // flight.
         self.request_pull_request_lookup(number, true, true, effects);
-        self.request_pull_request_checks(effects);
-        self.request_pull_request_conversation(effects);
+        self.request_pull_request_checks(true, effects);
+        self.request_pull_request_conversation(true, effects);
         if self.pull_request_check_cursor.is_some() {
-            self.request_check_run_log(effects);
+            self.request_check_run_log(true, effects);
         }
     }
 
@@ -2050,7 +2050,7 @@ impl App {
                         });
                         self.pull_request_checks_error = None;
                         if was_running {
-                            self.request_check_run_log(&mut effects);
+                            self.request_check_run_log(true, &mut effects);
                         }
                     }
                     Err(error) => self.pull_request_checks_error = Some(error),
@@ -2221,8 +2221,8 @@ impl App {
                         self.pull_request_progress = None;
                         self.pull_request_error = None;
                         self.schedule_pull_request_poll(now);
-                        self.request_pull_request_checks(&mut effects);
-                        self.request_pull_request_conversation(&mut effects);
+                        self.request_pull_request_checks(true, &mut effects);
+                        self.request_pull_request_conversation(true, &mut effects);
                         if !same || head_moved {
                             self.preview_due = None;
                             self.request_preview(&mut effects);
@@ -3807,9 +3807,9 @@ impl App {
         self.sidebar_offset = 0;
         self.content_scroll = 0;
         self.horizontal_scroll = 0;
-        self.request_pull_request_checks(effects);
-        self.request_pull_request_conversation(effects);
-        self.request_check_run_log(effects);
+        self.request_pull_request_checks(false, effects);
+        self.request_pull_request_conversation(false, effects);
+        self.request_check_run_log(false, effects);
     }
 
     fn request_pull_request_diff_file(
@@ -3894,8 +3894,10 @@ impl App {
         )));
     }
 
-    fn request_pull_request_checks(&mut self, effects: &mut Vec<AppEffect>) {
-        if self.pull_request_checks_loading {
+    /// `refresh` separates a live poll from merely arriving in the section: the
+    /// latter reuses what is already loaded rather than spending a request.
+    fn request_pull_request_checks(&mut self, refresh: bool, effects: &mut Vec<AppEffect>) {
+        if self.pull_request_checks_loading || (!refresh && !self.pull_request_checks.is_empty()) {
             return;
         }
         let Some(pull_request) = self.pull_request.clone() else {
@@ -3997,14 +3999,16 @@ impl App {
 
     fn select_pull_request_check(&mut self, cursor: Option<usize>, effects: &mut Vec<AppEffect>) {
         if self.set_check_cursor(cursor) {
-            self.request_check_run_log(effects);
+            self.request_check_run_log(false, effects);
         }
     }
 
     /// Fetch the selected check's steps and log. A selection change starts from a
     /// clean slate; a live refresh of the same run updates in place so the reader
-    /// keeps their scroll position while a job is still writing output.
-    fn request_check_run_log(&mut self, effects: &mut Vec<AppEffect>) {
+    /// keeps their scroll position while a job is still writing output. A log
+    /// already held for the selected run is only re-read when `refresh` asks for
+    /// it, so redrawing or re-entering the section costs nothing.
+    fn request_check_run_log(&mut self, refresh: bool, effects: &mut Vec<AppEffect>) {
         let (Some(pull_request), Some(check)) = (
             self.pull_request.clone(),
             self.selected_pull_request_check().cloned(),
@@ -4017,14 +4021,21 @@ impl App {
                 self.pull_request_check_log_generation.wrapping_add(1);
             return;
         };
+        if self.pull_request_check_log_loading {
+            return;
+        }
         let target = (check.workflow.clone(), check.name.clone());
-        if self.pull_request_check_log_target.as_ref() != Some(&target) {
+        if self.pull_request_check_log_target.as_ref() == Some(&target) {
+            let held = self.pull_request_check_log.is_some()
+                || self.pull_request_check_log_error.is_some();
+            if held && !refresh {
+                return;
+            }
+        } else {
             self.pull_request_check_log = None;
             self.pull_request_check_log_error = None;
             self.expanded_check_steps.clear();
             self.pull_request_check_log_target = Some(target);
-        } else if self.pull_request_check_log_loading {
-            return;
         }
         self.pull_request_check_log_generation =
             self.pull_request_check_log_generation.wrapping_add(1);
@@ -4036,8 +4047,10 @@ impl App {
         })));
     }
 
-    fn request_pull_request_conversation(&mut self, effects: &mut Vec<AppEffect>) {
-        if self.pull_request_conversation_loading {
+    fn request_pull_request_conversation(&mut self, refresh: bool, effects: &mut Vec<AppEffect>) {
+        if self.pull_request_conversation_loading
+            || (!refresh && !self.pull_request_conversation.entries.is_empty())
+        {
             return;
         }
         let Some(pull_request) = self.pull_request.clone() else {
@@ -4290,7 +4303,7 @@ impl App {
                 if self.pull_request_section == PullRequestSection::Overview {
                     // The overview pane renders app state directly rather than a
                     // diff document; only a selected check needs fetching.
-                    self.request_check_run_log(effects);
+                    self.request_check_run_log(false, effects);
                     return;
                 }
                 if preparing {
