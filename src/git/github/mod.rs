@@ -3,7 +3,7 @@ mod conversation;
 
 pub use self::checks::{
     CheckLogLine, CheckLogSeverity, CheckRunLog, CheckStep, PullRequestCheck,
-    PullRequestCheckStatus,
+    PullRequestCheckStatus, unix_now,
 };
 pub use self::conversation::{ConversationEntry, ConversationKind, PullRequestConversation};
 

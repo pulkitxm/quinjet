@@ -95,9 +95,29 @@ pub struct CheckStep {
 }
 
 impl CheckStep {
-    pub fn duration_label(&self) -> String {
+    /// How long the step took, or how long it has been running so far when it
+    /// has started but not finished.
+    pub fn duration_label(&self, now: i64) -> String {
+        if self.completed_at.is_empty() {
+            let Some(started) = timestamp_seconds(&self.started_at) else {
+                return String::new();
+            };
+            return if now > started {
+                format!("{}…", format_elapsed(now - started))
+            } else {
+                String::new()
+            };
+        }
         elapsed_label(&self.started_at, &self.completed_at)
     }
+}
+
+/// Seconds since the Unix epoch, for measuring against a GitHub timestamp.
+pub fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs() as i64)
+        .unwrap_or_default()
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -107,8 +127,12 @@ pub struct CheckRunLog {
     /// where a runner reports provisioning and teardown failures.
     pub loose_lines: Vec<CheckLogLine>,
     pub truncated: bool,
-    /// Set when this check has no readable log, with the reason to display.
+    /// Set when there is nothing to show at all, with the reason to display.
     pub unavailable: Option<String>,
+    /// The runner has not written anything yet. This is only true for the first
+    /// seconds of a job: GitHub serves a growing partial log from then on, so a
+    /// running job tails rather than waiting for its own completion.
+    pub log_pending: bool,
 }
 
 impl CheckRunLog {
@@ -117,6 +141,13 @@ impl CheckRunLog {
             unavailable: Some(reason.into()),
             ..Self::default()
         }
+    }
+
+    /// The step a runner is currently executing, if any.
+    pub fn running_step(&self) -> Option<&CheckStep> {
+        self.steps
+            .iter()
+            .find(|step| step.status == PullRequestCheckStatus::Pending)
     }
 
     pub fn failed_step(&self) -> Option<&CheckStep> {
@@ -154,6 +185,10 @@ impl Repository {
     /// the step whose run window contains it. Runner output is timestamped in
     /// UTC and the steps API reports the same clock, so the ranges map exactly
     /// without guessing at group headings.
+    ///
+    /// The log endpoint serves whatever a running job has written so far, so
+    /// repeating this call while a job runs is what makes the view tail it. Only
+    /// the first seconds of a job answer 404, before the blob exists at all.
     pub(crate) fn pull_request_check_log(
         &self,
         pull_request: &PullRequest,
@@ -170,20 +205,20 @@ impl Repository {
         let (raw, truncated) = self.check_run_raw_log(repository, job)?;
         if raw.is_empty() && steps.is_empty() {
             return Ok(CheckRunLog::unavailable(
-                "GitHub has not published a log for this check yet".to_owned(),
+                "GitHub has not published anything for this check yet".to_owned(),
             ));
         }
         let (lines, line_limit_reached) = parse_check_log(&raw);
         let loose_lines = assign_lines_to_steps(&mut steps, lines);
-        // A run still in progress has steps but no published archive yet, which
-        // is worth saying rather than showing a set of empty steps.
-        let pending = raw.is_empty() && check.status.is_running();
         Ok(CheckRunLog {
             steps,
             loose_lines,
             truncated: truncated || line_limit_reached,
-            unavailable: pending
-                .then(|| "GitHub publishes this run's log once the job finishes".to_owned()),
+            unavailable: None,
+            // The archive only appears once a job finishes, but its steps are
+            // live: which one is running, and how long each has taken, both
+            // move on every refresh.
+            log_pending: raw.is_empty(),
         })
     }
 
@@ -465,9 +500,10 @@ fn assign_lines_to_steps(steps: &mut [CheckStep], lines: Vec<CheckLogLine>) -> V
 /// Render an elapsed span between two RFC 3339 stamps, or nothing when either
 /// is missing or the pair does not describe a forward span.
 pub fn elapsed_label(started_at: &str, completed_at: &str) -> String {
-    let Some(seconds) = elapsed_seconds(started_at, completed_at) else {
-        return String::new();
-    };
+    elapsed_seconds(started_at, completed_at).map_or_else(String::new, format_elapsed)
+}
+
+fn format_elapsed(seconds: i64) -> String {
     if seconds < 60 {
         format!("{seconds}s")
     } else if seconds < 3_600 {
@@ -655,8 +691,8 @@ untimestamped trailing output\n";
             loose.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(),
             vec!["provisioning", "teardown"]
         );
-        assert_eq!(steps[1].duration_label(), "2m 20s");
-        assert_eq!(steps[0].duration_label(), "10s");
+        assert_eq!(steps[1].duration_label(0), "2m 20s");
+        assert_eq!(steps[0].duration_label(0), "10s");
     }
 
     #[test]
@@ -748,7 +784,15 @@ untimestamped trailing output\n";
         assert_eq!(steps[0].status, PullRequestCheckStatus::Passed);
         assert_eq!(steps[1].status, PullRequestCheckStatus::Pending);
         assert_eq!(steps[2].status, PullRequestCheckStatus::Failed);
-        assert_eq!(steps[1].duration_label(), "");
+        // A step that has started but not finished reports how long it has been
+        // running, measured against the caller's clock.
+        let started = timestamp_seconds("2026-08-14T18:00:10Z").unwrap();
+        assert_eq!(steps[1].duration_label(started + 95), "1m 35s…");
+        assert_eq!(
+            steps[1].duration_label(started),
+            "",
+            "a step reports nothing until at least a second has passed"
+        );
     }
 
     #[test]
