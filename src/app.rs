@@ -585,6 +585,9 @@ pub struct App {
     pub pull_request_checks_loading: bool,
     pub pull_request_checks_error: Option<String>,
     pub pull_request_checks_from_cache: bool,
+    /// How many settled runs the background warm has already covered, so a
+    /// poll that reports the same set does not queue the work again.
+    pull_request_prefetched_logs: usize,
     pub pull_request_conversation: PullRequestConversation,
     pub pull_request_conversation_loading: bool,
     pub pull_request_conversation_error: Option<String>,
@@ -712,6 +715,7 @@ impl App {
             pull_request_checks_loading: false,
             pull_request_checks_error: None,
             pull_request_checks_from_cache: false,
+            pull_request_prefetched_logs: 0,
             pull_request_conversation: PullRequestConversation::default(),
             pull_request_conversation_loading: false,
             pull_request_conversation_error: None,
@@ -1801,6 +1805,24 @@ impl App {
         effects
     }
 
+    /// Whether any pull-request read is on its way. The view shows one reload
+    /// mark for all of them, because the reader cares that it is refreshing,
+    /// not which of four endpoints is answering.
+    pub fn pull_request_refreshing(&self) -> bool {
+        self.pull_request_loading
+            || self.pull_request_checks_loading
+            || self.pull_request_conversation_loading
+            || self.pull_request_check_log_loading
+    }
+
+    /// Whether everything on screen came from cache rather than the network.
+    pub fn pull_request_served_from_cache(&self) -> bool {
+        self.pull_request.is_some()
+            && self.pull_request_from_cache
+            && self.pull_request_checks_from_cache
+            && !self.pull_request_refreshing()
+    }
+
     pub fn live_refresh_label(&self) -> String {
         format!("every {}s", self.pull_request_poll_interval().as_secs())
     }
@@ -2133,6 +2155,7 @@ impl App {
                         if was_running {
                             self.request_check_run_log(true, &mut effects);
                         }
+                        self.request_check_log_prefetch(&mut effects);
                     }
                     Err(error) => self.pull_request_checks_error = Some(error),
                 }
@@ -3770,6 +3793,7 @@ impl App {
         self.pull_request_checks_loading = false;
         self.pull_request_checks_error = None;
         self.pull_request_checks_generation = self.pull_request_checks_generation.wrapping_add(1);
+        self.pull_request_prefetched_logs = 0;
         self.pull_request_conversation = PullRequestConversation::default();
         self.pull_request_conversation_loading = false;
         self.pull_request_conversation_error = None;
@@ -4196,6 +4220,31 @@ impl App {
             pull_request: Box::new(pull_request),
             check: Box::new(check),
         })));
+    }
+
+    /// Warm every finished run's log once per pull request. Selecting a check
+    /// then costs a disk read rather than a round trip, which is the difference
+    /// between the list being browsable and being a series of waits.
+    fn request_check_log_prefetch(&mut self, effects: &mut Vec<AppEffect>) {
+        let Some(pull_request) = self.pull_request.clone() else {
+            return;
+        };
+        let settled: Vec<PullRequestCheck> = self
+            .pull_request_checks
+            .iter()
+            .filter(|check| !check.status.is_running())
+            .cloned()
+            .collect();
+        if settled.is_empty() || self.pull_request_prefetched_logs == settled.len() {
+            return;
+        }
+        self.pull_request_prefetched_logs = settled.len();
+        effects.push(AppEffect::Git(Box::new(
+            WorkerCommand::PrefetchCheckRunLogs {
+                pull_request: Box::new(pull_request),
+                checks: settled,
+            },
+        )));
     }
 
     fn request_pull_request_conversation(&mut self, refresh: bool, effects: &mut Vec<AppEffect>) {

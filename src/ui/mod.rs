@@ -831,7 +831,9 @@ fn draw_pull_requests_sidebar(
         .map_or_else(String::new, |progress| {
             format!("  · {}%", progress.percent())
         });
-    let cache = if app.pull_request_from_cache {
+    let cache = if app.pull_request_refreshing() {
+        "  ⟳"
+    } else if app.pull_request_served_from_cache() {
         "  · cached"
     } else {
         ""
@@ -1528,6 +1530,8 @@ fn overview_title(app: &App, showing_check: bool) -> String {
     };
     let loading = if app.pull_request_conversation_loading {
         "  ⟳"
+    } else if app.pull_request_served_from_cache() {
+        "  · cached"
     } else {
         ""
     };
@@ -5479,6 +5483,49 @@ terminal rows because that is what real pull-request comments look like in pract
             shift_line(&long.line, 0, 80).to_string().len() < long.line.to_string().len(),
             "the unscrolled view is still clipped to the pane"
         );
+    }
+
+    #[test]
+    fn the_pane_says_whether_it_is_refreshing_or_showing_a_cached_answer() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = overview_app();
+        app.pull_request_exact_number = Some(42);
+        let render = |app: &mut App, terminal: &mut Terminal<TestBackend>| {
+            terminal.draw(|frame| draw(frame, app)).unwrap();
+            terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+        };
+        let mut terminal = Terminal::new(TestBackend::new(120, 24)).unwrap();
+
+        app.pull_request_conversation_loading = true;
+        let refreshing = render(&mut app, &mut terminal);
+        assert!(
+            refreshing.contains('⟳'),
+            "a read in flight shows a reload mark"
+        );
+        assert!(!refreshing.contains("cached"));
+
+        app.pull_request_conversation_loading = false;
+        app.pull_request_from_cache = true;
+        app.pull_request_checks_from_cache = true;
+        let cached = render(&mut app, &mut terminal);
+        assert!(
+            cached.contains("cached"),
+            "an answer served from disk says so rather than pretending to be live"
+        );
+        assert!(!cached.contains('⟳'));
+
+        app.pull_request_checks_from_cache = false;
+        let live = render(&mut app, &mut terminal);
+        assert!(!live.contains("cached"));
+        assert!(!live.contains('⟳'));
     }
 
     #[test]

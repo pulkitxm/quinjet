@@ -12,6 +12,8 @@ const MAX_CHECK_LOG_BYTES: usize = 8 * 1024 * 1024;
 /// Check state is the one thing here that genuinely changes minute to minute,
 /// so it is the one thing kept on a clock rather than on an identity.
 const CHECK_LIST_CACHE_TTL: Duration = Duration::from_secs(30);
+/// A ceiling on how much a single pull request will warm in the background.
+const MAX_PREFETCHED_CHECK_LOGS: usize = 32;
 const MAX_CHECK_LOG_LINES: usize = 200_000;
 const CHECK_TSV_FIELDS: usize = 8;
 const STEP_TSV_FIELDS: usize = 6;
@@ -266,6 +268,23 @@ impl Repository {
             // move on every refresh.
             log_pending: raw.is_empty(),
         })
+    }
+
+    /// Read every finished run into the cache so that selecting any of them is
+    /// answered from disk. Runs still in progress are skipped: their output is
+    /// not cacheable, and re-reading it here would spend requests the live tail
+    /// is about to spend anyway.
+    pub(crate) fn prefetch_check_run_logs(
+        &self,
+        pull_request: &PullRequest,
+        checks: &[PullRequestCheck],
+    ) -> usize {
+        checks
+            .iter()
+            .filter(|check| !check.status.is_running() && check.job_id().is_some())
+            .take(MAX_PREFETCHED_CHECK_LOGS)
+            .filter(|check| self.pull_request_check_log(pull_request, check).is_ok())
+            .count()
     }
 
     fn check_run_steps(

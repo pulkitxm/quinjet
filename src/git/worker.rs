@@ -78,6 +78,12 @@ pub enum WorkerCommand {
         pull_request: Box<PullRequest>,
         check: Box<PullRequestCheck>,
     },
+    /// Warm every finished run's log so that opening any of them is instant.
+    /// It carries no generation because it changes nothing on screen.
+    PrefetchCheckRunLogs {
+        pull_request: Box<PullRequest>,
+        checks: Vec<PullRequestCheck>,
+    },
     LoadBranches {
         generation: u64,
     },
@@ -184,6 +190,7 @@ struct Mailbox {
     checks: Option<WorkerCommand>,
     conversation: Option<WorkerCommand>,
     check_log: Option<WorkerCommand>,
+    warm: Option<WorkerCommand>,
     shutdown: bool,
 }
 
@@ -223,6 +230,9 @@ impl Mailbox {
                 self.conversation = Some(command);
             }
             command @ WorkerCommand::LoadCheckRunLog { .. } => self.check_log = Some(command),
+            command @ WorkerCommand::PrefetchCheckRunLogs { .. } => {
+                self.warm = Some(command);
+            }
             WorkerCommand::Shutdown => self.shutdown = true,
         }
     }
@@ -241,6 +251,7 @@ impl Mailbox {
             .or_else(|| self.conversation.take())
             .or_else(|| self.history.take())
             .or_else(|| self.prefetch.take())
+            .or_else(|| self.warm.take())
     }
 }
 
@@ -266,7 +277,8 @@ fn worker_lane(command: &WorkerCommand) -> WorkerLane {
         | WorkerCommand::LookupPullRequest { .. }
         | WorkerCommand::LoadPullRequestChecks { .. }
         | WorkerCommand::LoadPullRequestConversation { .. }
-        | WorkerCommand::LoadCheckRunLog { .. } => WorkerLane::GitHubMetadata,
+        | WorkerCommand::LoadCheckRunLog { .. }
+        | WorkerCommand::PrefetchCheckRunLogs { .. } => WorkerLane::GitHubMetadata,
         WorkerCommand::PreparePullRequest { .. }
         | WorkerCommand::LoadPullRequestFile { .. }
         | WorkerCommand::LoadPullRequestFileBatch { .. } => WorkerLane::PullRequestPreview,
@@ -543,6 +555,13 @@ fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sende
                     .pull_request_check_log(&pull_request, &check)
                     .map_err(format_error),
             },
+            WorkerCommand::PrefetchCheckRunLogs {
+                pull_request,
+                checks,
+            } => {
+                repository.prefetch_check_run_logs(&pull_request, &checks);
+                continue;
+            }
             WorkerCommand::LoadBranches { generation } => WorkerEvent::Branches {
                 generation,
                 result: repository.branches().map_err(format_error),
