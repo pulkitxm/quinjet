@@ -3232,6 +3232,15 @@ impl App {
     }
 
     fn go_to_edge(&mut self, end: bool, now: Instant) {
+        // A check log is a list, so its ends are its first and last step. The
+        // draw scrolls whichever one is selected into view.
+        if self.focus == Focus::Content && self.check_log_visible() {
+            let steps = self.check_step_numbers();
+            if let Some(step) = if end { steps.last() } else { steps.first() } {
+                self.pull_request_step_cursor = *step;
+                return;
+            }
+        }
         if self.focus == Focus::Content {
             // The renderer owns the true row count: a pane may compose rows from
             // app state rather than from the diff document. Ask for the end and
@@ -5547,6 +5556,12 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE), now);
         assert_eq!(app.pull_request_step_cursor, 2);
         assert!(app.content_scroll > 0);
+
+        // The ends of the list are its first and last step.
+        app.handle_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE), now);
+        assert_eq!(app.pull_request_step_cursor, 3);
+        app.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE), now);
+        assert_eq!(app.pull_request_step_cursor, 1);
     }
 
     #[test]
