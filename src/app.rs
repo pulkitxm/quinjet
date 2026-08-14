@@ -7,8 +7,8 @@ use ratatui::layout::Rect;
 
 use crate::git::diff::{DiffDocument, DiffIndex, DiffLineKind, PullRequestDetails};
 use crate::git::github::{
-    GitHubRepository, PullRequest, PullRequestCheck, PullRequestDiffIndex, PullRequestFile,
-    PullRequestFileStatus, PullRequestProgress,
+    GitHubRepository, PullRequest, PullRequestCheck, PullRequestConversation, PullRequestDiffIndex,
+    PullRequestFile, PullRequestFileStatus, PullRequestProgress,
 };
 use crate::git::history::Commit;
 use crate::git::status::{Change, ChangeArea, RepoStatus};
@@ -553,6 +553,9 @@ pub struct App {
     pub pull_request_check_cursor: usize,
     pub pull_request_checks_loading: bool,
     pub pull_request_checks_error: Option<String>,
+    pub pull_request_conversation: PullRequestConversation,
+    pub pull_request_conversation_loading: bool,
+    pub pull_request_conversation_error: Option<String>,
     pub pull_request_progress: Option<PullRequestProgress>,
     pub auxiliary_preview: Option<AuxiliaryPreview>,
     pub document: DiffDocument,
@@ -598,6 +601,7 @@ pub struct App {
     pull_request_single_file: Option<PathBuf>,
     pull_request_prefetching: bool,
     pull_request_checks_generation: u64,
+    pull_request_conversation_generation: u64,
     local_diff_request: Option<LocalDiffRequest>,
     local_diff_workspace_generation: Option<u64>,
     local_diff_index: Option<DiffIndex>,
@@ -649,6 +653,9 @@ impl App {
             pull_request_check_cursor: 0,
             pull_request_checks_loading: false,
             pull_request_checks_error: None,
+            pull_request_conversation: PullRequestConversation::default(),
+            pull_request_conversation_loading: false,
+            pull_request_conversation_error: None,
             pull_request_progress: None,
             auxiliary_preview: None,
             document: DiffDocument::empty("Working Tree", "Loading changes…"),
@@ -691,6 +698,7 @@ impl App {
             pull_request_single_file: None,
             pull_request_prefetching: false,
             pull_request_checks_generation: 0,
+            pull_request_conversation_generation: 0,
             local_diff_request: None,
             local_diff_workspace_generation: None,
             local_diff_index: None,
@@ -1914,6 +1922,22 @@ impl App {
                     Err(error) => self.pull_request_checks_error = Some(error),
                 }
             }
+            WorkerEvent::PullRequestConversation { generation, result } => {
+                if generation != self.pull_request_conversation_generation {
+                    return effects;
+                }
+                self.pull_request_conversation_loading = false;
+                match result {
+                    Ok(conversation) => {
+                        // Entries are ordered oldest first, so new activity only
+                        // ever appends and a live refresh leaves the reader's
+                        // scroll position pointing at the same entry.
+                        self.pull_request_conversation = conversation;
+                        self.pull_request_conversation_error = None;
+                    }
+                    Err(error) => self.pull_request_conversation_error = Some(error),
+                }
+            }
             WorkerEvent::History {
                 generation,
                 skip,
@@ -2012,6 +2036,7 @@ impl App {
                         self.pull_request_from_cache = snapshot.from_cache;
                         self.reset_pull_request_runtime();
                         self.request_pull_request_checks(&mut effects);
+                        self.request_pull_request_conversation(&mut effects);
                         if self.view == View::PullRequests {
                             self.preview_due = None;
                             self.request_preview(&mut effects);
@@ -3435,6 +3460,11 @@ impl App {
         self.pull_request_checks_loading = false;
         self.pull_request_checks_error = None;
         self.pull_request_checks_generation = self.pull_request_checks_generation.wrapping_add(1);
+        self.pull_request_conversation = PullRequestConversation::default();
+        self.pull_request_conversation_loading = false;
+        self.pull_request_conversation_error = None;
+        self.pull_request_conversation_generation =
+            self.pull_request_conversation_generation.wrapping_add(1);
         self.sidebar_offset = 0;
     }
 
@@ -3672,6 +3702,24 @@ impl App {
         effects.push(AppEffect::Git(Box::new(
             WorkerCommand::LoadPullRequestChecks {
                 generation: self.pull_request_checks_generation,
+                pull_request: Box::new(pull_request),
+            },
+        )));
+    }
+
+    fn request_pull_request_conversation(&mut self, effects: &mut Vec<AppEffect>) {
+        if self.pull_request_conversation_loading {
+            return;
+        }
+        let Some(pull_request) = self.pull_request.clone() else {
+            return;
+        };
+        self.pull_request_conversation_generation =
+            self.pull_request_conversation_generation.wrapping_add(1);
+        self.pull_request_conversation_loading = true;
+        effects.push(AppEffect::Git(Box::new(
+            WorkerCommand::LoadPullRequestConversation {
+                generation: self.pull_request_conversation_generation,
                 pull_request: Box::new(pull_request),
             },
         )));
@@ -4135,6 +4183,7 @@ mod tests {
             author: "octocat".to_owned(),
             state: "OPEN".to_owned(),
             is_draft: false,
+            created_at: format!("2026-07-{number:02}T00:00:00Z"),
             updated_at: format!("2026-08-{number:02}T00:00:00Z"),
             url: format!("https://github.com/{repository}/pull/{number}"),
             base_ref: "main".to_owned(),
@@ -4535,7 +4584,7 @@ mod tests {
     }
 
     #[test]
-    fn loaded_metadata_immediately_queues_the_file_index_and_checks() {
+    fn loaded_metadata_immediately_queues_the_file_index_checks_and_conversation() {
         let mut app = App::new("/tmp/repo", "repo");
         app.view = View::PullRequests;
         app.pull_request_generation = 3;
@@ -4558,7 +4607,15 @@ mod tests {
             Instant::now(),
         );
 
-        assert_eq!(effects.len(), 2);
+        assert_eq!(effects.len(), 3);
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            AppEffect::Git(command) if matches!(
+                command.as_ref(),
+                WorkerCommand::LoadPullRequestConversation { pull_request, .. }
+                    if pull_request.number == 8
+            )
+        )));
         assert!(effects.iter().any(|effect| matches!(
             effect,
             AppEffect::Git(command) if matches!(

@@ -1,3 +1,7 @@
+mod conversation;
+
+pub use self::conversation::{ConversationEntry, ConversationKind, PullRequestConversation};
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -34,9 +38,10 @@ const PULL_REQUEST_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
 const TEMPORARY_REPOSITORY_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 const CACHE_MAGIC: &[u8] = b"quinjet-gh-cache-v1\n";
 
-const PULL_REQUEST_FIELDS: &str = "number,title,body,author,state,isDraft,updatedAt,url,baseRefName,baseRefOid,headRefName,headRefOid,headRepository,isCrossRepository,additions,deletions,changedFiles";
-const PULL_REQUEST_VIEW_TSV_JQ: &str = r#"[(.number|tostring), .title, (.body // ""), (.author.login // "ghost"), .state, (.isDraft|tostring), .updatedAt, .url, .baseRefName, .headRefName, (.headRepository.nameWithOwner // ""), (.isCrossRepository|tostring), (.additions|tostring), (.deletions|tostring), (.changedFiles|tostring), .baseRefOid, .headRefOid] | @tsv"#;
+const PULL_REQUEST_FIELDS: &str = "number,title,body,author,state,isDraft,createdAt,updatedAt,url,baseRefName,baseRefOid,headRefName,headRefOid,headRepository,isCrossRepository,additions,deletions,changedFiles";
+const PULL_REQUEST_VIEW_TSV_JQ: &str = r#"[(.number|tostring), .title, (.body // ""), (.author.login // "ghost"), .state, (.isDraft|tostring), .updatedAt, .url, .baseRefName, .headRefName, (.headRepository.nameWithOwner // ""), (.isCrossRepository|tostring), (.additions|tostring), (.deletions|tostring), (.changedFiles|tostring), .baseRefOid, .headRefOid, .createdAt] | @tsv"#;
 const REPOSITORY_TSV_TEMPLATE: &str = "{{.nameWithOwner}}{{\"\\t\"}}{{.url}}{{\"\\n\"}}";
+const PULL_REQUEST_TSV_FIELDS: usize = 18;
 
 static TEMPORARY_REPOSITORY_ID: AtomicU64 = AtomicU64::new(0);
 static CACHE_WRITE_ID: AtomicU64 = AtomicU64::new(0);
@@ -77,6 +82,7 @@ pub struct PullRequest {
     pub author: String,
     pub state: String,
     pub is_draft: bool,
+    pub created_at: String,
     pub updated_at: String,
     pub url: String,
     pub base_ref: String,
@@ -440,7 +446,7 @@ impl Repository {
     ) -> Result<(PullRequest, CacheDisposition)> {
         let response = self.checked_cached_gh(
             &format!(
-                "pull-request-v2\n{}\n{number}",
+                "pull-request-v3\n{}\n{number}",
                 repository.url.trim_end_matches('/')
             ),
             PULL_REQUEST_CACHE_TTL,
@@ -878,7 +884,7 @@ fn parse_pull_requests(
         if record.is_empty() {
             continue;
         }
-        let fields = parse_tsv_record(record, 17)
+        let fields = parse_tsv_record(record, PULL_REQUEST_TSV_FIELDS)
             .with_context(|| format!("invalid pull-request record {}", index + 1))?;
         pull_requests.push(parse_pull_request_fields(
             &fields,
@@ -894,8 +900,11 @@ fn parse_pull_request_fields(
     base_repository: &GitHubRepository,
     repositories: &[GitHubRepository],
 ) -> Result<PullRequest> {
-    if fields.len() != 17 {
-        bail!("expected 17 pull-request fields, received {}", fields.len());
+    if fields.len() != PULL_REQUEST_TSV_FIELDS {
+        bail!(
+            "expected {PULL_REQUEST_TSV_FIELDS} pull-request fields, received {}",
+            fields.len()
+        );
     }
     let head_repository = (!fields[10].is_empty()).then(|| fields[10].clone());
     let head_remotes = head_repository
@@ -922,6 +931,7 @@ fn parse_pull_request_fields(
         changed_files: parse_field(&fields[14], "changed-file count")?,
         base_oid: fields[15].clone(),
         head_oid: fields[16].clone(),
+        created_at: fields[17].clone(),
     })
 }
 
@@ -1821,7 +1831,7 @@ mod tests {
         directory
     }
 
-    fn repository(name: &str, url: &str, remotes: &[&str]) -> GitHubRepository {
+    pub(super) fn repository(name: &str, url: &str, remotes: &[&str]) -> GitHubRepository {
         GitHubRepository {
             name_with_owner: name.to_owned(),
             url: url.to_owned(),
@@ -1829,7 +1839,7 @@ mod tests {
         }
     }
 
-    fn pull_request(base: GitHubRepository, number: u64) -> PullRequest {
+    pub(super) fn pull_request(base: GitHubRepository, number: u64) -> PullRequest {
         PullRequest {
             number,
             title: "Ship the rocket".to_owned(),
@@ -1837,6 +1847,7 @@ mod tests {
             author: "octocat".to_owned(),
             state: "OPEN".to_owned(),
             is_draft: false,
+            created_at: "2026-08-12T09:00:00Z".to_owned(),
             updated_at: "2026-08-13T12:00:00Z".to_owned(),
             url: format!("{}/pull/{number}", base.url),
             base_ref: "main".to_owned(),
@@ -1948,7 +1959,7 @@ mod tests {
             "https://github.com/octocat/widget",
             &["origin", "publish"],
         );
-        let output = b"42\tShip the rocket\tDetailed\\nbody\toctocat\tOPEN\ttrue\t2026-08-13T12:00:00Z\thttps://github.com/acme/widget/pull/42\tmain\tfeature/rocket\toctocat/widget\ttrue\t12\t3\t4\tbaseoid\theadid\n";
+        let output = b"42\tShip the rocket\tDetailed\\nbody\toctocat\tOPEN\ttrue\t2026-08-13T12:00:00Z\thttps://github.com/acme/widget/pull/42\tmain\tfeature/rocket\toctocat/widget\ttrue\t12\t3\t4\tbaseoid\theadid\t2026-08-01T09:00:00Z\n";
 
         let requests = parse_pull_requests(output, &upstream, &[upstream.clone(), fork]).unwrap();
 
@@ -1969,7 +1980,7 @@ mod tests {
             "https://github.example.com/acme/widget",
             &["enterprise"],
         );
-        let output = b"7\tOld contribution\t\tghost\tOPEN\tfalse\t2026-01-01T00:00:00Z\thttps://github.example.com/acme/widget/pull/7\ttrunk\tlost-branch\t\tfalse\t0\t0\t1\tbaseoid\theadid\n";
+        let output = b"7\tOld contribution\t\tghost\tOPEN\tfalse\t2026-01-01T00:00:00Z\thttps://github.example.com/acme/widget/pull/7\ttrunk\tlost-branch\t\tfalse\t0\t0\t1\tbaseoid\theadid\t2025-12-30T00:00:00Z\n";
 
         let request = parse_pull_requests(output, &base, std::slice::from_ref(&base))
             .unwrap()
