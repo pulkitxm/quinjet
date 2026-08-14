@@ -2,6 +2,7 @@ mod app;
 mod git;
 mod ui;
 mod watch;
+mod webhook;
 
 use std::io::{self, IsTerminal};
 use std::path::PathBuf;
@@ -26,6 +27,7 @@ use crate::app::{App, AppEffect};
 use crate::git::Repository;
 use crate::git::worker::GitWorker;
 use crate::watch::RepoWatcher;
+use crate::webhook::WebhookListener;
 
 #[derive(Debug, Parser)]
 #[command(name = "quinjet", version, about)]
@@ -37,6 +39,13 @@ struct Cli {
     /// Disable mouse capture (all features remain keyboard-accessible)
     #[arg(long)]
     no_mouse: bool,
+
+    /// Refresh the open pull request the moment a forwarded GitHub webhook
+    /// arrives, given a port or host:port to listen on. Pair with
+    /// `gh webhook forward --repo <repo> --events '*' --url http://127.0.0.1:<port>`.
+    /// Only loopback connections are accepted.
+    #[arg(long, value_name = "ADDRESS")]
+    webhook_listen: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -48,6 +57,11 @@ fn main() -> Result<()> {
     let repository = Repository::discover(&cli.path)?;
     let worker = GitWorker::start(repository.clone());
     let watcher = RepoWatcher::new(repository.root()).ok();
+    let webhooks = cli
+        .webhook_listen
+        .as_deref()
+        .map(WebhookListener::bind)
+        .transpose()?;
     let mut app = App::new(repository.root(), repository.name());
     let mut terminal = TerminalGuard::enter(!cli.no_mouse)?;
     let render_tick = tick(Duration::from_millis(16));
@@ -75,6 +89,11 @@ fn main() -> Result<()> {
             let mut effects = Vec::new();
             app.filesystem_changed(&mut effects);
             running &= dispatch_effects(&worker, effects);
+            dirty = true;
+        }
+
+        if webhook_delivered(webhooks.as_ref()) {
+            running &= dispatch_effects(&worker, app.webhook_delivered(Instant::now()));
             dirty = true;
         }
 
@@ -120,6 +139,19 @@ fn watcher_changed(receiver: Option<&Receiver<()>>) -> bool {
         changed = true;
     }
     changed
+}
+
+/// Deliveries only say that something changed, so several arriving together
+/// collapse into the single refresh they would each have asked for.
+fn webhook_delivered(listener: Option<&WebhookListener>) -> bool {
+    let Some(listener) = listener else {
+        return false;
+    };
+    let mut delivered = false;
+    while listener.deliveries().try_recv().is_ok() {
+        delivered = true;
+    }
+    delivered
 }
 
 fn dispatch_effects(worker: &GitWorker, effects: Vec<AppEffect>) -> bool {

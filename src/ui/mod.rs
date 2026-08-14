@@ -1404,11 +1404,13 @@ fn draw_pull_request_overview(
 
     // Following the step cursor here keeps `[` and `]` useful on a log that is
     // far taller than the pane.
-    if showing_check
-        && let Some(cursor_row) = rows
-            .iter()
-            .position(|row| row.step == Some(app.pull_request_step_cursor))
-    {
+    let cursor_row = showing_check
+        .then(|| {
+            rows.iter()
+                .position(|row| row.step == Some(app.pull_request_step_cursor))
+        })
+        .flatten();
+    if let Some(cursor_row) = cursor_row {
         ensure_offset(
             &mut app.content_scroll,
             cursor_row,
