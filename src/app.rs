@@ -592,6 +592,10 @@ pub struct App {
     pub pull_request_check_log_error: Option<String>,
     pub expanded_check_steps: HashSet<usize>,
     pub pull_request_step_cursor: usize,
+    /// Set when the step selection moves, and cleared by the draw that acts on
+    /// it. Scrolling the selection into view on every frame instead would pin
+    /// the pane to the selected step and make its own output unreadable.
+    pub pull_request_step_reveal: bool,
     /// Whether the last draw left the content pane scrolled to its end. The
     /// renderer owns the row count, so it reports this back for the one decision
     /// that needs it: whether a growing log should keep following.
@@ -710,6 +714,7 @@ impl App {
             pull_request_check_log_error: None,
             expanded_check_steps: HashSet::new(),
             pull_request_step_cursor: 0,
+            pull_request_step_reveal: false,
             content_at_bottom: true,
             pull_request_progress: None,
             auxiliary_preview: None,
@@ -2143,13 +2148,15 @@ impl App {
                             // log; the step in progress is the reason anyone
                             // opens a running one.
                             if let Some(step) = log.failed_step().or_else(|| log.running_step()) {
-                                self.expanded_check_steps.insert(step.number);
-                                self.pull_request_step_cursor = step.number;
+                                let number = step.number;
+                                self.expanded_check_steps.insert(number);
+                                self.reveal_check_step(number);
                             }
                         }
                         if self.pull_request_step_cursor == 0 {
                             if let Some(step) = log.steps.first() {
-                                self.pull_request_step_cursor = step.number;
+                                let number = step.number;
+                                self.reveal_check_step(number);
                             }
                         }
                         self.pull_request_check_log = Some(log);
@@ -3237,7 +3244,7 @@ impl App {
         if self.focus == Focus::Content && self.check_log_visible() {
             let steps = self.check_step_numbers();
             if let Some(step) = if end { steps.last() } else { steps.first() } {
-                self.pull_request_step_cursor = *step;
+                self.reveal_check_step(*step);
                 return;
             }
         }
@@ -4070,7 +4077,7 @@ impl App {
         if !self.expanded_check_steps.remove(&step) {
             self.expanded_check_steps.insert(step);
         }
-        self.pull_request_step_cursor = step;
+        self.reveal_check_step(step);
     }
 
     fn toggle_all_check_steps(&mut self) {
@@ -4085,6 +4092,12 @@ impl App {
 
     /// Move between steps the way `[` and `]` move between diff hunks, so a long
     /// log can be walked without scrolling through it.
+    /// Move the step selection and ask the next draw to bring it into view.
+    fn reveal_check_step(&mut self, step: usize) {
+        self.pull_request_step_cursor = step;
+        self.pull_request_step_reveal = true;
+    }
+
     fn move_check_step_cursor(&mut self, amount: isize) -> bool {
         let steps = self.check_step_numbers();
         if steps.is_empty() {
@@ -4099,7 +4112,7 @@ impl App {
         } else {
             current.saturating_add(amount as usize).min(steps.len() - 1)
         };
-        self.pull_request_step_cursor = steps[next];
+        self.reveal_check_step(steps[next]);
         true
     }
 

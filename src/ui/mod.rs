@@ -1449,19 +1449,22 @@ fn draw_pull_request_overview(
 
     // Following the step cursor here keeps `[` and `]` useful on a log that is
     // far taller than the pane.
-    let cursor_row = showing_check
-        .then(|| {
-            rows.iter()
-                .position(|row| row.step == Some(app.pull_request_step_cursor))
-        })
-        .flatten();
-    if let Some(cursor_row) = cursor_row {
-        ensure_offset(
-            &mut app.content_scroll,
-            cursor_row,
-            inner.height as usize,
-            rows.len(),
-        );
+    // Only a selection that just moved pulls the view to it. Doing this on every
+    // frame would anchor the pane to the selected step, so scrolling into its own
+    // output, or down to the steps after it, would snap straight back.
+    if showing_check && app.pull_request_step_reveal {
+        app.pull_request_step_reveal = false;
+        if let Some(cursor_row) = rows
+            .iter()
+            .position(|row| row.step == Some(app.pull_request_step_cursor))
+        {
+            ensure_offset(
+                &mut app.content_scroll,
+                cursor_row,
+                inner.height as usize,
+                rows.len(),
+            );
+        }
     }
     let max_scroll = rows.len().saturating_sub(inner.height as usize);
     app.content_scroll = app.content_scroll.min(max_scroll);
@@ -5225,6 +5228,70 @@ terminal rows because that is what real pull-request comments look like in pract
             rows.iter()
                 .any(|row| row.line.to_string().contains("Older activity was omitted")),
             "a truncated thread says so rather than silently dropping history"
+        );
+    }
+
+    #[test]
+    fn an_expanded_step_can_be_scrolled_past_to_reach_the_steps_below_it() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = overview_app();
+        app.pull_request_check_cursor = Some(0);
+        let line = |text: &str| CheckLogLine {
+            timestamp: "2026-08-02T10:00:01Z".to_owned(),
+            text: text.to_owned(),
+            severity: CheckLogSeverity::Normal,
+        };
+        let step = |number: usize, lines: usize| CheckStep {
+            number,
+            name: format!("Step {number}"),
+            status: PullRequestCheckStatus::Passed,
+            conclusion: "success".to_owned(),
+            started_at: "2026-08-02T10:00:00Z".to_owned(),
+            completed_at: "2026-08-02T10:00:05Z".to_owned(),
+            lines: (0..lines)
+                .map(|index| line(&format!("output line {index}")))
+                .collect(),
+        };
+        app.pull_request_check_log = Some(crate::git::github::CheckRunLog {
+            steps: vec![step(1, 300), step(2, 0), step(3, 0)],
+            loose_lines: Vec::new(),
+            truncated: false,
+            unavailable: None,
+            log_pending: false,
+        });
+        // The first step is open and selected, which is how a reader arrives here.
+        app.expanded_check_steps.insert(1);
+        app.pull_request_step_cursor = 1;
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+
+        // Scroll into that step's output, the way PgDn or the wheel would.
+        app.content_scroll = 120;
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        assert_eq!(
+            app.content_scroll, 120,
+            "a redraw must not drag the view back to the selected step"
+        );
+
+        // And carry on to the end, where the steps that follow it live.
+        app.content_scroll = usize::MAX;
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(
+            rendered.contains("Step 2") && rendered.contains("Step 3"),
+            "the steps below a long expanded step are reachable by scrolling"
+        );
+        assert!(
+            !rendered.contains("output line 0 "),
+            "the view really moved past the expanded output"
         );
     }
 
