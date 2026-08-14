@@ -5,10 +5,10 @@ use std::thread;
 use crossbeam_channel::{Receiver, Sender, unbounded};
 
 use super::diff::DiffDocument;
-use super::github::{PullRequest, PullRequestBatch, PullRequestSnapshot};
+use super::github::{PullRequest, PullRequestProgress, PullRequestSnapshot};
 use super::history::Commit;
 use super::status::{Change, RepoStatus};
-use super::{Branch, GitOperation, HistoryBranch, Repository};
+use super::{Branch, GitOperation, HistoryBranch, Repository, Stash};
 
 #[derive(Debug)]
 pub enum WorkerCommand {
@@ -30,17 +30,23 @@ pub enum WorkerCommand {
         generation: u64,
         commit: Box<Commit>,
     },
-    LoadPullRequests {
+    LoadBranchDiff {
         generation: u64,
-        repositories: Vec<super::github::GitHubRepository>,
-        repository: Option<Box<super::github::GitHubRepository>>,
-        cursor: Option<String>,
+        branch: Box<HistoryBranch>,
+        expanded: bool,
+    },
+    LoadStashDiff {
+        generation: u64,
+        stash: Box<Stash>,
+    },
+    LoadGitHubRepositories {
+        generation: u64,
         refresh: bool,
     },
     LookupPullRequest {
         generation: u64,
         repositories: Vec<super::github::GitHubRepository>,
-        repository: Box<super::github::GitHubRepository>,
+        repository: Option<Box<super::github::GitHubRepository>>,
         number: u64,
         refresh: bool,
     },
@@ -54,6 +60,9 @@ pub enum WorkerCommand {
         generation: u64,
     },
     LoadHistoryBranches {
+        generation: u64,
+    },
+    LoadStashes {
         generation: u64,
     },
     Operate {
@@ -82,13 +91,26 @@ pub enum WorkerEvent {
         generation: u64,
         result: Result<DiffDocument, String>,
     },
-    PullRequestBatch {
+    BranchDiff {
         generation: u64,
-        result: Result<PullRequestBatch, String>,
+        result: Result<DiffDocument, String>,
+    },
+    StashDiff {
+        generation: u64,
+        result: Result<DiffDocument, String>,
+    },
+    GitHubRepositories {
+        generation: u64,
+        result: Result<(Vec<super::github::GitHubRepository>, Vec<String>), String>,
     },
     PullRequestLookup {
         generation: u64,
         result: Result<PullRequestSnapshot, String>,
+    },
+    PullRequestProgress {
+        generation: u64,
+        diff: bool,
+        progress: PullRequestProgress,
     },
     PullRequestDiff {
         generation: u64,
@@ -101,6 +123,10 @@ pub enum WorkerEvent {
     HistoryBranches {
         generation: u64,
         result: Result<Vec<HistoryBranch>, String>,
+    },
+    Stashes {
+        generation: u64,
+        result: Result<Vec<Stash>, String>,
     },
     OperationFinished {
         id: u64,
@@ -117,7 +143,7 @@ struct Mailbox {
     refresh: Option<WorkerCommand>,
     preview: Option<WorkerCommand>,
     history: Option<WorkerCommand>,
-    pull_requests: Option<WorkerCommand>,
+    pull_request: Option<WorkerCommand>,
     shutdown: bool,
 }
 
@@ -126,19 +152,22 @@ impl Mailbox {
         match command {
             command @ WorkerCommand::Operate { .. } => self.operations.push_back(command),
             command @ (WorkerCommand::LoadBranches { .. }
-            | WorkerCommand::LoadHistoryBranches { .. }) => self.branches = Some(command),
+            | WorkerCommand::LoadHistoryBranches { .. }
+            | WorkerCommand::LoadStashes { .. }) => self.branches = Some(command),
             command @ WorkerCommand::Refresh { .. } => self.refresh = Some(command),
             command @ (WorkerCommand::LoadDiff { .. }
             | WorkerCommand::LoadCommit { .. }
+            | WorkerCommand::LoadBranchDiff { .. }
+            | WorkerCommand::LoadStashDiff { .. }
             | WorkerCommand::LoadPullRequest { .. }) => {
                 // Only the newest preview matters. This makes key-repeat constant-space
                 // even when a large diff is slower than navigation.
                 self.preview = Some(command);
             }
             command @ WorkerCommand::LoadHistory { .. } => self.history = Some(command),
-            command @ (WorkerCommand::LoadPullRequests { .. }
+            command @ (WorkerCommand::LoadGitHubRepositories { .. }
             | WorkerCommand::LookupPullRequest { .. }) => {
-                self.pull_requests = Some(command);
+                self.pull_request = Some(command);
             }
             WorkerCommand::Shutdown => self.shutdown = true,
         }
@@ -150,7 +179,7 @@ impl Mailbox {
             .pop_front()
             .or_else(|| self.branches.take())
             .or_else(|| self.preview.take())
-            .or_else(|| self.pull_requests.take())
+            .or_else(|| self.pull_request.take())
             .or_else(|| self.refresh.take())
             .or_else(|| self.history.take())
     }
@@ -171,10 +200,11 @@ enum WorkerLane {
 
 fn worker_lane(command: &WorkerCommand) -> WorkerLane {
     match command {
-        WorkerCommand::LoadDiff { .. } | WorkerCommand::LoadCommit { .. } => {
-            WorkerLane::LocalPreview
-        }
-        WorkerCommand::LoadPullRequests { .. } | WorkerCommand::LookupPullRequest { .. } => {
+        WorkerCommand::LoadDiff { .. }
+        | WorkerCommand::LoadCommit { .. }
+        | WorkerCommand::LoadBranchDiff { .. }
+        | WorkerCommand::LoadStashDiff { .. } => WorkerLane::LocalPreview,
+        WorkerCommand::LoadGitHubRepositories { .. } | WorkerCommand::LookupPullRequest { .. } => {
             WorkerLane::GitHubMetadata
         }
         WorkerCommand::LoadPullRequest { .. } => WorkerLane::PullRequestPreview,
@@ -329,21 +359,27 @@ fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sende
                 generation,
                 result: repository.commit_detail(&commit).map_err(format_error),
             },
-            WorkerCommand::LoadPullRequests {
+            WorkerCommand::LoadBranchDiff {
                 generation,
-                repositories,
-                repository: selected_repository,
-                cursor,
-                refresh,
-            } => WorkerEvent::PullRequestBatch {
+                branch,
+                expanded,
+            } => WorkerEvent::BranchDiff {
                 generation,
                 result: repository
-                    .pull_request_batch(
-                        &repositories,
-                        selected_repository.as_deref(),
-                        cursor.as_deref(),
-                        refresh,
-                    )
+                    .branch_diff(&branch, expanded)
+                    .map_err(format_error),
+            },
+            WorkerCommand::LoadStashDiff { generation, stash } => WorkerEvent::StashDiff {
+                generation,
+                result: repository.stash_diff(&stash).map_err(format_error),
+            },
+            WorkerCommand::LoadGitHubRepositories {
+                generation,
+                refresh,
+            } => WorkerEvent::GitHubRepositories {
+                generation,
+                result: repository
+                    .github_repositories(refresh)
                     .map_err(format_error),
             },
             WorkerCommand::LookupPullRequest {
@@ -354,9 +390,21 @@ fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sende
                 refresh,
             } => WorkerEvent::PullRequestLookup {
                 generation,
-                result: repository
-                    .pull_request_lookup(&repositories, &selected_repository, number, refresh)
-                    .map_err(format_error),
+                result: {
+                    let _ = events.send(WorkerEvent::PullRequestProgress {
+                        generation,
+                        diff: false,
+                        progress: PullRequestProgress::LoadingMetadata,
+                    });
+                    repository
+                        .pull_request_lookup(
+                            &repositories,
+                            selected_repository.as_deref(),
+                            number,
+                            refresh,
+                        )
+                        .map_err(format_error)
+                },
             },
             WorkerCommand::LoadPullRequest {
                 generation,
@@ -366,7 +414,18 @@ fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sende
             } => WorkerEvent::PullRequestDiff {
                 generation,
                 result: repository
-                    .pull_request_diff(&pull_request, file_page, file_page_size)
+                    .pull_request_diff_with_progress(
+                        &pull_request,
+                        file_page,
+                        file_page_size,
+                        |progress| {
+                            let _ = events.send(WorkerEvent::PullRequestProgress {
+                                generation,
+                                diff: true,
+                                progress,
+                            });
+                        },
+                    )
                     .map_err(format_error),
             },
             WorkerCommand::LoadBranches { generation } => WorkerEvent::Branches {
@@ -376,6 +435,10 @@ fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sende
             WorkerCommand::LoadHistoryBranches { generation } => WorkerEvent::HistoryBranches {
                 generation,
                 result: repository.history_branches().map_err(format_error),
+            },
+            WorkerCommand::LoadStashes { generation } => WorkerEvent::Stashes {
+                generation,
+                result: repository.stashes().map_err(format_error),
             },
             WorkerCommand::Operate { id, operation } => {
                 let label = operation.label().to_owned();
@@ -458,22 +521,17 @@ mod tests {
     }
 
     #[test]
-    fn mailbox_coalesces_pull_request_lists_and_prioritizes_them_over_history() {
+    fn mailbox_keeps_only_the_latest_explicit_pull_request_lookup() {
         let mut mailbox = Mailbox::default();
-        mailbox.push(WorkerCommand::LoadPullRequests {
-            generation: 1,
-            repositories: Vec::new(),
-            repository: None,
-            cursor: None,
-            refresh: false,
-        });
-        mailbox.push(WorkerCommand::LoadPullRequests {
-            generation: 2,
-            repositories: Vec::new(),
-            repository: None,
-            cursor: Some("next-cursor".to_owned()),
-            refresh: false,
-        });
+        for (generation, number) in [(1, 41), (2, 42)] {
+            mailbox.push(WorkerCommand::LookupPullRequest {
+                generation,
+                repositories: Vec::new(),
+                repository: None,
+                number,
+                refresh: false,
+            });
+        }
         mailbox.push(WorkerCommand::LoadHistory {
             generation: 1,
             revision: "HEAD".to_owned(),
@@ -483,11 +541,11 @@ mod tests {
 
         assert!(matches!(
             mailbox.pop(),
-            Some(WorkerCommand::LoadPullRequests {
+            Some(WorkerCommand::LookupPullRequest {
                 generation: 2,
-                cursor: Some(cursor),
+                number: 42,
                 ..
-            }) if cursor == "next-cursor"
+            })
         ));
         assert!(matches!(
             mailbox.pop(),
@@ -508,6 +566,7 @@ mod tests {
         let request = PullRequest {
             number: 1,
             title: String::new(),
+            description: String::new(),
             author: String::new(),
             state: "OPEN".to_owned(),
             is_draft: false,
@@ -541,11 +600,11 @@ mod tests {
             WorkerLane::Background
         );
         assert_eq!(
-            worker_lane(&WorkerCommand::LoadPullRequests {
+            worker_lane(&WorkerCommand::LookupPullRequest {
                 generation: 5,
                 repositories: Vec::new(),
                 repository: None,
-                cursor: None,
+                number: 42,
                 refresh: false,
             }),
             WorkerLane::GitHubMetadata

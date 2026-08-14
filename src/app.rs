@@ -4,15 +4,14 @@ use std::time::{Duration, Instant};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
-use crate::git::diff::{DiffDocument, DiffLineKind};
+use crate::git::diff::{DiffDocument, DiffLineKind, PullRequestDetails};
 use crate::git::github::{
-    DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE, DEFAULT_PULL_REQUEST_PAGE_SIZE, GitHubRepository,
-    MAX_PULL_REQUESTS, PullRequest,
+    DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE, GitHubRepository, PullRequest, PullRequestProgress,
 };
 use crate::git::history::Commit;
 use crate::git::status::{Change, ChangeArea, RepoStatus};
 use crate::git::worker::{WorkerCommand, WorkerEvent};
-use crate::git::{Branch, ConflictChoice, GitOperation, HistoryBranch};
+use crate::git::{Branch, ConflictChoice, GitOperation, HistoryBranch, Stash};
 
 const PREVIEW_DEBOUNCE: Duration = Duration::from_millis(45);
 const TOAST_DURATION: Duration = Duration::from_secs(4);
@@ -253,9 +252,19 @@ impl TextBuffer {
 
 #[derive(Debug, Clone)]
 pub enum PromptKind {
-    Filter { previous: String },
-    CreateBranch { start: Option<String> },
-    RenameBranch { old: String },
+    Filter {
+        previous: String,
+    },
+    CreateBranch {
+        start: Option<String>,
+    },
+    RenameBranch {
+        old: String,
+    },
+    StashPush {
+        include_untracked: bool,
+        staged: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -289,10 +298,23 @@ pub enum Modal {
         query: TextBuffer,
         loading: bool,
     },
+    CompareBranches {
+        items: Vec<HistoryBranch>,
+        selected: usize,
+        query: TextBuffer,
+        loading: bool,
+    },
+    Stashes {
+        items: Vec<Stash>,
+        selected: usize,
+        query: TextBuffer,
+        loading: bool,
+    },
     PullRequestRepositories {
         items: Vec<GitHubRepository>,
         selected: usize,
         query: TextBuffer,
+        loading: bool,
     },
     CommandPalette {
         query: TextBuffer,
@@ -315,8 +337,12 @@ pub enum PaletteCommand {
     Push,
     Sync,
     Stash,
+    StashStaged,
+    StashIncludeUntracked,
     StashPop,
+    ManageStashes,
     Branches,
+    CompareBranch,
     RenameCurrentBranch,
     ToggleDiffLayout,
     ToggleAllFiles,
@@ -328,7 +354,7 @@ pub enum PaletteCommand {
 }
 
 impl PaletteCommand {
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 24] = [
         Self::Refresh,
         Self::StageAll,
         Self::UnstageAll,
@@ -339,8 +365,12 @@ impl PaletteCommand {
         Self::Push,
         Self::Sync,
         Self::Stash,
+        Self::StashStaged,
+        Self::StashIncludeUntracked,
         Self::StashPop,
+        Self::ManageStashes,
         Self::Branches,
+        Self::CompareBranch,
         Self::RenameCurrentBranch,
         Self::ToggleDiffLayout,
         Self::ToggleAllFiles,
@@ -362,9 +392,13 @@ impl PaletteCommand {
             Self::Pull => "Pull",
             Self::Push => "Push",
             Self::Sync => "Synchronize (Pull, Then Push)",
-            Self::Stash => "Stash Including Untracked",
+            Self::Stash => "Stash Changes…",
+            Self::StashStaged => "Stash Staged Changes…",
+            Self::StashIncludeUntracked => "Stash Changes Including Untracked…",
             Self::StashPop => "Pop Latest Stash",
+            Self::ManageStashes => "View and Manage Stashes…",
             Self::Branches => "Switch Branch…",
+            Self::CompareBranch => "Compare Current Branch With…",
             Self::RenameCurrentBranch => "Rename Current Branch…",
             Self::ToggleDiffLayout => "Toggle Unified / Side-by-Side Diff",
             Self::ToggleAllFiles => "Collapse / Expand All Files",
@@ -382,13 +416,38 @@ pub enum SidebarHit {
     ChangeGroup(ChangeArea),
     Change(usize),
     Commit(usize),
-    PullRequest(usize),
 }
 
 #[derive(Debug, Clone)]
 pub struct ContentFileHit {
     pub area: Rect,
     pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScmAction {
+    Stage(usize),
+    Unstage(usize),
+    Resolve(usize),
+    StageGroup(ChangeArea),
+    UnstageGroup(ChangeArea),
+    StageAll,
+    UnstageAll,
+    Commit,
+    Stashes,
+    CompareBranch,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScmActionHit {
+    pub area: Rect,
+    pub action: ScmAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuxiliaryPreview {
+    Branch(HistoryBranch),
+    Stash(Stash),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -408,6 +467,7 @@ pub struct UiGeometry {
     pub content: Rect,
     pub diff_divider: Option<Rect>,
     pub sidebar_hits: Vec<(u16, SidebarHit)>,
+    pub scm_action_hits: Vec<ScmActionHit>,
     pub content_file_hits: Vec<ContentFileHit>,
 }
 
@@ -426,15 +486,10 @@ pub struct App {
     pub status: RepoStatus,
     pub history: Vec<Commit>,
     pub history_branch: Option<HistoryBranch>,
-    pub pull_requests: Vec<PullRequest>,
+    pub pull_request: Option<PullRequest>,
     pub github_repositories: Vec<GitHubRepository>,
     pub pull_request_repository: Option<GitHubRepository>,
     pub pull_request_warnings: Vec<String>,
-    pub pull_request_page: usize,
-    pub pull_request_total: usize,
-    pub pull_request_fetched: usize,
-    pub pull_request_has_more: bool,
-    pub pull_request_next_cursor: Option<String>,
     pub pull_request_exact_number: Option<u64>,
     pub pull_request_from_cache: bool,
     pub history_branches: Vec<HistoryBranch>,
@@ -443,6 +498,8 @@ pub struct App {
     pub pull_request_lookup: TextBuffer,
     pub pull_request_lookup_active: bool,
     pub pull_request_file_page: usize,
+    pub pull_request_progress: Option<PullRequestProgress>,
+    pub auxiliary_preview: Option<AuxiliaryPreview>,
     pub document: DiffDocument,
     pub selected_change_group: Option<ChangeArea>,
     pub selected_preview_file: Option<PathBuf>,
@@ -451,7 +508,6 @@ pub struct App {
     pub expanded_preview_files: std::collections::HashSet<PathBuf>,
     pub change_cursor: usize,
     pub history_cursor: usize,
-    pub pull_request_cursor: usize,
     pub sidebar_offset: usize,
     pub content_scroll: usize,
     pub horizontal_scroll: usize,
@@ -469,8 +525,7 @@ pub struct App {
     pub document_loading: bool,
     pub history_loading: bool,
     pub history_complete: bool,
-    pub pull_requests_loading: bool,
-    pub pull_requests_loaded: bool,
+    pub pull_request_loading: bool,
     pub last_refresh: Option<Instant>,
     pub geometry: UiGeometry,
     status_generation: u64,
@@ -479,6 +534,7 @@ pub struct App {
     pull_request_generation: u64,
     branch_generation: u64,
     history_branch_generation: u64,
+    stash_generation: u64,
     operation_id: u64,
     refresh_again: bool,
     history_refresh_again: bool,
@@ -497,15 +553,10 @@ impl App {
             status: RepoStatus::default(),
             history: Vec::new(),
             history_branch: None,
-            pull_requests: Vec::new(),
+            pull_request: None,
             github_repositories: Vec::new(),
             pull_request_repository: None,
             pull_request_warnings: Vec::new(),
-            pull_request_page: 1,
-            pull_request_total: 0,
-            pull_request_fetched: 0,
-            pull_request_has_more: false,
-            pull_request_next_cursor: None,
             pull_request_exact_number: None,
             pull_request_from_cache: false,
             history_branches: Vec::new(),
@@ -514,6 +565,8 @@ impl App {
             pull_request_lookup: TextBuffer::default(),
             pull_request_lookup_active: false,
             pull_request_file_page: 1,
+            pull_request_progress: None,
+            auxiliary_preview: None,
             document: DiffDocument::empty("Working Tree", "Loading changes…"),
             selected_change_group: Some(ChangeArea::Unstaged),
             selected_preview_file: None,
@@ -522,7 +575,6 @@ impl App {
             expanded_preview_files: std::collections::HashSet::new(),
             change_cursor: 0,
             history_cursor: 0,
-            pull_request_cursor: 0,
             sidebar_offset: 0,
             content_scroll: 0,
             horizontal_scroll: 0,
@@ -540,8 +592,7 @@ impl App {
             document_loading: false,
             history_loading: false,
             history_complete: false,
-            pull_requests_loading: false,
-            pull_requests_loaded: false,
+            pull_request_loading: false,
             last_refresh: None,
             geometry: UiGeometry::default(),
             status_generation: 0,
@@ -550,6 +601,7 @@ impl App {
             pull_request_generation: 0,
             branch_generation: 0,
             history_branch_generation: 0,
+            stash_generation: 0,
             operation_id: 0,
             refresh_again: false,
             history_refresh_again: false,
@@ -563,7 +615,6 @@ impl App {
         self.request_refresh(&mut effects);
         self.request_history(true, &mut effects);
         self.request_history_branches(&mut effects);
-        self.request_pull_requests(false, &mut effects);
         effects
     }
 
@@ -599,58 +650,6 @@ impl App {
             .collect()
     }
 
-    pub fn visible_pull_request_indices(&self) -> Vec<usize> {
-        let start = self
-            .pull_request_page
-            .saturating_sub(1)
-            .saturating_mul(DEFAULT_PULL_REQUEST_PAGE_SIZE);
-        let end = start
-            .saturating_add(DEFAULT_PULL_REQUEST_PAGE_SIZE)
-            .min(self.pull_requests.len());
-        (start.min(end)..end).collect()
-    }
-
-    pub fn pull_request_page_count(&self) -> usize {
-        self.pull_requests
-            .len()
-            .max(1)
-            .div_ceil(DEFAULT_PULL_REQUEST_PAGE_SIZE)
-    }
-
-    pub fn pull_request_state_counts(&self) -> (usize, usize, usize) {
-        self.pull_requests
-            .iter()
-            .fold(
-                (0, 0, 0),
-                |(open, merged, closed), pull_request| match pull_request.state.as_str() {
-                    "MERGED" => (open, merged + 1, closed),
-                    "CLOSED" => (open, merged, closed + 1),
-                    _ => (open + 1, merged, closed),
-                },
-            )
-    }
-
-    pub fn pull_request_load_percent(&self) -> usize {
-        if self.pull_request_total == 0 {
-            if self.pull_requests_loading { 0 } else { 100 }
-        } else {
-            self.pull_request_fetched
-                .saturating_mul(100)
-                .checked_div(self.pull_request_total)
-                .unwrap_or_default()
-                .min(100)
-        }
-    }
-
-    fn normalize_pull_request_page(&mut self) {
-        self.pull_request_page = self
-            .pull_request_page
-            .clamp(1, self.pull_request_page_count());
-        self.pull_request_cursor = self
-            .pull_request_cursor
-            .min(self.visible_pull_request_indices().len().saturating_sub(1));
-    }
-
     pub fn history_branch_label(&self) -> String {
         self.history_branch.as_ref().map_or_else(
             || {
@@ -671,10 +670,7 @@ impl App {
     }
 
     pub fn selected_pull_request(&self) -> Option<&PullRequest> {
-        let visible = self.visible_pull_request_indices();
-        visible
-            .get(self.pull_request_cursor)
-            .and_then(|index| self.pull_requests.get(*index))
+        self.pull_request.as_ref()
     }
 
     pub fn selected_change(&self) -> Option<&Change> {
@@ -856,6 +852,21 @@ impl App {
             .collect()
     }
 
+    pub fn filtered_stashes(items: &[Stash], query: &str) -> Vec<usize> {
+        let query = query.to_lowercase();
+        items
+            .iter()
+            .enumerate()
+            .filter(|(_, stash)| {
+                query.is_empty()
+                    || stash.reference.to_lowercase().contains(&query)
+                    || stash.message.to_lowercase().contains(&query)
+                    || stash.branch.to_lowercase().contains(&query)
+            })
+            .map(|(index, _)| index)
+            .collect()
+    }
+
     pub fn filtered_github_repositories(items: &[GitHubRepository], query: &str) -> Vec<usize> {
         let query = query.to_lowercase();
         items
@@ -938,8 +949,12 @@ impl App {
                 self.open_history_branches(&mut effects)
             }
             KeyCode::Char('b') | KeyCode::Char('B') => self.open_branches(&mut effects),
+            KeyCode::Char('d') if self.view == View::Changes => {
+                self.open_compare_branches(&mut effects)
+            }
+            KeyCode::Char('S') if self.view == View::Changes => self.open_stashes(&mut effects),
             KeyCode::Char('o') if self.view == View::PullRequests => {
-                self.open_pull_request_repositories()
+                self.open_pull_request_repositories(&mut effects)
             }
             KeyCode::Char('c') if self.view == View::Changes => {
                 self.modal = Some(Modal::Commit {
@@ -979,11 +994,22 @@ impl App {
             KeyCode::Char('y') => self.queue_operation(GitOperation::Sync, &mut effects),
             KeyCode::Enter if !self.sidebar_hidden => self.toggle_focus(),
             KeyCode::Esc => {
-                if self.view == View::PullRequests && self.pull_request_exact_number.is_some() {
+                if self.auxiliary_preview.take().is_some() {
+                    self.request_preview(&mut effects);
+                } else if self.view == View::PullRequests
+                    && (self.pull_request_exact_number.is_some() || self.pull_request.is_some())
+                {
+                    self.invalidate_preview();
                     self.pull_request_exact_number = None;
+                    self.pull_request = None;
+                    self.pull_request_warnings.clear();
+                    self.pull_request_progress = None;
                     self.pull_request_lookup = TextBuffer::default();
-                    self.pull_request_page = 1;
-                    self.request_pull_requests(false, &mut effects);
+                    self.pull_request_lookup_active = true;
+                    self.document = DiffDocument::empty(
+                        "Open Pull Request",
+                        "Enter a pull-request number and press Enter",
+                    );
                 } else if !self.filter.is_empty() {
                     self.filter.clear();
                     self.normalize_selection();
@@ -1025,12 +1051,6 @@ impl App {
             KeyCode::Char('.') if self.view == View::PullRequests => {
                 self.change_pull_request_file_page(true, &mut effects)
             }
-            KeyCode::Left if self.view == View::PullRequests && self.focus == Focus::Sidebar => {
-                self.change_pull_request_page(false, &mut effects)
-            }
-            KeyCode::Right if self.view == View::PullRequests && self.focus == Focus::Sidebar => {
-                self.change_pull_request_page(true, &mut effects)
-            }
             KeyCode::Char('[') => self.jump_hunk(false),
             KeyCode::Char(']') => self.jump_hunk(true),
             KeyCode::Left | KeyCode::Char('h') if self.focus == Focus::Content => {
@@ -1062,6 +1082,8 @@ impl App {
             | Some(Modal::CommandPalette { query: input, .. })
             | Some(Modal::Branches { query: input, .. })
             | Some(Modal::HistoryBranches { query: input, .. })
+            | Some(Modal::CompareBranches { query: input, .. })
+            | Some(Modal::Stashes { query: input, .. })
             | Some(Modal::PullRequestRepositories { query: input, .. }) => input.insert_str(text),
             _ => {}
         }
@@ -1108,6 +1130,14 @@ impl App {
                     .contains((event.column, event.row).into())
                 {
                     self.switch_view(View::PullRequests, &mut effects);
+                } else if let Some(action) = self
+                    .geometry
+                    .scm_action_hits
+                    .iter()
+                    .find(|hit| hit.area.contains((event.column, event.row).into()))
+                    .map(|hit| hit.action.clone())
+                {
+                    self.handle_scm_action(action, &mut effects);
                 } else if self
                     .geometry
                     .sidebar
@@ -1123,6 +1153,7 @@ impl App {
                     {
                         match hit {
                             SidebarHit::ChangeGroup(group) => {
+                                self.auxiliary_preview = None;
                                 self.selected_change_group = Some(group);
                                 self.schedule_preview(now);
                             }
@@ -1132,6 +1163,7 @@ impl App {
                                     .iter()
                                     .position(|visible| *visible == index)
                                 {
+                                    self.auxiliary_preview = None;
                                     self.selected_change_group = None;
                                     self.change_cursor = cursor;
                                     self.schedule_preview(now);
@@ -1144,17 +1176,6 @@ impl App {
                                     .position(|visible| *visible == index)
                                 {
                                     self.history_cursor = cursor;
-                                    self.schedule_preview(now);
-                                }
-                            }
-                            SidebarHit::PullRequest(index) => {
-                                if let Some(cursor) = self
-                                    .visible_pull_request_indices()
-                                    .iter()
-                                    .position(|visible| *visible == index)
-                                {
-                                    self.pull_request_cursor = cursor;
-                                    self.pull_request_file_page = 1;
                                     self.schedule_preview(now);
                                 }
                             }
@@ -1299,11 +1320,14 @@ impl App {
             }
             WorkerEvent::Diff { generation, result }
             | WorkerEvent::CommitDetail { generation, result }
+            | WorkerEvent::BranchDiff { generation, result }
+            | WorkerEvent::StashDiff { generation, result }
             | WorkerEvent::PullRequestDiff { generation, result } => {
                 if generation != self.diff_generation {
                     return effects;
                 }
                 self.document_loading = false;
+                self.pull_request_progress = None;
                 match result {
                     Ok(document) => {
                         if let Some(details) = document.pull_request_details.as_ref() {
@@ -1368,78 +1392,37 @@ impl App {
                     self.request_history(true, &mut effects);
                 }
             }
-            WorkerEvent::PullRequestBatch { generation, result } => {
+            WorkerEvent::GitHubRepositories { generation, result } => {
                 if generation != self.pull_request_generation {
                     return effects;
                 }
                 match result {
-                    Ok(batch) => {
-                        let first_batch = self.pull_request_next_cursor.is_none();
-                        if !batch.repositories.is_empty() {
-                            self.github_repositories = batch.repositories;
-                        }
-                        self.pull_request_repository = batch.selected_repository;
-                        if first_batch {
-                            self.pull_requests.clear();
-                            self.pull_request_warnings = batch.warnings;
-                            self.pull_request_from_cache = batch.from_cache;
-                        } else {
-                            self.pull_request_warnings.extend(batch.warnings);
-                            self.pull_request_from_cache &= batch.from_cache;
-                        }
-                        for pull_request in batch.pull_requests {
-                            if self.pull_requests.len() >= MAX_PULL_REQUESTS {
-                                break;
-                            }
-                            if let Some(existing) = self.pull_requests.iter_mut().find(|existing| {
-                                existing.number == pull_request.number
-                                    && existing.base_repository.url
-                                        == pull_request.base_repository.url
-                            }) {
-                                *existing = pull_request;
-                            } else {
-                                self.pull_requests.push(pull_request);
-                            }
-                        }
-                        self.pull_request_total = batch.total_count.min(MAX_PULL_REQUESTS);
-                        if batch.total_count > MAX_PULL_REQUESTS
-                            && !self
-                                .pull_request_warnings
-                                .iter()
-                                .any(|warning| warning.contains("first 10,000 pull requests"))
+                    Ok((repositories, warnings)) => {
+                        self.github_repositories = repositories;
+                        self.pull_request_warnings = warnings;
+                        if let Some(Modal::PullRequestRepositories {
+                            items,
+                            selected,
+                            loading,
+                            ..
+                        }) = self.modal.as_mut()
                         {
-                            self.pull_request_warnings.push(
-                                "Showing the first 10,000 pull requests to keep memory bounded"
-                                    .to_owned(),
-                            );
-                        }
-                        self.pull_request_fetched = self.pull_requests.len();
-                        self.pull_request_has_more = batch.has_next_batch
-                            && self.pull_request_fetched < self.pull_request_total
-                            && self.pull_request_fetched < MAX_PULL_REQUESTS;
-                        self.pull_request_next_cursor = batch.next_cursor;
-                        if self.pull_request_has_more && self.pull_request_next_cursor.is_none() {
-                            self.pull_request_has_more = false;
-                            self.pull_request_warnings.push(
-                                "GitHub reported more pull requests without a continuation cursor"
-                                    .to_owned(),
-                            );
-                        }
-                        self.pull_requests_loaded = !self.pull_request_has_more;
-                        self.pull_requests_loading = self.pull_request_has_more;
-                        self.normalize_pull_request_page();
-                        if first_batch && self.view == View::PullRequests {
-                            self.schedule_preview(now);
-                        }
-                        if self.pull_request_has_more {
-                            self.request_next_pull_request_batch(false, &mut effects);
+                            items.clone_from(&self.github_repositories);
+                            *selected = self
+                                .pull_request_repository
+                                .as_ref()
+                                .and_then(|current| {
+                                    items.iter().position(|repository| {
+                                        repository.url.eq_ignore_ascii_case(&current.url)
+                                    })
+                                })
+                                .unwrap_or_default();
+                            *loading = false;
                         }
                     }
                     Err(error) => {
-                        self.pull_requests_loading = false;
-                        self.pull_requests_loaded = !self.pull_requests.is_empty();
-                        if self.pull_requests.is_empty() {
-                            self.document = DiffDocument::empty("Pull Requests", error.clone());
+                        if matches!(self.modal, Some(Modal::PullRequestRepositories { .. })) {
+                            self.modal = None;
                         }
                         self.show_toast(error, ToastLevel::Error, now);
                     }
@@ -1449,25 +1432,42 @@ impl App {
                 if generation != self.pull_request_generation {
                     return effects;
                 }
-                self.pull_requests_loading = false;
+                self.pull_request_loading = false;
                 match result {
                     Ok(snapshot) => {
+                        if !snapshot.repositories.is_empty() {
+                            self.github_repositories = snapshot.repositories;
+                        }
                         self.pull_request_repository = snapshot.selected_repository;
-                        self.pull_requests = snapshot.pull_requests;
+                        self.pull_request = Some(snapshot.pull_request);
                         self.pull_request_warnings = snapshot.warnings;
                         self.pull_request_exact_number = snapshot.exact_number;
                         self.pull_request_from_cache = snapshot.from_cache;
-                        self.pull_request_page = 1;
-                        self.pull_request_cursor = 0;
                         self.pull_request_file_page = 1;
                         if self.view == View::PullRequests {
-                            self.schedule_preview(now);
+                            self.preview_due = None;
+                            self.request_preview(&mut effects);
                         }
                     }
                     Err(error) => {
+                        self.pull_request_progress = None;
                         self.document = DiffDocument::empty("Pull Requests", error.clone());
                         self.show_toast(error, ToastLevel::Error, now);
                     }
+                }
+            }
+            WorkerEvent::PullRequestProgress {
+                generation,
+                diff,
+                progress,
+            } => {
+                let current = if diff {
+                    generation == self.diff_generation
+                } else {
+                    generation == self.pull_request_generation
+                };
+                if current {
+                    self.pull_request_progress = Some(progress);
                 }
             }
             WorkerEvent::Branches { generation, result } => {
@@ -1503,30 +1503,71 @@ impl App {
                     Ok(items) => {
                         self.history_branches_loaded = true;
                         self.history_branches = items;
-                        if let Some(Modal::HistoryBranches {
+                        match self.modal.as_mut() {
+                            Some(Modal::HistoryBranches {
+                                items: modal_items,
+                                selected,
+                                loading,
+                                ..
+                            }) => {
+                                *selected = self
+                                    .history_branches
+                                    .iter()
+                                    .position(|branch| {
+                                        self.history_branch
+                                            .as_ref()
+                                            .map_or(branch.current, |selected| {
+                                                selected.reference == branch.reference
+                                            })
+                                    })
+                                    .unwrap_or_default();
+                                modal_items.clone_from(&self.history_branches);
+                                *loading = false;
+                            }
+                            Some(Modal::CompareBranches {
+                                items: modal_items,
+                                selected,
+                                loading,
+                                ..
+                            }) => {
+                                modal_items.clone_from(&self.history_branches);
+                                *selected = 0;
+                                *loading = false;
+                            }
+                            _ => {}
+                        }
+                    }
+                    Err(error) => {
+                        if matches!(
+                            self.modal,
+                            Some(Modal::HistoryBranches { .. } | Modal::CompareBranches { .. })
+                        ) {
+                            self.modal = None;
+                        }
+                        self.show_toast(error, ToastLevel::Error, now);
+                    }
+                }
+            }
+            WorkerEvent::Stashes { generation, result } => {
+                if generation != self.stash_generation {
+                    return effects;
+                }
+                match result {
+                    Ok(items) => {
+                        if let Some(Modal::Stashes {
                             items: modal_items,
                             selected,
                             loading,
                             ..
                         }) = self.modal.as_mut()
                         {
-                            *selected = self
-                                .history_branches
-                                .iter()
-                                .position(|branch| {
-                                    self.history_branch
-                                        .as_ref()
-                                        .map_or(branch.current, |selected| {
-                                            selected.reference == branch.reference
-                                        })
-                                })
-                                .unwrap_or_default();
-                            modal_items.clone_from(&self.history_branches);
+                            *modal_items = items;
+                            *selected = 0;
                             *loading = false;
                         }
                     }
                     Err(error) => {
-                        if matches!(self.modal, Some(Modal::HistoryBranches { .. })) {
+                        if matches!(self.modal, Some(Modal::Stashes { .. })) {
                             self.modal = None;
                         }
                         self.show_toast(error, ToastLevel::Error, now);
@@ -1549,9 +1590,6 @@ impl App {
                         self.request_refresh(&mut effects);
                         if changes_history {
                             self.request_history(true, &mut effects);
-                        }
-                        if self.view == View::PullRequests {
-                            self.request_pull_requests(true, &mut effects);
                         }
                     }
                     Err(error) => {
@@ -1644,6 +1682,19 @@ impl App {
                                 GitOperation::RenameBranch {
                                     old: old.clone(),
                                     new: input.value.trim().to_owned(),
+                                },
+                                &mut effects,
+                            );
+                        }
+                        PromptKind::StashPush {
+                            include_untracked,
+                            staged,
+                        } => {
+                            self.queue_operation(
+                                GitOperation::StashPush {
+                                    message: input.value.trim().to_owned(),
+                                    include_untracked: *include_untracked,
+                                    staged: *staged,
                                 },
                                 &mut effects,
                             );
@@ -1809,10 +1860,136 @@ impl App {
                 }
                 self.modal = Some(modal);
             }
+            Modal::CompareBranches {
+                items,
+                selected,
+                query,
+                loading,
+            } => {
+                if key.code == KeyCode::Esc {
+                    return effects;
+                }
+                let visible = Self::filtered_history_branches(items, &query.value)
+                    .into_iter()
+                    .filter(|index| !items[*index].current)
+                    .collect::<Vec<_>>();
+                match key.code {
+                    KeyCode::Up | KeyCode::Char('k') => *selected = selected.saturating_sub(1),
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        *selected = (*selected + 1).min(visible.len().saturating_sub(1));
+                    }
+                    KeyCode::Enter if !*loading => {
+                        if let Some(branch) = visible
+                            .get(*selected)
+                            .and_then(|index| items.get(*index))
+                            .cloned()
+                        {
+                            self.auxiliary_preview = Some(AuxiliaryPreview::Branch(branch));
+                            self.content_scroll = 0;
+                            self.request_preview(&mut effects);
+                        }
+                        return effects;
+                    }
+                    _ => {
+                        edit_text(query, key, false);
+                        *selected = 0;
+                    }
+                }
+                self.modal = Some(modal);
+            }
+            Modal::Stashes {
+                items,
+                selected,
+                query,
+                loading,
+            } => {
+                if key.code == KeyCode::Esc {
+                    return effects;
+                }
+                let visible = Self::filtered_stashes(items, &query.value);
+                let selected_stash = visible
+                    .get(*selected)
+                    .and_then(|index| items.get(*index))
+                    .cloned();
+                match key.code {
+                    KeyCode::Up | KeyCode::Char('k') => *selected = selected.saturating_sub(1),
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        *selected = (*selected + 1).min(visible.len().saturating_sub(1));
+                    }
+                    KeyCode::Enter if !*loading => {
+                        if let Some(stash) = selected_stash {
+                            self.auxiliary_preview = Some(AuxiliaryPreview::Stash(stash));
+                            self.content_scroll = 0;
+                            self.request_preview(&mut effects);
+                        }
+                        return effects;
+                    }
+                    KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.prompt_stash(false, false);
+                        return effects;
+                    }
+                    KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.prompt_stash(true, false);
+                        return effects;
+                    }
+                    KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.prompt_stash(false, true);
+                        return effects;
+                    }
+                    KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::ALT) => {
+                        if let Some(stash) = selected_stash {
+                            self.queue_operation(
+                                GitOperation::StashApply(stash.reference),
+                                &mut effects,
+                            );
+                        }
+                        return effects;
+                    }
+                    KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::ALT) => {
+                        if let Some(stash) = selected_stash {
+                            self.queue_operation(
+                                GitOperation::StashPop(Some(stash.reference)),
+                                &mut effects,
+                            );
+                        }
+                        return effects;
+                    }
+                    KeyCode::Delete if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        if !items.is_empty() {
+                            self.modal = Some(Modal::Confirm {
+                                title: "Drop All Stashes?".to_owned(),
+                                message: "Permanently delete every stash? This cannot be undone."
+                                    .to_owned(),
+                                operation: GitOperation::StashClear,
+                            });
+                        }
+                        return effects;
+                    }
+                    KeyCode::Delete if !*loading => {
+                        if let Some(stash) = selected_stash {
+                            self.modal = Some(Modal::Confirm {
+                                title: "Drop Stash?".to_owned(),
+                                message: format!(
+                                    "Permanently delete {} — {}?",
+                                    stash.reference, stash.message
+                                ),
+                                operation: GitOperation::StashDrop(stash.reference),
+                            });
+                        }
+                        return effects;
+                    }
+                    _ => {
+                        edit_text(query, key, false);
+                        *selected = 0;
+                    }
+                }
+                self.modal = Some(modal);
+            }
             Modal::PullRequestRepositories {
                 items,
                 selected,
                 query,
+                loading,
             } => {
                 if key.code == KeyCode::Esc {
                     return effects;
@@ -1823,17 +2000,18 @@ impl App {
                     KeyCode::Down | KeyCode::Char('j') => {
                         *selected = (*selected + 1).min(visible.len().saturating_sub(1));
                     }
-                    KeyCode::Enter => {
+                    KeyCode::Enter if !*loading => {
                         if let Some(repository) = visible
                             .get(*selected)
                             .and_then(|index| items.get(*index))
                             .cloned()
                         {
                             self.pull_request_repository = Some(repository);
-                            self.pull_request_page = 1;
-                            self.pull_request_exact_number = None;
-                            self.pull_request_lookup = TextBuffer::default();
-                            self.request_pull_requests(false, &mut effects);
+                            if let Some(number) = self.pull_request_exact_number.or_else(|| {
+                                self.pull_request_lookup.value.trim().parse::<u64>().ok()
+                            }) {
+                                self.request_pull_request_lookup(number, false, &mut effects);
+                            }
                         }
                         return effects;
                     }
@@ -1893,9 +2071,13 @@ impl App {
             PaletteCommand::Pull => self.queue_operation(GitOperation::Pull, effects),
             PaletteCommand::Push => self.queue_operation(GitOperation::Push, effects),
             PaletteCommand::Sync => self.queue_operation(GitOperation::Sync, effects),
-            PaletteCommand::Stash => self.queue_operation(GitOperation::Stash, effects),
-            PaletteCommand::StashPop => self.queue_operation(GitOperation::StashPop, effects),
+            PaletteCommand::Stash => self.prompt_stash(false, false),
+            PaletteCommand::StashStaged => self.prompt_stash(false, true),
+            PaletteCommand::StashIncludeUntracked => self.prompt_stash(true, false),
+            PaletteCommand::StashPop => self.queue_operation(GitOperation::StashPop(None), effects),
+            PaletteCommand::ManageStashes => self.open_stashes(effects),
             PaletteCommand::Branches => self.open_branches(effects),
+            PaletteCommand::CompareBranch => self.open_compare_branches(effects),
             PaletteCommand::RenameCurrentBranch => {
                 if self.status.branch.detached || self.status.branch.head.is_empty() {
                     self.show_toast(
@@ -1956,26 +2138,24 @@ impl App {
             .clamp(MIN_DIFF_SPLIT_PERCENT, MAX_DIFF_SPLIT_PERCENT);
     }
 
-    fn switch_view(&mut self, view: View, effects: &mut Vec<AppEffect>) {
+    fn switch_view(&mut self, view: View, _effects: &mut Vec<AppEffect>) {
         self.pull_request_lookup_active = false;
         if self.view == view {
-            if view == View::PullRequests
-                && !self.pull_requests_loaded
-                && !self.pull_requests_loading
-            {
-                self.request_pull_requests(false, effects);
+            if view == View::PullRequests && self.pull_request.is_none() {
+                self.pull_request_lookup_active = true;
             }
             return;
         }
         self.view = view;
+        self.auxiliary_preview = None;
         self.focus = Focus::Sidebar;
         self.sidebar_offset = 0;
         self.content_scroll = 0;
         self.horizontal_scroll = 0;
         self.invalidate_preview();
         self.document = self.loading_document_for_view(view);
-        if view == View::PullRequests && !self.pull_requests_loaded && !self.pull_requests_loading {
-            self.request_pull_requests(false, effects);
+        if view == View::PullRequests && self.pull_request.is_none() {
+            self.pull_request_lookup_active = true;
         } else {
             self.preview_due = Some(Instant::now() + PREVIEW_DEBOUNCE);
         }
@@ -1998,13 +2178,22 @@ impl App {
                 };
                 DiffDocument::empty(title, message)
             }
-            View::PullRequests => {
-                let title = self.selected_pull_request().map_or_else(
-                    || "Pull Requests".to_owned(),
-                    |pull_request| format!("PR #{} — {}", pull_request.number, pull_request.title),
-                );
-                DiffDocument::empty(title, "Loading pull-request preview…")
-            }
+            View::PullRequests => self.selected_pull_request().map_or_else(
+                || {
+                    DiffDocument::empty(
+                        "Open Pull Request",
+                        "Enter a pull-request number and press Enter",
+                    )
+                },
+                |pull_request| {
+                    pull_request_loading_document(
+                        pull_request,
+                        self.pull_request_progress
+                            .map_or("Calculating pull-request diff…", PullRequestProgress::label),
+                        self.pull_request_file_page,
+                    )
+                },
+            ),
         }
     }
 
@@ -2038,6 +2227,7 @@ impl App {
 
         match self.view {
             View::Changes => {
+                self.auxiliary_preview = None;
                 let targets = self.change_targets();
                 if targets.is_empty() {
                     self.selected_change_group = Some(ChangeArea::Unstaged);
@@ -2067,23 +2257,7 @@ impl App {
                     (self.history_cursor + amount as usize).min(length - 1)
                 };
             }
-            View::PullRequests => {
-                let length = self.visible_pull_request_indices().len();
-                if length == 0 {
-                    self.pull_request_cursor = 0;
-                    return;
-                }
-                let previous = self.pull_request_cursor;
-                self.pull_request_cursor = if amount < 0 {
-                    self.pull_request_cursor
-                        .saturating_sub(amount.unsigned_abs())
-                } else {
-                    (self.pull_request_cursor + amount as usize).min(length - 1)
-                };
-                if self.pull_request_cursor != previous {
-                    self.pull_request_file_page = 1;
-                }
-            }
+            View::PullRequests => return,
         }
         self.schedule_preview(now);
     }
@@ -2113,6 +2287,7 @@ impl App {
         }
         match self.view {
             View::Changes => {
+                self.auxiliary_preview = None;
                 let targets = self.change_targets();
                 if let Some(target) = if end { targets.last() } else { targets.first() } {
                     self.select_change_target(*target);
@@ -2122,11 +2297,7 @@ impl App {
                 let length = self.visible_commit_indices().len();
                 self.history_cursor = if end { length.saturating_sub(1) } else { 0 };
             }
-            View::PullRequests => {
-                let length = self.visible_pull_request_indices().len();
-                self.pull_request_cursor = if end { length.saturating_sub(1) } else { 0 };
-                self.pull_request_file_page = 1;
-            }
+            View::PullRequests => return,
         }
         self.schedule_preview(now);
     }
@@ -2162,6 +2333,109 @@ impl App {
             .find(|(_, line)| line.kind == DiffLineKind::HunkHeader)
         {
             self.content_scroll = index;
+        }
+    }
+
+    fn handle_scm_action(&mut self, action: ScmAction, effects: &mut Vec<AppEffect>) {
+        match action {
+            ScmAction::Stage(index) | ScmAction::Unstage(index) | ScmAction::Resolve(index) => {
+                let Some(change) = self.status.changes.get(index).cloned() else {
+                    return;
+                };
+                self.auxiliary_preview = None;
+                if let Some(cursor) = self
+                    .visible_change_indices()
+                    .iter()
+                    .position(|visible| *visible == index)
+                {
+                    self.selected_change_group = None;
+                    self.change_cursor = cursor;
+                }
+                match action {
+                    ScmAction::Stage(_) => {
+                        self.queue_operation(GitOperation::Stage(vec![change.path]), effects)
+                    }
+                    ScmAction::Unstage(_) => {
+                        self.queue_operation(GitOperation::Unstage(vec![change.path]), effects)
+                    }
+                    ScmAction::Resolve(_) => self.modal = Some(Modal::Conflict { change }),
+                    _ => unreachable!(),
+                }
+            }
+            ScmAction::StageGroup(area) | ScmAction::UnstageGroup(area) => {
+                let paths = self
+                    .status
+                    .changes
+                    .iter()
+                    .filter(|change| change.area == area)
+                    .map(|change| change.path.clone())
+                    .collect::<Vec<_>>();
+                if paths.is_empty() {
+                    return;
+                }
+                match action {
+                    ScmAction::StageGroup(_) => {
+                        self.queue_operation(GitOperation::Stage(paths), effects)
+                    }
+                    ScmAction::UnstageGroup(_) => {
+                        self.queue_operation(GitOperation::Unstage(paths), effects)
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            ScmAction::StageAll => self.queue_operation(GitOperation::StageAll, effects),
+            ScmAction::UnstageAll => self.queue_operation(GitOperation::UnstageAll, effects),
+            ScmAction::Commit => {
+                self.modal = Some(Modal::Commit {
+                    input: TextBuffer::default(),
+                    amend: false,
+                });
+            }
+            ScmAction::Stashes => self.open_stashes(effects),
+            ScmAction::CompareBranch => self.open_compare_branches(effects),
+        }
+    }
+
+    fn prompt_stash(&mut self, include_untracked: bool, staged: bool) {
+        let title = if staged {
+            "Stash Staged Changes"
+        } else if include_untracked {
+            "Stash Changes Including Untracked"
+        } else {
+            "Stash Changes"
+        };
+        self.modal = Some(Modal::Prompt {
+            title: title.to_owned(),
+            input: TextBuffer::default(),
+            kind: PromptKind::StashPush {
+                include_untracked,
+                staged,
+            },
+        });
+    }
+
+    fn open_stashes(&mut self, effects: &mut Vec<AppEffect>) {
+        self.stash_generation = self.stash_generation.wrapping_add(1);
+        self.modal = Some(Modal::Stashes {
+            items: Vec::new(),
+            selected: 0,
+            query: TextBuffer::default(),
+            loading: true,
+        });
+        effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadStashes {
+            generation: self.stash_generation,
+        })));
+    }
+
+    fn open_compare_branches(&mut self, effects: &mut Vec<AppEffect>) {
+        self.modal = Some(Modal::CompareBranches {
+            items: self.history_branches.clone(),
+            selected: 0,
+            query: TextBuffer::default(),
+            loading: self.history_branches_loading,
+        });
+        if !self.history_branches_loaded && !self.history_branches_loading {
+            self.request_history_branches(effects);
         }
     }
 
@@ -2313,10 +2587,7 @@ impl App {
         self.request_history(true, effects);
     }
 
-    fn open_pull_request_repositories(&mut self) {
-        if self.github_repositories.is_empty() {
-            return;
-        }
+    fn open_pull_request_repositories(&mut self, effects: &mut Vec<AppEffect>) {
         let selected = self
             .pull_request_repository
             .as_ref()
@@ -2326,33 +2597,39 @@ impl App {
                     .position(|repository| repository.url == selected.url)
             })
             .unwrap_or_default();
+        let loading = self.github_repositories.is_empty();
         self.modal = Some(Modal::PullRequestRepositories {
             items: self.github_repositories.clone(),
             selected,
             query: TextBuffer::default(),
+            loading,
         });
+        if loading {
+            self.pull_request_generation = self.pull_request_generation.wrapping_add(1);
+            effects.push(AppEffect::Git(Box::new(
+                WorkerCommand::LoadGitHubRepositories {
+                    generation: self.pull_request_generation,
+                    refresh: false,
+                },
+            )));
+        }
     }
 
     fn handle_pull_request_lookup_key(&mut self, key: KeyEvent, now: Instant) -> Vec<AppEffect> {
         let mut effects = Vec::new();
         match key.code {
             KeyCode::Esc => self.pull_request_lookup_active = false,
+            KeyCode::Char('o') => {
+                self.pull_request_lookup_active = false;
+                self.open_pull_request_repositories(&mut effects);
+            }
             KeyCode::Enter => {
                 let value = self.pull_request_lookup.value.trim();
                 match value.parse::<u64>() {
                     Ok(number) if number > 0 => {
                         self.pull_request_lookup_active = false;
                         self.pull_request_file_page = 1;
-                        if self.pull_request_repository.is_some() {
-                            self.request_pull_request_lookup(number, false, &mut effects);
-                        } else {
-                            self.show_toast(
-                                "Wait for a GitHub repository to load before looking up a PR"
-                                    .to_owned(),
-                                ToastLevel::Info,
-                                now,
-                            );
-                        }
+                        self.request_pull_request_lookup(number, false, &mut effects);
                     }
                     _ => self.show_toast(
                         "Enter a positive numeric pull-request number".to_owned(),
@@ -2383,22 +2660,6 @@ impl App {
             _ => {}
         }
         effects
-    }
-
-    fn change_pull_request_page(&mut self, forward: bool, _effects: &mut Vec<AppEffect>) {
-        if self.pull_request_exact_number.is_some() {
-            return;
-        }
-        let page_count = self.pull_request_page_count();
-        if forward {
-            self.pull_request_page = (self.pull_request_page + 1).min(page_count);
-        } else {
-            self.pull_request_page = self.pull_request_page.saturating_sub(1).max(1);
-        }
-        self.pull_request_cursor = 0;
-        self.pull_request_file_page = 1;
-        self.sidebar_offset = 0;
-        self.schedule_preview(Instant::now());
     }
 
     fn change_pull_request_file_page(&mut self, forward: bool, effects: &mut Vec<AppEffect>) {
@@ -2438,10 +2699,11 @@ impl App {
             self.request_history_branches(effects);
         }
         if self.view == View::PullRequests {
-            if let Some(number) = self.pull_request_exact_number {
+            if let Some(number) = self
+                .pull_request_exact_number
+                .or_else(|| self.pull_request_lookup.value.trim().parse::<u64>().ok())
+            {
                 self.request_pull_request_lookup(number, true, effects);
-            } else {
-                self.request_pull_requests(true, effects);
             }
         }
     }
@@ -2458,63 +2720,27 @@ impl App {
         })));
     }
 
-    fn request_pull_requests(&mut self, refresh: bool, effects: &mut Vec<AppEffect>) {
-        self.pull_request_generation = self.pull_request_generation.wrapping_add(1);
-        self.invalidate_preview();
-        self.pull_requests_loading = true;
-        self.pull_requests_loaded = false;
-        self.pull_request_warnings.clear();
-        self.pull_request_exact_number = None;
-        self.pull_request_next_cursor = None;
-        self.pull_request_has_more = true;
-        self.pull_request_total = 0;
-        self.pull_request_fetched = 0;
-        self.pull_requests.clear();
-        self.pull_request_cursor = 0;
-        self.sidebar_offset = 0;
-        let repositories = if refresh {
-            Vec::new()
-        } else {
-            self.github_repositories.clone()
-        };
-        effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadPullRequests {
-            generation: self.pull_request_generation,
-            repositories,
-            repository: self.pull_request_repository.clone().map(Box::new),
-            cursor: None,
-            refresh,
-        })));
-    }
-
-    fn request_next_pull_request_batch(&mut self, refresh: bool, effects: &mut Vec<AppEffect>) {
-        effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadPullRequests {
-            generation: self.pull_request_generation,
-            repositories: self.github_repositories.clone(),
-            repository: self.pull_request_repository.clone().map(Box::new),
-            cursor: self.pull_request_next_cursor.clone(),
-            refresh,
-        })));
-    }
-
     fn request_pull_request_lookup(
         &mut self,
         number: u64,
         refresh: bool,
         effects: &mut Vec<AppEffect>,
     ) {
-        let Some(repository) = self.pull_request_repository.clone() else {
-            return;
-        };
         self.pull_request_generation = self.pull_request_generation.wrapping_add(1);
         self.invalidate_preview();
-        self.pull_request_has_more = false;
-        self.pull_request_next_cursor = None;
-        self.pull_requests_loading = true;
+        self.pull_request_loading = true;
+        self.pull_request_exact_number = Some(number);
+        self.pull_request_progress = Some(PullRequestProgress::LoadingMetadata);
         self.pull_request_warnings.clear();
+        self.pull_request = None;
+        self.document = DiffDocument::empty(
+            format!("Opening Pull Request #{number}"),
+            PullRequestProgress::LoadingMetadata.label(),
+        );
         effects.push(AppEffect::Git(Box::new(WorkerCommand::LookupPullRequest {
             generation: self.pull_request_generation,
             repositories: self.github_repositories.clone(),
-            repository: Box::new(repository),
+            repository: self.pull_request_repository.clone().map(Box::new),
             number,
             refresh,
         })));
@@ -2544,6 +2770,33 @@ impl App {
         let generation = self.diff_generation;
         match self.view {
             View::Changes => {
+                if let Some(preview) = self.auxiliary_preview.clone() {
+                    self.document_loading = true;
+                    match preview {
+                        AuxiliaryPreview::Branch(branch) => {
+                            self.document = DiffDocument::empty(
+                                format!("Compare HEAD with {}", branch.name),
+                                "Calculating branch diff…",
+                            );
+                            effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadBranchDiff {
+                                generation,
+                                branch: Box::new(branch),
+                                expanded: self.expanded_diff,
+                            })));
+                        }
+                        AuxiliaryPreview::Stash(stash) => {
+                            self.document = DiffDocument::empty(
+                                format!("{} — {}", stash.reference, stash.message),
+                                "Loading stash diff…",
+                            );
+                            effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadStashDiff {
+                                generation,
+                                stash: Box::new(stash),
+                            })));
+                        }
+                    }
+                    return;
+                }
                 let changes = if self.selected_change_group.is_some() {
                     self.selected_group_changes()
                 } else {
@@ -2614,6 +2867,12 @@ impl App {
                         return;
                     }
                     self.document_loading = true;
+                    self.pull_request_progress = Some(PullRequestProgress::PreparingRepository);
+                    self.document = pull_request_loading_document(
+                        &pull_request,
+                        PullRequestProgress::PreparingRepository.label(),
+                        self.pull_request_file_page,
+                    );
                     effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadPullRequest {
                         generation,
                         pull_request: Box::new(pull_request),
@@ -2623,13 +2882,11 @@ impl App {
                 } else {
                     self.document_loading = false;
                     self.document = DiffDocument::empty(
-                        "Pull Requests",
-                        if self.pull_requests_loading {
-                            "Loading a bounded pull-request page…"
-                        } else if self.pull_request_exact_number.is_some() {
-                            "That pull request was not found in the selected repository"
+                        "Open Pull Request",
+                        if self.pull_request_loading {
+                            "Fetching pull-request metadata…"
                         } else {
-                            "No open pull requests on this page"
+                            "Enter a pull-request number and press Enter"
                         },
                     );
                 }
@@ -2660,9 +2917,6 @@ impl App {
         self.history_cursor = self
             .history_cursor
             .min(self.visible_commit_indices().len().saturating_sub(1));
-        self.pull_request_cursor = self
-            .pull_request_cursor
-            .min(self.visible_pull_request_indices().len().saturating_sub(1));
         self.sidebar_offset = 0;
     }
 
@@ -2699,6 +2953,52 @@ impl App {
             expires_at: now + TOAST_DURATION,
         });
     }
+}
+
+fn pull_request_loading_document(
+    pull_request: &PullRequest,
+    message: &str,
+    file_page: usize,
+) -> DiffDocument {
+    let mut document = DiffDocument::empty(
+        format!(
+            "PR #{} — {}  ·  {} → {}",
+            pull_request.number,
+            pull_request.title,
+            pull_request.head_label(),
+            pull_request.base_label(),
+        ),
+        message,
+    );
+    document.pull_request_details = Some(PullRequestDetails {
+        number: pull_request.number,
+        title: pull_request.title.clone(),
+        description: pull_request.description.clone(),
+        author: pull_request.author.clone(),
+        state: pull_request.state.clone(),
+        is_draft: pull_request.is_draft,
+        updated_at: pull_request.updated_at.clone(),
+        url: pull_request.url.clone(),
+        base_repository: pull_request.base_repository.display_name(),
+        base_ref: pull_request.base_ref.clone(),
+        base_remotes: pull_request.base_repository.remotes.clone(),
+        head_repository: pull_request.head_repository.clone(),
+        head_ref: pull_request.head_ref.clone(),
+        head_remotes: pull_request.head_remotes.clone(),
+        is_cross_repository: pull_request.is_cross_repository,
+        changed_files: pull_request.changed_files,
+        additions: pull_request.additions,
+        deletions: pull_request.deletions,
+        page_additions: 0,
+        page_deletions: 0,
+        file_page: file_page.max(1),
+        file_page_size: DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE,
+        displayed_files: 0,
+        total_files: pull_request.changed_files,
+        has_previous_file_page: file_page > 1,
+        has_next_file_page: false,
+    });
+    document
 }
 
 fn edit_text(input: &mut TextBuffer, key: KeyEvent, multiline: bool) {
@@ -2779,6 +3079,7 @@ mod tests {
         PullRequest {
             number,
             title: title.to_owned(),
+            description: "A detailed pull-request description".to_owned(),
             author: "octocat".to_owned(),
             state: "OPEN".to_owned(),
             is_draft: false,
@@ -2916,6 +3217,34 @@ mod tests {
     }
 
     #[test]
+    fn clicking_a_file_stage_action_queues_only_that_path() {
+        let mut app = app_with_changes();
+        app.geometry.scm_action_hits = vec![ScmActionHit {
+            area: Rect::new(30, 8, 4, 1),
+            action: ScmAction::Stage(0),
+        }];
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 31,
+            row: 8,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        let effects = app.handle_mouse(click, Instant::now());
+
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Git(command)] if matches!(
+                command.as_ref(),
+                WorkerCommand::Operate {
+                    operation: GitOperation::Stage(paths),
+                    ..
+                } if paths == &[PathBuf::from("src/main.rs")]
+            )
+        ));
+    }
+
+    #[test]
     fn clicking_a_file_header_toggles_only_that_file() {
         let mut app = App::new("/tmp/repo", "repo");
         app.geometry.content = Rect::new(20, 4, 80, 20);
@@ -2956,7 +3285,7 @@ mod tests {
     }
 
     #[test]
-    fn startup_prefetches_pr_metadata_without_waiting_for_the_pr_tab() {
+    fn startup_does_not_fetch_any_pull_request_data() {
         let mut app = App::new("/tmp/repo", "repo");
 
         let effects = app.initial_effects();
@@ -2967,101 +3296,136 @@ mod tests {
                 AppEffect::Git(refresh),
                 AppEffect::Git(history),
                 AppEffect::Git(branches),
-                AppEffect::Git(pull_requests),
             ] if matches!(refresh.as_ref(), WorkerCommand::Refresh { .. })
                 && matches!(history.as_ref(), WorkerCommand::LoadHistory { .. })
                 && matches!(branches.as_ref(), WorkerCommand::LoadHistoryBranches { .. })
-                && matches!(pull_requests.as_ref(), WorkerCommand::LoadPullRequests { cursor: None, .. })
         ));
-        assert!(app.pull_requests_loading);
-        assert_eq!(app.view, View::Changes);
+        assert!(!app.pull_request_loading);
+        assert!(app.pull_request.is_none());
+        assert_eq!(app.pull_request_generation, 0);
     }
 
     #[test]
-    fn opening_pr_tab_does_not_restart_an_in_flight_startup_prefetch() {
+    fn opening_pr_tab_only_focuses_the_number_field() {
         let mut app = App::new("/tmp/repo", "repo");
-        let now = Instant::now();
-        let startup = app.initial_effects();
-        let generation = app.pull_request_generation;
 
-        let effects = app.handle_key(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE), now);
+        let effects = app.handle_key(
+            KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE),
+            Instant::now(),
+        );
 
-        assert_eq!(startup.len(), 4);
         assert!(effects.is_empty());
-        assert_eq!(app.pull_request_generation, generation);
-        assert!(app.pull_requests_loading);
-        assert_eq!(app.document.title, "Pull Requests");
+        assert_eq!(app.view, View::PullRequests);
+        assert!(app.pull_request_lookup_active);
+        assert_eq!(app.document.title, "Open Pull Request");
     }
 
     #[test]
-    fn pull_request_view_streams_batches_and_queues_the_selected_diff() {
+    fn repository_picker_is_also_discovered_only_on_explicit_request() {
         let mut app = App::new("/tmp/repo", "repo");
-        let now = Instant::now();
+        app.switch_view(View::PullRequests, &mut Vec::new());
 
-        let effects = app.handle_key(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE), now);
+        let effects = app.handle_key(
+            KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE),
+            Instant::now(),
+        );
 
-        assert_eq!(app.view, View::PullRequests);
-        assert!(app.pull_requests_loading);
         assert!(matches!(
             effects.as_slice(),
             [AppEffect::Git(command)] if matches!(
                 command.as_ref(),
-                WorkerCommand::LoadPullRequests {
+                WorkerCommand::LoadGitHubRepositories {
                     generation: 1,
-                    cursor: None,
+                    refresh: false,
+                }
+            )
+        ));
+        assert!(matches!(
+            app.modal,
+            Some(Modal::PullRequestRepositories { loading: true, .. })
+        ));
+    }
+
+    #[test]
+    fn numeric_lookup_discovers_the_repository_on_demand() {
+        let mut app = App::new("/tmp/repo", "repo");
+        let now = Instant::now();
+        app.switch_view(View::PullRequests, &mut Vec::new());
+        for character in ['4', '2'] {
+            app.handle_key(
+                KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
+                now,
+            );
+        }
+
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Git(command)] if matches!(
+                command.as_ref(),
+                WorkerCommand::LookupPullRequest {
+                    number: 42,
+                    repository: None,
                     ..
                 }
             )
         ));
-
-        let request = pull_request(8, "Cross-fork update", "acme/widget");
-        let repository = request.base_repository.clone();
-        let effects = app.handle_worker_event(
-            WorkerEvent::PullRequestBatch {
-                generation: 1,
-                result: Ok(crate::git::github::PullRequestBatch {
-                    repositories: vec![repository.clone()],
-                    selected_repository: Some(repository),
-                    pull_requests: vec![request],
-                    total_count: 1,
-                    fetched_count: 1,
-                    ..crate::git::github::PullRequestBatch::default()
-                }),
-            },
-            now,
+        assert_eq!(
+            app.pull_request_progress,
+            Some(PullRequestProgress::LoadingMetadata)
         );
-        assert!(effects.is_empty());
-        assert!(app.pull_requests_loaded);
-        assert!(!app.pull_requests_loading);
-        assert_eq!(app.pull_request_load_percent(), 100);
-
-        let (effects, _) = app.tick(now + PREVIEW_DEBOUNCE + Duration::from_millis(1));
-        assert!(matches!(
-            effects.as_slice(),
-            [AppEffect::Git(command)]
-                if matches!(command.as_ref(), WorkerCommand::LoadPullRequest { generation, pull_request, file_page: 1, file_page_size: DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE } if *generation >= 3 && pull_request.number == 8)
-        ));
-        assert!(app.document_loading);
+        assert!(app.pull_request_loading);
     }
 
     #[test]
-    fn pull_request_navigation_uses_only_the_bounded_server_page() {
+    fn loaded_metadata_immediately_queues_the_background_diff() {
         let mut app = App::new("/tmp/repo", "repo");
         app.view = View::PullRequests;
-        app.pull_requests = vec![
-            pull_request(1, "First change", "acme/one"),
-            pull_request(2, "Second change", "acme/two"),
-            pull_request(3, "Third change", "acme/three"),
-        ];
-        // A filter left by another view must not turn into a fuzzy PR query.
-        app.filter = "acme/two".to_owned();
+        app.pull_request_generation = 3;
+        app.pull_request_loading = true;
+        let request = pull_request(8, "Cross-fork update", "acme/widget");
+        let repository = request.base_repository.clone();
 
-        assert_eq!(app.visible_pull_request_indices(), vec![0, 1, 2]);
-        assert_eq!(app.selected_pull_request().unwrap().number, 1);
-        app.navigate(1, Instant::now());
-        assert_eq!(app.selected_pull_request().unwrap().number, 2);
-        app.go_to_edge(true, Instant::now());
-        assert_eq!(app.selected_pull_request().unwrap().number, 3);
+        let effects = app.handle_worker_event(
+            WorkerEvent::PullRequestLookup {
+                generation: 3,
+                result: Ok(crate::git::github::PullRequestSnapshot {
+                    repositories: vec![repository.clone()],
+                    selected_repository: Some(repository),
+                    pull_request: request,
+                    warnings: Vec::new(),
+                    exact_number: Some(8),
+                    from_cache: false,
+                }),
+            },
+            Instant::now(),
+        );
+
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Git(command)] if matches!(
+                command.as_ref(),
+                WorkerCommand::LoadPullRequest {
+                    pull_request,
+                    file_page: 1,
+                    file_page_size: DEFAULT_PULL_REQUEST_DIFF_PAGE_SIZE,
+                    ..
+                } if pull_request.number == 8
+            )
+        ));
+        assert_eq!(
+            app.pull_request_progress,
+            Some(PullRequestProgress::PreparingRepository)
+        );
+        assert_eq!(
+            app.document
+                .pull_request_details
+                .as_ref()
+                .unwrap()
+                .description,
+            "A detailed pull-request description"
+        );
     }
 
     #[test]
@@ -3125,9 +3489,7 @@ mod tests {
     fn switching_views_replaces_stale_preview_before_async_work_completes() {
         let mut app = App::new("/tmp/repo", "repo");
         let now = Instant::now();
-        app.pull_requests_loaded = true;
-        app.pull_requests
-            .push(pull_request(6, "Slow preview", "acme/widget"));
+        app.pull_request = Some(pull_request(6, "Slow preview", "acme/widget"));
         app.view = View::PullRequests;
         app.document = DiffDocument::empty("PR #6", "stale PR contents");
         app.history.push(Commit {
@@ -3159,9 +3521,7 @@ mod tests {
         let mut app = App::new("/tmp/repo", "repo");
         let now = Instant::now();
         app.view = View::PullRequests;
-        app.pull_requests_loaded = true;
-        app.pull_requests
-            .push(pull_request(6, "Slow preview", "acme/widget"));
+        app.pull_request = Some(pull_request(6, "Slow preview", "acme/widget"));
         app.diff_generation = 9;
 
         app.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE), now);
@@ -3184,71 +3544,29 @@ mod tests {
     }
 
     #[test]
-    fn stale_pull_request_results_do_not_replace_the_latest_list() {
+    fn stale_pull_request_metadata_does_not_replace_the_active_lookup() {
         let mut app = App::new("/tmp/repo", "repo");
         app.pull_request_generation = 2;
-        app.pull_requests_loading = true;
-        app.pull_requests
-            .push(pull_request(2, "Newest", "acme/widget"));
+        app.pull_request_loading = true;
 
         let effects = app.handle_worker_event(
-            WorkerEvent::PullRequestBatch {
+            WorkerEvent::PullRequestLookup {
                 generation: 1,
-                result: Ok(crate::git::github::PullRequestBatch {
-                    pull_requests: vec![pull_request(1, "Stale", "acme/widget")],
-                    ..crate::git::github::PullRequestBatch::default()
+                result: Ok(crate::git::github::PullRequestSnapshot {
+                    repositories: Vec::new(),
+                    selected_repository: None,
+                    pull_request: pull_request(1, "Stale", "acme/widget"),
+                    warnings: Vec::new(),
+                    exact_number: Some(1),
+                    from_cache: false,
                 }),
             },
             Instant::now(),
         );
 
         assert!(effects.is_empty());
-        assert!(app.pull_requests_loading);
-        assert_eq!(app.pull_requests[0].number, 2);
-    }
-
-    #[test]
-    fn pull_request_batches_append_and_queue_the_next_cursor() {
-        let mut app = App::new("/tmp/repo", "repo");
-        app.view = View::PullRequests;
-        app.pull_request_generation = 1;
-        app.pull_requests_loading = true;
-        let first = pull_request(2, "Two", "acme/widget");
-        let repository = first.base_repository.clone();
-
-        let effects = app.handle_worker_event(
-            WorkerEvent::PullRequestBatch {
-                generation: 1,
-                result: Ok(crate::git::github::PullRequestBatch {
-                    repositories: vec![repository.clone()],
-                    selected_repository: Some(repository.clone()),
-                    pull_requests: vec![first],
-                    warnings: vec!["cached repository identity".to_owned()],
-                    total_count: 3,
-                    fetched_count: 1,
-                    has_next_batch: true,
-                    next_cursor: Some("cursor-1".to_owned()),
-                    from_cache: true,
-                }),
-            },
-            Instant::now(),
-        );
-
-        assert_eq!(app.pull_request_fetched, 1);
-        assert_eq!(app.pull_request_total, 3);
-        assert_eq!(app.pull_request_load_percent(), 33);
-        assert!(app.pull_requests_loading);
-        assert!(matches!(
-            effects.as_slice(),
-            [AppEffect::Git(command)] if matches!(
-                command.as_ref(),
-                WorkerCommand::LoadPullRequests {
-                    cursor: Some(cursor),
-                    repository: Some(selected),
-                    ..
-                } if cursor == "cursor-1" && selected.url == repository.url
-            )
-        ));
+        assert!(app.pull_request_loading);
+        assert!(app.pull_request.is_none());
     }
 
     #[test]
@@ -3277,34 +3595,12 @@ mod tests {
                 command.as_ref(),
                 WorkerCommand::LookupPullRequest {
                     number: 123,
-                    repository: selected,
+                    repository: Some(selected),
                     ..
                 } if selected.url == repository.url
             )
         ));
         assert!(!app.pull_request_lookup_active);
-    }
-
-    #[test]
-    fn pull_request_pages_use_the_progressively_loaded_local_snapshot() {
-        let mut app = App::new("/tmp/repo", "repo");
-        app.view = View::PullRequests;
-        app.pull_request_total = 60;
-        app.pull_requests = (1..=50)
-            .map(|number| pull_request(number, "PR", "acme/widget"))
-            .collect();
-
-        let effects = app.handle_key(
-            KeyEvent::new(KeyCode::Right, KeyModifiers::NONE),
-            Instant::now(),
-        );
-
-        assert!(effects.is_empty());
-        assert_eq!(app.pull_request_page, 2);
-        assert_eq!(
-            app.visible_pull_request_indices(),
-            (25..50).collect::<Vec<_>>()
-        );
     }
 
     #[test]
@@ -3379,7 +3675,6 @@ mod tests {
         );
         assert!(!app.preview_file_collapsed("src/main.rs"));
 
-        app.pull_requests_loaded = true;
         app.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE), now);
         let generation = app.diff_generation;
         app.handle_worker_event(
@@ -3437,6 +3732,86 @@ mod tests {
                 } if old == "topic" && new == "feature/topic")
         ));
         assert_eq!(app.busy.as_deref(), Some("Renaming branch"));
+    }
+
+    #[test]
+    fn compare_branch_picker_queues_a_head_diff_without_checkout() {
+        let mut app = app_with_changes();
+        app.history_branches_loaded = true;
+        app.history_branches = vec![
+            HistoryBranch {
+                name: "main".to_owned(),
+                reference: "refs/heads/main".to_owned(),
+                current: true,
+                remote: false,
+                relative_date: "now".to_owned(),
+                short_id: "aaaaaaa".to_owned(),
+            },
+            HistoryBranch {
+                name: "topic".to_owned(),
+                reference: "refs/heads/topic".to_owned(),
+                current: false,
+                remote: false,
+                relative_date: "now".to_owned(),
+                short_id: "bbbbbbb".to_owned(),
+            },
+        ];
+        let now = Instant::now();
+
+        assert!(
+            app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE), now)
+                .is_empty()
+        );
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Git(command)] if matches!(
+                command.as_ref(),
+                WorkerCommand::LoadBranchDiff { branch, .. } if branch.name == "topic"
+            )
+        ));
+        assert!(matches!(
+            app.auxiliary_preview,
+            Some(AuxiliaryPreview::Branch(ref branch)) if branch.name == "topic"
+        ));
+    }
+
+    #[test]
+    fn stash_manager_creates_a_named_stash_flow() {
+        let mut app = app_with_changes();
+        let now = Instant::now();
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Char('S'), KeyModifiers::SHIFT), now);
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Git(command)]
+                if matches!(command.as_ref(), WorkerCommand::LoadStashes { .. })
+        ));
+
+        app.handle_key(
+            KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
+            now,
+        );
+        let Some(Modal::Prompt { input, .. }) = app.modal.as_mut() else {
+            panic!("expected stash message prompt");
+        };
+        *input = TextBuffer::new("checkpoint");
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Git(command)] if matches!(
+                command.as_ref(),
+                WorkerCommand::Operate {
+                    operation: GitOperation::StashPush {
+                        message,
+                        include_untracked: false,
+                        staged: false,
+                    },
+                    ..
+                } if message == "checkpoint"
+            )
+        ));
     }
 
     #[test]

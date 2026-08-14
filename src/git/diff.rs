@@ -73,6 +73,7 @@ pub struct CommitDetails {
 pub struct PullRequestDetails {
     pub number: u64,
     pub title: String,
+    pub description: String,
     pub author: String,
     pub state: String,
     pub is_draft: bool,
