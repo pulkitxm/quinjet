@@ -636,6 +636,10 @@ pub struct App {
     diff_generation: u64,
     history_generation: u64,
     pull_request_generation: u64,
+    /// Repository discovery answers on its own counter. Sharing the lookup's
+    /// would let opening the picker discard a pull request already on its way,
+    /// leaving its loading flag set with no reply ever able to clear it.
+    repository_generation: u64,
     pull_request_workspace_generation: Option<u64>,
     pull_request_documents: HashMap<PathBuf, DiffDocument>,
     pull_request_loading_path: Option<PathBuf>,
@@ -752,6 +756,7 @@ impl App {
             diff_generation: 0,
             history_generation: 0,
             pull_request_generation: 0,
+            repository_generation: 0,
             pull_request_workspace_generation: None,
             pull_request_documents: HashMap::new(),
             pull_request_loading_path: None,
@@ -2236,7 +2241,7 @@ impl App {
                 }
             }
             WorkerEvent::GitHubRepositories { generation, result } => {
-                if generation != self.pull_request_generation {
+                if generation != self.repository_generation {
                     return effects;
                 }
                 match result {
@@ -3599,10 +3604,10 @@ impl App {
             loading,
         });
         if loading {
-            self.pull_request_generation = self.pull_request_generation.wrapping_add(1);
+            self.repository_generation = self.repository_generation.wrapping_add(1);
             effects.push(AppEffect::Git(Box::new(
                 WorkerCommand::LoadGitHubRepositories {
-                    generation: self.pull_request_generation,
+                    generation: self.repository_generation,
                     refresh: false,
                 },
             )));
@@ -4053,7 +4058,24 @@ impl App {
         self.pull_request_check_cursor = cursor;
         self.content_scroll = 0;
         self.horizontal_scroll = 0;
+        // The pane draws its header from the selected check and its body from
+        // the loaded log. Dropping the log here is what keeps those two from
+        // ever describing different runs, however the selection moved and
+        // whichever frame lands before the replacement arrives.
+        self.invalidate_check_run_log();
         true
+    }
+
+    fn invalidate_check_run_log(&mut self) {
+        self.pull_request_check_log = None;
+        self.pull_request_check_log_error = None;
+        self.pull_request_check_log_target = None;
+        self.pull_request_check_log_loading = false;
+        self.pull_request_log_read_at = None;
+        self.expanded_check_steps.clear();
+        self.pull_request_step_cursor = 0;
+        self.pull_request_check_log_generation =
+            self.pull_request_check_log_generation.wrapping_add(1);
     }
 
     pub fn check_log_visible(&self) -> bool {
@@ -5581,6 +5603,97 @@ mod tests {
         assert_eq!(app.pull_request_step_cursor, 3);
         app.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE), now);
         assert_eq!(app.pull_request_step_cursor, 1);
+    }
+
+    #[test]
+    fn walking_the_check_list_with_keys_drops_the_log_it_walked_away_from() {
+        let mut app = App::new("/tmp/repo", "repo");
+        let now = Instant::now();
+        app.view = View::PullRequests;
+        app.focus = Focus::Sidebar;
+        app.pull_request = Some(pull_request(8, "Two checks", "acme/widget"));
+        app.pull_request_checks = vec![
+            check("Build every workspace", PullRequestCheckStatus::Passed),
+            check("No-comment policy", PullRequestCheckStatus::Passed),
+        ];
+        app.pull_request_check_cursor = Some(0);
+        app.pull_request_check_log_target =
+            Some(("CI".to_owned(), "Build every workspace".to_owned()));
+        app.pull_request_check_log = Some(crate::git::github::CheckRunLog {
+            steps: vec![crate::git::github::CheckStep {
+                number: 1,
+                name: "Build every workspace".to_owned(),
+                status: PullRequestCheckStatus::Passed,
+                conclusion: "success".to_owned(),
+                started_at: String::new(),
+                completed_at: String::new(),
+                lines: Vec::new(),
+            }],
+            loose_lines: Vec::new(),
+            truncated: false,
+            unavailable: None,
+            log_pending: false,
+        });
+        let stale = app.pull_request_check_log_generation;
+
+        // The keyboard path moves the cursor and leaves the request to the
+        // preview debounce, so the frames drawn in between must not still be
+        // holding the previous run's log.
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE), now);
+
+        assert_eq!(app.pull_request_check_cursor, Some(1));
+        assert!(
+            app.pull_request_check_log.is_none(),
+            "the header moved to another run, so its body cannot still be the old one"
+        );
+        assert_ne!(
+            app.pull_request_check_log_generation, stale,
+            "a reply already in flight for the previous run is invalidated"
+        );
+    }
+
+    #[test]
+    fn opening_the_repository_picker_does_not_cancel_a_pull_request_lookup() {
+        let mut app = App::new("/tmp/repo", "repo");
+        let now = Instant::now();
+        app.view = View::PullRequests;
+
+        let mut effects = Vec::new();
+        app.request_pull_request_lookup(42, false, false, &mut effects);
+        let lookup = app.pull_request_generation;
+        assert!(app.pull_request_loading);
+
+        // Checking which repository is being searched, then dismissing the
+        // picker, must not strand the lookup that is already running.
+        app.open_pull_request_repositories(&mut Vec::new());
+        assert_eq!(
+            app.pull_request_generation, lookup,
+            "repository discovery answers on its own counter"
+        );
+
+        app.handle_worker_event(
+            WorkerEvent::PullRequestLookup {
+                generation: lookup,
+                result: Ok(crate::git::github::PullRequestSnapshot {
+                    repositories: Vec::new(),
+                    selected_repository: None,
+                    pull_request: pull_request(42, "Still wanted", "acme/widget"),
+                    warnings: Vec::new(),
+                    exact_number: Some(42),
+                    from_cache: false,
+                }),
+            },
+            now,
+        );
+
+        assert!(
+            !app.pull_request_loading,
+            "the lookup reply is still accepted, so polling is never blocked"
+        );
+        assert_eq!(
+            app.pull_request.as_ref().map(|request| request.number),
+            Some(42)
+        );
     }
 
     #[test]

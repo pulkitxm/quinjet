@@ -178,6 +178,7 @@ struct Mailbox {
     preview: Option<WorkerCommand>,
     history: Option<WorkerCommand>,
     pull_request: Option<WorkerCommand>,
+    repositories: Option<WorkerCommand>,
     prefetch: Option<WorkerCommand>,
     checks: Option<WorkerCommand>,
     conversation: Option<WorkerCommand>,
@@ -207,8 +208,13 @@ impl Mailbox {
                 self.prefetch = Some(command);
             }
             command @ WorkerCommand::LoadHistory { .. } => self.history = Some(command),
-            command @ (WorkerCommand::LoadGitHubRepositories { .. }
-            | WorkerCommand::LookupPullRequest { .. }) => {
+            // Repository discovery keeps its own slot: it answers a different
+            // question from a pull-request lookup, and dropping one for the
+            // other leaves the caller waiting for a reply that never comes.
+            command @ WorkerCommand::LoadGitHubRepositories { .. } => {
+                self.repositories = Some(command);
+            }
+            command @ WorkerCommand::LookupPullRequest { .. } => {
                 self.pull_request = Some(command);
             }
             command @ WorkerCommand::LoadPullRequestChecks { .. } => self.checks = Some(command),
@@ -226,6 +232,7 @@ impl Mailbox {
             .pop_front()
             .or_else(|| self.branches.take())
             .or_else(|| self.preview.take())
+            .or_else(|| self.repositories.take())
             .or_else(|| self.pull_request.take())
             .or_else(|| self.refresh.take())
             .or_else(|| self.check_log.take())
