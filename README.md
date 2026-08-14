@@ -19,8 +19,10 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 - Compact change hunks by default; `t` expands the selected file to full context
 - Paginated, branch-scoped commit history with a view-only local/remote branch picker that never checks out
 - On-demand pull-request lookup by number—no startup prefetch and no repository-wide PR listing
-- PR title, source/destination branches, state, totals, a virtualized changed-file tree, and lazy per-file diffs
-- Live PR checks that refresh silently in the background without moving the diff viewport
+- PR title, source/destination branches, state, totals, description, and the whole conversation: comments, reviews and their inline replies, pushed commits, force pushes, and every lifecycle event
+- Foldable GitHub Actions logs per check run, with each step's output attached to the step that produced it
+- Adaptive live refresh that watches a running pull request closely and a settled one loosely, plus optional instant refresh from forwarded webhooks
+- Exact per-file line counts the moment a diff is indexed, and a virtualized changed-file tree with batched background patches
 - Reused local PR workspaces across multiple fetch/push remotes and forks—no checkout or persistent source refs
 - Current-branch comparison with any local or remote-tracking branch, without checkout
 - Named, staged-only, untracked-inclusive, preview, apply, pop, drop, and clear stash workflows
@@ -93,6 +95,15 @@ Mouse capture can be disabled without losing functionality:
 quinjet --no-mouse
 ```
 
+An open pull request stays current on its own poll. To make it react the instant something happens instead, let the GitHub CLI forward deliveries to Quinjet:
+
+```bash
+quinjet --webhook-listen 8787
+gh webhook forward --repo owner/name --events '*' --url http://127.0.0.1:8787
+```
+
+Only loopback connections are accepted, and a delivery is treated purely as a signal to re-read the pull request through `gh`; nothing from the request body is trusted or displayed.
+
 ### Changes, staging, branch comparison, and stashes
 
 The Changes view follows the VS Code SCM grouping model: conflicts, staged changes, and working-tree changes are separate selectable groups. Every file row has a visible `[+]`, `[−]`, or `[!]` action, and group headers expose stage-all/unstage-all actions. The bottom toolbar provides Commit, Stashes, Stage All, Unstage All, and Compare Branch entry points. Keyboard equivalents remain available.
@@ -109,7 +120,13 @@ History starts at the currently checked-out branch instead of mixing every ref i
 
 ### Pull requests, remotes, and cache
 
-Press `3`, enter a positive PR number, and press Enter. That explicit action is the first time Quinjet performs any GitHub request: startup and tab switching never list, prefetch, or auto-fetch pull requests. Quinjet lazily discovers the most appropriate configured GitHub repository and fetches only that PR's metadata. It then prepares a local Git comparison and enumerates the complete changed-file index without downloading one giant patch. The right side initially shows the all-files index; selecting a tree file switches it to an expanded single-file preview, and clicking the **Files** tab (or pressing `F`) returns to all files. Press `C` for checks. Every file and folder is selectable; click a folder or use `Left`/`Right`, `h`/`l`, `Enter`, or `Space` to collapse and expand it. Selecting or expanding a file asks Git for only that path's patch; rapid selections coalesce and stale results are discarded, so a PR with one file and a PR with thousands use the same stable layout. Checks refresh silently every ten seconds while the PR is open. Press `o` to discover or choose a configured remote repository, and `r` to refetch the current PR.
+Press `3`, enter a positive PR number, and press Enter. That explicit action is the first time Quinjet performs any GitHub request: startup and tab switching never list, prefetch, or auto-fetch pull requests. Quinjet lazily discovers the most appropriate configured GitHub repository and fetches only that PR's metadata.
+
+The view has two halves. **Pull request** (`P`) lists the conversation and every check run on the left. With the conversation selected, the right side is the pull request itself: title, state, author, source and destination, totals, check summary, description, and the full thread of comments, reviews and their inline replies, pushed commits, force pushes, renames, labels, and merges. Selecting a check replaces the right side with that run's steps, each showing its status and duration and folding open to the log lines that step produced; `[` and `]` move between steps, `Space` folds one, and `e` folds them all. The failing step opens on its own.
+
+**Files** (`F`) is the changed-file tree. Quinjet prepares a local Git comparison as soon as a PR opens and indexes every changed path together with its exact line counts, so headers read `+40 -0` immediately rather than resolving one file at a time. Patches then stream in behind batched reads, and anything you select is usually already there. Every file and folder is selectable; click a folder or use `Left`/`Right`, `h`/`l`, `Enter`, or `Space` to collapse and expand it. Rapid selections coalesce and stale results are discarded, so a PR with one file and a PR with thousands use the same stable layout.
+
+Press `o` to discover or choose a configured remote repository, and `r` to refetch the current PR immediately.
 
 Quinjet supports fork setups such as `origin` pointing to your fork and `upstream` to the base, separate push URLs, deleted fork heads exposed through GitHub's PR ref, and GitHub Enterprise hosts configured in `gh`. PR patches are **not** downloaded with `gh pr diff`: when both immutable OIDs already exist locally, Quinjet diffs them directly with no network request. Otherwise it creates one disposable bare workspace for the opened PR, shallow/partial-fetches the fixed base and PR-head refs, deepens only as needed to find the merge base, and reuses that workspace for every selected file. The opened repository is never checked out or given temporary branches/refs.
 
@@ -143,7 +160,9 @@ The UI intentionally stays uncluttered; press `?` for the complete shortcut refe
 | `b` in History | View another local/remote branch without checkout |
 | `b` elsewhere / `B` | Checkout branch picker; `F2`/`Ctrl+R` renames a local branch |
 | `o` in Pull Requests | Discover/select a repository and reopen the entered PR |
-| `F` / `C` in Pull Requests | Return to all changed files/show live checks |
+| `P` / `F` in Pull Requests | The pull request and its checks/all changed files |
+| `[` / `]` in a check log | Previous/next step |
+| `Space` / `e` in a check log | Fold the selected step/every step |
 | `←` / `→`, `h` / `l`, `Enter`, or `Space` on a PR folder | Collapse/expand that folder |
 | `r` | Refresh status; refetch the opened PR and checks in the PR view |
 | `/` | Filter changes/history, or focus the numeric PR field |
@@ -166,6 +185,8 @@ Text fields support Unicode-safe editing plus familiar terminal and macOS motion
 - Syntax grammar work is bounded to 512 KiB per patch and 32 KiB per row. Larger generated patches retain diff coloring but use plain source spans, preventing highlighting—not Git—from dominating load time; collapsed cached files also keep only their headers in the combined document.
 - History is paginated for one explicit branch revision; choosing another branch is read-only.
 - No pull-request command is queued at startup or when the PR tab opens. Only an explicit positive-number lookup contacts GitHub, and refreshing refetches only that PR.
+- Once a pull request is open it refreshes on an adaptive schedule: every 5 seconds while a check is running, every 20 seconds once they settle, and every 2 minutes from another view. Each read is independent, so one failing endpoint never stalls the others, and a moved head reindexes only the diff.
+- Conversations are bounded to 2,000 entries and check logs to 8 MiB / 200,000 lines, read through the same capped pipes as every other subprocess.
 - On-demand repository discovery inspects at most 32 Git remotes, 64 configured fetch/push URL entries (32 distinct URLs), and 16 GitHub repositories.
 - PR file indexes are capped at 16,384 paths / 8 MiB. Each selected file has an independent 8 MiB patch cap; the full PR patch is never materialized. Potentially large subprocess output is streamed and the child is terminated at the cap.
 - The changed-file tree is virtualized: render cost follows terminal height rather than PR size. Rapid file selections coalesce into the newest per-file Git diff with no loading-layout replacement.
