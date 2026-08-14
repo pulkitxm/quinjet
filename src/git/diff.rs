@@ -591,6 +591,67 @@ pub fn parse_diff(
     }
 }
 
+/// Cut a multi-file patch at its `diff --git` boundaries and key each section by
+/// the paths in that header. One Git invocation can then answer for many files
+/// while each file still parses and renders as its own document.
+pub fn split_patch_by_file(patch: &[u8]) -> Vec<PatchSection<'_>> {
+    let mut starts = Vec::new();
+    let mut offset = 0;
+    while offset < patch.len() {
+        let end = patch[offset..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(patch.len(), |index| offset + index + 1);
+        let line = &patch[offset..end];
+        if line.starts_with(b"diff --git ")
+            || line.starts_with(b"diff --cc ")
+            || line.starts_with(b"diff --combined ")
+        {
+            starts.push(offset);
+        }
+        offset = end;
+    }
+
+    starts
+        .iter()
+        .enumerate()
+        .map(|(index, start)| {
+            let end = starts.get(index + 1).copied().unwrap_or(patch.len());
+            let body = &patch[*start..end];
+            let header = body.split(|byte| *byte == b'\n').next().unwrap_or_default();
+            let header = String::from_utf8_lossy(header);
+            let (old_path, new_path) = header
+                .strip_prefix("diff --git ")
+                .map(diff_header_paths)
+                .unwrap_or_else(|| {
+                    let path = header
+                        .strip_prefix("diff --cc ")
+                        .or_else(|| header.strip_prefix("diff --combined "))
+                        .map(|path| PathBuf::from(decode_git_path(path.trim_end())));
+                    (path.clone(), path)
+                });
+            PatchSection {
+                old_path,
+                new_path,
+                body,
+            }
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PatchSection<'a> {
+    pub old_path: Option<PathBuf>,
+    pub new_path: Option<PathBuf>,
+    pub body: &'a [u8],
+}
+
+impl PatchSection<'_> {
+    pub fn matches(&self, path: &Path) -> bool {
+        self.new_path.as_deref() == Some(path) || self.old_path.as_deref() == Some(path)
+    }
+}
+
 #[derive(Default)]
 struct FileBuilder {
     old_path: Option<PathBuf>,
@@ -969,6 +1030,32 @@ mod tests {
                 binary: false,
             }
         );
+    }
+
+    #[test]
+    fn splits_a_batched_patch_into_one_section_per_file() {
+        let patch = b"diff --git a/src/one.rs b/src/one.rs\n--- a/src/one.rs\n+++ b/src/one.rs\n@@ -1 +1 @@\n-old\n+new\ndiff --git a/old name.rs b/new name.rs\nsimilarity index 90%\nrename from old name.rs\nrename to new name.rs\ndiff --git a/gone.rs b/gone.rs\ndeleted file mode 100644\n--- a/gone.rs\n+++ /dev/null\n@@ -1 +0,0 @@\n-bye\n";
+
+        let sections = split_patch_by_file(patch);
+
+        assert_eq!(sections.len(), 3);
+        assert!(sections[0].matches(Path::new("src/one.rs")));
+        assert!(
+            sections[1].matches(Path::new("new name.rs")),
+            "a rename is keyed by the post-image path even when it contains spaces"
+        );
+        assert!(sections[1].matches(Path::new("old name.rs")));
+        assert!(sections[2].matches(Path::new("gone.rs")));
+        assert!(!sections[0].matches(Path::new("gone.rs")));
+        assert_eq!(
+            String::from_utf8_lossy(sections[2].body),
+            "diff --git a/gone.rs b/gone.rs\ndeleted file mode 100644\n--- a/gone.rs\n+++ /dev/null\n@@ -1 +0,0 @@\n-bye\n"
+        );
+
+        // Each section still parses as exactly one self-contained file.
+        let document = parse_diff(sections[0].body, "one", None, false);
+        assert_eq!(document.file_count(), 1);
+        assert_eq!(document.addition_count(), 1);
     }
 
     #[test]
