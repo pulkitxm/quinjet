@@ -15,7 +15,7 @@ use crate::app::{
     PullRequestSection, PullRequestTreeEntry, ScmAction, ScmActionHit, SidebarHit, SidebarHitArea,
     ToastLevel, UiGeometry, View,
 };
-#[cfg(test)]
+use crate::convert::cells;
 use crate::git::diff::CommitDetails;
 use crate::git::diff::{DiffDocument, DiffLine, DiffLineKind, HighlightSpan, PullRequestDetails};
 use crate::git::github::{
@@ -242,7 +242,7 @@ fn draw_tabs(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) -> (Re
         Constraint::Length(13),
         Constraint::Length(17),
         Constraint::Min(8),
-        Constraint::Length((branch.width() + 3).min(area.width as usize) as u16),
+        Constraint::Length(cells((branch.width() + 3).min(area.width as usize))),
     ])
     .areas(area);
 
@@ -739,7 +739,7 @@ fn draw_history_sidebar(
         let cursor = app.sidebar_offset + row_offset;
         let commit = &app.history[*index];
         let selected = cursor == app.history_cursor;
-        let y = inner.y + row_offset as u16;
+        let y = inner.y + cells(row_offset);
         let row_style = Style::default().bg(if selected {
             theme.selected
         } else {
@@ -1104,7 +1104,7 @@ fn draw_pull_request_file_tree(
         .enumerate()
     {
         let row_index = app.sidebar_offset + offset;
-        let y = area.y + offset as u16;
+        let y = area.y + cells(offset);
         let selected = row_index == app.pull_request_tree_cursor;
         let background = if selected {
             theme.selected
@@ -1260,7 +1260,7 @@ fn draw_pull_request_check_list(
         .take(area.height as usize)
         .enumerate()
     {
-        let y = area.y + offset as u16;
+        let y = area.y + cells(offset);
         let row_area = Rect::new(area.x, y, area.width, 1);
         let selected = row == cursor_row;
         let background = if selected {
@@ -1468,7 +1468,7 @@ fn draw_pull_request_overview(
         .take(inner.height as usize)
         .enumerate()
     {
-        let row_area = Rect::new(inner.x, inner.y + offset as u16, inner.width, 1);
+        let row_area = Rect::new(inner.x, inner.y + cells(offset), inner.width, 1);
         let selected = showing_check && row.step == Some(app.pull_request_step_cursor);
         frame.render_widget(
             Paragraph::new(if row.wide {
@@ -2316,7 +2316,7 @@ fn draw_content(
     let mut diff_scroll = app.content_scroll;
     if diff_scroll < details_rows {
         let visible_details = details_rows - diff_scroll;
-        let details_height = visible_details.min(inner.height as usize) as u16;
+        let details_height = cells(visible_details.min(inner.height as usize));
         let details_area = Rect::new(inner.x, inner.y, inner.width, details_height);
         if app.document.commit_details.is_some() {
             draw_commit_details_scrolled(
@@ -2393,7 +2393,7 @@ fn draw_commit_details_scrolled(
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.border))
         .style(Style::default().bg(theme.panel_alt).fg(theme.text));
-    let full_area = Rect::new(0, 0, area.width, total_rows as u16);
+    let full_area = Rect::new(0, 0, area.width, cells(total_rows));
     let mut buffer = ratatui::buffer::Buffer::empty(full_area);
     let inner = block.inner(full_area);
     block.render(full_area, &mut buffer);
@@ -2451,7 +2451,7 @@ fn draw_commit_details_scrolled(
     Paragraph::new(lines).render(inner, &mut buffer);
 
     for destination_row in 0..area.height {
-        let source_row = scroll as u16 + destination_row;
+        let source_row = cells(scroll) + destination_row;
         if source_row >= full_area.height {
             break;
         }
@@ -2480,7 +2480,7 @@ fn draw_pull_request_details_scrolled(
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.border))
         .style(Style::default().bg(theme.panel_alt).fg(theme.text));
-    let full_area = Rect::new(0, 0, area.width, total_rows as u16);
+    let full_area = Rect::new(0, 0, area.width, cells(total_rows));
     let mut buffer = ratatui::buffer::Buffer::empty(full_area);
     let inner = block.inner(full_area);
     block.render(full_area, &mut buffer);
@@ -2600,7 +2600,7 @@ fn draw_pull_request_details_scrolled(
     Paragraph::new(lines).render(inner, &mut buffer);
 
     for destination_row in 0..area.height {
-        let source_row = scroll as u16 + destination_row;
+        let source_row = cells(scroll) + destination_row;
         if source_row >= full_area.height {
             break;
         }
@@ -2803,7 +2803,7 @@ fn draw_unified_diff(
         .enumerate()
     {
         let line = &app.document.lines[line_index];
-        let row_area = Rect::new(area.x, content_y + offset as u16, area.width, 1);
+        let row_area = Rect::new(area.x, content_y + cells(offset), area.width, 1);
         match line.kind {
             DiffLineKind::FileHeader => {
                 draw_file_header(frame, row_area, line, app, theme);
@@ -3061,7 +3061,7 @@ fn draw_side_by_side_diff(
         .take(content_height as usize)
         .enumerate()
     {
-        let y = content_y + offset as u16;
+        let y = content_y + cells(offset);
         let row_area = Rect::new(area.x, y, area.width, 1);
         match row {
             SideBySideRow::FileHeader(line) => {
@@ -3516,7 +3516,7 @@ fn draw_scrollbar(frame: &mut Frame<'_>, area: Rect, offset: usize, length: usiz
         };
         frame.render_widget(
             Paragraph::new("▐").style(Style::default().fg(color)),
-            Rect::new(area.right().saturating_sub(1), area.y + row as u16, 1, 1),
+            Rect::new(area.right().saturating_sub(1), area.y + cells(row), 1, 1),
         );
     }
 }
@@ -4243,7 +4243,7 @@ fn draw_pull_request_repositories(
     loading: bool,
     theme: &Theme,
 ) {
-    let height = (items.len() as u16 + 7)
+    let height = (cells(items.len()) + 7)
         .min(frame.area().height.saturating_sub(8))
         .max(10);
     let area = centered_rect(
@@ -4352,7 +4352,7 @@ fn draw_palette(
     theme: &Theme,
 ) {
     let commands = app.palette_commands(&query.value);
-    let height = (commands.len() as u16 + 6)
+    let height = (cells(commands.len()) + 6)
         .min(frame.area().height.saturating_sub(6))
         .max(8);
     let area = Rect::new(
@@ -4442,10 +4442,10 @@ fn progress_bar(percent: u16, width: usize) -> String {
 }
 
 fn draw_toast(frame: &mut Frame<'_>, message: &str, level: ToastLevel, theme: &Theme) {
-    let width = (message.width() as u16 + 6)
+    let width = (cells(message.width()) + 6)
         .min(frame.area().width.saturating_sub(4))
         .max(24);
-    let height = ((message.width() as u16 / width.max(1)) + 3).min(7);
+    let height = ((cells(message.width()) / width.max(1)) + 3).min(7);
     let area = Rect::new(
         frame.area().right().saturating_sub(width + 2),
         frame.area().bottom().saturating_sub(height + 3),
@@ -4505,10 +4505,10 @@ fn set_text_cursor(
     };
     let x = area
         .x
-        .saturating_add(column.min(area.width.saturating_sub(1) as usize) as u16);
+        .saturating_add(cells(column.min(area.width.saturating_sub(1) as usize)));
     let y = area
         .y
-        .saturating_add(row.min(area.height.saturating_sub(1) as usize) as u16);
+        .saturating_add(cells(row.min(area.height.saturating_sub(1) as usize)));
     frame.set_cursor_position((x, y));
 }
 
@@ -5742,8 +5742,8 @@ terminal rows because that is what real pull-request comments look like in pract
         assert!(rendered.ends_with("+12 -3 ┐"));
         assert!(!rendered.contains('⌄'));
         assert!(!rendered.contains('›'));
-        assert_eq!(buffer[(addition_column as u16, 0)].fg, theme.added);
-        assert_eq!(buffer[(deletion_column as u16, 0)].fg, theme.removed);
+        assert_eq!(buffer[(cells(addition_column), 0)].fg, theme.added);
+        assert_eq!(buffer[(cells(deletion_column), 0)].fg, theme.removed);
     }
 
     #[test]

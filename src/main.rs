@@ -1,4 +1,5 @@
 mod app;
+mod convert;
 mod git;
 mod ui;
 mod watch;
