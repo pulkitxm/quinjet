@@ -224,7 +224,7 @@ impl Repository {
         let mut data = output.stdout;
         if output.stdout_truncated {
             while data.last().is_some_and(|byte| *byte != b'\n') {
-                drop(data.pop());
+                let _ = data.pop();
             }
         }
         let entries = parse_conversation(&data).context(error_context.to_owned())?;

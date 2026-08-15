@@ -447,10 +447,6 @@ impl PaletteCommand {
         Self::Quit,
     ];
 
-    #[expect(
-        clippy::struct_excessive_bools,
-        reason = "each flag is an independent piece of interface state"
-    )]
     pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::Refresh => "Refresh Repository",

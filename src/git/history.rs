@@ -96,10 +96,6 @@ fn text(value: &[u8]) -> String {
 }
 
 #[cfg(test)]
-#[expect(
-    unused_results,
-    reason = "test helpers return values the assertions do not use"
-)]
 mod tests {
     use super::*;
 

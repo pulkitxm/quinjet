@@ -3479,7 +3479,9 @@ fn highlight_spans<'a>(
         if let Some(changed) = intersection {
             push_highlight_piece(
                 &mut output,
-                &span.text[..changed.start - span_start],
+                span.text
+                    .get(..changed.start - span_start)
+                    .unwrap_or_default(),
                 style,
                 false,
                 kind,
@@ -3489,7 +3491,9 @@ fn highlight_spans<'a>(
             );
             push_highlight_piece(
                 &mut output,
-                &span.text[changed.start - span_start..changed.end - span_start],
+                span.text
+                    .get(changed.start - span_start..changed.end - span_start)
+                    .unwrap_or_default(),
                 style,
                 true,
                 kind,
@@ -3499,7 +3503,9 @@ fn highlight_spans<'a>(
             );
             push_highlight_piece(
                 &mut output,
-                &span.text[changed.end - span_start..],
+                span.text
+                    .get(changed.end - span_start..)
+                    .unwrap_or_default(),
                 style,
                 false,
                 kind,
