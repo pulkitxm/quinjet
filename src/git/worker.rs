@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
@@ -7,8 +8,8 @@ use crossbeam_channel::{Receiver, Sender, unbounded};
 
 use super::diff::DiffDocument;
 use super::github::{
-    PreparedPullRequest, PullRequest, PullRequestCheck, PullRequestDiffIndex, PullRequestProgress,
-    PullRequestSnapshot,
+    CheckRunLog, PreparedPullRequest, PullRequest, PullRequestCheck, PullRequestChecks,
+    PullRequestConversation, PullRequestDiffIndex, PullRequestProgress, PullRequestSnapshot,
 };
 use super::history::Commit;
 use super::status::RepoStatus;
@@ -56,9 +57,34 @@ pub enum WorkerCommand {
         workspace_generation: u64,
         path: PathBuf,
     },
+    /// Background fill for the rest of a prepared pull request. It carries no
+    /// preview generation because it never replaces what the reader is looking
+    /// at; the workspace it was prepared against is the only thing that can
+    /// make its results stale.
+    LoadPullRequestFileBatch {
+        workspace_generation: u64,
+        paths: Vec<PathBuf>,
+    },
     LoadPullRequestChecks {
         generation: u64,
         pull_request: Box<PullRequest>,
+        refresh: bool,
+    },
+    LoadPullRequestConversation {
+        generation: u64,
+        pull_request: Box<PullRequest>,
+    },
+    LoadCheckRunLog {
+        generation: u64,
+        pull_request: Box<PullRequest>,
+        check: Box<PullRequestCheck>,
+    },
+    /// Warm every finished run's log so that opening any of them is instant.
+    /// It carries no generation because it changes nothing on screen.
+    PrefetchCheckRunLogs {
+        generation: u64,
+        pull_request: Box<PullRequest>,
+        checks: Vec<PullRequestCheck>,
     },
     LoadBranches {
         generation: u64,
@@ -117,9 +143,21 @@ pub enum WorkerEvent {
         generation: u64,
         result: Result<DiffDocument, String>,
     },
+    PullRequestDiffBatch {
+        workspace_generation: u64,
+        result: Result<Vec<(PathBuf, DiffDocument)>, String>,
+    },
     PullRequestChecks {
         generation: u64,
-        result: Result<Vec<PullRequestCheck>, String>,
+        result: Result<PullRequestChecks, String>,
+    },
+    PullRequestConversation {
+        generation: u64,
+        result: Result<PullRequestConversation, String>,
+    },
+    CheckRunLog {
+        generation: u64,
+        result: Result<CheckRunLog, String>,
     },
     Branches {
         generation: u64,
@@ -149,7 +187,12 @@ struct Mailbox {
     preview: Option<WorkerCommand>,
     history: Option<WorkerCommand>,
     pull_request: Option<WorkerCommand>,
+    repositories: Option<WorkerCommand>,
+    prefetch: Option<WorkerCommand>,
     checks: Option<WorkerCommand>,
+    conversation: Option<WorkerCommand>,
+    check_log: Option<WorkerCommand>,
+    warm: Option<WorkerCommand>,
     shutdown: bool,
 }
 
@@ -169,12 +212,29 @@ impl Mailbox {
                 // even when a large diff is slower than navigation.
                 self.preview = Some(command);
             }
+            // Background fill occupies its own slot so a queued batch can never
+            // displace the preview the reader is waiting for.
+            command @ WorkerCommand::LoadPullRequestFileBatch { .. } => {
+                self.prefetch = Some(command);
+            }
             command @ WorkerCommand::LoadHistory { .. } => self.history = Some(command),
-            command @ (WorkerCommand::LoadGitHubRepositories { .. }
-            | WorkerCommand::LookupPullRequest { .. }) => {
+            // Repository discovery keeps its own slot: it answers a different
+            // question from a pull-request lookup, and dropping one for the
+            // other leaves the caller waiting for a reply that never comes.
+            command @ WorkerCommand::LoadGitHubRepositories { .. } => {
+                self.repositories = Some(command);
+            }
+            command @ WorkerCommand::LookupPullRequest { .. } => {
                 self.pull_request = Some(command);
             }
             command @ WorkerCommand::LoadPullRequestChecks { .. } => self.checks = Some(command),
+            command @ WorkerCommand::LoadPullRequestConversation { .. } => {
+                self.conversation = Some(command);
+            }
+            command @ WorkerCommand::LoadCheckRunLog { .. } => self.check_log = Some(command),
+            command @ WorkerCommand::PrefetchCheckRunLogs { .. } => {
+                self.warm = Some(command);
+            }
             WorkerCommand::Shutdown => self.shutdown = true,
         }
     }
@@ -185,10 +245,15 @@ impl Mailbox {
             .pop_front()
             .or_else(|| self.branches.take())
             .or_else(|| self.preview.take())
+            .or_else(|| self.repositories.take())
             .or_else(|| self.pull_request.take())
             .or_else(|| self.refresh.take())
+            .or_else(|| self.check_log.take())
             .or_else(|| self.checks.take())
+            .or_else(|| self.conversation.take())
             .or_else(|| self.history.take())
+            .or_else(|| self.prefetch.take())
+            .or_else(|| self.warm.take())
     }
 }
 
@@ -203,6 +268,7 @@ enum WorkerLane {
     GitHubMetadata,
     LocalPreview,
     PullRequestPreview,
+    Warm,
 }
 
 fn worker_lane(command: &WorkerCommand) -> WorkerLane {
@@ -212,10 +278,16 @@ fn worker_lane(command: &WorkerCommand) -> WorkerLane {
         }
         WorkerCommand::LoadGitHubRepositories { .. }
         | WorkerCommand::LookupPullRequest { .. }
-        | WorkerCommand::LoadPullRequestChecks { .. } => WorkerLane::GitHubMetadata,
-        WorkerCommand::PreparePullRequest { .. } | WorkerCommand::LoadPullRequestFile { .. } => {
-            WorkerLane::PullRequestPreview
-        }
+        | WorkerCommand::LoadPullRequestChecks { .. }
+        | WorkerCommand::LoadPullRequestConversation { .. }
+        | WorkerCommand::LoadCheckRunLog { .. } => WorkerLane::GitHubMetadata,
+        // Warming settled logs can run for minutes. It gets its own thread so a
+        // reader who reopens or switches pull requests mid-warm is answered now
+        // rather than after the warm-up drains.
+        WorkerCommand::PrefetchCheckRunLogs { .. } => WorkerLane::Warm,
+        WorkerCommand::PreparePullRequest { .. }
+        | WorkerCommand::LoadPullRequestFile { .. }
+        | WorkerCommand::LoadPullRequestFileBatch { .. } => WorkerLane::PullRequestPreview,
         _ => WorkerLane::Background,
     }
 }
@@ -225,6 +297,8 @@ pub struct GitWorker {
     github_mailbox: Arc<SharedMailbox>,
     local_preview_mailbox: Arc<SharedMailbox>,
     pull_request_preview_mailbox: Arc<SharedMailbox>,
+    warm_mailbox: Arc<SharedMailbox>,
+    warm_generation: Arc<AtomicU64>,
     events: Receiver<WorkerEvent>,
 }
 
@@ -234,17 +308,23 @@ impl GitWorker {
         let github_mailbox = new_mailbox();
         let local_preview_mailbox = new_mailbox();
         let pull_request_preview_mailbox = new_mailbox();
+        let warm_mailbox = new_mailbox();
+        let warm_generation = Arc::new(AtomicU64::new(0));
+        let worker_warm_generation = Arc::clone(&warm_generation);
         let worker_mailbox = Arc::clone(&mailbox);
         let worker_github_mailbox = Arc::clone(&github_mailbox);
         let worker_local_preview_mailbox = Arc::clone(&local_preview_mailbox);
         let worker_pull_request_preview_mailbox = Arc::clone(&pull_request_preview_mailbox);
+        let worker_warm_mailbox = Arc::clone(&warm_mailbox);
         let github_repository = repository.clone_for_worker();
         let local_preview_repository = repository.clone_for_worker();
         let pull_request_preview_repository = repository.clone_for_worker();
+        let warm_repository = repository.clone_for_worker();
         let (event_tx, event_rx) = unbounded();
         let github_events = event_tx.clone();
         let local_preview_events = event_tx.clone();
         let pull_request_preview_events = event_tx.clone();
+        let warm_events = event_tx.clone();
         thread::Builder::new()
             .name("quinjet-git".to_owned())
             .spawn(move || run_worker(repository, worker_mailbox, event_tx))
@@ -273,11 +353,24 @@ impl GitWorker {
                 )
             })
             .expect("failed to start pull-request preview worker");
+        thread::Builder::new()
+            .name("quinjet-warm".to_owned())
+            .spawn(move || {
+                run_warm_worker(
+                    warm_repository,
+                    worker_warm_mailbox,
+                    warm_events,
+                    worker_warm_generation,
+                )
+            })
+            .expect("failed to start log warm-up worker");
         Self {
             mailbox,
             github_mailbox,
             local_preview_mailbox,
             pull_request_preview_mailbox,
+            warm_mailbox,
+            warm_generation,
             events: event_rx,
         }
     }
@@ -285,11 +378,18 @@ impl GitWorker {
     /// Queue work without blocking the render thread. Read requests occupy fixed
     /// mailbox slots and replace obsolete requests; repository mutations remain an
     /// ordered queue and are additionally serialized by the app's busy state.
-    pub fn send(&self, command: WorkerCommand) -> bool {
+    pub fn send(&self, mut command: WorkerCommand) -> bool {
+        // A warm-up is only worth finishing for the pull request that asked for
+        // it. Stamping each one supersedes whatever is still running for a pull
+        // request the reader has already left.
+        if let WorkerCommand::PrefetchCheckRunLogs { generation, .. } = &mut command {
+            *generation = self.warm_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        }
         let target = match worker_lane(&command) {
             WorkerLane::GitHubMetadata => &self.github_mailbox,
             WorkerLane::LocalPreview => &self.local_preview_mailbox,
             WorkerLane::PullRequestPreview => &self.pull_request_preview_mailbox,
+            WorkerLane::Warm => &self.warm_mailbox,
             WorkerLane::Background => &self.mailbox,
         };
         let Ok(mut mailbox) = target.state.lock() else {
@@ -315,6 +415,7 @@ impl Drop for GitWorker {
         shutdown_mailbox(&self.github_mailbox);
         shutdown_mailbox(&self.local_preview_mailbox);
         shutdown_mailbox(&self.pull_request_preview_mailbox);
+        shutdown_mailbox(&self.warm_mailbox);
     }
 }
 
@@ -332,6 +433,32 @@ fn shutdown_mailbox(mailbox: &SharedMailbox) {
     state.push(WorkerCommand::Shutdown);
     drop(state);
     mailbox.ready.notify_one();
+}
+
+/// The warm-up lane runs one job at a time and answers to nothing but its own
+/// generation, so a pull request the reader has left stops costing requests as
+/// soon as another one asks to be warmed.
+fn run_warm_worker(
+    repository: Repository,
+    mailbox: Arc<SharedMailbox>,
+    _events: Sender<WorkerEvent>,
+    generation: Arc<AtomicU64>,
+) {
+    while let Some(command) = next_command(&mailbox) {
+        match command {
+            WorkerCommand::PrefetchCheckRunLogs {
+                generation: mine,
+                pull_request,
+                checks,
+            } => {
+                repository.prefetch_check_run_logs(&pull_request, &checks, &|| {
+                    generation.load(Ordering::SeqCst) == mine
+                });
+            }
+            WorkerCommand::Shutdown => break,
+            _ => continue,
+        }
+    }
 }
 
 fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sender<WorkerEvent>) {
@@ -449,15 +576,47 @@ fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sende
                     .ok_or_else(|| "Pull-request diff workspace is no longer available".to_owned())
                     .and_then(|(_, workspace)| workspace.diff_file(&path).map_err(format_error)),
             },
+            WorkerCommand::LoadPullRequestFileBatch {
+                workspace_generation,
+                paths,
+            } => WorkerEvent::PullRequestDiffBatch {
+                workspace_generation,
+                result: pull_request_workspace
+                    .as_ref()
+                    .filter(|(prepared_generation, _)| *prepared_generation == workspace_generation)
+                    .ok_or_else(|| "Pull-request diff workspace is no longer available".to_owned())
+                    .and_then(|(_, workspace)| workspace.diff_files(&paths).map_err(format_error)),
+            },
             WorkerCommand::LoadPullRequestChecks {
                 generation,
                 pull_request,
+                refresh,
             } => WorkerEvent::PullRequestChecks {
                 generation,
                 result: repository
-                    .pull_request_checks(&pull_request)
+                    .pull_request_checks(&pull_request, refresh)
                     .map_err(format_error),
             },
+            WorkerCommand::LoadPullRequestConversation {
+                generation,
+                pull_request,
+            } => WorkerEvent::PullRequestConversation {
+                generation,
+                result: repository
+                    .pull_request_conversation(&pull_request)
+                    .map_err(format_error),
+            },
+            WorkerCommand::LoadCheckRunLog {
+                generation,
+                pull_request,
+                check,
+            } => WorkerEvent::CheckRunLog {
+                generation,
+                result: repository
+                    .pull_request_check_log(&pull_request, &check)
+                    .map_err(format_error),
+            },
+            WorkerCommand::PrefetchCheckRunLogs { .. } => continue,
             WorkerCommand::LoadBranches { generation } => WorkerEvent::Branches {
                 generation,
                 result: repository.branches().map_err(format_error),
@@ -512,6 +671,44 @@ mod tests {
 
     use super::*;
     use crate::git::status::{Change, ChangeArea, ChangeStatus};
+
+    #[test]
+    fn warming_logs_never_shares_a_lane_with_the_reads_a_reader_waits_on() {
+        // Warming a settled run's log can take minutes. Once it starts, a lane
+        // cannot preempt it, so a reader who reopens or switches pull requests
+        // would sit on "Loading…" until the warm-up drained.
+        let pull_request = || Box::new(PullRequest::default());
+        let warm = WorkerCommand::PrefetchCheckRunLogs {
+            generation: 0,
+            pull_request: pull_request(),
+            checks: Vec::new(),
+        };
+        let awaited = [
+            WorkerCommand::LoadPullRequestChecks {
+                generation: 1,
+                pull_request: pull_request(),
+                refresh: true,
+            },
+            WorkerCommand::LoadPullRequestConversation {
+                generation: 1,
+                pull_request: pull_request(),
+            },
+            WorkerCommand::LookupPullRequest {
+                generation: 1,
+                repositories: Vec::new(),
+                repository: None,
+                number: 1,
+                refresh: true,
+            },
+        ];
+        for command in awaited {
+            assert_ne!(
+                worker_lane(&command),
+                worker_lane(&warm),
+                "{command:?} must not queue behind the log warm-up"
+            );
+        }
+    }
 
     #[test]
     fn mailbox_coalesces_previews_and_refreshes() {
@@ -609,6 +806,7 @@ mod tests {
             author: String::new(),
             state: "OPEN".to_owned(),
             is_draft: false,
+            created_at: String::new(),
             updated_at: String::new(),
             url: String::new(),
             base_ref: "main".to_owned(),
@@ -650,9 +848,42 @@ mod tests {
             worker_lane(&WorkerCommand::LoadPullRequestChecks {
                 generation: 6,
                 pull_request: Box::new(request),
+                refresh: false,
             }),
             WorkerLane::GitHubMetadata
         );
+    }
+
+    #[test]
+    fn background_prefetch_never_displaces_the_preview_a_reader_is_waiting_for() {
+        let mut mailbox = Mailbox::default();
+        mailbox.push(WorkerCommand::LoadPullRequestFileBatch {
+            workspace_generation: 1,
+            paths: vec![PathBuf::from("a.rs"), PathBuf::from("b.rs")],
+        });
+        mailbox.push(WorkerCommand::LoadPullRequestFile {
+            generation: 5,
+            workspace_generation: 1,
+            path: PathBuf::from("selected.rs"),
+        });
+        mailbox.push(WorkerCommand::LoadPullRequestFileBatch {
+            workspace_generation: 1,
+            paths: vec![PathBuf::from("c.rs")],
+        });
+
+        assert!(matches!(
+            mailbox.pop(),
+            Some(WorkerCommand::LoadPullRequestFile { generation: 5, .. })
+        ));
+        assert!(
+            matches!(
+                mailbox.pop(),
+                Some(WorkerCommand::LoadPullRequestFileBatch { paths, .. })
+                    if paths == vec![PathBuf::from("c.rs")]
+            ),
+            "only the newest background batch survives, and it runs after the preview"
+        );
+        assert!(mailbox.pop().is_none());
     }
 
     #[test]
