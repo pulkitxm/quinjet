@@ -71,6 +71,7 @@ fn main() -> Result<()> {
     let mut running = true;
 
     app.mouse_capture = !cli.no_mouse;
+    app.webhooks_listening = webhooks.is_some();
     running &= dispatch_effects(&worker, &mut terminal, app.initial_effects());
     while running {
         if dirty {

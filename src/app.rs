@@ -630,6 +630,7 @@ pub struct App {
     pub modal: Option<Modal>,
     pub toast: Option<Toast>,
     pub mouse_capture: bool,
+    pub webhooks_listening: bool,
     pub busy: Option<String>,
     pub refreshing: bool,
     pub document_loading: bool,
@@ -753,6 +754,7 @@ impl App {
             modal: None,
             toast: None,
             mouse_capture: true,
+            webhooks_listening: false,
             busy: None,
             refreshing: false,
             document_loading: false,
@@ -1841,8 +1843,15 @@ impl App {
             && !self.pull_request_refreshing()
     }
 
+    /// A forwarded delivery bypasses every floor, so when one can arrive the
+    /// poll interval is the fallback rather than the promise.
     pub fn live_refresh_label(&self) -> String {
-        format!("every {}s", self.pull_request_poll_interval().as_secs())
+        let interval = self.pull_request_poll_interval().as_secs();
+        if self.webhooks_listening {
+            format!("webhooks · every {interval}s")
+        } else {
+            format!("every {interval}s")
+        }
     }
 
     /// Watch a running pull request closely and a settled one loosely. The
