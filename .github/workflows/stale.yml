@@ -6,15 +6,19 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: read # read the checkout
+
+concurrency:
+  group: stale
+  cancel-in-progress: false
 
 jobs:
   stale:
     name: Sweep
     runs-on: ubuntu-latest
     permissions:
-      issues: write
-      pull-requests: write
+      issues: write # open or update the tracking issue
+      pull-requests: write # write labels and summaries onto the pull request
     steps:
       - uses: actions/stale@5bef64f19d7facfb25b37b414482c7164d639639 # v9
         with:
