@@ -459,7 +459,9 @@ impl Repository {
                 truncated = true;
                 break;
             }
-            let status = records[cursor];
+            let Some(status) = records.get(cursor).copied() else {
+                break;
+            };
             cursor += 1;
             let status_code = status.first().copied().unwrap_or_default();
             let rename_or_copy = matches!(status_code, b'R' | b'C');
@@ -731,16 +733,16 @@ impl Repository {
                 continue;
             }
             let fields: Vec<_> = record.split(|byte| *byte == 0x1f).collect();
-            if fields.len() < 5 {
+            let [name, head, upstream, relative_date, short_id, ..] = fields.as_slice() else {
                 continue;
-            }
-            let upstream = text(fields[2]);
+            };
+            let upstream = text(upstream);
             branches.push(Branch {
-                name: text(fields[0]),
-                current: fields[1] == b"*",
+                name: text(name),
+                current: *head == b"*",
                 upstream: (!upstream.is_empty()).then_some(upstream),
-                relative_date: text(fields[3]),
-                short_id: text(fields[4]),
+                relative_date: text(relative_date),
+                short_id: text(short_id),
             });
         }
         Ok(branches)
@@ -764,21 +766,25 @@ impl Repository {
                 continue;
             }
             let fields: Vec<_> = record.split(|byte| *byte == 0x1f).collect();
-            if fields.len() < 6 || !trim_ascii(fields[5]).is_empty() {
+            let [name, reference, head, relative_date, short_id, symref, ..] = fields.as_slice()
+            else {
+                continue;
+            };
+            if !trim_ascii(symref).is_empty() {
                 continue;
             }
-            let reference = text(fields[1]);
+            let reference = text(reference);
             let remote = reference.starts_with("refs/remotes/");
             if !reference.starts_with("refs/heads/") && !remote {
                 continue;
             }
             branches.push(HistoryBranch {
-                name: text(fields[0]),
+                name: text(name),
                 reference,
-                current: fields[2] == b"*",
+                current: *head == b"*",
                 remote,
-                relative_date: text(fields[3]),
-                short_id: text(fields[4]),
+                relative_date: text(relative_date),
+                short_id: text(short_id),
             });
         }
         branches.sort_by_key(|branch| (!branch.current, branch.remote));
@@ -798,21 +804,21 @@ impl Repository {
                 continue;
             }
             let fields: Vec<_> = record.split(|byte| *byte == 0x1f).collect();
-            if fields.len() < 4 {
+            let [reference, subject, relative_date, short_id, ..] = fields.as_slice() else {
                 continue;
-            }
-            let reference = text(fields[0]);
+            };
+            let reference = text(reference);
             if !valid_stash_reference(&reference) {
                 continue;
             }
-            let subject = text(fields[1]);
+            let subject = text(subject);
             let (branch, message) = parse_stash_subject(&subject);
             stashes.push(Stash {
                 reference,
                 message,
                 branch,
-                relative_date: text(fields[2]),
-                short_id: text(fields[3]),
+                relative_date: text(relative_date),
+                short_id: text(short_id),
             });
         }
         Ok(stashes)
@@ -1215,7 +1221,9 @@ fn truncate_diff_index(output: &mut Vec<u8>) -> bool {
     if output.len() <= MAX_DIFF_INDEX_BYTES {
         return false;
     }
-    let boundary = output[..MAX_DIFF_INDEX_BYTES]
+    let boundary = output
+        .get(..MAX_DIFF_INDEX_BYTES)
+        .unwrap_or_default()
         .iter()
         .rposition(|byte| *byte == 0)
         .map_or(0, |index| index + 1);
@@ -1338,12 +1346,18 @@ fn truncate_to_complete_line(bytes: &mut Vec<u8>) {
     }
 }
 
-fn trim_ascii(mut value: &[u8]) -> &[u8] {
-    while value.first().is_some_and(u8::is_ascii_whitespace) {
-        value = &value[1..];
+const fn trim_ascii(mut value: &[u8]) -> &[u8] {
+    while let Some((first, rest)) = value.split_first() {
+        if !first.is_ascii_whitespace() {
+            break;
+        }
+        value = rest;
     }
-    while value.last().is_some_and(u8::is_ascii_whitespace) {
-        value = &value[..value.len() - 1];
+    while let Some((last, rest)) = value.split_last() {
+        if !last.is_ascii_whitespace() {
+            break;
+        }
+        value = rest;
     }
     value
 }
