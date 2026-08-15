@@ -940,11 +940,10 @@ fn draw_pull_requests_sidebar(
     }
 
     let controls_y = body_area.bottom();
-    let repository_name = app
-        .pull_request_repository
-        .as_ref()
-        .map(GitHubRepository::display_name)
-        .unwrap_or_else(|| "auto-detect from remotes".to_owned());
+    let repository_name = app.pull_request_repository.as_ref().map_or_else(
+        || "auto-detect from remotes".to_owned(),
+        GitHubRepository::display_name,
+    );
     if controls_height >= 1 {
         let repository_area = Rect::new(inner.x, controls_y, inner.width, 1);
         frame.render_widget(
@@ -1120,8 +1119,7 @@ fn draw_pull_request_file_tree(
                 let indent_width = depth.saturating_mul(2).min(16);
                 let name = path
                     .file_name()
-                    .map(|name| name.to_string_lossy())
-                    .unwrap_or_else(|| path.to_string_lossy());
+                    .map_or_else(|| path.to_string_lossy(), |name| name.to_string_lossy());
                 let available = (area.width as usize)
                     .saturating_sub(indent_width)
                     .saturating_sub(5);
@@ -1158,11 +1156,10 @@ fn draw_pull_request_file_tree(
                     continue;
                 };
                 let indent_width = depth.saturating_mul(2).min(16);
-                let name = file
-                    .path
-                    .file_name()
-                    .map(|name| name.to_string_lossy())
-                    .unwrap_or_else(|| file.path.to_string_lossy());
+                let name = file.path.file_name().map_or_else(
+                    || file.path.to_string_lossy(),
+                    |name| name.to_string_lossy(),
+                );
                 let available = (area.width as usize)
                     .saturating_sub(indent_width)
                     .saturating_sub(7);
@@ -1207,7 +1204,7 @@ fn draw_pull_request_file_tree(
     hits
 }
 
-fn pull_request_file_status_code(status: PullRequestFileStatus) -> &'static str {
+const fn pull_request_file_status_code(status: PullRequestFileStatus) -> &'static str {
     match status {
         PullRequestFileStatus::Added => "A",
         PullRequestFileStatus::Modified => "M",
@@ -1220,7 +1217,7 @@ fn pull_request_file_status_code(status: PullRequestFileStatus) -> &'static str 
     }
 }
 
-fn pull_request_file_status_color(status: PullRequestFileStatus, theme: &Theme) -> Color {
+const fn pull_request_file_status_color(status: PullRequestFileStatus, theme: &Theme) -> Color {
     match status {
         PullRequestFileStatus::Added => theme.added,
         PullRequestFileStatus::Deleted => theme.removed,
@@ -1355,7 +1352,10 @@ fn conversation_row_suffix(app: &App) -> String {
     }
 }
 
-fn pull_request_check_icon(status: PullRequestCheckStatus, theme: &Theme) -> (&'static str, Color) {
+const fn pull_request_check_icon(
+    status: PullRequestCheckStatus,
+    theme: &Theme,
+) -> (&'static str, Color) {
     match status {
         PullRequestCheckStatus::Passed => ("✓", theme.success),
         PullRequestCheckStatus::Failed => ("×", theme.error),
@@ -1378,7 +1378,7 @@ struct ContentRow {
 }
 
 impl ContentRow {
-    fn plain(line: Line<'static>) -> Self {
+    const fn plain(line: Line<'static>) -> Self {
         Self {
             line,
             step: None,
@@ -1386,7 +1386,7 @@ impl ContentRow {
         }
     }
 
-    fn wide(line: Line<'static>) -> Self {
+    const fn wide(line: Line<'static>) -> Self {
         Self {
             line,
             step: None,
@@ -2039,7 +2039,7 @@ fn push_log_lines(rows: &mut Vec<ContentRow>, lines: &[CheckLogLine], theme: &Th
     }
 }
 
-fn log_severity_color(severity: CheckLogSeverity, theme: &Theme) -> Color {
+const fn log_severity_color(severity: CheckLogSeverity, theme: &Theme) -> Color {
     match severity {
         CheckLogSeverity::Normal => theme.text,
         CheckLogSeverity::Command => theme.accent,
@@ -2918,17 +2918,9 @@ fn draw_file_header(frame: &mut Frame<'_>, area: Rect, line: &DiffLine, app: &Ap
     } else {
         "⌄"
     };
-    let additions = line
-        .spans
-        .get(1)
-        .map(|span| span.text.as_str())
-        .unwrap_or("+0");
-    let deletions = line
-        .spans
-        .get(2)
-        .map(|span| span.text.as_str())
-        .unwrap_or("-0");
-    let reserved = 9usize + additions.width() + deletions.width();
+    let additions = line.spans.get(1).map_or("+0", |span| span.text.as_str());
+    let deletions = line.spans.get(2).map_or("-0", |span| span.text.as_str());
+    let reserved = 9_usize + additions.width() + deletions.width();
     let label = truncate_middle(label, (area.width as usize).saturating_sub(reserved));
     let fill = (area.width as usize)
         .saturating_sub(reserved)
@@ -3244,11 +3236,11 @@ fn paired_intraline_emphasis(
     let old_bytes = old_line
         .spans
         .iter()
-        .fold(0usize, |total, span| total.saturating_add(span.text.len()));
+        .fold(0_usize, |total, span| total.saturating_add(span.text.len()));
     let new_bytes = new_line
         .spans
         .iter()
-        .fold(0usize, |total, span| total.saturating_add(span.text.len()));
+        .fold(0_usize, |total, span| total.saturating_add(span.text.len()));
     if old_bytes.max(new_bytes) > MAX_INTRALINE_SOURCE_BYTES {
         return (None, None);
     }
@@ -3371,10 +3363,10 @@ fn highlight_spans<'a>(
         if remaining == 0 {
             break;
         }
-        let foreground = span
-            .foreground
-            .map(|(r, g, b)| Color::Rgb(r, g, b))
-            .unwrap_or_else(|| line_foreground(kind, theme));
+        let foreground = span.foreground.map_or_else(
+            || line_foreground(kind, theme),
+            |(r, g, b)| Color::Rgb(r, g, b),
+        );
         let mut style = Style::default().fg(foreground);
         if span.bold {
             style = style.add_modifier(Modifier::BOLD);
@@ -3438,9 +3430,9 @@ fn highlight_spans<'a>(
     output
 }
 
-#[allow(clippy::too_many_arguments)]
-fn push_highlight_piece<'a>(
-    output: &mut Vec<Span<'a>>,
+#[expect(clippy::too_many_arguments)]
+fn push_highlight_piece(
+    output: &mut Vec<Span<'_>>,
     text: &str,
     mut style: Style,
     emphasized: bool,
@@ -3497,7 +3489,7 @@ fn line_background(kind: DiffLineKind, theme: &Theme) -> Style {
     }
 }
 
-fn line_foreground(kind: DiffLineKind, theme: &Theme) -> Color {
+const fn line_foreground(kind: DiffLineKind, theme: &Theme) -> Color {
     match kind {
         DiffLineKind::Added => theme.added,
         DiffLineKind::Removed => theme.removed,
@@ -4541,7 +4533,7 @@ fn modal_block(title: &str, theme: &Theme) -> Block<'static> {
         .style(Style::default().bg(theme.panel).fg(theme.text))
 }
 
-fn status_color(status: ChangeStatus, theme: &Theme) -> Color {
+const fn status_color(status: ChangeStatus, theme: &Theme) -> Color {
     match status {
         ChangeStatus::Added | ChangeStatus::Untracked => theme.added,
         ChangeStatus::Deleted => theme.removed,
@@ -4553,7 +4545,7 @@ fn status_color(status: ChangeStatus, theme: &Theme) -> Color {
     }
 }
 
-fn graph_color(index: usize, theme: &Theme) -> Color {
+const fn graph_color(index: usize, theme: &Theme) -> Color {
     match index % 4 {
         0 => theme.accent,
         1 => theme.modified,
@@ -4718,7 +4710,7 @@ mod tests {
             .buffer()
             .content()
             .iter()
-            .map(|cell| cell.symbol())
+            .map(ratatui::buffer::Cell::symbol)
             .collect();
 
         assert!(rendered.contains("[+]"));
@@ -4810,7 +4802,7 @@ mod tests {
             .buffer()
             .content()
             .iter()
-            .map(|cell| cell.symbol())
+            .map(ratatui::buffer::Cell::symbol)
             .collect();
         assert!(rendered.contains("⌄ src/"));
         assert!(rendered.contains("app.rs"));
@@ -4834,7 +4826,7 @@ mod tests {
             .buffer()
             .content()
             .iter()
-            .map(|cell| cell.symbol())
+            .map(ratatui::buffer::Cell::symbol)
             .collect();
         assert!(rendered.contains("› src/"));
         assert!(!rendered.contains("app.rs"));
@@ -4882,7 +4874,7 @@ mod tests {
             .buffer()
             .content()
             .iter()
-            .map(|cell| cell.symbol())
+            .map(ratatui::buffer::Cell::symbol)
             .collect();
 
         assert!(app.sidebar_offset > 0);
@@ -4963,7 +4955,7 @@ mod tests {
             .buffer()
             .content()
             .iter()
-            .map(|cell| cell.symbol())
+            .map(ratatui::buffer::Cell::symbol)
             .collect();
 
         assert_eq!(rendered.matches("Commit details").count(), 1);
@@ -5070,7 +5062,7 @@ mod tests {
             .buffer()
             .content()
             .iter()
-            .map(|cell| cell.symbol())
+            .map(ratatui::buffer::Cell::symbol)
             .collect();
 
         assert!(rendered.contains("Pull Requests"));
@@ -5083,7 +5075,7 @@ mod tests {
         assert!(!rendered.contains("@@"));
 
         app.pull_request_section = PullRequestSection::Overview;
-        app.pull_request_checks = vec![crate::git::github::PullRequestCheck {
+        app.pull_request_checks = vec![PullRequestCheck {
             name: "CI / ubuntu".to_owned(),
             workflow: "CI".to_owned(),
             state: "SUCCESS".to_owned(),
@@ -5099,7 +5091,7 @@ mod tests {
             .buffer()
             .content()
             .iter()
-            .map(|cell| cell.symbol())
+            .map(ratatui::buffer::Cell::symbol)
             .collect();
         assert!(rendered.contains("Conversation"));
         assert!(rendered.contains("CI / ubuntu"));
@@ -5247,7 +5239,7 @@ terminal rows because that is what real pull-request comments look like in pract
             .buffer()
             .content()
             .iter()
-            .map(|cell| cell.symbol())
+            .map(ratatui::buffer::Cell::symbol)
             .collect();
         assert!(
             rendered.contains("Step 2") && rendered.contains("Step 3"),
@@ -5452,7 +5444,7 @@ terminal rows because that is what real pull-request comments look like in pract
                 .buffer()
                 .content()
                 .iter()
-                .map(|cell| cell.symbol())
+                .map(ratatui::buffer::Cell::symbol)
                 .collect::<String>()
         };
         let mut terminal = Terminal::new(TestBackend::new(120, 24)).unwrap();
@@ -5507,7 +5499,7 @@ terminal rows because that is what real pull-request comments look like in pract
             .buffer()
             .content()
             .iter()
-            .map(|cell| cell.symbol())
+            .map(ratatui::buffer::Cell::symbol)
             .collect();
 
         assert!(rendered.contains("could not be opened"));
@@ -5565,7 +5557,7 @@ terminal rows because that is what real pull-request comments look like in pract
             .buffer()
             .content()
             .iter()
-            .map(|cell| cell.symbol())
+            .map(ratatui::buffer::Cell::symbol)
             .collect();
 
         assert!(rendered.contains("Conversation"));
@@ -5644,7 +5636,7 @@ terminal rows because that is what real pull-request comments look like in pract
             .buffer()
             .content()
             .iter()
-            .map(|cell| cell.symbol())
+            .map(ratatui::buffer::Cell::symbol)
             .collect();
 
         assert!(rendered.contains("2 steps"));
@@ -5696,7 +5688,11 @@ terminal rows because that is what real pull-request comments look like in pract
 
         terminal.draw(|frame| draw(frame, &mut app)).unwrap();
         let buffer = terminal.backend().buffer();
-        let rendered: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+        let rendered: String = buffer
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect();
         let bottom = (24..27)
             .flat_map(|row| (0..42).map(move |column| buffer[(column, row)].symbol()))
             .collect::<String>();
@@ -5723,7 +5719,11 @@ terminal rows because that is what real pull-request comments look like in pract
             .draw(|frame| draw_file_header(frame, frame.area(), &header, &app, &theme))
             .unwrap();
         let buffer = terminal.backend().buffer();
-        let rendered: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+        let rendered: String = buffer
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect();
         let addition_column = rendered
             .chars()
             .position(|character| character == '+')

@@ -87,11 +87,11 @@ pub(crate) struct PreparedLocalDiff {
 }
 
 impl PreparedLocalDiff {
-    pub fn index(&self) -> DiffIndex {
+    pub(crate) fn index(&self) -> DiffIndex {
         self.index.clone()
     }
 
-    pub fn diff_file(&self, path: &Path) -> Result<DiffDocument> {
+    pub(crate) fn diff_file(&self, path: &Path) -> Result<DiffDocument> {
         self.repository
             .local_diff_file(&self.request, &self.index, path)
     }
@@ -146,7 +146,7 @@ pub enum GitOperation {
 }
 
 impl GitOperation {
-    pub fn label(&self) -> &'static str {
+    pub(crate) const fn label(&self) -> &'static str {
         match self {
             Self::Stage(_) => "Staging change",
             Self::StageAll => "Staging all changes",
@@ -174,7 +174,7 @@ impl GitOperation {
         }
     }
 
-    pub fn changes_history(&self) -> bool {
+    pub(crate) const fn changes_history(&self) -> bool {
         matches!(
             self,
             Self::Commit { .. }
@@ -197,7 +197,7 @@ pub struct Repository {
 }
 
 impl Repository {
-    pub fn discover(path: impl AsRef<Path>) -> Result<Self> {
+    pub(crate) fn discover(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let output = Command::new("git")
             .arg("-C")
@@ -221,22 +221,22 @@ impl Repository {
         })
     }
 
-    pub fn root(&self) -> &Path {
+    pub(crate) fn root(&self) -> &Path {
         &self.root
     }
 
-    pub fn clone_for_worker(&self) -> Self {
+    pub(crate) fn clone_for_worker(&self) -> Self {
         self.clone()
     }
 
-    pub fn name(&self) -> String {
-        self.root
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| self.root.to_string_lossy().into_owned())
+    pub(crate) fn name(&self) -> String {
+        self.root.file_name().map_or_else(
+            || self.root.to_string_lossy().into_owned(),
+            |name| name.to_string_lossy().into_owned(),
+        )
     }
 
-    pub fn status(&self) -> Result<RepoStatus> {
+    pub(crate) fn status(&self) -> Result<RepoStatus> {
         let output = self.checked([
             OsString::from("status"),
             OsString::from("--porcelain=v2"),
@@ -248,7 +248,7 @@ impl Repository {
         Ok(parse_porcelain_v2(&output))
     }
 
-    pub fn history(&self, revision: &str, skip: usize, limit: usize) -> Result<Vec<Commit>> {
+    pub(crate) fn history(&self, revision: &str, skip: usize, limit: usize) -> Result<Vec<Commit>> {
         if revision != "HEAD"
             && !revision.starts_with("refs/heads/")
             && !revision.starts_with("refs/remotes/")
@@ -275,7 +275,10 @@ impl Repository {
         Ok(parse_log(&output))
     }
 
-    pub fn prepare_local_diff(&self, request: &LocalDiffRequest) -> Result<PreparedLocalDiff> {
+    pub(crate) fn prepare_local_diff(
+        &self,
+        request: &LocalDiffRequest,
+    ) -> Result<PreparedLocalDiff> {
         let index = self.local_diff_index(request)?;
         Ok(PreparedLocalDiff {
             repository: self.clone_for_worker(),
@@ -654,7 +657,7 @@ impl Repository {
         Ok(parse_diff(&output, title, Some(path), truncated))
     }
 
-    pub fn diff_for_change(&self, change: &Change, expanded: bool) -> Result<DiffDocument> {
+    pub(crate) fn diff_for_change(&self, change: &Change, expanded: bool) -> Result<DiffDocument> {
         let (output, truncated) = self.raw_diff_for_change(change, expanded)?;
         let title = format!(
             "{} — {} {}",
@@ -696,7 +699,7 @@ impl Repository {
         Ok((output, truncated))
     }
 
-    pub fn has_commit(&self, oid: &str) -> bool {
+    pub(crate) fn has_commit(&self, oid: &str) -> bool {
         is_full_oid(oid)
             && self
                 .run([
@@ -707,7 +710,7 @@ impl Repository {
                 .is_ok_and(|output| output.status.success())
     }
 
-    pub fn branches(&self) -> Result<Vec<Branch>> {
+    pub(crate) fn branches(&self) -> Result<Vec<Branch>> {
         let output = self.checked([
             OsString::from("for-each-ref"),
             OsString::from("--sort=-committerdate"),
@@ -739,7 +742,7 @@ impl Repository {
         Ok(branches)
     }
 
-    pub fn history_branches(&self) -> Result<Vec<HistoryBranch>> {
+    pub(crate) fn history_branches(&self) -> Result<Vec<HistoryBranch>> {
         let output = self.checked([
             OsString::from("for-each-ref"),
             OsString::from("--sort=-committerdate"),
@@ -778,7 +781,7 @@ impl Repository {
         Ok(branches)
     }
 
-    pub fn stashes(&self) -> Result<Vec<Stash>> {
+    pub(crate) fn stashes(&self) -> Result<Vec<Stash>> {
         let output = self.checked([
             OsString::from("stash"),
             OsString::from("list"),
@@ -811,7 +814,7 @@ impl Repository {
         Ok(stashes)
     }
 
-    pub fn perform(&self, operation: &GitOperation) -> Result<String> {
+    pub(crate) fn perform(&self, operation: &GitOperation) -> Result<String> {
         match operation {
             GitOperation::Stage(paths) => {
                 self.with_paths(["add"], paths)?;
@@ -1208,7 +1211,7 @@ fn truncate_diff_index(output: &mut Vec<u8>) -> bool {
     true
 }
 
-fn diff_status_label(status: u8) -> &'static str {
+const fn diff_status_label(status: u8) -> &'static str {
     match status {
         b'A' => "added",
         b'M' => "modified",
@@ -1283,7 +1286,7 @@ fn strings<const N: usize>(values: [&str; N]) -> [OsString; N] {
 fn command_error(context: &str, output: &Output) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    let details = if !stderr.is_empty() { stderr } else { stdout };
+    let details = if stderr.is_empty() { stdout } else { stderr };
     if details.is_empty() {
         format!("{context} (exit status {})", output.status)
     } else {
@@ -1421,8 +1424,8 @@ mod tests {
     #[test]
     fn rejects_paths_outside_worktree() {
         let root = Path::new("/tmp/repository");
-        assert!(safe_worktree_path(root, Path::new("../secret")).is_err());
-        assert!(safe_worktree_path(root, Path::new("/etc/passwd")).is_err());
+        safe_worktree_path(root, Path::new("../secret")).unwrap_err();
+        safe_worktree_path(root, Path::new("/etc/passwd")).unwrap_err();
         assert_eq!(
             safe_worktree_path(root, Path::new("src/main.rs")).unwrap(),
             PathBuf::from("/tmp/repository/src/main.rs")
@@ -1475,7 +1478,7 @@ mod tests {
             run_test_git(&test_repository.path, ["show-ref"]),
             refs_before
         );
-        assert!(repository.history("--all", 0, 50).is_err());
+        repository.history("--all", 0, 50).unwrap_err();
     }
 
     #[test]
@@ -1644,7 +1647,7 @@ mod tests {
 
         let prepared = repository
             .prepare_local_diff(&LocalDiffRequest::Changes {
-                changes: status.changes.clone(),
+                changes: status.changes,
                 version: 0,
                 expanded: false,
             })

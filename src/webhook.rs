@@ -32,7 +32,7 @@ pub struct WebhookListener {
 
 impl WebhookListener {
     /// Bind a listener for `gh webhook forward --url http://<address>/`.
-    pub fn bind(target: &str) -> Result<Self> {
+    pub(crate) fn bind(target: &str) -> Result<Self> {
         let address = parse_listen_address(target)?;
         let listener = TcpListener::bind(address)
             .with_context(|| format!("failed to listen for webhooks on {address}"))?;
@@ -51,7 +51,7 @@ impl WebhookListener {
         })
     }
 
-    pub fn deliveries(&self) -> &Receiver<WebhookDelivery> {
+    pub(crate) const fn deliveries(&self) -> &Receiver<WebhookDelivery> {
         &self.receiver
     }
 }
@@ -181,7 +181,7 @@ mod tests {
             parse_listen_address(" 0.0.0.0:9000 ").unwrap(),
             SocketAddr::from(([0, 0, 0, 0], 9000))
         );
-        assert!(parse_listen_address("not-an-address").is_err());
+        parse_listen_address("not-an-address").unwrap_err();
     }
 
     #[test]

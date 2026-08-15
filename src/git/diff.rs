@@ -51,7 +51,7 @@ pub struct DiffLine {
 }
 
 impl DiffLine {
-    pub fn text(&self) -> String {
+    pub(crate) fn text(&self) -> String {
         if self.kind == DiffLineKind::FileHeader {
             self.spans
                 .iter()
@@ -95,7 +95,7 @@ pub struct DiffFileIndexEntry {
 }
 
 impl DiffFileIndexEntry {
-    pub fn new(path: PathBuf, old_path: Option<PathBuf>, status: String) -> Self {
+    pub(crate) const fn new(path: PathBuf, old_path: Option<PathBuf>, status: String) -> Self {
         Self {
             path,
             old_path,
@@ -189,11 +189,11 @@ pub struct DiffIndex {
 
 impl DiffIndex {
     #[cfg(test)]
-    pub fn document(&self, loaded: &HashMap<PathBuf, DiffDocument>) -> DiffDocument {
+    pub(crate) fn document(&self, loaded: &HashMap<PathBuf, DiffDocument>) -> DiffDocument {
         self.document_with_visibility(loaded, |_| true)
     }
 
-    pub fn document_with_visibility(
+    pub(crate) fn document_with_visibility(
         &self,
         loaded: &HashMap<PathBuf, DiffDocument>,
         mut visible: impl FnMut(&Path) -> bool,
@@ -324,7 +324,7 @@ pub struct DiffDocument {
 }
 
 impl DiffDocument {
-    pub fn empty(title: impl Into<String>, message: impl Into<String>) -> Self {
+    pub(crate) fn empty(title: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             title: title.into(),
             lines: vec![DiffLine {
@@ -339,21 +339,21 @@ impl DiffDocument {
         }
     }
 
-    pub fn file_count(&self) -> usize {
+    pub(crate) fn file_count(&self) -> usize {
         self.lines
             .iter()
             .filter(|line| line.kind == DiffLineKind::FileHeader)
             .count()
     }
 
-    pub fn addition_count(&self) -> usize {
+    pub(crate) fn addition_count(&self) -> usize {
         self.lines
             .iter()
             .filter(|line| line.kind == DiffLineKind::Added)
             .count()
     }
 
-    pub fn deletion_count(&self) -> usize {
+    pub(crate) fn deletion_count(&self) -> usize {
         self.lines
             .iter()
             .filter(|line| line.kind == DiffLineKind::Removed)
@@ -608,16 +608,16 @@ pub fn split_patch_by_file(patch: &[u8]) -> Vec<PatchSection<'_>> {
             let body = &patch[*start..end];
             let header = body.split(|byte| *byte == b'\n').next().unwrap_or_default();
             let header = String::from_utf8_lossy(header);
-            let (old_path, new_path) = header
-                .strip_prefix("diff --git ")
-                .map(diff_header_paths)
-                .unwrap_or_else(|| {
+            let (old_path, new_path) = header.strip_prefix("diff --git ").map_or_else(
+                || {
                     let path = header
                         .strip_prefix("diff --cc ")
                         .or_else(|| header.strip_prefix("diff --combined "))
                         .map(|path| PathBuf::from(decode_git_path(path.trim_end())));
                     (path.clone(), path)
-                });
+                },
+                diff_header_paths,
+            );
             PatchSection {
                 old_path,
                 new_path,
@@ -635,7 +635,7 @@ pub struct PatchSection<'a> {
 }
 
 impl PatchSection<'_> {
-    pub fn matches(&self, path: &Path) -> bool {
+    pub(crate) fn matches(&self, path: &Path) -> bool {
         self.new_path.as_deref() == Some(path) || self.old_path.as_deref() == Some(path)
     }
 }

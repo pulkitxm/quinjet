@@ -10,7 +10,7 @@ pub struct RepoWatcher {
 }
 
 impl RepoWatcher {
-    pub fn new(root: &Path) -> Result<Self> {
+    pub(crate) fn new(root: &Path) -> Result<Self> {
         let (sender, receiver) = bounded(1);
         let mut watcher = notify::recommended_watcher(move |result: notify::Result<Event>| {
             let Ok(event) = result else {
@@ -31,7 +31,7 @@ impl RepoWatcher {
         })
     }
 
-    pub fn changes(&self) -> &Receiver<()> {
+    pub(crate) const fn changes(&self) -> &Receiver<()> {
         &self.receiver
     }
 }

@@ -84,7 +84,7 @@ pub enum PullRequestTreeEntry {
 }
 
 impl PullRequestTreeEntry {
-    pub const fn depth(&self) -> usize {
+    pub(crate) const fn depth(&self) -> usize {
         match self {
             Self::Directory { depth, .. } | Self::File { depth, .. } => *depth,
         }
@@ -118,23 +118,23 @@ pub struct TextBuffer {
 }
 
 impl TextBuffer {
-    pub fn new(value: impl Into<String>) -> Self {
+    pub(crate) fn new(value: impl Into<String>) -> Self {
         let value = value.into();
         let cursor = value.len();
         Self { value, cursor }
     }
 
-    pub fn insert(&mut self, character: char) {
+    pub(crate) fn insert(&mut self, character: char) {
         self.value.insert(self.cursor, character);
         self.cursor += character.len_utf8();
     }
 
-    pub fn insert_str(&mut self, text: &str) {
+    pub(crate) fn insert_str(&mut self, text: &str) {
         self.value.insert_str(self.cursor, text);
         self.cursor += text.len();
     }
 
-    pub fn backspace(&mut self) {
+    pub(crate) fn backspace(&mut self) {
         if self.cursor == 0 {
             return;
         }
@@ -147,7 +147,7 @@ impl TextBuffer {
         self.cursor = previous;
     }
 
-    pub fn delete(&mut self) {
+    pub(crate) fn delete(&mut self) {
         if self.cursor >= self.value.len() {
             return;
         }
@@ -159,7 +159,7 @@ impl TextBuffer {
         self.value.drain(self.cursor..self.cursor + length);
     }
 
-    pub fn move_left(&mut self) {
+    pub(crate) fn move_left(&mut self) {
         self.cursor = self.value[..self.cursor]
             .char_indices()
             .next_back()
@@ -167,34 +167,34 @@ impl TextBuffer {
             .unwrap_or_default();
     }
 
-    pub fn move_right(&mut self) {
+    pub(crate) fn move_right(&mut self) {
         if let Some(character) = self.value[self.cursor..].chars().next() {
             self.cursor += character.len_utf8();
         }
     }
 
-    pub fn home(&mut self) {
+    pub(crate) fn home(&mut self) {
         let line_start = self.value[..self.cursor]
             .rfind('\n')
             .map_or(0, |index| index + 1);
         self.cursor = line_start;
     }
 
-    pub fn end(&mut self) {
+    pub(crate) fn end(&mut self) {
         self.cursor = self.value[self.cursor..]
             .find('\n')
             .map_or(self.value.len(), |index| self.cursor + index);
     }
 
-    pub fn document_start(&mut self) {
+    pub(crate) const fn document_start(&mut self) {
         self.cursor = 0;
     }
 
-    pub fn document_end(&mut self) {
+    pub(crate) fn document_end(&mut self) {
         self.cursor = self.value.len();
     }
 
-    pub fn delete_word_backward(&mut self) {
+    pub(crate) fn delete_word_backward(&mut self) {
         if self.cursor == 0 {
             return;
         }
@@ -220,7 +220,7 @@ impl TextBuffer {
         self.cursor = start;
     }
 
-    pub fn delete_word_forward(&mut self) {
+    pub(crate) fn delete_word_forward(&mut self) {
         if self.cursor >= self.value.len() {
             return;
         }
@@ -245,7 +245,7 @@ impl TextBuffer {
         self.value.drain(self.cursor..end);
     }
 
-    pub fn delete_to_line_start(&mut self) {
+    pub(crate) fn delete_to_line_start(&mut self) {
         let start = self.value[..self.cursor]
             .rfind('\n')
             .map_or(0, |index| index + 1);
@@ -253,14 +253,14 @@ impl TextBuffer {
         self.cursor = start;
     }
 
-    pub fn delete_to_line_end(&mut self) {
+    pub(crate) fn delete_to_line_end(&mut self) {
         let end = self.value[self.cursor..]
             .find('\n')
             .map_or(self.value.len(), |index| self.cursor + index);
         self.value.drain(self.cursor..end);
     }
 
-    pub fn move_word_left(&mut self) {
+    pub(crate) fn move_word_left(&mut self) {
         if self.cursor == 0 {
             return;
         }
@@ -280,7 +280,7 @@ impl TextBuffer {
         self.cursor = cursor;
     }
 
-    pub fn move_word_right(&mut self) {
+    pub(crate) fn move_word_right(&mut self) {
         let mut cursor = self.cursor;
         while let Some((next, character)) = next_character(&self.value, cursor) {
             if !is_word_character(character) {
@@ -402,7 +402,7 @@ pub enum PaletteCommand {
 }
 
 impl PaletteCommand {
-    pub const ALL: [Self; 24] = [
+    pub(crate) const ALL: [Self; 24] = [
         Self::Refresh,
         Self::StageAll,
         Self::UnstageAll,
@@ -429,7 +429,7 @@ impl PaletteCommand {
         Self::Quit,
     ];
 
-    pub const fn label(self) -> &'static str {
+    pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::Refresh => "Refresh Repository",
             Self::StageAll => "Stage All Changes",
@@ -612,8 +612,8 @@ pub struct App {
     pub selected_change_group: Option<ChangeArea>,
     pub selected_preview_file: Option<PathBuf>,
     pub preview_file_cursor: usize,
-    pub collapsed_preview_files: std::collections::HashSet<PathBuf>,
-    pub expanded_preview_files: std::collections::HashSet<PathBuf>,
+    pub collapsed_preview_files: HashSet<PathBuf>,
+    pub expanded_preview_files: HashSet<PathBuf>,
     pub change_cursor: usize,
     pub history_cursor: usize,
     pub sidebar_offset: usize,
@@ -684,7 +684,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(root: impl AsRef<Path>, name: impl Into<String>) -> Self {
+    pub(crate) fn new(root: impl AsRef<Path>, name: impl Into<String>) -> Self {
         Self {
             repository_root: root.as_ref().to_path_buf(),
             repository_name: name.into(),
@@ -800,7 +800,7 @@ impl App {
         }
     }
 
-    pub fn initial_effects(&mut self) -> Vec<AppEffect> {
+    pub(crate) fn initial_effects(&mut self) -> Vec<AppEffect> {
         let mut effects = Vec::new();
         self.request_refresh(&mut effects);
         self.request_history(true, &mut effects);
@@ -808,7 +808,7 @@ impl App {
         effects
     }
 
-    pub fn visible_change_indices(&self) -> Vec<usize> {
+    pub(crate) fn visible_change_indices(&self) -> Vec<usize> {
         let query = self.filter.to_lowercase();
         self.status
             .changes
@@ -821,7 +821,7 @@ impl App {
             .collect()
     }
 
-    pub fn visible_commit_indices(&self) -> Vec<usize> {
+    pub(crate) fn visible_commit_indices(&self) -> Vec<usize> {
         let query = self.filter.to_lowercase();
         self.history
             .iter()
@@ -840,7 +840,7 @@ impl App {
             .collect()
     }
 
-    pub fn history_branch_label(&self) -> String {
+    pub(crate) fn history_branch_label(&self) -> String {
         self.history_branch.as_ref().map_or_else(
             || {
                 if self.status.branch.head.is_empty() {
@@ -859,20 +859,20 @@ impl App {
             .map_or_else(|| "HEAD".to_owned(), |branch| branch.reference.clone())
     }
 
-    pub fn selected_pull_request(&self) -> Option<&PullRequest> {
+    pub(crate) const fn selected_pull_request(&self) -> Option<&PullRequest> {
         self.pull_request.as_ref()
     }
 
-    pub fn selected_pull_request_file(&self) -> Option<&PullRequestFile> {
+    pub(crate) fn selected_pull_request_file(&self) -> Option<&PullRequestFile> {
         self.pull_request_files.get(self.pull_request_file_cursor)
     }
 
-    pub fn selected_pull_request_check(&self) -> Option<&PullRequestCheck> {
+    pub(crate) fn selected_pull_request_check(&self) -> Option<&PullRequestCheck> {
         self.pull_request_check_cursor
             .and_then(|cursor| self.pull_request_checks.get(cursor))
     }
 
-    pub fn pull_request_tree_entries(&self) -> Vec<PullRequestTreeEntry> {
+    pub(crate) fn pull_request_tree_entries(&self) -> Vec<PullRequestTreeEntry> {
         let mut entries = Vec::with_capacity(self.pull_request_files.len().saturating_mul(2));
         let mut seen_directories = BTreeSet::new();
         for (index, file) in self.pull_request_files.iter().enumerate() {
@@ -906,7 +906,7 @@ impl App {
         entries
     }
 
-    pub fn pull_request_directory_collapsed(&self, path: &Path) -> bool {
+    pub(crate) fn pull_request_directory_collapsed(&self, path: &Path) -> bool {
         self.collapsed_pull_request_directories.contains(path)
     }
 
@@ -1033,7 +1033,7 @@ impl App {
         }
     }
 
-    pub fn local_diff_load_progress(&self) -> Option<(usize, usize)> {
+    pub(crate) fn local_diff_load_progress(&self) -> Option<(usize, usize)> {
         self.local_diff_index.as_ref().map(|index| {
             let loaded = if index.files.len() == 1 && self.local_diff_single_loaded {
                 1
@@ -1044,14 +1044,14 @@ impl App {
         })
     }
 
-    pub fn selected_change(&self) -> Option<&Change> {
+    pub(crate) fn selected_change(&self) -> Option<&Change> {
         let visible = self.visible_change_indices();
         visible
             .get(self.change_cursor)
             .and_then(|index| self.status.changes.get(*index))
     }
 
-    pub fn selected_group_changes(&self) -> Vec<Change> {
+    pub(crate) fn selected_group_changes(&self) -> Vec<Change> {
         let Some(group) = self.selected_change_group else {
             return Vec::new();
         };
@@ -1095,13 +1095,13 @@ impl App {
             .filter(|target| self.change_targets().contains(target))
     }
 
-    pub fn preview_file_selected(&self, path: &str) -> bool {
+    pub(crate) fn preview_file_selected(&self, path: &str) -> bool {
         self.selected_preview_file
             .as_deref()
             .is_some_and(|selected| selected.to_string_lossy() == path)
     }
 
-    pub fn preview_files_collapsible(&self) -> bool {
+    pub(crate) fn preview_files_collapsible(&self) -> bool {
         if let Some(index) = self.local_diff_index.as_ref() {
             return index.files.len() > 1;
         }
@@ -1118,7 +1118,7 @@ impl App {
             > 1
     }
 
-    pub fn preview_file_collapsed(&self, path: &str) -> bool {
+    pub(crate) fn preview_file_collapsed(&self, path: &str) -> bool {
         if !self.preview_files_collapsible() {
             return false;
         }
@@ -1173,7 +1173,7 @@ impl App {
         }
     }
 
-    pub fn preview_files_all_collapsed(&self) -> bool {
+    pub(crate) fn preview_files_all_collapsed(&self) -> bool {
         let paths = self.preview_file_paths();
         paths.len() > 1
             && paths
@@ -1220,7 +1220,7 @@ impl App {
         }
     }
 
-    fn select_change_target(&mut self, target: ChangeTarget) {
+    const fn select_change_target(&mut self, target: ChangeTarget) {
         match target {
             ChangeTarget::Group(area) => self.selected_change_group = Some(area),
             ChangeTarget::Change(cursor) => {
@@ -1230,14 +1230,14 @@ impl App {
         }
     }
 
-    pub fn selected_commit(&self) -> Option<&Commit> {
+    pub(crate) fn selected_commit(&self) -> Option<&Commit> {
         let visible = self.visible_commit_indices();
         visible
             .get(self.history_cursor)
             .and_then(|index| self.history.get(*index))
     }
 
-    pub fn palette_commands(&self, query: &str) -> Vec<PaletteCommand> {
+    pub(crate) fn palette_commands(&self, query: &str) -> Vec<PaletteCommand> {
         let words: Vec<_> = query
             .split_ascii_whitespace()
             .map(str::to_lowercase)
@@ -1251,7 +1251,7 @@ impl App {
             .collect()
     }
 
-    pub fn filtered_branches(items: &[Branch], query: &str) -> Vec<usize> {
+    pub(crate) fn filtered_branches(items: &[Branch], query: &str) -> Vec<usize> {
         let query = query.to_lowercase();
         items
             .iter()
@@ -1261,7 +1261,7 @@ impl App {
             .collect()
     }
 
-    pub fn filtered_history_branches(items: &[HistoryBranch], query: &str) -> Vec<usize> {
+    pub(crate) fn filtered_history_branches(items: &[HistoryBranch], query: &str) -> Vec<usize> {
         let query = query.to_lowercase();
         items
             .iter()
@@ -1271,7 +1271,7 @@ impl App {
             .collect()
     }
 
-    pub fn filtered_stashes(items: &[Stash], query: &str) -> Vec<usize> {
+    pub(crate) fn filtered_stashes(items: &[Stash], query: &str) -> Vec<usize> {
         let query = query.to_lowercase();
         items
             .iter()
@@ -1286,7 +1286,10 @@ impl App {
             .collect()
     }
 
-    pub fn filtered_github_repositories(items: &[GitHubRepository], query: &str) -> Vec<usize> {
+    pub(crate) fn filtered_github_repositories(
+        items: &[GitHubRepository],
+        query: &str,
+    ) -> Vec<usize> {
         let query = query.to_lowercase();
         items
             .iter()
@@ -1303,7 +1306,7 @@ impl App {
             .collect()
     }
 
-    pub fn handle_key(&mut self, key: KeyEvent, now: Instant) -> Vec<AppEffect> {
+    pub(crate) fn handle_key(&mut self, key: KeyEvent, now: Instant) -> Vec<AppEffect> {
         if let Some(modal) = self.modal.take() {
             return self.handle_modal_key(modal, key, now);
         }
@@ -1358,25 +1361,25 @@ impl App {
                 });
             }
             KeyCode::Char('v') => self.toggle_diff_layout(),
-            KeyCode::Char('e') | KeyCode::Char('E') if self.check_log_visible() => {
+            KeyCode::Char('e' | 'E') if self.check_log_visible() => {
                 self.toggle_all_check_steps();
             }
-            KeyCode::Char('e') | KeyCode::Char('E') => self.toggle_all_preview_files(),
-            KeyCode::Char('t') | KeyCode::Char('T') => {
+            KeyCode::Char('e' | 'E') => self.toggle_all_preview_files(),
+            KeyCode::Char('t' | 'T') => {
                 self.expanded_diff = !self.expanded_diff;
                 self.content_scroll = 0;
                 self.request_preview(&mut effects);
             }
             KeyCode::Char('b') if self.view == View::History => {
-                self.open_history_branches(&mut effects)
+                self.open_history_branches(&mut effects);
             }
-            KeyCode::Char('b') | KeyCode::Char('B') => self.open_branches(&mut effects),
+            KeyCode::Char('b' | 'B') => self.open_branches(&mut effects),
             KeyCode::Char('d') if self.view == View::Changes => {
-                self.open_compare_branches(&mut effects)
+                self.open_compare_branches(&mut effects);
             }
             KeyCode::Char('S') if self.view == View::Changes => self.open_stashes(&mut effects),
             KeyCode::Char('o') if self.view == View::PullRequests => {
-                self.open_pull_request_repositories(&mut effects)
+                self.open_pull_request_repositories(&mut effects);
             }
             KeyCode::Char('c') if self.view == View::Changes => {
                 self.modal = Some(Modal::Commit {
@@ -1390,7 +1393,7 @@ impl App {
             KeyCode::Char('U') if self.view == View::Changes => {
                 self.queue_operation(GitOperation::UnstageAll, &mut effects);
             }
-            KeyCode::Char('s') | KeyCode::Char(' ')
+            KeyCode::Char('s' | ' ')
                 if self.view == View::Changes
                     && self.focus == Focus::Sidebar
                     && self.selected_change_group.is_none() =>
@@ -1428,15 +1431,15 @@ impl App {
                 self.confirm_discard();
             }
             KeyCode::Char('P') if self.view == View::PullRequests => {
-                self.select_pull_request_section(PullRequestSection::Overview, &mut effects)
+                self.select_pull_request_section(PullRequestSection::Overview, &mut effects);
             }
             KeyCode::Char('F') if self.view == View::PullRequests => {
-                self.select_pull_request_section(PullRequestSection::Files, &mut effects)
+                self.select_pull_request_section(PullRequestSection::Files, &mut effects);
             }
             KeyCode::Char('C') if self.view == View::History => self.confirm_cherry_pick(),
             KeyCode::Char('R') if self.view == View::History => self.confirm_revert(),
             KeyCode::Char('n') if self.view == View::History => self.prompt_branch_at_commit(),
-            KeyCode::Char('f') | KeyCode::Char('p') if self.view == View::PullRequests => {
+            KeyCode::Char('f' | 'p') if self.view == View::PullRequests => {
                 self.show_toast(
                     "Fetch and push live in Changes · Shift+P and Shift+F switch section"
                         .to_owned(),
@@ -1519,7 +1522,7 @@ impl App {
             KeyCode::Char(']') if self.check_log_visible() => {
                 self.move_check_step_cursor(1);
             }
-            KeyCode::Char('[') | KeyCode::Char(']')
+            KeyCode::Char('[' | ']')
                 if self.view == View::PullRequests
                     && self.pull_request_section == PullRequestSection::Overview => {}
             KeyCode::Char('[') => self.jump_hunk(false),
@@ -1549,7 +1552,7 @@ impl App {
         effects
     }
 
-    pub fn handle_paste(&mut self, text: &str) {
+    pub(crate) fn handle_paste(&mut self, text: &str) {
         if self.pull_request_lookup_active {
             let remaining =
                 MAX_PULL_REQUEST_NUMBER_DIGITS.saturating_sub(self.pull_request_lookup.value.len());
@@ -1561,21 +1564,23 @@ impl App {
             self.pull_request_lookup.insert_str(&digits);
             return;
         }
-        match self.modal.as_mut() {
-            Some(Modal::Commit { input, .. })
-            | Some(Modal::Prompt { input, .. })
-            | Some(Modal::CommandPalette { query: input, .. })
-            | Some(Modal::Branches { query: input, .. })
-            | Some(Modal::HistoryBranches { query: input, .. })
-            | Some(Modal::CompareBranches { query: input, .. })
-            | Some(Modal::Stashes { query: input, .. })
-            | Some(Modal::PullRequestRepositories { query: input, .. }) => input.insert_str(text),
-            _ => {}
+        if let Some(
+            Modal::Commit { input, .. }
+            | Modal::Prompt { input, .. }
+            | Modal::CommandPalette { query: input, .. }
+            | Modal::Branches { query: input, .. }
+            | Modal::HistoryBranches { query: input, .. }
+            | Modal::CompareBranches { query: input, .. }
+            | Modal::Stashes { query: input, .. }
+            | Modal::PullRequestRepositories { query: input, .. },
+        ) = self.modal.as_mut()
+        {
+            input.insert_str(text)
         }
         self.apply_live_modal_filter();
     }
 
-    pub fn handle_mouse(&mut self, event: MouseEvent, now: Instant) -> Vec<AppEffect> {
+    pub(crate) fn handle_mouse(&mut self, event: MouseEvent, now: Instant) -> Vec<AppEffect> {
         let mut effects = Vec::new();
         if self.modal.is_some() || event.modifiers.contains(KeyModifiers::SHIFT) {
             return effects;
@@ -1779,7 +1784,7 @@ impl App {
         effects
     }
 
-    pub fn tick(&mut self, now: Instant) -> (Vec<AppEffect>, bool) {
+    pub(crate) fn tick(&mut self, now: Instant) -> (Vec<AppEffect>, bool) {
         let mut changed = false;
         if self
             .toast
@@ -1812,7 +1817,7 @@ impl App {
     /// A GitHub webhook was forwarded to this session. The payload is only a
     /// hint that something changed, so the poller runs immediately rather than
     /// trying to apply the delivery itself.
-    pub fn webhook_delivered(&mut self, now: Instant) -> Vec<AppEffect> {
+    pub(crate) fn webhook_delivered(&mut self, now: Instant) -> Vec<AppEffect> {
         let mut effects = Vec::new();
         if self.pull_request.is_some() {
             self.refresh_pull_request_live(now, true, &mut effects);
@@ -1823,7 +1828,7 @@ impl App {
     /// Whether any pull-request read is on its way. The view shows one reload
     /// mark for all of them, because the reader cares that it is refreshing,
     /// not which of four endpoints is answering.
-    pub fn pull_request_refreshing(&self) -> bool {
+    pub(crate) const fn pull_request_refreshing(&self) -> bool {
         self.pull_request_loading
             || self.pull_request_checks_loading
             || self.pull_request_conversation_loading
@@ -1834,7 +1839,7 @@ impl App {
     /// network. Check state is deliberately held for only thirty seconds, so
     /// including it here made the answer almost always false and the label
     /// never appeared at all.
-    pub fn pull_request_served_from_cache(&self) -> bool {
+    pub(crate) const fn pull_request_served_from_cache(&self) -> bool {
         self.pull_request.is_some()
             && self.pull_request_from_cache
             && self.pull_request_conversation.from_cache
@@ -1843,7 +1848,7 @@ impl App {
 
     /// A forwarded delivery bypasses every floor, so when one can arrive the
     /// poll interval is the fallback rather than the promise.
-    pub fn live_refresh_label(&self) -> String {
+    pub(crate) fn live_refresh_label(&self) -> String {
         let interval = self.pull_request_poll_interval().as_secs();
         if self.webhooks_listening {
             format!("webhooks · every {interval}s")
@@ -1930,7 +1935,7 @@ impl App {
         }
     }
 
-    pub fn filesystem_changed(&mut self, effects: &mut Vec<AppEffect>) {
+    pub(crate) fn filesystem_changed(&mut self, effects: &mut Vec<AppEffect>) {
         self.changes_diff_version = self.changes_diff_version.wrapping_add(1);
         if self.view == View::Changes && self.auxiliary_preview.is_none() {
             self.invalidate_preview();
@@ -1941,11 +1946,15 @@ impl App {
 
     /// The repository heartbeat. Pull-request liveness is separate because it
     /// paces itself against GitHub rather than the local working tree.
-    pub fn periodic_refresh(&mut self, effects: &mut Vec<AppEffect>) {
+    pub(crate) fn periodic_refresh(&mut self, effects: &mut Vec<AppEffect>) {
         self.request_refresh(effects);
     }
 
-    pub fn handle_worker_event(&mut self, event: WorkerEvent, now: Instant) -> Vec<AppEffect> {
+    pub(crate) fn handle_worker_event(
+        &mut self,
+        event: WorkerEvent,
+        now: Instant,
+    ) -> Vec<AppEffect> {
         let mut effects = Vec::new();
         match event {
             WorkerEvent::Status { generation, result } => {
@@ -2503,7 +2512,7 @@ impl App {
         let mut effects = Vec::new();
         match &mut modal {
             Modal::Help { scroll } => match key.code {
-                KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q') => {}
+                KeyCode::Esc | KeyCode::Char('?' | 'q') => {}
                 KeyCode::Up | KeyCode::Char('k') => {
                     *scroll = scroll.saturating_sub(1);
                     self.modal = Some(modal);
@@ -2603,10 +2612,10 @@ impl App {
                 self.modal = Some(modal);
             }
             Modal::Confirm { operation, .. } => match key.code {
-                KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
+                KeyCode::Enter | KeyCode::Char('y' | 'Y') => {
                     self.queue_operation(operation.clone(), &mut effects);
                 }
-                KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {}
+                KeyCode::Esc | KeyCode::Char('n' | 'N') => {}
                 _ => self.modal = Some(modal),
             },
             Modal::Conflict { change } => match key.code {
@@ -3131,14 +3140,14 @@ impl App {
         }
     }
 
-    fn toggle_focus(&mut self) {
+    const fn toggle_focus(&mut self) {
         self.focus = match self.focus {
             Focus::Sidebar => Focus::Content,
             Focus::Content => Focus::Sidebar,
         };
     }
 
-    fn toggle_sidebar(&mut self) {
+    const fn toggle_sidebar(&mut self) {
         self.sidebar_hidden = !self.sidebar_hidden;
         self.focus = if self.sidebar_hidden {
             Focus::Content
@@ -3151,7 +3160,7 @@ impl App {
         }
     }
 
-    fn toggle_diff_layout(&mut self) {
+    const fn toggle_diff_layout(&mut self) {
         self.diff_layout = match self.diff_layout {
             DiffLayout::Unified => DiffLayout::SideBySide,
             DiffLayout::SideBySide => DiffLayout::Unified,
@@ -3356,10 +3365,10 @@ impl App {
                 }
                 match action {
                     ScmAction::Stage(_) => {
-                        self.queue_operation(GitOperation::Stage(vec![change.path]), effects)
+                        self.queue_operation(GitOperation::Stage(vec![change.path]), effects);
                     }
                     ScmAction::Unstage(_) => {
-                        self.queue_operation(GitOperation::Unstage(vec![change.path]), effects)
+                        self.queue_operation(GitOperation::Unstage(vec![change.path]), effects);
                     }
                     ScmAction::Resolve(_) => self.modal = Some(Modal::Conflict { change }),
                     _ => unreachable!(),
@@ -3378,10 +3387,10 @@ impl App {
                 }
                 match action {
                     ScmAction::StageGroup(_) => {
-                        self.queue_operation(GitOperation::Stage(paths), effects)
+                        self.queue_operation(GitOperation::Stage(paths), effects);
                     }
                     ScmAction::UnstageGroup(_) => {
-                        self.queue_operation(GitOperation::Unstage(paths), effects)
+                        self.queue_operation(GitOperation::Unstage(paths), effects);
                     }
                     _ => unreachable!(),
                 }
@@ -4081,7 +4090,7 @@ impl App {
             self.pull_request_check_log_generation.wrapping_add(1);
     }
 
-    pub fn check_log_visible(&self) -> bool {
+    pub(crate) fn check_log_visible(&self) -> bool {
         self.view == View::PullRequests
             && self.pull_request_section == PullRequestSection::Overview
             && self.pull_request_check_cursor.is_some()
@@ -4094,7 +4103,7 @@ impl App {
             .unwrap_or_default()
     }
 
-    pub fn check_step_expanded(&self, step: usize) -> bool {
+    pub(crate) fn check_step_expanded(&self, step: usize) -> bool {
         self.expanded_check_steps.contains(&step)
     }
 
@@ -4118,7 +4127,7 @@ impl App {
     /// Move between steps the way `[` and `]` move between diff hunks, so a long
     /// log can be walked without scrolling through it.
     /// Move the step selection and ask the next draw to bring it into view.
-    fn reveal_check_step(&mut self, step: usize) {
+    const fn reveal_check_step(&mut self, step: usize) {
         self.pull_request_step_cursor = step;
         self.pull_request_step_reveal = true;
     }
@@ -4391,7 +4400,7 @@ impl App {
         let title = match &request {
             LocalDiffRequest::Changes { changes, .. } => changes
                 .first()
-                .map_or_else(|| "Working Tree".to_owned(), |change| change.display_path()),
+                .map_or_else(|| "Working Tree".to_owned(), Change::display_path),
             LocalDiffRequest::Commit { commit, .. } => {
                 format!("{} — {}", commit.short_id, commit.subject)
             }
@@ -4525,7 +4534,7 @@ impl App {
         true
     }
 
-    fn invalidate_preview(&mut self) {
+    const fn invalidate_preview(&mut self) {
         self.diff_generation = self.diff_generation.wrapping_add(1);
         self.document_loading = false;
         self.preview_due = None;
@@ -5007,7 +5016,7 @@ mod tests {
             name: "build".to_owned(),
             workflow: "CI".to_owned(),
             state: "SUCCESS".to_owned(),
-            status: crate::git::github::PullRequestCheckStatus::Passed,
+            status: PullRequestCheckStatus::Passed,
             description: String::new(),
             link: "https://github.com/o/r/actions/runs/1/job/2".to_owned(),
             started_at: String::new(),
@@ -5436,7 +5445,7 @@ mod tests {
             .map(|path| PullRequestFile {
                 path: PathBuf::from(path),
                 old_path: None,
-                status: crate::git::github::PullRequestFileStatus::Modified,
+                status: PullRequestFileStatus::Modified,
                 counts: None,
             })
             .collect();
@@ -5742,7 +5751,7 @@ mod tests {
             completed_at: String::new(),
             lines: Vec::new(),
         };
-        app.pull_request_check_log = Some(crate::git::github::CheckRunLog {
+        app.pull_request_check_log = Some(CheckRunLog {
             steps: vec![step(1), step(2), step(3)],
             loose_lines: Vec::new(),
             truncated: false,
@@ -5792,7 +5801,7 @@ mod tests {
         app.pull_request_check_cursor = Some(0);
         app.pull_request_check_log_target =
             Some(("CI".to_owned(), "Build every workspace".to_owned()));
-        app.pull_request_check_log = Some(crate::git::github::CheckRunLog {
+        app.pull_request_check_log = Some(CheckRunLog {
             steps: vec![crate::git::github::CheckStep {
                 number: 1,
                 name: "Build every workspace".to_owned(),
@@ -5902,7 +5911,7 @@ mod tests {
         let effects = app.handle_worker_event(
             WorkerEvent::CheckRunLog {
                 generation: slow,
-                result: Ok(crate::git::github::CheckRunLog {
+                result: Ok(CheckRunLog {
                     steps: vec![crate::git::github::CheckStep {
                         number: 1,
                         name: "Build every workspace".to_owned(),
@@ -5941,7 +5950,7 @@ mod tests {
         app.pull_request_checks = vec![check("build", PullRequestCheckStatus::Pending)];
         app.pull_request_check_cursor = Some(0);
         app.pull_request_check_log_generation = 3;
-        let log = || crate::git::github::CheckRunLog {
+        let log = || CheckRunLog {
             steps: Vec::new(),
             loose_lines: Vec::new(),
             truncated: false,

@@ -263,7 +263,7 @@ enum WorkerLane {
     Warm,
 }
 
-fn worker_lane(command: &WorkerCommand) -> WorkerLane {
+const fn worker_lane(command: &WorkerCommand) -> WorkerLane {
     match command {
         WorkerCommand::PrepareLocalDiff { .. } | WorkerCommand::LoadLocalDiffFile { .. } => {
             WorkerLane::LocalPreview
@@ -292,7 +292,7 @@ pub struct GitWorker {
 }
 
 impl GitWorker {
-    pub fn start(repository: Repository) -> Self {
+    pub(crate) fn start(repository: Repository) -> Self {
         let mailbox = new_mailbox();
         let github_mailbox = new_mailbox();
         let local_preview_mailbox = new_mailbox();
@@ -329,7 +329,7 @@ impl GitWorker {
                     local_preview_repository,
                     worker_local_preview_mailbox,
                     local_preview_events,
-                )
+                );
             })
             .expect("failed to start local preview worker");
         thread::Builder::new()
@@ -339,7 +339,7 @@ impl GitWorker {
                     pull_request_preview_repository,
                     worker_pull_request_preview_mailbox,
                     pull_request_preview_events,
-                )
+                );
             })
             .expect("failed to start pull-request preview worker");
         thread::Builder::new()
@@ -350,7 +350,7 @@ impl GitWorker {
                     worker_warm_mailbox,
                     warm_events,
                     worker_warm_generation,
-                )
+                );
             })
             .expect("failed to start log warm-up worker");
         Self {
@@ -367,7 +367,7 @@ impl GitWorker {
     /// Queue work without blocking the render thread. Read requests occupy fixed
     /// mailbox slots and replace obsolete requests; repository mutations remain an
     /// ordered queue and are additionally serialized by the app's busy state.
-    pub fn send(&self, mut command: WorkerCommand) -> bool {
+    pub(crate) fn send(&self, mut command: WorkerCommand) -> bool {
         if let WorkerCommand::PrefetchCheckRunLogs { generation, .. } = &mut command {
             *generation = self.warm_generation.fetch_add(1, Ordering::SeqCst) + 1;
         }
@@ -390,7 +390,7 @@ impl GitWorker {
         true
     }
 
-    pub fn events(&self) -> &Receiver<WorkerEvent> {
+    pub(crate) const fn events(&self) -> &Receiver<WorkerEvent> {
         &self.events
     }
 }
