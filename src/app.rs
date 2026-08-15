@@ -1047,18 +1047,18 @@ impl App {
                 }
             }
             PullRequestTreeEntry::File { index, .. } if !expand => {
-                let parent_cursor =
-                    self.pull_request_files[index]
-                        .path
-                        .parent()
-                        .and_then(|parent| {
-                            entries.iter().position(|entry| {
-                                matches!(
-                                    entry,
-                                    PullRequestTreeEntry::Directory { path, .. } if path == parent
-                                )
-                            })
-                        });
+                let parent_cursor = self
+                    .pull_request_files
+                    .get(index)
+                    .and_then(|file| file.path.parent())
+                    .and_then(|parent| {
+                        entries.iter().position(|entry| {
+                            matches!(
+                                entry,
+                                PullRequestTreeEntry::Directory { path, .. } if path == parent
+                            )
+                        })
+                    });
                 if let Some(cursor) = parent_cursor {
                     self.pull_request_tree_cursor = cursor;
                 }
@@ -1105,16 +1105,23 @@ impl App {
             ChangeArea::Staged,
             ChangeArea::Unstaged,
         ] {
-            if visible
-                .iter()
-                .any(|index| self.status.changes[*index].area == area)
-            {
+            if visible.iter().any(|index| {
+                self.status
+                    .changes
+                    .get(*index)
+                    .is_some_and(|change| change.area == area)
+            }) {
                 targets.push(ChangeTarget::Group(area));
                 targets.extend(
                     visible
                         .iter()
                         .enumerate()
-                        .filter(|(_, index)| self.status.changes[**index].area == area)
+                        .filter(|(_, index)| {
+                            self.status
+                                .changes
+                                .get(**index)
+                                .is_some_and(|change| change.area == area)
+                        })
                         .map(|(cursor, _)| ChangeTarget::Change(cursor)),
                 );
             }
@@ -1240,14 +1247,15 @@ impl App {
         } else {
             (current + count(amount)).min(paths.len() - 1)
         };
-        self.selected_preview_file = Some(paths[self.preview_file_cursor].clone());
+        self.selected_preview_file = paths.get(self.preview_file_cursor).cloned();
         if let Some(line_index) = self.document.lines.iter().position(|line| {
             line.kind == DiffLineKind::FileHeader
                 && line.spans.first().is_some_and(|span| {
-                    span.text
-                        .split("  · ")
-                        .next()
-                        .is_some_and(|path| Path::new(path) == paths[self.preview_file_cursor])
+                    span.text.split("  · ").next().is_some_and(|path| {
+                        paths
+                            .get(self.preview_file_cursor)
+                            .is_some_and(|selected| Path::new(path) == selected)
+                    })
                 })
         }) {
             self.content_scroll = line_index;
@@ -2836,7 +2844,7 @@ impl App {
                 }
                 let visible = Self::filtered_history_branches(items, &query.value)
                     .into_iter()
-                    .filter(|index| !items[*index].current)
+                    .filter(|index| items.get(*index).is_some_and(|item| !item.current))
                     .collect::<Vec<_>>();
                 match key.code {
                     KeyCode::Up | KeyCode::Char('k') => *selected = selected.saturating_sub(1),
@@ -3270,7 +3278,9 @@ impl App {
                 } else {
                     (current + count(amount)).min(targets.len() - 1)
                 };
-                self.select_change_target(targets[next]);
+                if let Some(target) = targets.get(next).copied() {
+                    self.select_change_target(target);
+                }
             }
             View::History => {
                 let length = self.visible_commit_indices().len();
@@ -4222,7 +4232,10 @@ impl App {
         } else {
             current.saturating_add(count(amount)).min(steps.len() - 1)
         };
-        self.reveal_check_step(steps[next]);
+        let Some(step) = steps.get(next).copied() else {
+            return false;
+        };
+        self.reveal_check_step(step);
         true
     }
 
@@ -4630,8 +4643,10 @@ impl App {
 
     fn normalize_selection(&mut self) {
         let targets = self.change_targets();
-        if !targets.is_empty() && self.selected_change_target().is_none() {
-            self.select_change_target(targets[0]);
+        if self.selected_change_target().is_none() {
+            if let Some(first) = targets.first().copied() {
+                self.select_change_target(first);
+            }
         }
         self.change_cursor = self
             .change_cursor
@@ -4656,10 +4671,12 @@ impl App {
             }
         }
         if self.selected_change_target().is_none() {
-            if visible
-                .iter()
-                .any(|index| self.status.changes[*index].area == ChangeArea::Unstaged)
-            {
+            if visible.iter().any(|index| {
+                self.status
+                    .changes
+                    .get(*index)
+                    .is_some_and(|change| change.area == ChangeArea::Unstaged)
+            }) {
                 self.selected_change_group = Some(ChangeArea::Unstaged);
             } else if let Some(target) = self.change_targets().first().copied() {
                 self.select_change_target(target);
