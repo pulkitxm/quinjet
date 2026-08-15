@@ -29,6 +29,7 @@ has() {
 }
 
 usage() {
+    # editorconfig-checker-disable
     cat <<'EOF'
 Install the latest Quinjet release.
 
@@ -45,6 +46,7 @@ Environment variables:
   QUINJET_INSTALL_DIR     Same as --bin-dir
   QUINJET_NO_MODIFY_PATH  Set to 1 to avoid updating PATH
 EOF
+    # editorconfig-checker-enable
 }
 
 require_value() {
