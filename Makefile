@@ -3,12 +3,12 @@ NIGHTLY ?= nightly
 COVERAGE_MIN ?= 65
 
 .PHONY: ci ci-fast deep fmt fmt-check lint lint-nightly test doc deadlinks msrv build package \
-	install-check comments secrets typos spellcheck deny audit osv sbom unused sort hack \
+	install-check comments secrets typos spellcheck deny audit osv sbom unused sort hack wiki \
 	coverage shell actions yaml markdown toml editorconfig ruff miri careful sanitize mutants \
 	minimal-versions udeps bloat tools tools-deep
 
 ci: fmt-check lint test doc deadlinks comments secrets typos spellcheck deny audit osv unused sort hack \
-	shell actions yaml markdown toml editorconfig ruff package
+	shell actions yaml markdown toml editorconfig ruff wiki package
 
 ci-fast: fmt-check lint test comments secrets
 
@@ -136,6 +136,9 @@ editorconfig:
 ruff:
 	ruff check scripts
 	ruff format --check scripts
+
+wiki:
+	python3 scripts/sync_wiki.py --check
 
 tools:
 	$(CARGO) install cargo-deny cargo-audit cargo-machete cargo-shear cargo-hack cargo-llvm-cov \

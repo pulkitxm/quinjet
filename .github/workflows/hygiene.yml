@@ -34,10 +34,10 @@ jobs:
         run: |
           set -euo pipefail
           stray=$(git grep -ln 'Command::new' -- 'src/**/*.rs' \
-            | grep -v -e '^src/git/' -e '^src/main.rs$' || true)
+            | grep -v -e '^src/git/' -e '^src/cli/' -e '^src/main.rs$' || true)
           if [ -n "${stray}" ]; then
             echo "${stray}" >&2
-            echo 'spawn processes from src/git so arguments stay shell-free' >&2
+            echo 'spawn processes from src/git or src/cli so arguments stay shell-free' >&2
             exit 1
           fi
       - name: No stray debug markers
@@ -217,6 +217,16 @@ jobs:
           args: --config lychee.toml './**/*.md'
           fail: true
 
+  wiki:
+    name: Wiki
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Every page builds and every link resolves
+        run: python3 scripts/sync_wiki.py --check
+
   hygiene:
     name: Hygiene
     if: always()
@@ -233,6 +243,7 @@ jobs:
       - python
       - actions
       - links
+      - wiki
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any check failed
