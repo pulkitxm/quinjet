@@ -220,19 +220,18 @@ impl DiffIndex {
                     .iter()
                     .find(|line| line.kind == DiffLineKind::FileHeader)
             });
-            if show_body {
-                if let Some(document) = loaded_document.filter(|_| loaded_header.is_some()) {
-                    let mut file_lines = document.lines.clone();
-                    if let Some(label) = file_lines
-                        .iter_mut()
-                        .find(|line| line.kind == DiffLineKind::FileHeader)
-                        .and_then(|header| header.spans.first_mut())
-                    {
-                        label.text = file.label();
-                    }
-                    lines.extend(file_lines);
-                    continue;
+            if show_body && let Some(document) = loaded_document.filter(|_| loaded_header.is_some())
+            {
+                let mut file_lines = document.lines.clone();
+                if let Some(label) = file_lines
+                    .iter_mut()
+                    .find(|line| line.kind == DiffLineKind::FileHeader)
+                    .and_then(|header| header.spans.first_mut())
+                {
+                    label.text = file.label();
                 }
+                lines.extend(file_lines);
+                continue;
             }
 
             let mut header = index_file_header(file);
