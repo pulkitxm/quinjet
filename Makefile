@@ -1,6 +1,6 @@
 CARGO ?= cargo
 NIGHTLY ?= nightly
-COVERAGE_MIN ?= 55
+COVERAGE_MIN ?= 65
 
 .PHONY: ci ci-fast deep fmt fmt-check lint lint-nightly test doc deadlinks msrv build package \
 	install-check comments secrets typos spellcheck deny audit osv sbom unused sort hack \
