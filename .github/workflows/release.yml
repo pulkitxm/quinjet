@@ -72,6 +72,9 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test --all-features --locked
+      # main only accepts changes through a reviewed pull request, so the bump
+      # lives on the tag rather than on the branch. The next version is read
+      # from crates.io, not from the manifest, so releases keep advancing.
       - name: Commit the version bump
         env:
           VERSION: ${{ steps.bump.outputs.version }}
@@ -82,13 +85,12 @@ jobs:
           git add Cargo.toml Cargo.lock
           git commit -m "chore: release v${VERSION}"
       - run: cargo package --locked
-      - name: Tag and push
+      - name: Tag the release
         env:
           VERSION: ${{ steps.bump.outputs.version }}
         run: |
           set -euo pipefail
           git tag -a "v${VERSION}" -m "quinjet v${VERSION}"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
           git push origin "v${VERSION}"
 
   build:
