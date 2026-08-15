@@ -266,6 +266,7 @@ enum WorkerLane {
     GitHubMetadata,
     LocalPreview,
     PullRequestPreview,
+    Warm,
 }
 
 fn worker_lane(command: &WorkerCommand) -> WorkerLane {
@@ -277,8 +278,11 @@ fn worker_lane(command: &WorkerCommand) -> WorkerLane {
         | WorkerCommand::LookupPullRequest { .. }
         | WorkerCommand::LoadPullRequestChecks { .. }
         | WorkerCommand::LoadPullRequestConversation { .. }
-        | WorkerCommand::LoadCheckRunLog { .. }
-        | WorkerCommand::PrefetchCheckRunLogs { .. } => WorkerLane::GitHubMetadata,
+        | WorkerCommand::LoadCheckRunLog { .. } => WorkerLane::GitHubMetadata,
+        // Warming settled logs can run for minutes. It gets its own thread so a
+        // reader who reopens or switches pull requests mid-warm is answered now
+        // rather than after the warm-up drains.
+        WorkerCommand::PrefetchCheckRunLogs { .. } => WorkerLane::Warm,
         WorkerCommand::PreparePullRequest { .. }
         | WorkerCommand::LoadPullRequestFile { .. }
         | WorkerCommand::LoadPullRequestFileBatch { .. } => WorkerLane::PullRequestPreview,
@@ -291,6 +295,7 @@ pub struct GitWorker {
     github_mailbox: Arc<SharedMailbox>,
     local_preview_mailbox: Arc<SharedMailbox>,
     pull_request_preview_mailbox: Arc<SharedMailbox>,
+    warm_mailbox: Arc<SharedMailbox>,
     events: Receiver<WorkerEvent>,
 }
 
@@ -300,17 +305,21 @@ impl GitWorker {
         let github_mailbox = new_mailbox();
         let local_preview_mailbox = new_mailbox();
         let pull_request_preview_mailbox = new_mailbox();
+        let warm_mailbox = new_mailbox();
         let worker_mailbox = Arc::clone(&mailbox);
         let worker_github_mailbox = Arc::clone(&github_mailbox);
         let worker_local_preview_mailbox = Arc::clone(&local_preview_mailbox);
         let worker_pull_request_preview_mailbox = Arc::clone(&pull_request_preview_mailbox);
+        let worker_warm_mailbox = Arc::clone(&warm_mailbox);
         let github_repository = repository.clone_for_worker();
         let local_preview_repository = repository.clone_for_worker();
         let pull_request_preview_repository = repository.clone_for_worker();
+        let warm_repository = repository.clone_for_worker();
         let (event_tx, event_rx) = unbounded();
         let github_events = event_tx.clone();
         let local_preview_events = event_tx.clone();
         let pull_request_preview_events = event_tx.clone();
+        let warm_events = event_tx.clone();
         thread::Builder::new()
             .name("quinjet-git".to_owned())
             .spawn(move || run_worker(repository, worker_mailbox, event_tx))
@@ -339,11 +348,16 @@ impl GitWorker {
                 )
             })
             .expect("failed to start pull-request preview worker");
+        thread::Builder::new()
+            .name("quinjet-warm".to_owned())
+            .spawn(move || run_worker(warm_repository, worker_warm_mailbox, warm_events))
+            .expect("failed to start log warm-up worker");
         Self {
             mailbox,
             github_mailbox,
             local_preview_mailbox,
             pull_request_preview_mailbox,
+            warm_mailbox,
             events: event_rx,
         }
     }
@@ -356,6 +370,7 @@ impl GitWorker {
             WorkerLane::GitHubMetadata => &self.github_mailbox,
             WorkerLane::LocalPreview => &self.local_preview_mailbox,
             WorkerLane::PullRequestPreview => &self.pull_request_preview_mailbox,
+            WorkerLane::Warm => &self.warm_mailbox,
             WorkerLane::Background => &self.mailbox,
         };
         let Ok(mut mailbox) = target.state.lock() else {
@@ -381,6 +396,7 @@ impl Drop for GitWorker {
         shutdown_mailbox(&self.github_mailbox);
         shutdown_mailbox(&self.local_preview_mailbox);
         shutdown_mailbox(&self.pull_request_preview_mailbox);
+        shutdown_mailbox(&self.warm_mailbox);
     }
 }
 
@@ -616,6 +632,43 @@ mod tests {
 
     use super::*;
     use crate::git::status::{Change, ChangeArea, ChangeStatus};
+
+    #[test]
+    fn warming_logs_never_shares_a_lane_with_the_reads_a_reader_waits_on() {
+        // Warming a settled run's log can take minutes. Once it starts, a lane
+        // cannot preempt it, so a reader who reopens or switches pull requests
+        // would sit on "Loading…" until the warm-up drained.
+        let pull_request = || Box::new(PullRequest::default());
+        let warm = WorkerCommand::PrefetchCheckRunLogs {
+            pull_request: pull_request(),
+            checks: Vec::new(),
+        };
+        let awaited = [
+            WorkerCommand::LoadPullRequestChecks {
+                generation: 1,
+                pull_request: pull_request(),
+                refresh: true,
+            },
+            WorkerCommand::LoadPullRequestConversation {
+                generation: 1,
+                pull_request: pull_request(),
+            },
+            WorkerCommand::LookupPullRequest {
+                generation: 1,
+                repositories: Vec::new(),
+                repository: None,
+                number: 1,
+                refresh: true,
+            },
+        ];
+        for command in awaited {
+            assert_ne!(
+                worker_lane(&command),
+                worker_lane(&warm),
+                "{command:?} must not queue behind the log warm-up"
+            );
+        }
+    }
 
     #[test]
     fn mailbox_coalesces_previews_and_refreshes() {
