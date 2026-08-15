@@ -10,9 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: read # read the checkout
 
 concurrency:
   group: pages
@@ -22,11 +20,17 @@ jobs:
   deploy:
     name: Deploy installers
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # read the checkout
+      pages: write # publish the Pages artifact
+      id-token: write # authenticate through OIDC
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - name: Prepare Pages artifact
         run: |
           mkdir _site

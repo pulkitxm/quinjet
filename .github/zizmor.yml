@@ -1,0 +1,12 @@
+rules:
+  superfluous-actions:
+    ignore:
+      - ci.yml
+      - deep.yml
+      - hygiene.yml
+      - nightly.yml
+      - release.yml
+      - security.yml
+  adhoc-packages:
+    ignore:
+      - nightly.yml
