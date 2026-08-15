@@ -328,7 +328,7 @@ impl GitWorker {
             thread::Builder::new()
                 .name("quinjet-github".to_owned())
                 .spawn(move || {
-                    run_worker(&github_repository, &worker_github_mailbox, &github_events)
+                    run_worker(&github_repository, &worker_github_mailbox, &github_events);
                 })
                 .expect("failed to start GitHub metadata worker"),
         );
@@ -446,7 +446,7 @@ fn run_warm_worker(
     _events: &Sender<WorkerEvent>,
     generation: &Arc<AtomicU64>,
 ) {
-    while let Some(command) = next_command(&mailbox) {
+    while let Some(command) = next_command(mailbox) {
         match command {
             WorkerCommand::PrefetchCheckRunLogs {
                 generation: mine,
@@ -466,7 +466,7 @@ fn run_warm_worker(
 fn run_worker(repository: &Repository, mailbox: &Arc<SharedMailbox>, events: &Sender<WorkerEvent>) {
     let mut local_diff_workspace: Option<(u64, PreparedLocalDiff)> = None;
     let mut pull_request_workspace: Option<(u64, PreparedPullRequest)> = None;
-    while let Some(command) = next_command(&mailbox) {
+    while let Some(command) = next_command(mailbox) {
         let event = match command {
             WorkerCommand::Refresh { generation } => WorkerEvent::Status {
                 generation,

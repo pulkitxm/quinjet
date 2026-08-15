@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
+use crate::convert::{count, offset};
 use crate::git::diff::{DiffDocument, DiffIndex, DiffLineKind, PullRequestDetails};
 use crate::git::github::{
     CheckRunLog, GitHubRepository, PullRequest, PullRequestCheck, PullRequestConversation,
@@ -1204,7 +1205,7 @@ impl App {
         self.preview_file_cursor = if amount < 0 {
             current.saturating_sub(amount.unsigned_abs())
         } else {
-            (current + amount as usize).min(paths.len() - 1)
+            (current + count(amount)).min(paths.len() - 1)
         };
         self.selected_preview_file = Some(paths[self.preview_file_cursor].clone());
         if let Some(line_index) = self.document.lines.iter().position(|line| {
@@ -3182,7 +3183,7 @@ impl App {
             } else if amount < 0 {
                 self.content_scroll = self.content_scroll.saturating_sub(amount.unsigned_abs());
             } else {
-                self.content_scroll = self.content_scroll.saturating_add(amount as usize);
+                self.content_scroll = self.content_scroll.saturating_add(count(amount));
             }
             return;
         }
@@ -3203,7 +3204,7 @@ impl App {
                 let next = if amount < 0 {
                     current.saturating_sub(amount.unsigned_abs())
                 } else {
-                    (current + amount as usize).min(targets.len() - 1)
+                    (current + count(amount)).min(targets.len() - 1)
                 };
                 self.select_change_target(targets[next]);
             }
@@ -3216,7 +3217,7 @@ impl App {
                 self.history_cursor = if amount < 0 {
                     self.history_cursor.saturating_sub(amount.unsigned_abs())
                 } else {
-                    (self.history_cursor + amount as usize).min(length - 1)
+                    (self.history_cursor + count(amount)).min(length - 1)
                 };
             }
             View::PullRequests => {
@@ -3232,7 +3233,7 @@ impl App {
                             self.pull_request_tree_cursor
                                 .saturating_sub(amount.unsigned_abs())
                         } else {
-                            (self.pull_request_tree_cursor + amount as usize).min(entries.len() - 1)
+                            (self.pull_request_tree_cursor + count(amount)).min(entries.len() - 1)
                         };
                         self.select_pull_request_tree_entry(cursor, now);
                     }
@@ -3258,7 +3259,7 @@ impl App {
                 self.content_scroll = self.content_scroll.saturating_add(amount);
             }
         } else {
-            let amount = self.geometry.sidebar.height.saturating_sub(4).max(1) as isize;
+            let amount = offset(self.geometry.sidebar.height.saturating_sub(4).max(1));
             self.navigate(direction * amount, now);
         }
     }
@@ -4062,7 +4063,7 @@ impl App {
         let next = if amount < 0 {
             row.saturating_sub(amount.unsigned_abs())
         } else {
-            row.saturating_add(amount as usize).min(last + 1)
+            row.saturating_add(count(amount)).min(last + 1)
         };
         let _ = self.set_check_cursor(next.checked_sub(1));
     }
@@ -4146,7 +4147,7 @@ impl App {
         let next = if amount < 0 {
             current.saturating_sub(amount.unsigned_abs())
         } else {
-            current.saturating_add(amount as usize).min(steps.len() - 1)
+            current.saturating_add(count(amount)).min(steps.len() - 1)
         };
         self.reveal_check_step(steps[next]);
         true
@@ -4818,7 +4819,7 @@ mod tests {
             head_repository: Some("octocat/fork".to_owned()),
             head_remotes: vec!["origin".to_owned()],
             is_cross_repository: true,
-            additions: number as usize,
+            additions: usize::try_from(number).unwrap_or(usize::MAX),
             deletions: 1,
             changed_files: 2,
         }
