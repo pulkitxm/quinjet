@@ -9,22 +9,65 @@ permissions:
   contents: read
   issues: write
 
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
 jobs:
   full-check:
+    name: Full check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny,cargo-audit,cargo-machete,cargo-hack,shellcheck,shfmt,taplo-cli
       - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --all -- --check
+      - run: pipx install yamllint
+      - run: npm install --global markdownlint-cli2
+      - name: make ci
+        run: make ci
+
+  future-toolchain:
+    name: Rust ${{ matrix.toolchain }}
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [beta, nightly]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --all-targets --all-features -- -D warnings
-      - run: cargo test --all-features --locked
-      - run: cargo build --release --locked
-      - run: cargo package --locked
-      - if: failure()
-        uses: actions/github-script@v7
+      - run: cargo test --all-features
+
+  links:
+    name: Links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: --config lychee.toml './**/*.md'
+          fail: true
+
+  report:
+    name: Report
+    if: always() && contains(needs.*.result, 'failure')
+    needs: [full-check, future-toolchain, links]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/github-script@v7
         with:
           script: |
             const title = 'Nightly CI failed'

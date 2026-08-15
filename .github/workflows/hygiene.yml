@@ -1,0 +1,186 @@
+name: Hygiene
+
+on:
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hygiene-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  repo:
+    name: Repository rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: No disallowed comments
+        run: |
+          python3 scripts/check_comments.py --selftest
+          python3 scripts/check_comments.py
+      - name: No committed secrets
+        run: |
+          python3 scripts/check_secrets.py --selftest
+          python3 scripts/check_secrets.py
+      - name: No stray debug markers
+        run: |
+          set -euo pipefail
+          if git grep -nE '\b(dbg!|todo!|unimplemented!|FIXME|XXX[^X]|eprintln!)' -- 'src/**/*.rs'; then
+            echo "remove the markers above before merging" >&2
+            exit 1
+          fi
+      - name: No large files
+        run: |
+          set -euo pipefail
+          oversized=$(git ls-files -z | xargs -0 -I{} find {} -size +512k -print)
+          if [ -n "${oversized}" ]; then
+            echo "${oversized}" >&2
+            echo "tracked files over 512k" >&2
+            exit 1
+          fi
+      - name: Text files end with a newline
+        run: |
+          set -euo pipefail
+          rc=0
+          while IFS= read -r -d '' file; do
+            case "${file}" in
+              *.png | *.jpg | *.jpeg | *.gif | *.ico | *.pdf) continue ;;
+            esac
+            if [ -s "${file}" ] && [ -n "$(tail -c 1 "${file}")" ]; then
+              echo "${file}: missing trailing newline" >&2
+              rc=1
+            fi
+          done < <(git ls-files -z)
+          exit "${rc}"
+
+  typos:
+    name: Spelling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: crate-ci/typos@master
+
+  editorconfig:
+    name: EditorConfig
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: editorconfig-checker
+        run: npx --yes editorconfig-checker
+
+  toml:
+    name: TOML
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: taplo-cli
+      - run: taplo fmt --check --diff
+      - run: taplo lint
+
+  yaml:
+    name: YAML
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: pipx install yamllint
+      - run: yamllint --strict .
+
+  markdown:
+    name: Markdown
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: DavidAnson/markdownlint-cli2-action@v20
+        with:
+          globs: '**/*.md'
+
+  shell:
+    name: Shell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: shellcheck,shfmt
+      - run: shellcheck --severity=style --enable=all install.sh tests/install.sh
+      - run: shfmt --diff --indent 2 --case-indent install.sh tests/install.sh
+
+  powershell:
+    name: PowerShell
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          $findings = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error, Warning
+          if ($findings) { $findings | Format-Table -AutoSize; exit 1 }
+
+  python:
+    name: Python scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: check --select ALL --ignore D203,D213,COM812,ISC001 scripts
+      - name: Format
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: format --check scripts
+
+  actions:
+    name: Workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: actionlint
+      - run: actionlint -color
+      - name: zizmor
+        run: pipx run zizmor --persona=pedantic --format=plain .github/workflows
+
+  links:
+    name: Links
+    if: github.event_name != 'merge_group'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: --config lychee.toml './**/*.md'
+          fail: true
+
+  hygiene:
+    name: Hygiene
+    if: always()
+    needs:
+      - repo
+      - typos
+      - editorconfig
+      - toml
+      - yaml
+      - markdown
+      - shell
+      - powershell
+      - python
+      - actions
+      - links
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any check failed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+      - run: echo "hygiene is clean"

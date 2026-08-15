@@ -12,36 +12,90 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+  RUSTFLAGS: -D warnings
 
 jobs:
-  quality:
-    name: Format, lint, and test
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+      - name: cargo fmt (nightly style rules)
+        run: >-
+          cargo fmt --all --
+          --check
+          --unstable-features
+          --config group_imports=StdExternalCrate,imports_granularity=Module,reorder_impl_items=true,normalize_comments=true,format_code_in_doc_comments=true,format_macro_matchers=true,condense_wildcard_suffixes=true,use_field_init_shorthand=true
+
+  clippy:
+    name: Clippy (${{ matrix.toolchain }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        toolchain: [stable, beta, nightly]
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.toolchain != 'stable' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: clippy-${{ matrix.toolchain }}
+      - run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Lint shell installer
-        if: runner.os == 'Linux'
-        run: shellcheck install.sh tests/install.sh
-      - name: Test shell installer
-        if: runner.os != 'Windows'
-        run: sh tests/install.sh
-      - name: Test PowerShell installer
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: ./tests/install.ps1
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --all-targets --all-features -- -D warnings
-      - run: cargo test --all-features --locked
-      - run: cargo build --release --locked
+        with:
+          key: test-${{ matrix.os }}
+      - name: Tests
+        run: cargo test --all-features --locked
+      - name: Tests (release)
+        run: cargo test --all-features --locked --release
+      - name: Doc tests
+        run: cargo test --doc --all-features --locked
+      - name: Release build
+        run: cargo build --release --locked
+
+  docs:
+    name: Rustdoc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo doc
+        env:
+          RUSTDOCFLAGS: >-
+            -D warnings
+            -D rustdoc::broken_intra_doc_links
+            -D rustdoc::private_intra_doc_links
+            -D rustdoc::invalid_codeblock_attributes
+            -D rustdoc::invalid_html_tags
+            -D rustdoc::bare_urls
+        run: cargo doc --no-deps --all-features --document-private-items --locked
 
   msrv:
     name: Minimum supported Rust
@@ -52,16 +106,118 @@ jobs:
         with:
           toolchain: '1.85'
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --all-features --locked
+      - name: MSRV matches Cargo.toml
+        run: |
+          set -euo pipefail
+          declared=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[0].rust_version')
+          test "${declared}" = 1.85
+      - run: cargo check --all-targets --all-features --locked
+
+  features:
+    name: Feature powerset
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-hack
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo hack --feature-powerset --no-dev-deps check --locked
+
+  cross:
+    name: Cross build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+          - aarch64-apple-darwin
+          - x86_64-pc-windows-msvc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cross-${{ matrix.target }}
+      - name: Check
+        run: cargo check --locked --all-features --target ${{ matrix.target }}
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - uses: Swatinem/rust-cache@v2
+      - name: Measure coverage
+        run: cargo llvm-cov --all-features --locked --no-report
+      - name: Report
+        run: cargo llvm-cov report --lcov --output-path lcov.info
+      - name: Enforce the floor
+        run: cargo llvm-cov report --fail-under-lines 50
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: lcov.info
 
   package:
-    name: Package validation
+    name: Package and install
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo package --locked
+      - name: Cargo.lock is current
+        run: cargo metadata --locked --format-version 1 >/dev/null
       - run: cargo install --path . --locked --root /tmp/quinjet-install
       - run: /tmp/quinjet-install/bin/quinjet --version
       - run: /tmp/quinjet-install/bin/quinjet --help >/dev/null
+
+  installers:
+    name: Installers (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Shell installer
+        if: runner.os != 'Windows'
+        run: sh tests/install.sh
+      - name: PowerShell installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tests/install.ps1
+
+  ci:
+    name: CI
+    if: always()
+    needs:
+      - format
+      - clippy
+      - test
+      - docs
+      - msrv
+      - features
+      - cross
+      - coverage
+      - package
+      - installers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any required job failed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+      - run: echo "every required check passed"
