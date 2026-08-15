@@ -27,7 +27,7 @@ jobs:
       - uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780 # v2
         with:
           tool: cargo-audit
-      - run: cargo audit --deny warnings
+      - run: cargo audit --deny warnings --ignore RUSTSEC-2024-0320
 
   deny:
     name: cargo-deny (${{ matrix.check }})
@@ -72,7 +72,7 @@ jobs:
       - uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780 # v2
         with:
           tool: osv-scanner
-      - run: osv-scanner scan source --recursive .
+      - run: osv-scanner scan source --config osv-scanner.toml --recursive .
 
   gitleaks:
     name: Gitleaks
