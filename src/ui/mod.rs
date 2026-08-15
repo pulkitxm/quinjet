@@ -116,27 +116,23 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
         return;
     }
 
-    let vertical = Layout::vertical([
+    let [tabs, main, footer] = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(8),
         Constraint::Length(2),
     ])
-    .split(frame.area());
-    let tabs = vertical[0];
-    let main = vertical[1];
-    let footer = vertical[2];
+    .areas(frame.area());
     let maximum_sidebar = main.width.saturating_sub(32).max(22);
     app.sidebar_width = app.sidebar_width.clamp(22, maximum_sidebar);
-    let (sidebar_area, sidebar_divider, content_area) = if app.sidebar_hidden {
-        (Rect::default(), Rect::default(), main)
+    let [sidebar_area, sidebar_divider, content_area] = if app.sidebar_hidden {
+        [Rect::default(), Rect::default(), main]
     } else {
-        let columns = Layout::horizontal([
+        Layout::horizontal([
             Constraint::Length(app.sidebar_width),
             Constraint::Length(1),
             Constraint::Min(31),
         ])
-        .split(main);
-        (columns[0], columns[1], columns[2])
+        .areas(main)
     };
 
     let (changes_tab, history_tab, pull_requests_tab) = draw_tabs(frame, tabs, app, &theme);
@@ -235,32 +231,38 @@ fn draw_tabs(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) -> (Re
         }
         text
     };
-    let header = Layout::horizontal([
+    let [
+        changes_tab,
+        history_tab,
+        pull_requests_tab,
+        title_area,
+        branch_area,
+    ] = Layout::horizontal([
         Constraint::Length(13),
         Constraint::Length(13),
         Constraint::Length(17),
         Constraint::Min(8),
         Constraint::Length((branch.width() + 3).min(area.width as usize) as u16),
     ])
-    .split(area);
+    .areas(area);
 
     draw_tab(
         frame,
-        header[0],
+        changes_tab,
         "  Changes  ",
         app.view == View::Changes,
         theme,
     );
     draw_tab(
         frame,
-        header[1],
+        history_tab,
         "  History  ",
         app.view == View::History,
         theme,
     );
     draw_tab(
         frame,
-        header[2],
+        pull_requests_tab,
         " Pull Requests ",
         app.view == View::PullRequests,
         theme,
@@ -281,7 +283,7 @@ fn draw_tabs(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) -> (Re
                 .border_style(Style::default().fg(theme.border))
                 .style(Style::default().bg(theme.panel)),
         ),
-        header[3],
+        title_area,
     );
     frame.render_widget(
         Paragraph::new(branch)
@@ -292,9 +294,9 @@ fn draw_tabs(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) -> (Re
                     .borders(Borders::TOP | Borders::RIGHT | Borders::BOTTOM)
                     .border_style(Style::default().fg(theme.border)),
             ),
-        header[4],
+        branch_area,
     );
-    (header[0], header[1], header[2])
+    (changes_tab, history_tab, pull_requests_tab)
 }
 
 fn draw_tab(frame: &mut Frame<'_>, area: Rect, label: &str, active: bool, theme: &Theme) {
