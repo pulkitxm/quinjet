@@ -38,8 +38,6 @@ impl Default for Theme {
             accent_soft: Color::Rgb(37, 80, 126),
             selected: Color::Rgb(32, 60, 92),
             added: Color::Rgb(126, 231, 135),
-            // VS Code uses a subdued whole-line tint and overlays a stronger tint on
-            // changed character ranges.
             added_background: Color::Rgb(41, 51, 35),
             added_emphasis_background: Color::Rgb(61, 78, 35),
             removed: Color::Rgb(255, 123, 114),

@@ -604,9 +604,6 @@ impl Repository {
         append_diff_file_paths(&mut tracked_args, file);
         let (mut output, mut truncated) = self.checked_bounded(tracked_args, MAX_DIFF_BYTES)?;
 
-        // `git stash` keeps untracked files in an optional third-parent root
-        // commit. `stash show` cannot path-filter on older Git versions, so read
-        // only the selected path from that root commit when it exists.
         let untracked_commit = format!("{}^3", stash.reference);
         let untracked_exists = self
             .run([
@@ -761,7 +758,6 @@ impl Repository {
             }
             let fields: Vec<_> = record.split(|byte| *byte == 0x1f).collect();
             if fields.len() < 6 || !trim_ascii(fields[5]).is_empty() {
-                // Skip symbolic remote HEAD aliases such as origin/HEAD.
                 continue;
             }
             let reference = text(fields[1]);
@@ -1678,8 +1674,6 @@ mod tests {
                 binary: false,
             })
         );
-        // An untracked path is in no diff yet, so its header stays unresolved
-        // rather than claiming a total Git never reported.
         assert_eq!(counts_for("untracked.txt"), None);
     }
 
