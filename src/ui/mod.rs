@@ -104,7 +104,7 @@ const HELP_LINES: &[(&str, &str)] = &[
     ("q", "Quit"),
 ];
 
-pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
+pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let theme = Theme::default();
     frame.render_widget(
         Block::default().style(Style::default().bg(theme.background)),

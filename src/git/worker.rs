@@ -18,7 +18,7 @@ use super::{
 };
 
 #[derive(Debug)]
-pub enum WorkerCommand {
+pub(crate) enum WorkerCommand {
     Refresh {
         generation: u64,
     },
@@ -103,7 +103,7 @@ pub enum WorkerCommand {
 }
 
 #[derive(Debug)]
-pub enum WorkerEvent {
+pub(crate) enum WorkerEvent {
     Status {
         generation: u64,
         result: Result<RepoStatus, String>,
@@ -281,7 +281,7 @@ const fn worker_lane(command: &WorkerCommand) -> WorkerLane {
     }
 }
 
-pub struct GitWorker {
+pub(crate) struct GitWorker {
     mailbox: Arc<SharedMailbox>,
     github_mailbox: Arc<SharedMailbox>,
     local_preview_mailbox: Arc<SharedMailbox>,

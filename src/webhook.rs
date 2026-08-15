@@ -20,11 +20,11 @@ const READ_TIMEOUT: Duration = Duration::from_secs(5);
 /// listener safe: the worst a forged request can do is trigger a refresh that
 /// would have happened on the next poll anyway.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WebhookDelivery {
+pub(crate) struct WebhookDelivery {
     pub event: String,
 }
 
-pub struct WebhookListener {
+pub(crate) struct WebhookListener {
     receiver: Receiver<WebhookDelivery>,
     address: SocketAddr,
     stopped: Arc<AtomicBool>,

@@ -23,7 +23,7 @@ const HIDDEN_TIMELINE_EVENTS: &str = r#"["subscribed","unsubscribed","mentioned"
 const REVIEW_COMMENT_TSV_JQ: &str = r#".[] | ["review_comment", (.user.login // ""), (.created_at // ""), ((.path // "") + ":" + (((.line // .original_line) // 0)|tostring)), (.body // ""), (.html_url // ""), ((.pull_request_review_id // 0)|tostring), (.diff_hunk // "")] | @tsv"#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConversationKind {
+pub(crate) enum ConversationKind {
     Opened,
     Comment,
     Review,
@@ -93,7 +93,7 @@ struct ConversationRecords {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConversationEntry {
+pub(crate) struct ConversationEntry {
     pub kind: ConversationKind,
     pub actor: String,
     pub timestamp: String,
@@ -110,7 +110,7 @@ pub struct ConversationEntry {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PullRequestConversation {
+pub(crate) struct PullRequestConversation {
     pub entries: Vec<ConversationEntry>,
     pub truncated: bool,
     /// True when nothing had to be transferred: either the thread was already

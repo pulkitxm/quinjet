@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 /// Where a change lives in Git's three-tree model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum ChangeArea {
+pub(crate) enum ChangeArea {
     Conflict,
     Staged,
     Unstaged,
@@ -19,7 +19,7 @@ impl ChangeArea {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ChangeStatus {
+pub(crate) enum ChangeStatus {
     Added,
     Modified,
     Deleted,
@@ -59,7 +59,7 @@ impl ChangeStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Change {
+pub(crate) struct Change {
     pub path: PathBuf,
     pub original_path: Option<PathBuf>,
     pub area: ChangeArea,
@@ -88,7 +88,7 @@ impl Change {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct BranchState {
+pub(crate) struct BranchState {
     pub head: String,
     pub oid: Option<String>,
     pub upstream: Option<String>,
@@ -98,7 +98,7 @@ pub struct BranchState {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct RepoStatus {
+pub(crate) struct RepoStatus {
     pub branch: BranchState,
     pub changes: Vec<Change>,
 }
@@ -113,7 +113,7 @@ impl RepoStatus {
 }
 
 /// Parse `git status --porcelain=v2 --branch -z` without depending on localized output.
-pub fn parse_porcelain_v2(output: &[u8]) -> RepoStatus {
+pub(crate) fn parse_porcelain_v2(output: &[u8]) -> RepoStatus {
     let mut status = RepoStatus::default();
     let records: Vec<&[u8]> = output.split(|byte| *byte == 0).collect();
     let mut index = 0;

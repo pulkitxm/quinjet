@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use crossbeam_channel::{Receiver, bounded};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
-pub struct RepoWatcher {
+pub(crate) struct RepoWatcher {
     receiver: Receiver<()>,
     _watcher: RecommendedWatcher,
 }

@@ -22,7 +22,7 @@ const CHECK_TSV_JQ: &str = r#".[] | [.name, .workflow, .state, .bucket, (.descri
 const JOB_STEPS_TSV_JQ: &str = r#".steps[]? | [((.number // 0)|tostring), (.name // ""), (.status // ""), (.conclusion // ""), (.started_at // ""), (.completed_at // "")] | @tsv"#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PullRequestCheckStatus {
+pub(crate) enum PullRequestCheckStatus {
     Pending,
     Passed,
     Failed,
@@ -51,7 +51,7 @@ impl PullRequestCheckStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PullRequestCheck {
+pub(crate) struct PullRequestCheck {
     pub name: String,
     pub workflow: String,
     pub state: String,
@@ -77,7 +77,7 @@ impl PullRequestCheck {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CheckLogSeverity {
+pub(crate) enum CheckLogSeverity {
     Normal,
     Command,
     Notice,
@@ -86,14 +86,14 @@ pub enum CheckLogSeverity {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CheckLogLine {
+pub(crate) struct CheckLogLine {
     pub timestamp: String,
     pub text: String,
     pub severity: CheckLogSeverity,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CheckStep {
+pub(crate) struct CheckStep {
     pub number: usize,
     pub name: String,
     pub status: PullRequestCheckStatus,
@@ -122,7 +122,7 @@ impl CheckStep {
 }
 
 /// Seconds since the Unix epoch, for measuring against a GitHub timestamp.
-pub fn unix_now() -> i64 {
+pub(crate) fn unix_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs() as i64)
@@ -132,13 +132,13 @@ pub fn unix_now() -> i64 {
 /// A check list plus where it came from, so the view can say whether it is
 /// showing a cached answer or one just read from GitHub.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PullRequestChecks {
+pub(crate) struct PullRequestChecks {
     pub checks: Vec<PullRequestCheck>,
     pub from_cache: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct CheckRunLog {
+pub(crate) struct CheckRunLog {
     pub steps: Vec<CheckStep>,
     /// Output produced before the first step or after the last one, which is
     /// where a runner reports provisioning and teardown failures.
