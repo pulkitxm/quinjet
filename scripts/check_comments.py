@@ -37,7 +37,12 @@ class Finding:
 
 def comments(source: str) -> list[tuple[int, str, bool]]:
     """Return (line, text, is_doc) for every comment outside string literals."""
-    found: list[tuple[int, str, bool]] = []
+    return [(line, text, is_doc) for _, _, line, text, is_doc in spans(source)]
+
+
+def spans(source: str) -> list[tuple[int, int, int, str, bool]]:
+    """Return (start, stop, line, text, is_doc) for every comment in the source."""
+    found: list[tuple[int, int, int, str, bool]] = []
     i = 0
     line = 1
     end = len(source)
@@ -53,20 +58,43 @@ def comments(source: str) -> list[tuple[int, str, bool]]:
         elif char in "rbc" and (raw := raw_string_start(source, i)) is not None:
             i, line = skip_raw_string(source, raw, line)
         elif source.startswith("//", i):
+            start = i
             stop = source.find("\n", i)
             stop = end if stop == -1 else stop
-            body = source[i:stop]
+            body = source[start:stop]
             is_doc = body.startswith("///") or body.startswith("//!")
-            found.append((line, body.strip(), is_doc))
+            found.append((start, stop, line, body.strip(), is_doc))
             i = stop
         elif source.startswith("/*", i):
+            start = i
             start_line = line
             i, line, body = skip_block_comment(source, i, line)
             is_doc = body.startswith("/**") or body.startswith("/*!")
-            found.append((start_line, body.strip().splitlines()[0], is_doc))
+            found.append((start, i, start_line, body.strip().splitlines()[0], is_doc))
         else:
             i += 1
     return found
+
+
+def strip(source: str) -> str:
+    """Remove every comment the checker would report, leaving the code intact."""
+    doomed = [
+        (start, stop)
+        for start, stop, _, text, is_doc in spans(source)
+        if not is_doc and not allowed(text)
+    ]
+    out = source
+    for start, stop in reversed(doomed):
+        head = out.rfind("\n", 0, start) + 1
+        before = out[head:start]
+        after = out[stop:]
+        if before.strip() == "" and after.startswith("\n"):
+            out = out[:head] + after[1:]
+        elif before.strip() == "":
+            out = out[:head] + after
+        else:
+            out = out[:start].rstrip(" \t") + after
+    return out
 
 
 def skip_string(source: str, i: int, line: int) -> tuple[int, int]:
@@ -149,6 +177,30 @@ def tracked_rust_files(root: Path) -> list[Path]:
     return [root / name for name in listed.split("\0") if name]
 
 
+def repository_root() -> Path:
+    return Path(
+        subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    )
+
+
+def rewrite() -> int:
+    root = repository_root()
+    changed = 0
+    for path in tracked_rust_files(root):
+        source = path.read_text(encoding="utf-8")
+        stripped = strip(source)
+        if stripped != source:
+            path.write_text(stripped, encoding="utf-8")
+            changed += 1
+    print(f"check_comments: stripped comments from {changed} file(s)")
+    return 0
+
+
 def selftest() -> int:
     cases: list[tuple[str, int]] = [
         ("fn main() {}\n", 0),
@@ -166,21 +218,41 @@ def selftest() -> int:
         ("// rustfmt::skip\n", 0),
         ('let s = "// fake";\n// real\n', 1),
     ]
+    strips: list[tuple[str, str]] = [
+        ("fn a() {\n    // gone\n    let x = 1;\n}\n", "fn a() {\n    let x = 1;\n}\n"),
+        ("let x = 1; // trailing\n", "let x = 1;\n"),
+        ("/// doc\nfn a() {}\n", "/// doc\nfn a() {}\n"),
+        ('let s = "// keep";\n', 'let s = "// keep";\n'),
+        ("// SPDX-License-Identifier: MIT\n", "// SPDX-License-Identifier: MIT\n"),
+        ("fn a() {}\n/* block */\nfn b() {}\n", "fn a() {}\nfn b() {}\n"),
+    ]
+
     failures = 0
     for source, expected in cases:
         actual = len(scan(Path("<selftest>"), source))
         if actual != expected:
             failures += 1
             print(f"selftest: expected {expected}, got {actual} for {source!r}", file=sys.stderr)
+    for source, expected_source in strips:
+        actual_source = strip(source)
+        if actual_source != expected_source:
+            failures += 1
+            print(
+                f"selftest: strip produced {actual_source!r}, expected {expected_source!r}",
+                file=sys.stderr,
+            )
     if failures:
         return 1
-    print(f"check_comments: {len(cases)} selftest cases pass")
+    print(f"check_comments: {len(cases) + len(strips)} selftest cases pass")
     return 0
 
 
 def main(argv: list[str]) -> int:
     if "--selftest" in argv:
         return selftest()
+
+    if "--strip" in argv:
+        return rewrite()
 
     root = Path(
         subprocess.run(
