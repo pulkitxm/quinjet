@@ -278,11 +278,13 @@ impl Repository {
         &self,
         pull_request: &PullRequest,
         checks: &[PullRequestCheck],
+        wanted: &dyn Fn() -> bool,
     ) -> usize {
         checks
             .iter()
             .filter(|check| !check.status.is_running() && check.job_id().is_some())
             .take(MAX_PREFETCHED_CHECK_LOGS)
+            .take_while(|_| wanted())
             .filter(|check| self.pull_request_check_log(pull_request, check).is_ok())
             .count()
     }
@@ -926,5 +928,33 @@ untimestamped trailing output\n";
         assert_eq!(checks[2].name, "tests");
         assert_eq!(checks[2].status, PullRequestCheckStatus::Passed);
         assert_eq!(checks[2].description, "all good");
+    }
+
+    #[test]
+    fn a_warm_up_stops_as_soon_as_the_pull_request_it_serves_is_left() {
+        // Every settled run is worth warming while the reader is on that pull
+        // request. The moment they are not, the rest of the queue is only
+        // spending rate limit, so a superseded warm-up must reach no run at all
+        // rather than draining first and being ignored afterwards.
+        let settled = |name: &str| PullRequestCheck {
+            name: name.to_owned(),
+            workflow: "CI".to_owned(),
+            state: "SUCCESS".to_owned(),
+            status: PullRequestCheckStatus::Passed,
+            description: String::new(),
+            link: "https://github.com/o/r/actions/runs/1/job/2".to_owned(),
+            started_at: String::new(),
+            completed_at: String::new(),
+        };
+        let repository = crate::git::Repository {
+            root: std::path::PathBuf::from("/nonexistent-on-purpose"),
+        };
+        let checks = [settled("one"), settled("two"), settled("three")];
+
+        // Reaching any run here would have to read from that root, so a
+        // non-zero answer is also proof it went to the network.
+        let warmed =
+            repository.prefetch_check_run_logs(&PullRequest::default(), &checks, &|| false);
+        assert_eq!(warmed, 0, "a superseded warm-up asks for nothing");
     }
 }
