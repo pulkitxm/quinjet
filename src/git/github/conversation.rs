@@ -347,6 +347,10 @@ fn timeline_tsv_jq() -> String {
 }
 
 #[cfg(test)]
+#[expect(
+    unused_results,
+    reason = "test helpers return values the assertions do not use"
+)]
 mod tests {
     use super::*;
 

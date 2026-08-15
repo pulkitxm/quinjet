@@ -1953,6 +1953,10 @@ fn stable_cache_hash(value: &[u8]) -> (u64, u64) {
 }
 
 #[cfg(test)]
+#[expect(
+    unused_results,
+    reason = "test helpers return values the assertions do not use"
+)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
