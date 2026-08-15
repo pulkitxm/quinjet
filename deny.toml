@@ -9,6 +9,9 @@ ignore = [
   # loader, which has no released alternative yet. Nothing user-supplied is
   # parsed as YAML: the only inputs are the syntax definitions we ship.
   "RUSTSEC-2024-0320",
+  # bincode 1 is unmaintained and arrives through syntect's cached syntax
+  # dumps, which we build from the assets we ship rather than from user input.
+  "RUSTSEC-2025-0141",
 ]
 
 [licenses]
