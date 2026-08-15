@@ -426,13 +426,13 @@ impl Repository {
         let head = head.as_ref();
         let status =
             String::from_utf8_lossy(head.lines().next().unwrap_or_default().as_bytes()).to_string();
-        if status.contains(" 304") {
-            if let Some(entry) = cached {
-                return Ok(ValidatedRead {
-                    data: split_validator(&entry).1.to_vec(),
-                    unchanged: true,
-                });
-            }
+        if status.contains(" 304")
+            && let Some(entry) = cached
+        {
+            return Ok(ValidatedRead {
+                data: split_validator(&entry).1.to_vec(),
+                unchanged: true,
+            });
         }
         if let Some(etag) = header_value(head, "etag").filter(|_| !has_next_page(head)) {
             let mut entry = etag.into_bytes();
@@ -866,15 +866,14 @@ impl Repository {
         let cached = cache
             .as_ref()
             .and_then(|cache| cache.read(cache_key, limit));
-        if !refresh || life == CacheLife::Immutable {
-            if let Some(entry) = cached.as_ref() {
-                if life.accepts(entry.age) {
-                    return Ok(GhResponse {
-                        data: entry.data.clone(),
-                        disposition: CacheDisposition::Fresh,
-                    });
-                }
-            }
+        if (!refresh || life == CacheLife::Immutable)
+            && let Some(entry) = cached.as_ref()
+            && life.accepts(entry.age)
+        {
+            return Ok(GhResponse {
+                data: entry.data.clone(),
+                disposition: CacheDisposition::Fresh,
+            });
         }
 
         let output = match self.run_gh_bounded(args, limit) {
@@ -1180,12 +1179,12 @@ fn remote_url_for_gh(url: &str) -> String {
         };
     }
 
-    if let Some((_, target)) = url.rsplit_once('@') {
-        if let Some((host, path)) = target.split_once(':') {
-            if !host.is_empty() && !path.is_empty() {
-                return format!("ssh://{host}/{path}");
-            }
-        }
+    if let Some((_, target)) = url.rsplit_once('@')
+        && let Some((host, path)) = target.split_once(':')
+        && !host.is_empty()
+        && !path.is_empty()
+    {
+        return format!("ssh://{host}/{path}");
     }
     url.to_owned()
 }
@@ -1256,10 +1255,10 @@ fn merge_repository(
         repository.url = repository.url.trim_end_matches('/').to_owned();
         repository
     });
-    if let Some(remote) = remote {
-        if !entry.remotes.iter().any(|existing| existing == remote) {
-            entry.remotes.push(remote.to_owned());
-        }
+    if let Some(remote) = remote
+        && !entry.remotes.iter().any(|existing| existing == remote)
+    {
+        entry.remotes.push(remote.to_owned());
     }
 }
 

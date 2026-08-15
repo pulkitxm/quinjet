@@ -206,7 +206,7 @@ impl TextBuffer {
         self.cursor = 0;
     }
 
-    pub(crate) fn document_end(&mut self) {
+    pub(crate) const fn document_end(&mut self) {
         self.cursor = self.value.len();
     }
 
@@ -227,10 +227,10 @@ impl TextBuffer {
             }
             start = index;
         }
-        if start == self.cursor {
-            if let Some((index, _)) = previous_character(&self.value, start) {
-                start = index;
-            }
+        if start == self.cursor
+            && let Some((index, _)) = previous_character(&self.value, start)
+        {
+            start = index;
         }
         drop(self.value.drain(start..self.cursor));
         self.cursor = start;
@@ -253,10 +253,10 @@ impl TextBuffer {
             }
             end = next;
         }
-        if end == self.cursor {
-            if let Some((next, _)) = next_character(&self.value, end) {
-                end = next;
-            }
+        if end == self.cursor
+            && let Some((next, _)) = next_character(&self.value, end)
+        {
+            end = next;
         }
         drop(self.value.drain(self.cursor..end));
     }
@@ -2254,18 +2254,18 @@ impl App {
                         .is_some_and(|check| check.status.is_running());
                 match result {
                     Ok(log) => {
-                        if self.expanded_check_steps.is_empty() {
-                            if let Some(step) = log.failed_step().or_else(|| log.running_step()) {
-                                let number = step.number;
-                                let _ = self.expanded_check_steps.insert(number);
-                                self.reveal_check_step(number);
-                            }
+                        if self.expanded_check_steps.is_empty()
+                            && let Some(step) = log.failed_step().or_else(|| log.running_step())
+                        {
+                            let number = step.number;
+                            let _ = self.expanded_check_steps.insert(number);
+                            self.reveal_check_step(number);
                         }
-                        if self.pull_request_step_cursor == 0 {
-                            if let Some(step) = log.steps.first() {
-                                let number = step.number;
-                                self.reveal_check_step(number);
-                            }
+                        if self.pull_request_step_cursor == 0
+                            && let Some(step) = log.steps.first()
+                        {
+                            let number = step.number;
+                            self.reveal_check_step(number);
                         }
                         self.pull_request_check_log = Some(log);
                         self.pull_request_check_log_error = None;
@@ -4354,13 +4354,12 @@ impl App {
         if !self.history_branches_loading {
             self.request_history_branches(effects);
         }
-        if self.view == View::PullRequests {
-            if let Some(number) = self
+        if self.view == View::PullRequests
+            && let Some(number) = self
                 .pull_request_exact_number
                 .or_else(|| self.pull_request_lookup.value.trim().parse::<u64>().ok())
-            {
-                self.request_pull_request_lookup(number, true, false, effects);
-            }
+        {
+            self.request_pull_request_lookup(number, true, false, effects);
         }
     }
 
@@ -4639,10 +4638,10 @@ impl App {
 
     fn normalize_selection(&mut self) {
         let targets = self.change_targets();
-        if self.selected_change_target().is_none() {
-            if let Some(first) = targets.first().copied() {
-                self.select_change_target(first);
-            }
+        if self.selected_change_target().is_none()
+            && let Some(first) = targets.first().copied()
+        {
+            self.select_change_target(first);
         }
         self.change_cursor = self
             .change_cursor
@@ -4655,16 +4654,16 @@ impl App {
 
     fn restore_change_selection(&mut self, selected: Option<&Change>) {
         let visible = self.visible_change_indices();
-        if let Some(selected) = selected {
-            if let Some(cursor) = visible.iter().position(|index| {
+        if let Some(selected) = selected
+            && let Some(cursor) = visible.iter().position(|index| {
                 self.status.changes.get(*index).is_some_and(|change| {
                     change.path == selected.path && change.area == selected.area
                 })
-            }) {
-                self.selected_change_group = None;
-                self.change_cursor = cursor;
-                return;
-            }
+            })
+        {
+            self.selected_change_group = None;
+            self.change_cursor = cursor;
+            return;
         }
         if self.selected_change_target().is_none() {
             if visible.iter().any(|index| {

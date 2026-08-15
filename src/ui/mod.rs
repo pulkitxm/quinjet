@@ -2760,13 +2760,13 @@ fn text_preview_lines(value: &str, width: usize, maximum_lines: usize) -> Vec<St
         skipped = skipped.saturating_add(used);
         lines.push(line);
     }
-    if skipped < total_width {
-        if let Some(last) = lines.last_mut() {
-            *last = format!(
-                "{}…",
-                slice_width(last.trim_end(), 0, width.saturating_sub(1))
-            );
-        }
+    if skipped < total_width
+        && let Some(last) = lines.last_mut()
+    {
+        *last = format!(
+            "{}…",
+            slice_width(last.trim_end(), 0, width.saturating_sub(1))
+        );
     }
     while lines.len() < maximum_lines {
         lines.push(String::new());
@@ -4664,7 +4664,7 @@ const fn graph_color(index: usize, theme: &Theme) -> Color {
     }
 }
 
-fn history_glyph(commit: &crate::git::history::Commit, index: usize) -> &'static str {
+const fn history_glyph(commit: &crate::git::history::Commit, index: usize) -> &'static str {
     if commit.parent_ids.len() > 1 {
         "●╮ "
     } else if index > 0 {

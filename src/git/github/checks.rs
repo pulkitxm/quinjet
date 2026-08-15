@@ -191,13 +191,13 @@ impl Repository {
             pull_request.number,
             pull_request.head_oid
         );
-        if !refresh {
-            if let Some(cached) = super::cache_read(&key, CacheLife::Ttl(CHECK_LIST_CACHE_TTL)) {
-                return Ok(PullRequestChecks {
-                    checks: parse_pull_request_checks(&cached)?,
-                    from_cache: true,
-                });
-            }
+        if !refresh
+            && let Some(cached) = super::cache_read(&key, CacheLife::Ttl(CHECK_LIST_CACHE_TTL))
+        {
+            return Ok(PullRequestChecks {
+                checks: parse_pull_request_checks(&cached)?,
+                from_cache: true,
+            });
         }
         let output = self.run_gh(pull_request_checks_args(pull_request))?;
         let accepted_status = output.status.success()
@@ -316,10 +316,10 @@ impl Repository {
         life: CacheLife,
     ) -> Result<(Vec<u8>, bool)> {
         let key = format!("check-log-v1\n{repository}\n{job}");
-        if life == CacheLife::Immutable {
-            if let Some(cached) = super::cache_read_bounded(&key, life, MAX_CHECK_LOG_BYTES) {
-                return Ok((cached, false));
-            }
+        if life == CacheLife::Immutable
+            && let Some(cached) = super::cache_read_bounded(&key, life, MAX_CHECK_LOG_BYTES)
+        {
+            return Ok((cached, false));
         }
         let endpoint = format!("repos/{repository}/actions/jobs/{job}/logs");
         let output = self.run_gh_log([

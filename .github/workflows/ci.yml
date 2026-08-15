@@ -127,13 +127,13 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
-          toolchain: '1.85'
+          toolchain: '1.88'
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: MSRV matches Cargo.toml
         run: |
           set -euo pipefail
           declared=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[0].rust_version')
-          test "${declared}" = 1.85
+          test "${declared}" = 1.88
       - run: cargo check --all-targets --all-features --locked
 
   features:
