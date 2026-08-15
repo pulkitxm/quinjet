@@ -652,7 +652,7 @@ pub(crate) struct App {
     pub pull_request_loading: bool,
     pub last_refresh: Option<Instant>,
     pub geometry: UiGeometry,
-    status_generation: u64,
+    pub status_generation: u64,
     changes_diff_version: u64,
     diff_generation: u64,
     history_generation: u64,
@@ -1817,14 +1817,13 @@ impl App {
     }
 
     pub(crate) fn tick(&mut self, now: Instant) -> (Vec<AppEffect>, bool) {
-        let mut changed = false;
-        if self
+        let toast_expired = self
             .toast
             .as_ref()
-            .is_some_and(|toast| now >= toast.expires_at)
-        {
+            .is_some_and(|toast| now >= toast.expires_at);
+        let mut changed = toast_expired;
+        if toast_expired {
             self.toast = None;
-            changed = true;
         }
         if self
             .pending_g
