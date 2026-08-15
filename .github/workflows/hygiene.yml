@@ -179,7 +179,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/ruff-action@4919ec5cf1f49eff0871dbcea0da843445b837e6 # v3
         with:
-          args: check --select ALL --ignore D203,D213,COM812,ISC001 scripts
+          args: check scripts
       - name: Format
         uses: astral-sh/ruff-action@4919ec5cf1f49eff0871dbcea0da843445b837e6 # v3
         with:

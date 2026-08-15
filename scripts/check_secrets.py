@@ -22,13 +22,19 @@ PLACEHOLDER = re.compile(
 
 @dataclass(frozen=True)
 class Rule:
+    """One credential shape and whether placeholders excuse a match."""
+
     name: str
     pattern: re.Pattern[str]
     placeholders_ok: bool = True
 
 
 RULES = (
-    Rule("private key block", re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"), False),
+    Rule(
+        "private key block",
+        re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"),
+        placeholders_ok=False,
+    ),
     Rule("github token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}")),
     Rule("github fine-grained token", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}")),
     Rule("aws access key id", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
@@ -55,6 +61,7 @@ SKIP_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".woff", ".wof
 
 
 def scan(text: str, name: str) -> list[str]:
+    """Report every credential-shaped match in one file."""
     if "\0" in text:
         return []
     findings = []
@@ -69,6 +76,7 @@ def scan(text: str, name: str) -> list[str]:
 
 
 def selftest() -> int:
+    """Prove the scanner on known input before trusting it on the tree."""
     cases: list[tuple[str, int]] = [
         ("nothing to see here\n", 0),
         ("-----BEGIN OPENSSH PRIVATE KEY-----\n", 1),
@@ -79,7 +87,7 @@ def selftest() -> int:
         ("https://deploy:8f3a9c2b1d4e6f7a0b5c@example.com\n", 1),
         ("https://user:secret@github.com/acme/widget.git\n", 0),
         ("https://example.com/path\n", 0),
-        ("let repo = \"https://github.com/pulkitxm/quinjet\";\n", 0),
+        ('let repo = "https://github.com/pulkitxm/quinjet";\n', 0),
     ]
     failures = 0
     for text, expected in cases:
@@ -94,6 +102,7 @@ def selftest() -> int:
 
 
 def main(argv: list[str]) -> int:
+    """Scan every tracked file, or run the selftest."""
     if "--selftest" in argv:
         return selftest()
 
