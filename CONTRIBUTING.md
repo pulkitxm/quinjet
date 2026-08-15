@@ -28,10 +28,15 @@ builds, coverage, packaging, installer smoke tests, repository hygiene, spelling
 linting, and dependency auditing. The same set runs locally:
 
 ```bash
-make tools   # once, installs the cargo-based checkers
-make ci      # everything CI runs
-make ci-fast # format, lint, test, comments, secrets
+make tools      # once, installs the cargo-based checkers
+make ci         # everything CI runs on a pull request
+make ci-fast    # format, lint, test, comments, secrets
+make tools-deep # once, installs the expensive checkers
+make deep       # miri, sanitizers, cargo-careful, mutants, minimal versions, udeps, bloat
 ```
+
+The deep checks also run weekly, and on demand when a pull request is labelled
+`deep-check`.
 
 At minimum, run this before submitting a pull request:
 
