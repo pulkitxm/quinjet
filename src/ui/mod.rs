@@ -659,7 +659,7 @@ fn build_change_rows<'a>(app: &'a App, visible: &[usize]) -> Vec<ChangeRow<'a>> 
     let mut rows = Vec::new();
     let mut cursor_map = HashMap::new();
     for (cursor, index) in visible.iter().enumerate() {
-        cursor_map.insert(*index, cursor);
+        let _ = cursor_map.insert(*index, cursor);
     }
     for area in [
         ChangeArea::Conflict,
@@ -2204,7 +2204,7 @@ fn wrap_prose(value: &str, width: usize) -> Vec<(ProseStyle, String)> {
         }
     }
     while output.last().is_some_and(|(_, text)| text.is_empty()) {
-        output.pop();
+        drop(output.pop());
     }
     output
 }

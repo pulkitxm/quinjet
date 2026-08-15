@@ -40,10 +40,12 @@ impl WebhookListener {
         let (sender, receiver) = bounded(64);
         let stopped = Arc::new(AtomicBool::new(false));
         let worker_stopped = Arc::clone(&stopped);
-        thread::Builder::new()
-            .name("quinjet-webhook".to_owned())
-            .spawn(move || serve(&listener, &sender, &worker_stopped))
-            .context("failed to start the webhook listener")?;
+        drop(
+            thread::Builder::new()
+                .name("quinjet-webhook".to_owned())
+                .spawn(move || serve(&listener, &sender, &worker_stopped))
+                .context("failed to start the webhook listener")?,
+        );
         Ok(Self {
             receiver,
             address,

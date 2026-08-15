@@ -318,7 +318,7 @@ impl PreparedPullRequest {
             let key = patch_cache_key(&self.merge_base, &self.head, &file.path);
             match cache_read_bounded(&key, CacheLife::Immutable, MAX_CACHED_PATCH_BYTES) {
                 Some(patch) => {
-                    cached.insert(file.path.clone(), patch);
+                    drop(cached.insert(file.path.clone(), patch));
                 }
                 None => requested.push(file.path.clone()),
             }
@@ -746,7 +746,7 @@ impl Repository {
                         ));
                         break 'remotes;
                     }
-                    urls.insert(entry);
+                    let _ = urls.insert(entry);
                 }
             }
         }
@@ -910,7 +910,7 @@ impl Repository {
         S: AsRef<OsStr>,
     {
         let mut command = Command::new("gh");
-        command
+        let _ = command
             .current_dir(&self.root)
             .args(args)
             .env("GH_PROMPT_DISABLED", "1")
@@ -1201,7 +1201,7 @@ fn repository_from_remote_url(url: &str) -> Option<GitHubRepository> {
 fn group_remote_urls(remote_urls: &[RemoteUrl]) -> Vec<(String, Vec<String>)> {
     let mut grouped: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for remote_url in remote_urls {
-        grouped
+        let _ = grouped
             .entry(remote_url_for_gh(&remote_url.url))
             .or_default()
             .insert(remote_url.remote.clone());
@@ -1272,7 +1272,7 @@ impl TemporaryBareRepository {
                 continue;
             }
             let mut command = Command::new("git");
-            command
+            let _ = command
                 .args(["init", "--bare", "--quiet"])
                 .arg(&path)
                 .env("LC_ALL", "C")
@@ -1333,7 +1333,7 @@ fn fetch_pull_request(
     if pull_request.base_ref.is_empty() || pull_request.head_ref.is_empty() {
         bail!("Pull request metadata does not contain complete base/head refs");
     }
-    checked_temp_git(
+    drop(checked_temp_git(
         temporary,
         &[
             OsString::from("remote"),
@@ -1342,7 +1342,7 @@ fn fetch_pull_request(
             OsString::from(pull_request.base_repository.selector()),
         ],
         "unable to configure the disposable base remote",
-    )?;
+    )?);
     let base_refspec = format!("+refs/heads/{}:refs/quinjet/base", pull_request.base_ref);
     let pull_refspec = format!("+refs/pull/{}/head:refs/quinjet/head", pull_request.number);
 
@@ -1358,7 +1358,7 @@ fn fetch_pull_request(
                 );
             };
             let head_url = repository_url_for_name(&pull_request.base_repository, head_repository);
-            checked_temp_git(
+            drop(checked_temp_git(
                 temporary,
                 &[
                     OsString::from("remote"),
@@ -1367,7 +1367,7 @@ fn fetch_pull_request(
                     OsString::from(head_url),
                 ],
                 "unable to configure the disposable fork remote",
-            )?;
+            )?);
             let head_refspec = format!("+refs/heads/{}:refs/quinjet/head", pull_request.head_ref);
             fetch_ref(temporary, "head", &head_refspec, 64).with_context(|| {
                 format!(
@@ -1658,7 +1658,7 @@ fn diff_selected_paths(
     let mut patch = output.stdout;
     if output.stdout_truncated {
         while patch.last().is_some_and(|byte| *byte != b'\n') {
-            patch.pop();
+            let _ = patch.pop();
         }
     }
     Ok((patch, output.stdout_truncated))
@@ -1688,7 +1688,7 @@ fn run_repository_git(
     stderr_limit: usize,
 ) -> Result<BoundedOutput> {
     let mut command = Command::new("git");
-    command
+    let _ = command
         .arg("-C")
         .arg(repository)
         .args(["-c", "core.quotepath=false"])
@@ -1712,7 +1712,7 @@ pub(crate) fn run_bounded_command(
     stdout_limit: usize,
     stderr_limit: usize,
 ) -> Result<BoundedOutput> {
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let _ = command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = command.spawn()?;
     let mut stdout = child
         .stdout
@@ -1820,7 +1820,7 @@ impl CacheStore {
         if !data.starts_with(CACHE_MAGIC) {
             return None;
         }
-        data.drain(..CACHE_MAGIC.len());
+        drop(data.drain(..CACHE_MAGIC.len()));
         let age = metadata
             .modified()
             .ok()
@@ -1840,11 +1840,11 @@ impl CacheStore {
             .root
             .join(format!(".write-{}-{id}.tmp", std::process::id()));
         let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
+        let _ = options.write(true).create_new(true);
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
+            let _ = options.mode(0o600);
         }
         let mut file = options.open(&temporary)?;
         file.write_all(CACHE_MAGIC)?;

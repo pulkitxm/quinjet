@@ -75,7 +75,7 @@ fn main() -> Result<()> {
     running &= dispatch_effects(&worker, &mut terminal, app.initial_effects());
     while running {
         if dirty {
-            terminal
+            let _ = terminal
                 .terminal
                 .draw(|frame| ui::draw(frame, &mut app))
                 .context("failed to render Quinjet")?;
