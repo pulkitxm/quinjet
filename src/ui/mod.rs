@@ -5206,6 +5206,7 @@ terminal rows because that is what real pull-request comments look like in pract
             .to_owned();
         app.pull_request_conversation = crate::git::github::PullRequestConversation {
             truncated: true,
+            from_cache: false,
             entries: (0..500)
                 .map(|index| ConversationEntry {
                     kind: if index % 3 == 0 {
@@ -5421,6 +5422,7 @@ terminal rows because that is what real pull-request comments look like in pract
         let wide = "│ ✓ Format, lint, and test (ubuntu-latest)   CI   passed in 33s   https://github.com/acme/widget/actions/runs/1/job/2 │";
         app.pull_request_conversation = crate::git::github::PullRequestConversation {
             truncated: false,
+            from_cache: false,
             entries: vec![ConversationEntry {
                 kind: ConversationKind::Comment,
                 actor: "pulkitxm".to_owned(),
@@ -5515,6 +5517,7 @@ terminal rows because that is what real pull-request comments look like in pract
         app.pull_request_conversation_loading = false;
         app.pull_request_from_cache = true;
         app.pull_request_checks_from_cache = true;
+        app.pull_request_conversation.from_cache = true;
         let cached = render(&mut app, &mut terminal);
         assert!(
             cached.contains("cached"),
@@ -5562,6 +5565,7 @@ terminal rows because that is what real pull-request comments look like in pract
         let mut app = overview_app();
         app.pull_request_conversation = crate::git::github::PullRequestConversation {
             truncated: false,
+            from_cache: false,
             entries: vec![
                 ConversationEntry {
                     kind: ConversationKind::Opened,
