@@ -783,7 +783,7 @@ fn decode_git_path(value: &str) -> String {
                 output.push(value);
             }
             Some(other) => output.push(other),
-            None | Some(b'\\') => output.push(b'\\'),
+            None => output.push(b'\\'),
         }
     }
     String::from_utf8_lossy(&output).into_owned()

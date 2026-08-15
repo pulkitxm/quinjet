@@ -16,9 +16,7 @@ use crate::app::{
     ToastLevel, UiGeometry, View,
 };
 use crate::convert::cells;
-use crate::git::diff::{
-    CommitDetails, DiffDocument, DiffLine, DiffLineKind, HighlightSpan, PullRequestDetails,
-};
+use crate::git::diff::{DiffDocument, DiffLine, DiffLineKind, HighlightSpan, PullRequestDetails};
 use crate::git::github::{
     CheckLogLine, CheckLogSeverity, CheckStep, ConversationEntry, ConversationKind,
     GitHubRepository, PullRequestCheckStatus, PullRequestFileStatus,
@@ -1459,7 +1457,11 @@ fn draw_pull_request_overview(
 
     let mut title = overview_title(app, showing_check);
     if overflow > 0 {
-        title.push_str(&format!("·  ←/→ {}/{overflow} ", app.horizontal_scroll));
+        title.push_str("·  ←/→ ");
+        title.push_str(&app.horizontal_scroll.to_string());
+        title.push('/');
+        title.push_str(&overflow.to_string());
+        title.push(' ');
     }
     frame.render_widget(panel_block(title, focused, theme), area);
 
@@ -2252,7 +2254,7 @@ fn wrap_words(value: &str, width: usize) -> Vec<String> {
             if word_width > width {
                 lines.push(truncate_end(word, width));
             } else {
-                current = word.to_owned();
+                word.clone_into(&mut current);
             }
         }
     }
@@ -2776,8 +2778,8 @@ fn unified_row_indices(document: &DiffDocument, app: &App) -> Vec<usize> {
         let collapsed = document.lines[index].kind == DiffLineKind::FileHeader
             && file_header_path(&document.lines[index])
                 .is_some_and(|path| app.preview_file_collapsed(path));
+        index += 1;
         if collapsed {
-            index += 1;
             while index < document.lines.len()
                 && document.lines[index].kind != DiffLineKind::FileFooter
             {
@@ -2786,8 +2788,6 @@ fn unified_row_indices(document: &DiffDocument, app: &App) -> Vec<usize> {
             if index < document.lines.len() {
                 index += 1;
             }
-        } else {
-            index += 1;
         }
     }
     rows
@@ -3467,7 +3467,10 @@ fn highlight_spans<'a>(
     output
 }
 
-#[expect(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the renderer needs the whole row context in one call"
+)]
 fn push_highlight_piece(
     output: &mut Vec<Span<'_>>,
     text: &str,
@@ -3509,8 +3512,7 @@ fn marker_for(kind: DiffLineKind, theme: &Theme) -> (&'static str, Style) {
                 .fg(theme.accent)
                 .add_modifier(Modifier::BOLD),
         ),
-        DiffLineKind::Context => ("  ", Style::default().fg(theme.muted)),
-        DiffLineKind::Meta => ("  ", Style::default().fg(theme.muted)),
+        DiffLineKind::Context | DiffLineKind::Meta => ("  ", Style::default().fg(theme.muted)),
         DiffLineKind::FileHeader | DiffLineKind::FileFooter => {
             ("", Style::default().fg(theme.muted))
         }
@@ -4707,6 +4709,7 @@ fn suffix_width(value: &str, width: usize) -> String {
 )]
 mod tests {
     use super::*;
+    use crate::git::diff::CommitDetails;
 
     #[test]
     fn three_tabs_fit_the_minimum_supported_terminal_width() {
