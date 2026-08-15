@@ -17,7 +17,7 @@ exclude = ["extras/", ".github/", ".agents/"]
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
 crossbeam-channel = "0.5"
-crossterm = "0.28"
+crossterm = "0.29"
 notify = "8.0"
 ratatui = "0.30"
 syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
