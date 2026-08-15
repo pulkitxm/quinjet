@@ -1,0 +1,187 @@
+name: Deep checks
+
+on:
+  schedule:
+    - cron: '40 3 * * 0'
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deep-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  gate:
+    name: Should the deep checks run
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ github.event_name != 'pull_request' || github.event.label.name == 'deep-check' }}
+    steps:
+      - run: echo "event ${{ github.event_name }}, label ${{ github.event.label.name }}"
+
+  miri:
+    name: Miri
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - uses: Swatinem/rust-cache@v2
+      - name: Interpret the tests that do not touch the process boundary
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation -Zmiri-strict-provenance
+        run: cargo miri test --all-features
+
+  sanitizers:
+    name: Sanitizer (${{ matrix.sanitizer }})
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [address, leak, thread]
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.sanitizer != 'address' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: sanitizer-${{ matrix.sanitizer }}
+      - name: Run the tests under ${{ matrix.sanitizer }}
+        env:
+          RUSTFLAGS: -Zsanitizer=${{ matrix.sanitizer }}
+          RUSTDOCFLAGS: -Zsanitizer=${{ matrix.sanitizer }}
+        run: >-
+          cargo +nightly test --all-features --target x86_64-unknown-linux-gnu
+          -Zbuild-std --no-fail-fast
+
+  careful:
+    name: cargo-careful
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-careful
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo +nightly careful test --all-features
+
+  mutants:
+    name: Mutants ${{ matrix.shard }}/6
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants
+      - uses: Swatinem/rust-cache@v2
+      - name: Hunt for tests that survive a mutated build
+        run: cargo mutants --no-shuffle --in-place --timeout 120 --shard ${{ matrix.shard }}/6
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutants-${{ matrix.shard }}
+          path: mutants.out/
+
+  minimal-versions:
+    name: Minimal dependency versions
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-minimal-versions
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo minimal-versions check --all-targets --all-features
+
+  unused-dependencies:
+    name: cargo-udeps
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-udeps
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo +nightly udeps --all-targets --all-features
+
+  msrv:
+    name: MSRV is the true minimum
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+      - run: cargo binstall --no-confirm --locked cargo-msrv
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo msrv verify -- cargo check --all-targets --all-features --locked
+
+  size:
+    name: Binary size
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+      - run: cargo binstall --no-confirm --locked cargo-bloat
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked
+      - name: Where the bytes went
+        run: cargo bloat --release --crates -n 30
+
+  dependencies:
+    name: Outdated dependencies
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+      - run: cargo binstall --no-confirm --locked cargo-outdated
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo outdated --root-deps-only --exit-code 1

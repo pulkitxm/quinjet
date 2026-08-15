@@ -1,0 +1,10 @@
+[profile.default]
+retries = 0
+failure-output = "immediate-final"
+fail-fast = false
+slow-timeout = { period = "30s", terminate-after = 4 }
+
+[profile.ci]
+retries = { backoff = "exponential", count = 2, delay = "1s" }
+failure-output = "immediate-final"
+final-status-level = "slow"

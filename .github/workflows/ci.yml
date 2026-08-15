@@ -67,11 +67,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
       - uses: Swatinem/rust-cache@v2
         with:
           key: test-${{ matrix.os }}
       - name: Tests
-        run: cargo test --all-features --locked
+        run: cargo nextest run --all-features --locked --no-fail-fast
       - name: Tests (release)
         run: cargo test --all-features --locked --release
       - name: Doc tests
@@ -96,6 +99,11 @@ jobs:
             -D rustdoc::invalid_html_tags
             -D rustdoc::bare_urls
         run: cargo doc --no-deps --all-features --document-private-items --locked
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deadlinks
+      - name: No dead links in the generated docs
+        run: cargo deadlinks --dir target/doc
 
   msrv:
     name: Minimum supported Rust
@@ -169,6 +177,11 @@ jobs:
         with:
           name: coverage-lcov
           path: lcov.info
+      - uses: codecov/codecov-action@v5
+        with:
+          files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
 
   package:
     name: Package and install
@@ -183,6 +196,14 @@ jobs:
       - run: cargo install --path . --locked --root /tmp/quinjet-install
       - run: /tmp/quinjet-install/bin/quinjet --version
       - run: /tmp/quinjet-install/bin/quinjet --help >/dev/null
+      - name: Binary stays under the size budget
+        env:
+          BUDGET_BYTES: 20971520
+        run: |
+          set -euo pipefail
+          size=$(stat -c %s /tmp/quinjet-install/bin/quinjet)
+          echo "release binary: ${size} bytes (budget ${BUDGET_BYTES})"
+          test "${size}" -le "${BUDGET_BYTES}"
 
   installers:
     name: Installers (${{ matrix.os }})
