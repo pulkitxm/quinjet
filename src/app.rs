@@ -1436,9 +1436,6 @@ impl App {
             KeyCode::Char('C') if self.view == View::History => self.confirm_cherry_pick(),
             KeyCode::Char('R') if self.view == View::History => self.confirm_revert(),
             KeyCode::Char('n') if self.view == View::History => self.prompt_branch_at_commit(),
-            // Reading someone's pull request is not the place to push your own
-            // branch. The tab labels used to imply these were the section keys,
-            // and following that pushed.
             KeyCode::Char('f') | KeyCode::Char('p') if self.view == View::PullRequests => {
                 self.show_toast(
                     "Fetch and push live in Changes · Shift+P and Shift+F switch section"
@@ -1522,7 +1519,6 @@ impl App {
             KeyCode::Char(']') if self.check_log_visible() => {
                 self.move_check_step_cursor(1);
             }
-            // The conversation has neither steps nor hunks to jump between.
             KeyCode::Char('[') | KeyCode::Char(']')
                 if self.view == View::PullRequests
                     && self.pull_request_section == PullRequestSection::Overview => {}
@@ -1581,8 +1577,6 @@ impl App {
 
     pub fn handle_mouse(&mut self, event: MouseEvent, now: Instant) -> Vec<AppEffect> {
         let mut effects = Vec::new();
-        // Shift is the standard terminal override for native text selection while
-        // mouse reporting is enabled. Never activate a Quinjet control during it.
         if self.modal.is_some() || event.modifiers.contains(KeyModifiers::SHIFT) {
             return effects;
         }
@@ -1906,8 +1900,6 @@ impl App {
             force || last.is_none_or(|last| now.duration_since(last) >= interval)
         };
 
-        // A stream that coalesced into a request already in flight is left
-        // unstamped, so it is due again on the next tick rather than skipped.
         if due(
             self.pull_request_checks_read_at,
             self.pull_request_poll_interval(),
@@ -1926,8 +1918,6 @@ impl App {
                 self.pull_request_detail_read_at = Some(now);
             }
         }
-        // A finished run's log is immutable; only a job still writing output is
-        // worth re-reading.
         let running = self
             .selected_pull_request_check()
             .is_some_and(|check| check.status.is_running());
@@ -1984,9 +1974,6 @@ impl App {
                             self.request_history(true, &mut effects);
                         }
                         if self.view == View::Changes {
-                            // A status result is authoritative and already arrives off the UI
-                            // thread. Queue its preview immediately instead of adding another
-                            // debounce delay; navigation still uses debounced previews.
                             self.preview_due = None;
                             self.request_preview(&mut effects);
                         }
@@ -2142,9 +2129,6 @@ impl App {
                     return effects;
                 }
                 self.pull_request_prefetching = false;
-                // Background fill is best-effort. Individual files still load on
-                // demand, so a failed batch must neither raise an error to the
-                // reader nor retry in a loop.
                 if let Ok(documents) = result {
                     for (path, document) in documents {
                         self.pull_request_documents.entry(path).or_insert(document);
@@ -2162,9 +2146,6 @@ impl App {
                 self.pull_request_checks_loading = false;
                 match result {
                     Ok(snapshot) => {
-                        // A live refresh can add, drop or reorder runs. Follow the
-                        // selected check by identity so a completing run never
-                        // pulls a different one under the reader's cursor.
                         let selected = self
                             .selected_pull_request_check()
                             .map(|check| (check.workflow.clone(), check.name.clone()));
@@ -2179,8 +2160,6 @@ impl App {
                                     == (selected.0.as_str(), selected.1.as_str())
                             })
                         });
-                        // A run that disappeared takes the reader back to the
-                        // conversation rather than to another run's log.
                         self.set_check_cursor(cursor);
                         self.pull_request_checks_error = None;
                         if was_running {
@@ -2202,13 +2181,7 @@ impl App {
                         .is_some_and(|check| check.status.is_running());
                 match result {
                     Ok(log) => {
-                        // A failure is the reason anyone opens a log, so open that
-                        // step for them. The cursor follows so `space` folds it
-                        // again without any navigation first.
                         if self.expanded_check_steps.is_empty() {
-                            // A failure is the reason anyone opens a finished
-                            // log; the step in progress is the reason anyone
-                            // opens a running one.
                             if let Some(step) = log.failed_step().or_else(|| log.running_step()) {
                                 let number = step.number;
                                 self.expanded_check_steps.insert(number);
@@ -2223,9 +2196,6 @@ impl App {
                         }
                         self.pull_request_check_log = Some(log);
                         self.pull_request_check_log_error = None;
-                        // Stay on the newest output while a job is still writing,
-                        // but never yank a reader who has scrolled up to read
-                        // something earlier.
                         if following {
                             self.content_scroll = usize::MAX;
                         }
@@ -2243,9 +2213,6 @@ impl App {
                 self.pull_request_conversation_loading = false;
                 match result {
                     Ok(conversation) => {
-                        // Entries are ordered oldest first, so new activity only
-                        // ever appends and a live refresh leaves the reader's
-                        // scroll position pointing at the same entry.
                         self.pull_request_conversation = conversation;
                         self.pull_request_conversation_error = None;
                     }
@@ -2352,9 +2319,6 @@ impl App {
                                     .url
                                     .eq_ignore_ascii_case(&current.base_repository.url)
                         });
-                        // A force push or a new commit replaces the head, which
-                        // invalidates the prepared diff but nothing else the
-                        // reader is looking at.
                         let head_moved =
                             previous.is_some_and(|previous| previous.head_oid != current.head_oid);
                         self.pull_request_repository = snapshot.selected_repository;
@@ -2366,8 +2330,6 @@ impl App {
                         } else if head_moved {
                             self.reset_pull_request_diff_runtime();
                         }
-                        // Metadata has landed; anything still to do reports its
-                        // own progress from here.
                         self.pull_request_progress = None;
                         self.pull_request_error = None;
                         self.schedule_pull_request_poll(now);
@@ -3126,9 +3088,6 @@ impl App {
         self.horizontal_scroll = 0;
         self.invalidate_preview();
         self.document = self.loading_document_for_view(view);
-        // The poll cadence depends on which view is open, so a pending tick
-        // scheduled at the slow background rate would otherwise leave a pull
-        // request stale for up to two minutes after returning to it.
         self.schedule_pull_request_poll(Instant::now());
         if view == View::PullRequests && self.pull_request.is_none() {
             self.pull_request_lookup_active = true;
@@ -3202,9 +3161,6 @@ impl App {
     }
 
     fn navigate(&mut self, amount: isize, now: Instant) {
-        // A check log is a list of steps, so moving through it selects a step
-        // the way every other list in Quinjet does. The draw scrolls whatever
-        // is selected into view.
         if self.focus == Focus::Content
             && self.check_log_visible()
             && self.move_check_step_cursor(amount)
@@ -3273,8 +3229,6 @@ impl App {
                     }
                     PullRequestSection::Overview => {
                         self.move_check_cursor(amount);
-                        // Reuse the preview debounce so holding j or k walks the
-                        // list without firing a log request per keystroke.
                         self.schedule_preview(now);
                     }
                 }
@@ -3301,8 +3255,6 @@ impl App {
     }
 
     fn go_to_edge(&mut self, end: bool, now: Instant) {
-        // A check log is a list, so its ends are its first and last step. The
-        // draw scrolls whichever one is selected into view.
         if self.focus == Focus::Content && self.check_log_visible() {
             let steps = self.check_step_numbers();
             if let Some(step) = if end { steps.last() } else { steps.first() } {
@@ -3311,9 +3263,6 @@ impl App {
             }
         }
         if self.focus == Focus::Content {
-            // The renderer owns the true row count: a pane may compose rows from
-            // app state rather than from the diff document. Ask for the end and
-            // let the draw clamp to whatever that pane actually holds.
             self.content_scroll = if end { usize::MAX } else { 0 };
             return;
         }
@@ -3341,8 +3290,6 @@ impl App {
                         self.select_pull_request_tree_entry(cursor, now);
                     }
                     PullRequestSection::Overview => {
-                        // Home returns to the pull request itself, which sits
-                        // above the first check in the sidebar.
                         let cursor = end
                             .then(|| self.pull_request_checks.len().checked_sub(1))
                             .flatten();
@@ -3636,8 +3583,6 @@ impl App {
         self.sidebar_offset = 0;
         self.history_complete = false;
         self.history_refresh_again = false;
-        // Invalidate a page that may still be running for the previous branch. The
-        // mailbox then replaces any queued history request with this branch.
         self.history_generation = self.history_generation.wrapping_add(1);
         self.history_loading = false;
         self.request_history(true, effects);
@@ -4120,10 +4065,6 @@ impl App {
         self.pull_request_check_cursor = cursor;
         self.content_scroll = 0;
         self.horizontal_scroll = 0;
-        // The pane draws its header from the selected check and its body from
-        // the loaded log. Dropping the log here is what keeps those two from
-        // ever describing different runs, however the selection moved and
-        // whichever frame lands before the replacement arrives.
         self.invalidate_check_run_log();
         true
     }
@@ -4226,8 +4167,6 @@ impl App {
         };
         let target = (check.workflow.clone(), check.name.clone());
         if self.pull_request_check_log_target.as_ref() == Some(&target) {
-            // Nothing to do for a run already loaded or already on its way,
-            // unless a live refresh is asking for its newest output.
             if self.pull_request_check_log_loading {
                 return;
             }
@@ -4237,9 +4176,6 @@ impl App {
                 return;
             }
         } else {
-            // A different run. Anything in flight is now answering for the wrong
-            // check, so it has to be dropped rather than waited on: bumping the
-            // generation below is what makes its reply unusable.
             self.pull_request_check_log = None;
             self.pull_request_check_log_error = None;
             self.expanded_check_steps.clear();
@@ -4275,8 +4211,6 @@ impl App {
         self.pull_request_prefetched_logs = settled.len();
         effects.push(AppEffect::Git(Box::new(
             WorkerCommand::PrefetchCheckRunLogs {
-                // The worker stamps this: it owns the ordering that decides
-                // which warm-up is still the current one.
                 generation: 0,
                 pull_request: Box::new(pull_request),
                 checks: settled,
@@ -4533,13 +4467,8 @@ impl App {
                     }
                     return;
                 };
-                // Index the diff as soon as a pull request is open, whichever
-                // half is on screen. Opening a pull request is the commitment;
-                // the files should already be there when they are asked for.
                 let preparing = self.prepare_pull_request_workspace(&pull_request, effects);
                 if self.pull_request_section == PullRequestSection::Overview {
-                    // The overview pane renders app state directly rather than a
-                    // diff document; only a selected check needs fetching.
                     self.request_check_run_log(false, effects);
                     return;
                 }
@@ -5034,8 +4963,6 @@ mod tests {
 
     #[test]
     fn reading_a_pull_request_never_pushes_your_own_branch() {
-        // The section tabs used to be labelled [P] and [F], and following that
-        // pushed a branch. The labels are gone; the keys must be too.
         let mut app = app_with_changes();
         let now = Instant::now();
         app.view = View::PullRequests;
@@ -5052,7 +4979,6 @@ mod tests {
             assert!(app.busy.is_none(), "{character} started a git operation");
         }
 
-        // Everywhere else they still do their job.
         app.view = View::Changes;
         app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE), now);
         assert!(app.busy.is_some(), "fetch still runs from the changes view");
@@ -5100,8 +5026,6 @@ mod tests {
 
     #[test]
     fn the_mouse_can_be_released_so_the_terminal_can_select_text() {
-        // A terminal cannot select text with a mouse it is reporting to the
-        // application, so the only way to copy from the screen is to let go.
         let mut app = app_with_changes();
         let now = Instant::now();
         assert!(app.mouse_capture);
@@ -5780,8 +5704,6 @@ mod tests {
         assert_eq!(command_count(&first, "conversation"), 1);
         assert_eq!(command_count(&first, "log"), 1);
 
-        // Pretend every in-flight read landed, then tick again one active
-        // interval later: only the check state is due.
         app.pull_request_checks_loading = false;
         app.pull_request_conversation_loading = false;
         app.pull_request_check_log_loading = false;
@@ -5797,7 +5719,6 @@ mod tests {
         );
         assert_eq!(command_count(&second, "log"), 0);
 
-        // A delivery says something definitely changed, so nothing waits.
         let forced = app.webhook_delivered(start + PULL_REQUEST_ACTIVE_POLL);
         assert_eq!(command_count(&forced, "conversation"), 1);
         assert_eq!(command_count(&forced, "log"), 1);
@@ -5843,17 +5764,14 @@ mod tests {
             "selecting a step never scrolls the pane behind the reader's back"
         );
 
-        // Space folds whatever is selected.
         app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE), now);
         assert!(app.check_step_expanded(2));
 
-        // Paging still scrolls the output rather than moving the selection.
         app.geometry.content = Rect::new(0, 0, 80, 20);
         app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE), now);
         assert_eq!(app.pull_request_step_cursor, 2);
         assert!(app.content_scroll > 0);
 
-        // The ends of the list are its first and last step.
         app.handle_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE), now);
         assert_eq!(app.pull_request_step_cursor, 3);
         app.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE), now);
@@ -5891,9 +5809,6 @@ mod tests {
         });
         let stale = app.pull_request_check_log_generation;
 
-        // The keyboard path moves the cursor and leaves the request to the
-        // preview debounce, so the frames drawn in between must not still be
-        // holding the previous run's log.
         app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE), now);
 
         assert_eq!(app.pull_request_check_cursor, Some(1));
@@ -5918,8 +5833,6 @@ mod tests {
         let lookup = app.pull_request_generation;
         assert!(app.pull_request_loading);
 
-        // Checking which repository is being searched, then dismissing the
-        // picker, must not strand the lookup that is already running.
         app.open_pull_request_repositories(&mut Vec::new());
         assert_eq!(
             app.pull_request_generation, lookup,
@@ -5962,14 +5875,12 @@ mod tests {
             check("No-comment policy", PullRequestCheckStatus::Passed),
         ];
 
-        // Open the first check. Its log is slow, so it is still in flight.
         let mut effects = Vec::new();
         app.select_pull_request_check(Some(0), &mut effects);
         assert_eq!(effects.len(), 1);
         let slow = app.pull_request_check_log_generation;
         assert!(app.pull_request_check_log_loading);
 
-        // Move to the second check before the first one answers.
         let mut effects = Vec::new();
         app.select_pull_request_check(Some(1), &mut effects);
         assert!(
@@ -5988,8 +5899,6 @@ mod tests {
             "the in-flight read is invalidated by the move"
         );
 
-        // The slow reply finally lands. It belongs to a check nobody is looking
-        // at, so it must not be rendered under the selected one.
         let effects = app.handle_worker_event(
             WorkerEvent::CheckRunLog {
                 generation: slow,
@@ -6040,7 +5949,6 @@ mod tests {
             log_pending: false,
         };
 
-        // Sitting at the end: new output keeps arriving in view.
         app.content_at_bottom = true;
         app.content_scroll = 120;
         app.handle_worker_event(
@@ -6056,7 +5964,6 @@ mod tests {
             "the draw clamps this to the new end"
         );
 
-        // Scrolled up to read something: the view stays where it was put.
         app.content_at_bottom = false;
         app.content_scroll = 40;
         app.pull_request_check_log_generation = 4;
@@ -6069,7 +5976,6 @@ mod tests {
         );
         assert_eq!(app.content_scroll, 40);
 
-        // A finished run has nothing more to follow.
         app.pull_request_checks = vec![check("build", PullRequestCheckStatus::Passed)];
         app.content_at_bottom = true;
         app.content_scroll = 40;

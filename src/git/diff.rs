@@ -156,7 +156,6 @@ pub fn parse_numstat(output: &[u8]) -> HashMap<PathBuf, DiffLineCounts> {
             binary,
         };
         if path.is_empty() {
-            // Rename or copy: the pre-image and post-image follow as records.
             let Some(new_path) = records.get(cursor + 1) else {
                 break;
             };
@@ -397,10 +396,6 @@ pub fn parse_diff(
         return DiffDocument::empty(title, "No textual diff to display");
     }
 
-    // Syntect is intentionally bounded. Raw Git patch generation is generally fast,
-    // but grammar parsing can dominate large or generated files by several seconds.
-    // Large patches retain diff coloring and line numbers while using plain source
-    // spans; ordinary patches keep full syntax highlighting.
     let assets = (raw.len() <= MAX_SYNTAX_HIGHLIGHT_PATCH_BYTES).then(highlight_assets);
     let mut active_path = path_hint.map(Path::to_path_buf);
     let mut old_highlighter = highlighter_for_path(assets, active_path.as_deref());
@@ -442,8 +437,6 @@ pub fn parse_diff(
             continue;
         }
 
-        // Ignore commit headers and other preamble. A commit summary is rendered in
-        // its own pane; only rows belonging to an actual file enter the diff model.
         if current_file.is_none() {
             continue;
         }
@@ -546,8 +539,6 @@ pub fn parse_diff(
             new_line = new_line.map(|line| line + 1);
             let content = expand_tabs(content);
             let spans = highlight_optional(&mut new_highlighter, &content, assets);
-            // Advance the old parser too. Its spans are normally identical, while its
-            // state can differ after a replacement block.
             advance_highlighter(&mut old_highlighter, &content, assets);
             file_mut(&mut current_file, path_hint).lines.push(DiffLine {
                 kind: DiffLineKind::Context,
@@ -565,9 +556,6 @@ pub fn parse_diff(
     if let Some(file) = current_file.take() {
         files.push(file);
     }
-    // GitHub's path sort follows Git's canonical, case-sensitive ordering of the
-    // complete repository-relative path. Sorting the full path (rather than only the
-    // basename) keeps nested files in the same order as GitHub's changed-files view.
     files.sort_by_cached_key(FileBuilder::sort_path);
     for file in files {
         flush_file(file, &mut lines);
@@ -859,9 +847,6 @@ fn expand_tabs(line: &str) -> Cow<'_, str> {
         return Cow::Borrowed(line);
     }
 
-    // Terminal cells do not have tab stops, and ratatui treats a literal tab as a
-    // zero-width control character. Expanding it keeps indentation visible and
-    // aligns syntax spans and horizontal scrolling with what is rendered.
     let mut expanded = String::with_capacity(line.len());
     let mut column = 0;
     for character in line.chars() {
@@ -1052,7 +1037,6 @@ mod tests {
             "diff --git a/gone.rs b/gone.rs\ndeleted file mode 100644\n--- a/gone.rs\n+++ /dev/null\n@@ -1 +0,0 @@\n-bye\n"
         );
 
-        // Each section still parses as exactly one self-contained file.
         let document = parse_diff(sections[0].body, "one", None, false);
         assert_eq!(document.file_count(), 1);
         assert_eq!(document.addition_count(), 1);

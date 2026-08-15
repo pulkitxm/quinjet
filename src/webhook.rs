@@ -59,8 +59,6 @@ impl WebhookListener {
 impl Drop for WebhookListener {
     fn drop(&mut self) {
         self.stopped.store(true, Ordering::Relaxed);
-        // `accept` blocks until a connection arrives, so knock once to let the
-        // thread observe the stop flag and exit.
         let _ = TcpStream::connect(self.address);
     }
 }
@@ -81,8 +79,6 @@ fn serve(listener: &TcpListener, sender: &Sender<WebhookDelivery>, stopped: &Ato
             continue;
         }
         if let Some(delivery) = read_delivery(stream) {
-            // A full mailbox already has refreshes pending; dropping the extra
-            // signal costs nothing.
             let _ = sender.try_send(delivery);
         }
     }

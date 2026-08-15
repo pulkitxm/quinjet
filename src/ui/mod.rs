@@ -938,8 +938,6 @@ fn draw_pull_requests_sidebar(
             );
         }
     }
-    // Nothing fills the empty list: the field below already reads
-    // "PR #  Enter lookup", and the pane beside it says the same thing once.
 
     let controls_y = body_area.bottom();
     let repository_name = app
@@ -1413,8 +1411,6 @@ fn draw_pull_request_overview(
 ) -> Vec<ContentStepHit> {
     let showing_check = app.pull_request_check_cursor.is_some();
     let focused = app.focus == Focus::Content && app.modal.is_none();
-    // Measure the pane before composing, then title it once the rows are known,
-    // so the header can say whether anything lies past the right edge.
     let inner = panel_block(String::new(), focused, theme).inner(area);
     if inner.width == 0 || inner.height == 0 {
         frame.render_widget(
@@ -1445,11 +1441,6 @@ fn draw_pull_request_overview(
     }
     frame.render_widget(panel_block(title, focused, theme), area);
 
-    // Following the step cursor here keeps `[` and `]` useful on a log that is
-    // far taller than the pane.
-    // Only a selection that just moved pulls the view to it. Doing this on every
-    // frame would anchor the pane to the selected step, so scrolling into its own
-    // output, or down to the steps after it, would snap straight back.
     if showing_check && app.pull_request_step_reveal {
         app.pull_request_step_reveal = false;
         if let Some(cursor_row) = rows
@@ -1649,9 +1640,6 @@ fn conversation_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> 
         theme,
     )));
 
-    // The description is rendered on its own rather than waiting for the
-    // conversation, so a pull request reads completely from the moment its
-    // metadata lands.
     rows.push(ContentRow::blank());
     rows.push(ContentRow::plain(section_rule("Description", width, theme)));
     if pull_request.description.trim().is_empty() {
@@ -1713,8 +1701,6 @@ fn push_conversation_entry(
     } else {
         format!("  ·  {stamp}")
     };
-    // A header says who is speaking, so it stays anchored while their code
-    // scrolls underneath it. Only the action clause gives way when it has to.
     let reserved = 3 + entry.actor.width() + stamp.width();
     let action = truncate_end(&action, width.saturating_sub(reserved));
     rows.push(ContentRow::plain(Line::from(vec![
@@ -1740,7 +1726,6 @@ fn push_conversation_entry(
             ])));
         }
     }
-    // The opening post's body is the description, already shown above it.
     if entry.kind != ConversationKind::Opened
         && entry.kind.has_body()
         && !entry.body.trim().is_empty()
@@ -2044,8 +2029,6 @@ fn push_log_lines(rows: &mut Vec<ContentRow>, lines: &[CheckLogLine], theme: &Th
         return;
     }
     for line in lines {
-        // Runner output keeps its full width; the pane scrolls sideways rather
-        // than cutting a line off at the border.
         rows.push(ContentRow::wide(Line::from(vec![
             Span::styled("   │ ", Style::default().fg(theme.border)),
             Span::styled(
@@ -2169,16 +2152,11 @@ fn wrap_prose(value: &str, width: usize) -> Vec<(ProseStyle, String)> {
     for raw_line in value.lines() {
         let trimmed = raw_line.trim_end();
         if trimmed.trim_start().starts_with("```") {
-            // The fence is punctuation for a parser, not content for a reader.
-            // Its own styling already says where the block starts and ends.
             fenced = !fenced;
             continue;
         }
         if fenced {
             previous_blank = false;
-            // Code keeps its full width and its own indentation. Wrapping or
-            // truncating it would destroy the alignment that makes it readable;
-            // the pane scrolls sideways to reach the rest instead.
             output.push((ProseStyle::Code, trimmed.to_owned()));
             continue;
         }
@@ -2213,9 +2191,6 @@ fn wrap_prose(value: &str, width: usize) -> Vec<(ProseStyle, String)> {
             ""
         };
         let available = width.saturating_sub(indent.width() + prefix.width());
-        // Emphasis markers carry no meaning once the line is styled. Backticks
-        // stay because a terminal has no other way to set inline code apart, and
-        // underscores stay because they are ordinary characters in identifiers.
         let body = body.replace('*', "");
         for (index, wrapped) in wrap_words(&body, available).into_iter().enumerate() {
             let lead = if index == 0 {
@@ -2318,9 +2293,6 @@ fn draw_content(
         return (None, Vec::new(), Vec::new());
     }
 
-    // Commit and pull-request metadata belong to the same scrollable document as
-    // their file panes. Treating details as a fixed region makes them sticky and
-    // permanently reduces the diff viewport.
     let details_rows = if app.document.commit_details.is_some() {
         commit_details_row_count(inner.height)
     } else if app.view != View::PullRequests && app.document.pull_request_details.is_some() {
@@ -2419,8 +2391,6 @@ fn draw_commit_details_scrolled(
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.border))
         .style(Style::default().bg(theme.panel_alt).fg(theme.text));
-    // Render the complete card to a temporary buffer, then copy its visible rows.
-    // This preserves borders while allowing the card to leave the viewport naturally.
     let full_area = Rect::new(0, 0, area.width, total_rows as u16);
     let mut buffer = ratatui::buffer::Buffer::empty(full_area);
     let inner = block.inner(full_area);
@@ -2771,8 +2741,6 @@ fn unified_row_indices(document: &DiffDocument, app: &App) -> Vec<usize> {
     let mut index = 0;
     while index < document.lines.len() {
         if document.lines[index].kind == DiffLineKind::HunkHeader {
-            // The @@ ranges are patch transport metadata. Editors such as VS Code
-            // use them for navigation but do not mix them into the source view.
             index += 1;
             continue;
         }
@@ -3190,8 +3158,6 @@ fn side_by_side_rows<'a>(document: &'a DiffDocument, app: &App) -> Vec<SideBySid
                 index += 1;
             }
             DiffLineKind::HunkHeader => {
-                // Keep hunk metadata in the model for [ / ] navigation, but omit the
-                // raw @@ coordinates from the source-oriented preview.
                 index += 1;
             }
             DiffLineKind::Meta => {
@@ -5262,13 +5228,11 @@ terminal rows because that is what real pull-request comments look like in pract
             unavailable: None,
             log_pending: false,
         });
-        // The first step is open and selected, which is how a reader arrives here.
         app.expanded_check_steps.insert(1);
         app.pull_request_step_cursor = 1;
         let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
         terminal.draw(|frame| draw(frame, &mut app)).unwrap();
 
-        // Scroll into that step's output, the way PgDn or the wheel would.
         app.content_scroll = 120;
         terminal.draw(|frame| draw(frame, &mut app)).unwrap();
         assert_eq!(
@@ -5276,7 +5240,6 @@ terminal rows because that is what real pull-request comments look like in pract
             "a redraw must not drag the view back to the selected step"
         );
 
-        // And carry on to the end, where the steps that follow it live.
         app.content_scroll = usize::MAX;
         terminal.draw(|frame| draw(frame, &mut app)).unwrap();
         let rendered: String = terminal
@@ -5361,8 +5324,6 @@ terminal rows because that is what real pull-request comments look like in pract
         app.pull_request_check_log = Some(crate::git::github::CheckRunLog {
             truncated: false,
             unavailable: None,
-            // GitHub has published no archive yet, which is the normal state for
-            // most of a job's life.
             log_pending: true,
             loose_lines: Vec::new(),
             steps: vec![
@@ -5437,8 +5398,6 @@ terminal rows because that is what real pull-request comments look like in pract
             !rows.iter().any(|row| text(row).contains("```")),
             "fence markers are punctuation for a parser, never shown to a reader"
         );
-        // Both the description's fenced block and the comment's survive, each
-        // carrying its exact source text.
         let scrollable: Vec<String> = rows.iter().filter(|row| row.wide).map(text).collect();
         assert!(scrollable.iter().any(|row| row.contains("cargo test")));
         assert!(scrollable.iter().any(|row| row.contains("  short line")));
@@ -5459,7 +5418,6 @@ terminal rows because that is what real pull-request comments look like in pract
             "everything that is not code is wrapped to fit"
         );
 
-        // Scrolling reaches past the pane on the code row and leaves prose alone.
         let prose = rows
             .iter()
             .find(|row| !row.wide && text(row).contains("webhook path"))
@@ -5518,9 +5476,6 @@ terminal rows because that is what real pull-request comments look like in pract
         );
         assert!(!cached.contains('⟳'));
 
-        // Check state is held for thirty seconds by design, so it is nearly
-        // always read live. Letting it veto the label made the label
-        // unreachable: it never once appeared in a warm session.
         app.pull_request_checks_from_cache = false;
         let live_checks = render(&mut app, &mut terminal);
         assert!(
@@ -5711,8 +5666,6 @@ terminal rows because that is what real pull-request comments look like in pract
             "step rows stay clickable"
         );
 
-        // Log output is the widest thing this pane shows, so it has to be the
-        // thing that scrolls rather than the thing that gets cut off.
         let rows = check_run_rows(&app, 40, &Theme::default());
         let log = rows
             .iter()

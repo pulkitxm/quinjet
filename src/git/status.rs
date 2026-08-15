@@ -191,7 +191,6 @@ fn parse_branch_header(record: &[u8], branch: &mut BranchState) {
 }
 
 fn parse_ordinary(record: &[u8], changes: &mut Vec<Change>) {
-    // 1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>
     let fields = splitn_bytes(record, b' ', 9);
     if fields.len() != 9 || fields[1].len() < 2 {
         return;
@@ -200,7 +199,6 @@ fn parse_ordinary(record: &[u8], changes: &mut Vec<Change>) {
 }
 
 fn parse_renamed(record: &[u8], original_path: &[u8], changes: &mut Vec<Change>) {
-    // 2 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <Xscore> <path>\0<origPath>
     let fields = splitn_bytes(record, b' ', 10);
     if fields.len() != 10 || fields[1].len() < 2 {
         return;
@@ -209,7 +207,6 @@ fn parse_renamed(record: &[u8], original_path: &[u8], changes: &mut Vec<Change>)
 }
 
 fn parse_unmerged(record: &[u8], changes: &mut Vec<Change>) {
-    // u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>
     let fields = splitn_bytes(record, b' ', 11);
     if fields.len() != 11 {
         return;

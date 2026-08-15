@@ -208,19 +208,12 @@ impl Mailbox {
             | WorkerCommand::LoadLocalDiffFile { .. }
             | WorkerCommand::PreparePullRequest { .. }
             | WorkerCommand::LoadPullRequestFile { .. }) => {
-                // Only the newest preview matters. This makes key-repeat constant-space
-                // even when a large diff is slower than navigation.
                 self.preview = Some(command);
             }
-            // Background fill occupies its own slot so a queued batch can never
-            // displace the preview the reader is waiting for.
             command @ WorkerCommand::LoadPullRequestFileBatch { .. } => {
                 self.prefetch = Some(command);
             }
             command @ WorkerCommand::LoadHistory { .. } => self.history = Some(command),
-            // Repository discovery keeps its own slot: it answers a different
-            // question from a pull-request lookup, and dropping one for the
-            // other leaves the caller waiting for a reply that never comes.
             command @ WorkerCommand::LoadGitHubRepositories { .. } => {
                 self.repositories = Some(command);
             }
@@ -240,7 +233,6 @@ impl Mailbox {
     }
 
     fn pop(&mut self) -> Option<WorkerCommand> {
-        // Explicit user work and visible previews win over background pagination.
         self.operations
             .pop_front()
             .or_else(|| self.branches.take())
@@ -281,9 +273,6 @@ fn worker_lane(command: &WorkerCommand) -> WorkerLane {
         | WorkerCommand::LoadPullRequestChecks { .. }
         | WorkerCommand::LoadPullRequestConversation { .. }
         | WorkerCommand::LoadCheckRunLog { .. } => WorkerLane::GitHubMetadata,
-        // Warming settled logs can run for minutes. It gets its own thread so a
-        // reader who reopens or switches pull requests mid-warm is answered now
-        // rather than after the warm-up drains.
         WorkerCommand::PrefetchCheckRunLogs { .. } => WorkerLane::Warm,
         WorkerCommand::PreparePullRequest { .. }
         | WorkerCommand::LoadPullRequestFile { .. }
@@ -379,9 +368,6 @@ impl GitWorker {
     /// mailbox slots and replace obsolete requests; repository mutations remain an
     /// ordered queue and are additionally serialized by the app's busy state.
     pub fn send(&self, mut command: WorkerCommand) -> bool {
-        // A warm-up is only worth finishing for the pull request that asked for
-        // it. Stamping each one supersedes whatever is still running for a pull
-        // request the reader has already left.
         if let WorkerCommand::PrefetchCheckRunLogs { generation, .. } = &mut command {
             *generation = self.warm_generation.fetch_add(1, Ordering::SeqCst) + 1;
         }
@@ -674,9 +660,6 @@ mod tests {
 
     #[test]
     fn warming_logs_never_shares_a_lane_with_the_reads_a_reader_waits_on() {
-        // Warming a settled run's log can take minutes. Once it starts, a lane
-        // cannot preempt it, so a reader who reopens or switches pull requests
-        // would sit on "Loading…" until the warm-up drained.
         let pull_request = || Box::new(PullRequest::default());
         let warm = WorkerCommand::PrefetchCheckRunLogs {
             generation: 0,
