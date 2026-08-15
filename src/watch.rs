@@ -65,10 +65,6 @@ fn is_noisy_git_path(path: &Path) -> bool {
 }
 
 #[cfg(test)]
-#[expect(
-    unused_results,
-    reason = "test helpers return values the assertions do not use"
-)]
 mod tests {
     use std::path::Path;
 
