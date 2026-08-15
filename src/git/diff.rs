@@ -76,14 +76,34 @@ pub struct CommitDetails {
     pub committed_at: String,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DiffLineCounts {
+    pub additions: usize,
+    pub deletions: usize,
+    pub binary: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffFileIndexEntry {
     pub path: PathBuf,
     pub old_path: Option<PathBuf>,
     pub status: String,
+    /// Exact per-file totals read from `git diff --numstat` while the index is
+    /// built. Known counts let a file header render its real `+n -n` before the
+    /// patch for that file has been produced.
+    pub counts: Option<DiffLineCounts>,
 }
 
 impl DiffFileIndexEntry {
+    pub fn new(path: PathBuf, old_path: Option<PathBuf>, status: String) -> Self {
+        Self {
+            path,
+            old_path,
+            status,
+            counts: None,
+        }
+    }
+
     fn label(&self) -> String {
         let mut label = self.path.display().to_string();
         if let Some(old_path) = self.old_path.as_ref().filter(|old| *old != &self.path) {
@@ -91,8 +111,73 @@ impl DiffFileIndexEntry {
         } else if !self.status.is_empty() {
             label.push_str(&format!("  · {}", self.status));
         }
+        if self.counts.is_some_and(|counts| counts.binary) {
+            label.push_str("  · binary");
+        }
         label
     }
+
+    fn count_spans(&self) -> (String, String) {
+        self.counts.map_or_else(
+            || ("+?".to_owned(), "-?".to_owned()),
+            |counts| {
+                (
+                    format!("+{}", counts.additions),
+                    format!("-{}", counts.deletions),
+                )
+            },
+        )
+    }
+}
+
+/// Parse `git diff --numstat -z` output into per-path totals. Renames emit an
+/// empty path field followed by the pre-image and post-image records, so the
+/// scanner has to consume those two extra records instead of assuming one.
+pub fn parse_numstat(output: &[u8]) -> HashMap<PathBuf, DiffLineCounts> {
+    let records: Vec<&[u8]> = output
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+        .collect();
+    let mut counts = HashMap::new();
+    let mut cursor = 0;
+    while cursor < records.len() {
+        let record = records[cursor];
+        cursor += 1;
+        let mut fields = record.splitn(3, |byte| *byte == b'\t');
+        let (Some(additions), Some(deletions), Some(path)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        let binary = additions == b"-" || deletions == b"-";
+        let entry = DiffLineCounts {
+            additions: parse_count(additions),
+            deletions: parse_count(deletions),
+            binary,
+        };
+        if path.is_empty() {
+            // Rename or copy: the pre-image and post-image follow as records.
+            let Some(new_path) = records.get(cursor + 1) else {
+                break;
+            };
+            cursor += 2;
+            counts.insert(record_path(new_path), entry);
+        } else {
+            counts.insert(record_path(path), entry);
+        }
+    }
+    counts
+}
+
+fn parse_count(field: &[u8]) -> usize {
+    std::str::from_utf8(field)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or_default()
+}
+
+fn record_path(record: &[u8]) -> PathBuf {
+    PathBuf::from(String::from_utf8_lossy(record).into_owned())
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -192,14 +277,15 @@ impl DiffIndex {
 }
 
 fn index_file_header(file: &DiffFileIndexEntry) -> DiffLine {
+    let (additions, deletions) = file.count_spans();
     DiffLine {
         kind: DiffLineKind::FileHeader,
         old_line: None,
         new_line: None,
         spans: vec![
             HighlightSpan::plain(file.label()),
-            HighlightSpan::plain("+?"),
-            HighlightSpan::plain("-?"),
+            HighlightSpan::plain(additions),
+            HighlightSpan::plain(deletions),
         ],
     }
 }
@@ -505,6 +591,67 @@ pub fn parse_diff(
     }
 }
 
+/// Cut a multi-file patch at its `diff --git` boundaries and key each section by
+/// the paths in that header. One Git invocation can then answer for many files
+/// while each file still parses and renders as its own document.
+pub fn split_patch_by_file(patch: &[u8]) -> Vec<PatchSection<'_>> {
+    let mut starts = Vec::new();
+    let mut offset = 0;
+    while offset < patch.len() {
+        let end = patch[offset..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(patch.len(), |index| offset + index + 1);
+        let line = &patch[offset..end];
+        if line.starts_with(b"diff --git ")
+            || line.starts_with(b"diff --cc ")
+            || line.starts_with(b"diff --combined ")
+        {
+            starts.push(offset);
+        }
+        offset = end;
+    }
+
+    starts
+        .iter()
+        .enumerate()
+        .map(|(index, start)| {
+            let end = starts.get(index + 1).copied().unwrap_or(patch.len());
+            let body = &patch[*start..end];
+            let header = body.split(|byte| *byte == b'\n').next().unwrap_or_default();
+            let header = String::from_utf8_lossy(header);
+            let (old_path, new_path) = header
+                .strip_prefix("diff --git ")
+                .map(diff_header_paths)
+                .unwrap_or_else(|| {
+                    let path = header
+                        .strip_prefix("diff --cc ")
+                        .or_else(|| header.strip_prefix("diff --combined "))
+                        .map(|path| PathBuf::from(decode_git_path(path.trim_end())));
+                    (path.clone(), path)
+                });
+            PatchSection {
+                old_path,
+                new_path,
+                body,
+            }
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PatchSection<'a> {
+    pub old_path: Option<PathBuf>,
+    pub new_path: Option<PathBuf>,
+    pub body: &'a [u8],
+}
+
+impl PatchSection<'_> {
+    pub fn matches(&self, path: &Path) -> bool {
+        self.new_path.as_deref() == Some(path) || self.old_path.as_deref() == Some(path)
+    }
+}
+
 #[derive(Default)]
 struct FileBuilder {
     old_path: Option<PathBuf>,
@@ -804,11 +951,13 @@ mod tests {
                     path: PathBuf::from("src/first.rs"),
                     old_path: None,
                     status: "modified".to_owned(),
+                    counts: None,
                 },
                 DiffFileIndexEntry {
                     path: PathBuf::from("src/second.rs"),
                     old_path: None,
                     status: "added".to_owned(),
+                    counts: None,
                 },
             ],
             truncated: false,
@@ -846,6 +995,115 @@ mod tests {
         assert_eq!(collapsed.addition_count(), 0);
         assert!(!collapsed.lines.iter().any(|line| line.text() == "new();"));
         assert!(collapsed.lines[0].text().contains("+1"));
+    }
+
+    #[test]
+    fn reads_numstat_totals_for_plain_renamed_and_binary_paths() {
+        let output = b"1\t1\tsrc/keep.rs\x001\t0\t\x00old/name.rs\x00new/name.rs\x00-\t-\tassets/logo.png\x004\t2\tpath\twith\ttabs.rs\x00";
+
+        let counts = parse_numstat(output);
+
+        assert_eq!(counts.len(), 4);
+        assert_eq!(
+            counts[Path::new("src/keep.rs")],
+            DiffLineCounts {
+                additions: 1,
+                deletions: 1,
+                binary: false,
+            }
+        );
+        assert_eq!(
+            counts[Path::new("new/name.rs")],
+            DiffLineCounts {
+                additions: 1,
+                deletions: 0,
+                binary: false,
+            }
+        );
+        assert!(!counts.contains_key(Path::new("old/name.rs")));
+        assert!(counts[Path::new("assets/logo.png")].binary);
+        assert_eq!(
+            counts[Path::new("path\twith\ttabs.rs")],
+            DiffLineCounts {
+                additions: 4,
+                deletions: 2,
+                binary: false,
+            }
+        );
+    }
+
+    #[test]
+    fn splits_a_batched_patch_into_one_section_per_file() {
+        let patch = b"diff --git a/src/one.rs b/src/one.rs\n--- a/src/one.rs\n+++ b/src/one.rs\n@@ -1 +1 @@\n-old\n+new\ndiff --git a/old name.rs b/new name.rs\nsimilarity index 90%\nrename from old name.rs\nrename to new name.rs\ndiff --git a/gone.rs b/gone.rs\ndeleted file mode 100644\n--- a/gone.rs\n+++ /dev/null\n@@ -1 +0,0 @@\n-bye\n";
+
+        let sections = split_patch_by_file(patch);
+
+        assert_eq!(sections.len(), 3);
+        assert!(sections[0].matches(Path::new("src/one.rs")));
+        assert!(
+            sections[1].matches(Path::new("new name.rs")),
+            "a rename is keyed by the post-image path even when it contains spaces"
+        );
+        assert!(sections[1].matches(Path::new("old name.rs")));
+        assert!(sections[2].matches(Path::new("gone.rs")));
+        assert!(!sections[0].matches(Path::new("gone.rs")));
+        assert_eq!(
+            String::from_utf8_lossy(sections[2].body),
+            "diff --git a/gone.rs b/gone.rs\ndeleted file mode 100644\n--- a/gone.rs\n+++ /dev/null\n@@ -1 +0,0 @@\n-bye\n"
+        );
+
+        // Each section still parses as exactly one self-contained file.
+        let document = parse_diff(sections[0].body, "one", None, false);
+        assert_eq!(document.file_count(), 1);
+        assert_eq!(document.addition_count(), 1);
+    }
+
+    #[test]
+    fn indexed_counts_render_before_any_patch_is_loaded() {
+        let index = DiffIndex {
+            title: "Pull request".to_owned(),
+            files: vec![
+                DiffFileIndexEntry {
+                    path: PathBuf::from(".github/workflows/pages.yml"),
+                    old_path: None,
+                    status: "added".to_owned(),
+                    counts: Some(DiffLineCounts {
+                        additions: 40,
+                        deletions: 0,
+                        binary: false,
+                    }),
+                },
+                DiffFileIndexEntry {
+                    path: PathBuf::from("README.md"),
+                    old_path: None,
+                    status: "modified".to_owned(),
+                    counts: Some(DiffLineCounts {
+                        additions: 12,
+                        deletions: 3,
+                        binary: false,
+                    }),
+                },
+            ],
+            truncated: false,
+            commit_details: None,
+        };
+
+        let skeleton = index.document_with_visibility(&HashMap::new(), |_| false);
+        let headers: Vec<_> = skeleton
+            .lines
+            .iter()
+            .filter(|line| line.kind == DiffLineKind::FileHeader)
+            .map(DiffLine::text)
+            .collect();
+
+        assert_eq!(
+            headers,
+            vec![
+                ".github/workflows/pages.yml  · added +40 -0",
+                "README.md  · modified +12 -3",
+            ]
+        );
+        assert!(!skeleton.lines.iter().any(|line| line.text().contains("+?")));
     }
 
     #[test]

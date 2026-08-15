@@ -1,4 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet};
+mod checks;
+mod conversation;
+
+pub use self::checks::{
+    CheckLogLine, CheckLogSeverity, CheckRunLog, CheckStep, PullRequestCheck,
+    PullRequestCheckStatus, PullRequestChecks, unix_now,
+};
+pub use self::conversation::{ConversationEntry, ConversationKind, PullRequestConversation};
+
+use std::borrow::Cow;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, OpenOptions};
@@ -11,7 +21,10 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, bail};
 
-use super::diff::{DiffDocument, PullRequestDetails, parse_diff};
+use super::diff::{
+    DiffDocument, DiffLineCounts, PullRequestDetails, parse_diff, parse_numstat,
+    split_patch_by_file,
+};
 use super::{MAX_DIFF_BYTES, Repository, text, trim_ascii};
 
 const MAX_GIT_REMOTES: usize = 32;
@@ -24,21 +37,28 @@ const MAX_PULL_REQUEST_BODY_BYTES: usize = 256 * 1024;
 const MAX_GH_ERROR_BYTES: usize = 256 * 1024;
 const MAX_PR_PATH_BYTES: usize = 8 * 1024 * 1024;
 const MAX_PR_PATHS: usize = 16_384;
-const MAX_CACHE_BYTES: u64 = 32 * 1024 * 1024;
-const MAX_CACHE_ENTRIES: usize = 256;
+/// A single file's patch is cached only if it is small enough that one file
+/// cannot crowd out the rest of a pull request.
+const MAX_CACHED_PATCH_BYTES: usize = 1024 * 1024;
+/// The cache now holds immutable content (finished run logs, patches for a
+/// fixed pair of commits) rather than only small metadata blobs, so the budget
+/// is sized for those and pruned oldest-first.
+const MAX_CACHE_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_CACHE_ENTRIES: usize = 2_048;
 const REPOSITORY_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const PULL_REQUEST_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
 const TEMPORARY_REPOSITORY_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 const CACHE_MAGIC: &[u8] = b"quinjet-gh-cache-v1\n";
 
-const PULL_REQUEST_FIELDS: &str = "number,title,body,author,state,isDraft,updatedAt,url,baseRefName,baseRefOid,headRefName,headRefOid,headRepository,isCrossRepository,additions,deletions,changedFiles";
-const PULL_REQUEST_VIEW_TSV_JQ: &str = r#"[(.number|tostring), .title, (.body // ""), (.author.login // "ghost"), .state, (.isDraft|tostring), .updatedAt, .url, .baseRefName, .headRefName, (.headRepository.nameWithOwner // ""), (.isCrossRepository|tostring), (.additions|tostring), (.deletions|tostring), (.changedFiles|tostring), .baseRefOid, .headRefOid] | @tsv"#;
+const PULL_REQUEST_FIELDS: &str = "number,title,body,author,state,isDraft,createdAt,updatedAt,url,baseRefName,baseRefOid,headRefName,headRefOid,headRepository,isCrossRepository,additions,deletions,changedFiles";
+const PULL_REQUEST_VIEW_TSV_JQ: &str = r#"[(.number|tostring), .title, (.body // ""), (.author.login // "ghost"), .state, (.isDraft|tostring), .updatedAt, .url, .baseRefName, .headRefName, (.headRepository.nameWithOwner // ""), (.isCrossRepository|tostring), (.additions|tostring), (.deletions|tostring), (.changedFiles|tostring), .baseRefOid, .headRefOid, .createdAt] | @tsv"#;
 const REPOSITORY_TSV_TEMPLATE: &str = "{{.nameWithOwner}}{{\"\\t\"}}{{.url}}{{\"\\n\"}}";
+const PULL_REQUEST_TSV_FIELDS: usize = 18;
 
 static TEMPORARY_REPOSITORY_ID: AtomicU64 = AtomicU64::new(0);
 static CACHE_WRITE_ID: AtomicU64 = AtomicU64::new(0);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GitHubRepository {
     pub name_with_owner: String,
     pub url: String,
@@ -66,7 +86,7 @@ impl GitHubRepository {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PullRequest {
     pub number: u64,
     pub title: String,
@@ -74,6 +94,7 @@ pub struct PullRequest {
     pub author: String,
     pub state: String,
     pub is_draft: bool,
+    pub created_at: String,
     pub updated_at: String,
     pub url: String,
     pub base_ref: String,
@@ -145,6 +166,7 @@ pub struct PullRequestFile {
     pub path: PathBuf,
     pub old_path: Option<PathBuf>,
     pub status: PullRequestFileStatus,
+    pub counts: Option<DiffLineCounts>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,28 +174,6 @@ pub struct PullRequestDiffIndex {
     pub files: Vec<PullRequestFile>,
     pub total_files: usize,
     pub truncated: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PullRequestCheckStatus {
-    Pending,
-    Passed,
-    Failed,
-    Skipped,
-    Cancelled,
-    Unknown,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PullRequestCheck {
-    pub name: String,
-    pub workflow: String,
-    pub state: String,
-    pub status: PullRequestCheckStatus,
-    pub description: String,
-    pub link: String,
-    pub started_at: String,
-    pub completed_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -187,6 +187,24 @@ enum CacheDisposition {
     Network,
     Fresh,
     Stale,
+}
+
+/// How long an entry stays usable. `Immutable` is for content whose identity is
+/// already in its key: a finished run's log, or a patch between two fixed
+/// commits. Such an entry can never become wrong, only evicted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CacheLife {
+    Immutable,
+    Ttl(Duration),
+}
+
+impl CacheLife {
+    fn accepts(self, age: Duration) -> bool {
+        match self {
+            Self::Immutable => true,
+            Self::Ttl(ttl) => age <= ttl,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -257,12 +275,25 @@ impl PreparedPullRequest {
             .iter()
             .find(|file| file.path == path)
             .with_context(|| format!("{} is not part of this pull request", path.display()))?;
+        let key = patch_cache_key(&self.merge_base, &self.head, &file.path);
+        if let Some(patch) = cache_read_bounded(&key, CacheLife::Immutable, MAX_CACHED_PATCH_BYTES)
+        {
+            return Ok(pull_request_file_document(
+                &patch,
+                &self.pull_request,
+                file,
+                false,
+            ));
+        }
         let (patch, truncated) = diff_selected_paths(
             self.repository.path(),
             &self.merge_base,
             &self.head,
             std::slice::from_ref(&file.path),
         )?;
+        if !truncated {
+            cache_write_bounded(&key, &patch, MAX_CACHED_PATCH_BYTES);
+        }
         Ok(pull_request_file_document(
             &patch,
             &self.pull_request,
@@ -270,6 +301,193 @@ impl PreparedPullRequest {
             truncated,
         ))
     }
+
+    /// Produce many file documents from a single `git diff`. Spawning one Git
+    /// process per file dominates the cost of a wide pull request, so batching
+    /// is what lets the whole diff arrive while the reader is still reading the
+    /// first file.
+    pub(crate) fn diff_files(&self, paths: &[PathBuf]) -> Result<Vec<(PathBuf, DiffDocument)>> {
+        let files: Vec<&PullRequestFile> = paths
+            .iter()
+            .filter_map(|path| self.index.files.iter().find(|file| &file.path == path))
+            .collect();
+        if files.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Serve whatever this pair of commits has already produced, and ask Git
+        // only for the remainder. A pull request opened a second time without a
+        // new head asks Git for nothing at all.
+        let mut cached: HashMap<PathBuf, Vec<u8>> = HashMap::new();
+        let mut requested: Vec<PathBuf> = Vec::new();
+        for file in &files {
+            let key = patch_cache_key(&self.merge_base, &self.head, &file.path);
+            match cache_read_bounded(&key, CacheLife::Immutable, MAX_CACHED_PATCH_BYTES) {
+                Some(patch) => {
+                    cached.insert(file.path.clone(), patch);
+                }
+                None => requested.push(file.path.clone()),
+            }
+        }
+        let (patch, truncated) = if requested.is_empty() {
+            (Vec::new(), false)
+        } else {
+            diff_selected_paths(
+                self.repository.path(),
+                &self.merge_base,
+                &self.head,
+                &requested,
+            )?
+        };
+        let sections = split_patch_by_file(&patch);
+        Ok(files
+            .into_iter()
+            .map(|file| {
+                let body = match cached.get(&file.path) {
+                    Some(patch) => patch.as_slice(),
+                    None => {
+                        let body = sections
+                            .iter()
+                            .find(|section| section.matches(&file.path))
+                            .map(|section| section.body)
+                            .unwrap_or_default();
+                        if !truncated {
+                            let key = patch_cache_key(&self.merge_base, &self.head, &file.path);
+                            cache_write_bounded(&key, body, MAX_CACHED_PATCH_BYTES);
+                        }
+                        body
+                    }
+                };
+                (
+                    file.path.clone(),
+                    pull_request_file_document(body, &self.pull_request, file, truncated),
+                )
+            })
+            .collect())
+    }
+}
+
+/// Direct cache access for readers that cannot express themselves as a single
+/// `gh` invocation: a response judged by its body rather than its exit status,
+/// or bytes produced by Git rather than by GitHub.
+pub(crate) fn cache_read(key: &str, life: CacheLife) -> Option<Vec<u8>> {
+    cache_read_bounded(key, life, MAX_GH_METADATA_BYTES)
+}
+
+pub(crate) fn cache_read_bounded(key: &str, life: CacheLife, limit: usize) -> Option<Vec<u8>> {
+    CacheStore::discover()?
+        .read(key, limit)
+        .filter(|entry| life.accepts(entry.age))
+        .map(|entry| entry.data)
+}
+
+pub(crate) fn cache_write(key: &str, data: &[u8]) {
+    cache_write_bounded(key, data, MAX_GH_METADATA_BYTES);
+}
+
+pub(crate) fn cache_write_bounded(key: &str, data: &[u8], limit: usize) {
+    if let Some(cache) = CacheStore::discover() {
+        let _ = cache.write(key, data, limit);
+    }
+}
+
+/// A validated read: GitHub is asked whether the answer changed, and answers
+/// `304 Not Modified` when it did not. That reply carries no body and costs
+/// nothing against the rate limit, which is what lets an unchanged thread be
+/// re-checked as often as it is worth checking.
+///
+/// The entry holds the validator on its first line and the body after it, so
+/// the two can never be stored out of step with each other.
+pub(crate) struct ValidatedRead {
+    pub data: Vec<u8>,
+    pub unchanged: bool,
+}
+
+impl Repository {
+    pub(crate) fn validated_gh(&self, key: &str, args: Vec<OsString>) -> Result<ValidatedRead> {
+        let cached = cache_read(key, CacheLife::Immutable);
+        let validator = cached.as_ref().and_then(|entry| split_validator(entry).0);
+        let mut request = vec![OsString::from("api"), OsString::from("-i")];
+        if let Some(validator) = validator.as_ref() {
+            request.push(OsString::from("-H"));
+            request.push(OsString::from(format!("If-None-Match: {validator}")));
+        }
+        request.extend(args);
+
+        let output = self.run_gh(request)?;
+        if !output.status.success() {
+            bail!(
+                "{}",
+                bounded_command_error("unable to read from GitHub", &output)
+            );
+        }
+        let (head, body) = split_http_response(&output.stdout);
+        let head = head.as_ref();
+        let status =
+            String::from_utf8_lossy(head.lines().next().unwrap_or_default().as_bytes()).to_string();
+        if status.contains(" 304") {
+            if let Some(entry) = cached {
+                return Ok(ValidatedRead {
+                    data: split_validator(&entry).1.to_vec(),
+                    unchanged: true,
+                });
+            }
+        }
+        // A response spanning more than one page has no single validator to
+        // store, so it is returned without being cached; the caller's own key
+        // still covers it.
+        if let Some(etag) = header_value(head, "etag").filter(|_| !has_next_page(head)) {
+            let mut entry = etag.into_bytes();
+            entry.push(b'\n');
+            entry.extend_from_slice(body);
+            cache_write(key, &entry);
+        }
+        Ok(ValidatedRead {
+            data: body.to_vec(),
+            unchanged: false,
+        })
+    }
+}
+
+/// Split the stored entry into its validator and the body it validates.
+fn split_validator(entry: &[u8]) -> (Option<String>, &[u8]) {
+    match entry.iter().position(|byte| *byte == b'\n') {
+        Some(index) => (
+            Some(String::from_utf8_lossy(&entry[..index]).into_owned()),
+            &entry[index + 1..],
+        ),
+        None => (None, entry),
+    }
+}
+
+/// `gh api -i` prints the response head, a blank line, then the body.
+fn split_http_response(output: &[u8]) -> (Cow<'_, str>, &[u8]) {
+    // The body is split on bytes so that a response the head cannot describe as
+    // UTF-8 still arrives whole; only the head itself is decoded.
+    for separator in [b"\r\n\r\n".as_slice(), b"\n\n".as_slice()] {
+        if let Some(index) = output
+            .windows(separator.len())
+            .position(|window| window == separator)
+        {
+            return (
+                String::from_utf8_lossy(&output[..index]),
+                &output[index + separator.len()..],
+            );
+        }
+    }
+    (String::from_utf8_lossy(output), &[])
+}
+
+fn header_value(head: &str, name: &str) -> Option<String> {
+    head.lines().find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        key.trim()
+            .eq_ignore_ascii_case(name)
+            .then(|| value.trim().to_owned())
+    })
+}
+
+fn has_next_page(head: &str) -> bool {
+    header_value(head, "link").is_some_and(|link| link.contains("rel=\"next\""))
 }
 
 struct GhResponse {
@@ -368,29 +586,6 @@ impl Repository {
         })
     }
 
-    pub(crate) fn pull_request_checks(
-        &self,
-        pull_request: &PullRequest,
-    ) -> Result<Vec<PullRequestCheck>> {
-        let output = self.run_gh(pull_request_checks_args(pull_request))?;
-        let accepted_status = output.status.success()
-            || matches!(output.status.code(), Some(1 | 8)) && !output.stdout.is_empty();
-        if output.stdout_truncated {
-            bail!("pull-request checks exceeded the metadata limit");
-        }
-        if !accepted_status {
-            let error = String::from_utf8_lossy(&output.stderr);
-            if error.to_ascii_lowercase().contains("no checks") {
-                return Ok(Vec::new());
-            }
-            bail!(
-                "{}",
-                bounded_command_error("unable to load pull-request checks", &output)
-            );
-        }
-        parse_pull_request_checks(&output.stdout)
-    }
-
     fn pull_request_metadata(
         &self,
         repository: &GitHubRepository,
@@ -400,10 +595,10 @@ impl Repository {
     ) -> Result<(PullRequest, CacheDisposition)> {
         let response = self.checked_cached_gh(
             &format!(
-                "pull-request-v2\n{}\n{number}",
+                "pull-request-v3\n{}\n{number}",
                 repository.url.trim_end_matches('/')
             ),
-            PULL_REQUEST_CACHE_TTL,
+            CacheLife::Ttl(PULL_REQUEST_CACHE_TTL),
             refresh,
             pull_request_view_args(repository, number),
             "unable to load pull request",
@@ -601,7 +796,7 @@ impl Repository {
         let key = format!("repository\n{identity}");
         let response = self.checked_cached_gh(
             &key,
-            REPOSITORY_CACHE_TTL,
+            CacheLife::Ttl(REPOSITORY_CACHE_TTL),
             refresh,
             args,
             "gh repo view failed",
@@ -624,7 +819,7 @@ impl Repository {
     fn checked_cached_gh<I, S>(
         &self,
         cache_key: &str,
-        ttl: Duration,
+        life: CacheLife,
         refresh: bool,
         args: I,
         error_context: &str,
@@ -633,11 +828,40 @@ impl Repository {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
+        self.checked_cached_gh_bounded(
+            cache_key,
+            life,
+            refresh,
+            args,
+            error_context,
+            MAX_GH_METADATA_BYTES,
+        )
+    }
+
+    /// `limit` bounds both the response Quinjet will read and the entry it will
+    /// keep, so a check log can use the cache without letting metadata grow.
+    fn checked_cached_gh_bounded<I, S>(
+        &self,
+        cache_key: &str,
+        life: CacheLife,
+        refresh: bool,
+        args: I,
+        error_context: &str,
+        limit: usize,
+    ) -> Result<GhResponse>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
         let cache = CacheStore::discover();
-        let cached = cache.as_ref().and_then(|cache| cache.read(cache_key));
-        if !refresh {
+        let cached = cache
+            .as_ref()
+            .and_then(|cache| cache.read(cache_key, limit));
+        // An immutable entry is never re-read, even for an explicit refresh:
+        // its key already names exactly the content it holds.
+        if !refresh || life == CacheLife::Immutable {
             if let Some(entry) = cached.as_ref() {
-                if entry.age <= ttl {
+                if life.accepts(entry.age) {
                     return Ok(GhResponse {
                         data: entry.data.clone(),
                         disposition: CacheDisposition::Fresh,
@@ -646,7 +870,7 @@ impl Repository {
             }
         }
 
-        let output = match self.run_gh(args) {
+        let output = match self.run_gh_bounded(args, limit) {
             Ok(output) => output,
             Err(error) => {
                 if let Some(entry) = cached.as_ref() {
@@ -660,7 +884,7 @@ impl Repository {
         };
         if output.status.success() && !output.stdout_truncated {
             if let Some(cache) = cache.as_ref() {
-                let _ = cache.write(cache_key, &output.stdout);
+                let _ = cache.write(cache_key, &output.stdout, limit);
             }
             return Ok(GhResponse {
                 data: output.stdout,
@@ -684,6 +908,16 @@ impl Repository {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
+        self.run_gh_bounded(args, MAX_GH_METADATA_BYTES)
+    }
+
+    /// Metadata responses are small and share one cap, but a check run log is
+    /// arbitrarily large and needs its own.
+    fn run_gh_bounded<I, S>(&self, args: I, stdout_limit: usize) -> Result<BoundedOutput>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
         let mut command = Command::new("gh");
         command
             .current_dir(&self.root)
@@ -692,14 +926,12 @@ impl Repository {
             .env("GH_PAGER", "cat")
             .env("GH_NO_UPDATE_NOTIFIER", "1")
             .env("NO_COLOR", "1");
-        run_bounded_command(&mut command, MAX_GH_METADATA_BYTES, MAX_GH_ERROR_BYTES).with_context(
-            || {
-                format!(
-                    "failed to execute GitHub CLI (`gh`) in {}; install it and run `gh auth login`",
-                    self.root.display()
-                )
-            },
-        )
+        run_bounded_command(&mut command, stdout_limit, MAX_GH_ERROR_BYTES).with_context(|| {
+            format!(
+                "failed to execute GitHub CLI (`gh`) in {}; install it and run `gh auth login`",
+                self.root.display()
+            )
+        })
     }
 }
 
@@ -779,55 +1011,6 @@ fn pull_request_view_args(repository: &GitHubRepository, number: u64) -> Vec<OsS
     ]
 }
 
-fn pull_request_checks_args(pull_request: &PullRequest) -> Vec<OsString> {
-    vec![
-        OsString::from("pr"),
-        OsString::from("checks"),
-        OsString::from(pull_request.number.to_string()),
-        OsString::from("--repo"),
-        OsString::from(pull_request.base_repository.selector()),
-        OsString::from("--json"),
-        OsString::from("bucket,completedAt,description,link,name,startedAt,state,workflow"),
-        OsString::from("--jq"),
-        OsString::from(
-            r#".[] | [.name, .workflow, .state, .bucket, (.description // ""), (.link // ""), (.startedAt // ""), (.completedAt // "")] | @tsv"#,
-        ),
-    ]
-}
-
-fn parse_pull_request_checks(output: &[u8]) -> Result<Vec<PullRequestCheck>> {
-    let mut checks = Vec::new();
-    for (index, record) in output.split(|byte| *byte == b'\n').enumerate() {
-        if record.is_empty() {
-            continue;
-        }
-        let fields = parse_tsv_record(record, 8)
-            .with_context(|| format!("invalid pull-request check record {}", index + 1))?;
-        let status = match fields[3].to_ascii_lowercase().as_str() {
-            "pass" => PullRequestCheckStatus::Passed,
-            "fail" => PullRequestCheckStatus::Failed,
-            "pending" => PullRequestCheckStatus::Pending,
-            "skipping" => PullRequestCheckStatus::Skipped,
-            "cancel" => PullRequestCheckStatus::Cancelled,
-            _ => PullRequestCheckStatus::Unknown,
-        };
-        checks.push(PullRequestCheck {
-            name: fields[0].clone(),
-            workflow: fields[1].clone(),
-            state: fields[2].clone(),
-            status,
-            description: fields[4].clone(),
-            link: fields[5].clone(),
-            started_at: fields[6].clone(),
-            completed_at: fields[7].clone(),
-        });
-    }
-    // Keep ordering independent of status so a pending check completing does not
-    // move rows underneath the user's cursor during a live refresh.
-    checks.sort_by_key(|check| (check.workflow.to_lowercase(), check.name.to_lowercase()));
-    Ok(checks)
-}
-
 fn parse_pull_requests(
     output: &[u8],
     base_repository: &GitHubRepository,
@@ -838,7 +1021,7 @@ fn parse_pull_requests(
         if record.is_empty() {
             continue;
         }
-        let fields = parse_tsv_record(record, 17)
+        let fields = parse_tsv_record(record, PULL_REQUEST_TSV_FIELDS)
             .with_context(|| format!("invalid pull-request record {}", index + 1))?;
         pull_requests.push(parse_pull_request_fields(
             &fields,
@@ -854,8 +1037,11 @@ fn parse_pull_request_fields(
     base_repository: &GitHubRepository,
     repositories: &[GitHubRepository],
 ) -> Result<PullRequest> {
-    if fields.len() != 17 {
-        bail!("expected 17 pull-request fields, received {}", fields.len());
+    if fields.len() != PULL_REQUEST_TSV_FIELDS {
+        bail!(
+            "expected {PULL_REQUEST_TSV_FIELDS} pull-request fields, received {}",
+            fields.len()
+        );
     }
     let head_repository = (!fields[10].is_empty()).then(|| fields[10].clone());
     let head_remotes = head_repository
@@ -882,6 +1068,7 @@ fn parse_pull_request_fields(
         changed_files: parse_field(&fields[14], "changed-file count")?,
         base_oid: fields[15].clone(),
         head_oid: fields[16].clone(),
+        created_at: fields[17].clone(),
     })
 }
 
@@ -1303,13 +1490,32 @@ fn changed_files_in_repository(
         OsString::from(head),
         OsString::from("--"),
     ];
-    let output = run_repository_git(repository, &args, MAX_PR_PATH_BYTES, 128 * 1024)?;
-    if !output.status.success() && !output.stdout_truncated {
-        bail!(
-            "{}",
-            bounded_command_error("unable to enumerate pull-request files", &output)
-        );
-    }
+    let counts = numstat_counts(repository, merge_base, head);
+    // The listing between two fixed commits can never change, so it is keyed by
+    // those commits and kept. A moved head simply asks a different question.
+    let key = format!("pr-files-v1\n{merge_base}\n{head}");
+    let cached = cache_read_bounded(&key, CacheLife::Immutable, MAX_PR_PATH_BYTES);
+    let output = match cached {
+        Some(data) => BoundedOutput {
+            status: successful_status(),
+            stdout: data,
+            stderr: Vec::new(),
+            stdout_truncated: false,
+        },
+        None => {
+            let output = run_repository_git(repository, &args, MAX_PR_PATH_BYTES, 128 * 1024)?;
+            if !output.status.success() && !output.stdout_truncated {
+                bail!(
+                    "{}",
+                    bounded_command_error("unable to enumerate pull-request files", &output)
+                );
+            }
+            if !output.stdout_truncated {
+                cache_write_bounded(&key, &output.stdout, MAX_PR_PATH_BYTES);
+            }
+            output
+        }
+    };
     let mut truncated = output.stdout_truncated;
     let complete_output = if output.stdout_truncated && !output.stdout.ends_with(&[0]) {
         output
@@ -1367,13 +1573,65 @@ fn changed_files_in_repository(
         } else {
             (None, first_path)
         };
+        let file_counts = counts.get(&path).copied();
         files.push(PullRequestFile {
             path,
             old_path,
             status,
+            counts: file_counts,
         });
     }
     Ok((files, truncated))
+}
+
+/// Read exact per-file totals alongside the changed-path listing. One extra
+/// `--numstat` pass over the same range lets every file header render its real
+/// `+n -n` immediately, so the list never fills in unevenly as patches load.
+fn numstat_counts(
+    repository: &Path,
+    merge_base: &str,
+    head: &str,
+) -> HashMap<PathBuf, DiffLineCounts> {
+    let key = format!("pr-numstat-v1\n{merge_base}\n{head}");
+    if let Some(data) = cache_read_bounded(&key, CacheLife::Immutable, MAX_PR_PATH_BYTES) {
+        return parse_numstat(&data);
+    }
+    let args = [
+        OsString::from("diff"),
+        OsString::from("--numstat"),
+        OsString::from("-z"),
+        OsString::from("--find-renames"),
+        OsString::from(merge_base),
+        OsString::from(head),
+        OsString::from("--"),
+    ];
+    run_repository_git(repository, &args, MAX_PR_PATH_BYTES, 128 * 1024)
+        .ok()
+        .filter(|output| output.status.success() && !output.stdout_truncated)
+        .map(|output| {
+            cache_write_bounded(&key, &output.stdout, MAX_PR_PATH_BYTES);
+            parse_numstat(&output.stdout)
+        })
+        .unwrap_or_default()
+}
+
+/// A status that reports success, for feeding cached bytes back through the
+/// same path a real command's output takes.
+fn successful_status() -> ExitStatus {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        ExitStatus::from_raw(0)
+    }
+    #[cfg(not(unix))]
+    {
+        use std::os::windows::process::ExitStatusExt;
+        ExitStatus::from_raw(0)
+    }
+}
+
+fn patch_cache_key(merge_base: &str, head: &str, path: &Path) -> String {
+    format!("pr-patch-v1\n{merge_base}\n{head}\n{}", path.display())
 }
 
 fn diff_selected_paths(
@@ -1555,10 +1813,10 @@ impl CacheStore {
         Self { root }
     }
 
-    fn read(&self, key: &str) -> Option<CacheEntry> {
+    fn read(&self, key: &str, limit: usize) -> Option<CacheEntry> {
         let path = self.path(key);
         let metadata = fs::metadata(&path).ok()?;
-        if metadata.len() > MAX_GH_METADATA_BYTES as u64 + CACHE_MAGIC.len() as u64 {
+        if metadata.len() > limit as u64 + CACHE_MAGIC.len() as u64 {
             let _ = fs::remove_file(path);
             return None;
         }
@@ -1575,8 +1833,8 @@ impl CacheStore {
         Some(CacheEntry { data, age })
     }
 
-    fn write(&self, key: &str, data: &[u8]) -> Result<()> {
-        if data.len() > MAX_GH_METADATA_BYTES {
+    fn write(&self, key: &str, data: &[u8], limit: usize) -> Result<()> {
+        if data.len() > limit {
             return Ok(());
         }
         create_private_directory(&self.root)?;
@@ -1754,7 +2012,7 @@ mod tests {
         directory
     }
 
-    fn repository(name: &str, url: &str, remotes: &[&str]) -> GitHubRepository {
+    pub(super) fn repository(name: &str, url: &str, remotes: &[&str]) -> GitHubRepository {
         GitHubRepository {
             name_with_owner: name.to_owned(),
             url: url.to_owned(),
@@ -1762,7 +2020,7 @@ mod tests {
         }
     }
 
-    fn pull_request(base: GitHubRepository, number: u64) -> PullRequest {
+    pub(super) fn pull_request(base: GitHubRepository, number: u64) -> PullRequest {
         PullRequest {
             number,
             title: "Ship the rocket".to_owned(),
@@ -1770,6 +2028,7 @@ mod tests {
             author: "octocat".to_owned(),
             state: "OPEN".to_owned(),
             is_draft: false,
+            created_at: "2026-08-12T09:00:00Z".to_owned(),
             updated_at: "2026-08-13T12:00:00Z".to_owned(),
             url: format!("{}/pull/{number}", base.url),
             base_ref: "main".to_owned(),
@@ -1881,7 +2140,7 @@ mod tests {
             "https://github.com/octocat/widget",
             &["origin", "publish"],
         );
-        let output = b"42\tShip the rocket\tDetailed\\nbody\toctocat\tOPEN\ttrue\t2026-08-13T12:00:00Z\thttps://github.com/acme/widget/pull/42\tmain\tfeature/rocket\toctocat/widget\ttrue\t12\t3\t4\tbaseoid\theadid\n";
+        let output = b"42\tShip the rocket\tDetailed\\nbody\toctocat\tOPEN\ttrue\t2026-08-13T12:00:00Z\thttps://github.com/acme/widget/pull/42\tmain\tfeature/rocket\toctocat/widget\ttrue\t12\t3\t4\tbaseoid\theadid\t2026-08-01T09:00:00Z\n";
 
         let requests = parse_pull_requests(output, &upstream, &[upstream.clone(), fork]).unwrap();
 
@@ -1902,7 +2161,7 @@ mod tests {
             "https://github.example.com/acme/widget",
             &["enterprise"],
         );
-        let output = b"7\tOld contribution\t\tghost\tOPEN\tfalse\t2026-01-01T00:00:00Z\thttps://github.example.com/acme/widget/pull/7\ttrunk\tlost-branch\t\tfalse\t0\t0\t1\tbaseoid\theadid\n";
+        let output = b"7\tOld contribution\t\tghost\tOPEN\tfalse\t2026-01-01T00:00:00Z\thttps://github.example.com/acme/widget/pull/7\ttrunk\tlost-branch\t\tfalse\t0\t0\t1\tbaseoid\theadid\t2025-12-30T00:00:00Z\n";
 
         let request = parse_pull_requests(output, &base, std::slice::from_ref(&base))
             .unwrap()
@@ -1938,28 +2197,14 @@ mod tests {
     }
 
     #[test]
-    fn parses_live_pull_request_checks_in_stable_name_order() {
-        let output = b"tests\tCI\tSUCCESS\tpass\tall good\thttps://example.test/pass\tstart\tdone\nlint\tCI\tFAILURE\tfail\tbroken\thttps://example.test/fail\tstart\tdone\nbuild\tCI\tIN_PROGRESS\tpending\t\thttps://example.test/pending\tstart\t\n";
-
-        let checks = parse_pull_request_checks(output).unwrap();
-
-        assert_eq!(checks.len(), 3);
-        assert_eq!(checks[0].name, "build");
-        assert_eq!(checks[0].status, PullRequestCheckStatus::Pending);
-        assert_eq!(checks[1].name, "lint");
-        assert_eq!(checks[1].status, PullRequestCheckStatus::Failed);
-        assert_eq!(checks[2].name, "tests");
-        assert_eq!(checks[2].status, PullRequestCheckStatus::Passed);
-        assert_eq!(checks[2].description, "all good");
-    }
-
-    #[test]
     fn cache_round_trips_private_metadata_and_uses_stable_keys() {
         let directory = test_directory("cache");
         let cache = CacheStore::at(directory.0.clone());
-        cache.write("repo\npage 1", b"metadata\n").unwrap();
+        cache
+            .write("repo\npage 1", b"metadata\n", MAX_GH_METADATA_BYTES)
+            .unwrap();
 
-        let entry = cache.read("repo\npage 1").unwrap();
+        let entry = cache.read("repo\npage 1", MAX_GH_METADATA_BYTES).unwrap();
         assert_eq!(entry.data, b"metadata\n");
         assert!(entry.age < Duration::from_secs(2));
         assert_eq!(cache.path("same"), cache.path("same"));
@@ -1991,6 +2236,7 @@ mod tests {
             path: PathBuf::from("test.txt"),
             old_path: None,
             status: PullRequestFileStatus::Modified,
+            counts: None,
         };
         let document = pull_request_file_document(patch, &request, &file, true);
         let details = document.pull_request_details.unwrap();
@@ -2040,6 +2286,28 @@ mod tests {
                 && file.old_path.as_deref() == Some(Path::new("renamed.txt"))
                 && file.status == PullRequestFileStatus::Renamed
         }));
+
+        // Every entry carries its exact totals straight from the index, so no
+        // header has to wait for its own patch before it can show `+n -n`.
+        assert!(files.iter().all(|file| file.counts.is_some()));
+        assert_eq!(
+            files
+                .iter()
+                .find(|file| file.path == Path::new("modified.txt"))
+                .and_then(|file| file.counts),
+            Some(DiffLineCounts {
+                additions: 1,
+                deletions: 1,
+                binary: false,
+            })
+        );
+        assert_eq!(
+            files
+                .iter()
+                .find(|file| file.path == Path::new("moved.txt"))
+                .and_then(|file| file.counts),
+            Some(DiffLineCounts::default())
+        );
     }
 
     #[test]
@@ -2146,6 +2414,33 @@ mod tests {
             deletions += document.deletion_count();
         }
         assert_eq!((additions, deletions), (21, 0));
+
+        // One batched read answers for the whole index and produces exactly the
+        // same per-file documents as the file-at-a-time path.
+        let paths: Vec<PathBuf> = index.files.iter().map(|file| file.path.clone()).collect();
+        let batch = workspace.diff_files(&paths).unwrap();
+        assert_eq!(batch.len(), 21);
+        assert_eq!(
+            batch
+                .iter()
+                .map(|(path, _)| path.clone())
+                .collect::<Vec<_>>(),
+            paths
+        );
+        assert!(batch.iter().all(|(_, document)| document.file_count() == 1));
+        assert_eq!(
+            batch
+                .iter()
+                .map(|(_, document)| document.addition_count())
+                .sum::<usize>(),
+            21
+        );
+        assert_eq!(
+            workspace
+                .diff_files(&[PathBuf::from("never-changed.txt")])
+                .unwrap(),
+            Vec::new()
+        );
         drop(workspace);
         assert!(!temporary_path.exists());
         assert_eq!(source.git(&["branch", "--show-current"]), before_branch);
@@ -2219,5 +2514,48 @@ mod tests {
         let repository = repositories.into_values().next().unwrap();
         assert_eq!(repository.url, "https://github.com/acme/widget");
         assert_eq!(repository.remotes, vec!["origin", "upstream"]);
+    }
+
+    #[test]
+    fn a_response_head_is_read_apart_from_its_body() {
+        let response = b"HTTP/2.0 200 OK\r\nEtag: W/\"92ade\"\r\nContent-Type: application/json\r\n\r\n[{\"a\":1}]";
+        let (head, body) = split_http_response(response);
+        assert!(head.starts_with("HTTP/2.0 200 OK"));
+        assert_eq!(body, b"[{\"a\":1}]");
+        assert_eq!(header_value(&head, "etag").as_deref(), Some("W/\"92ade\""));
+        assert_eq!(header_value(&head, "ETAG").as_deref(), Some("W/\"92ade\""));
+        assert_eq!(header_value(&head, "link"), None);
+    }
+
+    #[test]
+    fn a_body_the_head_cannot_describe_still_arrives_whole() {
+        // Splitting on bytes rather than on a decoded string keeps a body with a
+        // stray non-UTF-8 byte from silently arriving empty.
+        let mut response = b"HTTP/2.0 200 OK\n\n".to_vec();
+        response.extend_from_slice(&[0xff, 0xfe, b'o', b'k']);
+        let (head, body) = split_http_response(&response);
+        assert_eq!(head, "HTTP/2.0 200 OK");
+        assert_eq!(body, [0xff, 0xfe, b'o', b'k']);
+    }
+
+    #[test]
+    fn only_a_single_page_answer_is_worth_a_validator() {
+        let paged = "HTTP/2.0 200 OK\nLink: <https://api.github.com/x?page=2>; rel=\"next\"";
+        let last = "HTTP/2.0 200 OK\nLink: <https://api.github.com/x?page=1>; rel=\"prev\"";
+        assert!(has_next_page(paged));
+        assert!(!has_next_page(last));
+        assert!(!has_next_page("HTTP/2.0 200 OK"));
+    }
+
+    #[test]
+    fn a_cache_entry_keeps_its_validator_beside_the_body_it_validates() {
+        let entry = b"W/\"92ade\"\nname\tvalue\n";
+        let (validator, body) = split_validator(entry);
+        assert_eq!(validator.as_deref(), Some("W/\"92ade\""));
+        assert_eq!(body, b"name\tvalue\n");
+
+        let (missing, whole) = split_validator(b"no newline here");
+        assert_eq!(missing, None);
+        assert_eq!(whole, b"no newline here");
     }
 }
