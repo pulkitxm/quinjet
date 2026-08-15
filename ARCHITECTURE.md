@@ -7,22 +7,36 @@ Quinjet optimizes for immediate input response, authoritative Git behavior, and 
 ## Layers
 
 ```text
-Terminal events
-      │
-      ▼
-App state + intents ───────────────► Ratatui renderer
-      │                                  ▲
-      ▼                                  │ latest snapshot
-bounded Git command queue                │
-      │                                  │
-      ▼                                  │
-Git worker ── Git CLI ── parsed events ──┘
-      ▲
-      │
-filesystem watcher (coalesced signal)
-webhook listener (loopback, opt-in)
+argv
+  ├── no verb ──► Terminal events
+  │                     │
+  │                     ▼
+  │       App state + intents ──► Ratatui renderer
+  │                     │                   ▲
+  │                     ▼                   │ snapshot
+  │       bounded Git command queue         │
+  │                     │                   │
+  │                     ▼                   │
+  │                Git worker ──────────────┘
+  │                     │
+  └── a verb ───────────┤
+                        ▼
+                  cli::Command
+                        │
+                        ▼
+              cli::Session::execute ──► Outcome
+                        │                 │
+                        ▼                 ▼
+          Git CLI / GitHub CLI      text or JSON on stdout
+                        ▲
+                        │
+      filesystem watcher, webhook listener
 ```
 
+- `src/cli/command.rs`: the one command vocabulary. `Command` names every operation, `Outcome` names every answer, and `Session` owns the repository plus the two reusable diff workspaces.
+- `src/cli/mod.rs`: the subcommand tree, its dispatch ahead of terminal setup, the exit-code taxonomy, and the `--json` emitter.
+- `src/cli/render.rs`: plain-text renderings of every outcome, with no terminal, no color, and no width assumption.
+- `src/cli/watch.rs`: the non-interactive refresh loop, repainting for a terminal and streaming compact JSON for a pipe.
 - `src/app.rs`: focus, selection, modal, command, lazy-file, live-check, progress, and generation state.
 - `src/git/mod.rs`: safe argv construction, reusable index-first local diff workspaces, branch/stash workflows, branch-scoped history reads, and user-facing Git operations.
 - `src/git/status.rs`: byte-oriented porcelain-v2 status parser.
@@ -31,7 +45,7 @@ webhook listener (loopback, opt-in)
 - `src/git/github/checks.rs`: check runs, their GitHub Actions job steps, and raw run logs reduced to timestamped, severity-tagged lines.
 - `src/git/github/conversation.rs`: the pull-request timeline and inline review comments flattened into one ordered thread.
 - `src/git/diff.rs`: unified-diff model and syntax highlighting for working-tree, commit, and PR patches.
-- `src/git/worker.rs`: the non-blocking UI/Git boundary.
+- `src/git/worker.rs`: the non-blocking UI/command boundary. It performs no Git work of its own; it routes each request through `cli::Session` and labels the answer with the generation its caller asked under.
 - `src/watch.rs`: repository watcher and event-storm coalescing.
 - `src/webhook.rs`: optional loopback listener that turns a forwarded GitHub delivery into a refresh signal.
 - `src/ui/`: viewport-only rendering, diff layouts, theme, and mouse hit map.
@@ -39,6 +53,7 @@ webhook listener (loopback, opt-in)
 ## Responsiveness Invariants
 
 1. The UI thread mutates only in-memory state and renders visible rows.
+1a. There is one command vocabulary. Every terminal operation and every subcommand is a `cli::Command` executed by `cli::Session`, so an operation reachable on screen and not from the command line cannot exist. The worker adds only a generation tag and a lane; it constructs no argument list. Subcommand dispatch happens before the interactive-terminal check and before any terminal mode is entered, so a piped invocation never claims stdout.
 2. Every preview, status, history, branch, and pull-request request carries a generation; stale replies are ignored.
 3. Fixed coalescing mailboxes isolate status/history, GitHub metadata (lookup, checks, conversation, check logs), local change/commit/branch/stash previews, and potentially network-bound PR previews. Background diff prefetch occupies its own mailbox slot behind the preview slot, so a queued batch can never displace the preview a reader is waiting for. Key repeat remains constant-space, slow GitHub work cannot block tab switches, and ordered user mutations are serialized by app state. No GitHub command is queued at startup or merely by opening the PR tab.
 4. Watcher signals are lossy by design: one full status snapshot subsumes all preceding file events.
@@ -57,6 +72,8 @@ webhook listener (loopback, opt-in)
 12a. Every entry is written atomically under the per-user Quinjet cache root with private Unix modes, bounded to 128 MiB / 2,048 entries pruned oldest first, with a 1 MiB ceiling per file patch so one file cannot crowd out a pull request, and relocatable through `QUINJET_CACHE_DIR`. Patches are cached; credentials never are. Because patches are repository content at rest outside the repository, the cache root stays owner-only.
 12b. Opening a pull request warms every settled run's log in the background, on the metadata lane behind every interactive read, capped at 32 runs and issued once per set of settled runs. The view carries one reload mark while any pull-request read is in flight and says `cached` when what is on screen came from disk.
 13. Read operations set `GIT_OPTIONAL_LOCKS=0`; `gh` runs with prompts, paging, color, and update checks disabled on the worker thread.
+14. A session owns the prepared workspaces, which is what makes one layer serve both faces. The terminal keeps a session per worker lane and pays for a prepared pull request once; a subcommand builds a session, prepares, reads, and drops it, so a repeated invocation pays the fetch again and relies on the immutable per-file caches instead. Mutations are serialized by app state inside the terminal only; two concurrent processes can race on the index exactly as two `git` invocations would.
+15. The command line never repaints or streams progress into a pipe. Human output is written once per invocation, `--json` is one document, and `--watch` is the single deliberate exception: one compact document per read under `--json`, a repainted screen on a terminal, and appended frames when redirected.
 
 ## VS Code Research
 
