@@ -287,6 +287,10 @@ impl Repository {
         })
     }
 
+    #[expect(
+        clippy::option_if_let_else,
+        reason = "the branch is one arm of a longer chain that map_or_else cannot express"
+    )]
     fn local_diff_index(&self, request: &LocalDiffRequest) -> Result<DiffIndex> {
         match request {
             LocalDiffRequest::Changes { changes, .. } => {

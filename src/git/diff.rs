@@ -834,6 +834,10 @@ fn syntax_for_path<'a>(syntaxes: &'a SyntaxSet, path: Option<&Path>) -> &'a Synt
         .unwrap_or_else(|| syntaxes.find_syntax_plain_text())
 }
 
+#[expect(
+    clippy::option_if_let_else,
+    reason = "the branch is one arm of a longer chain that map_or_else cannot express"
+)]
 fn highlight(
     highlighter: &mut HighlightLines<'_>,
     line: &str,

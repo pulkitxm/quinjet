@@ -653,7 +653,7 @@ pub(crate) struct App {
     pub last_refresh: Option<Instant>,
     pub geometry: UiGeometry,
     pub status_generation: u64,
-    changes_diff_version: u64,
+    pub changes_diff_version: u64,
     diff_generation: u64,
     history_generation: u64,
     pull_request_generation: u64,
