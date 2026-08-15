@@ -67,8 +67,6 @@ pub struct GitHubRepository {
 
 impl GitHubRepository {
     pub fn selector(&self) -> &str {
-        // A canonical URL keeps PR numbers scoped to the selected repository and
-        // also carries the GitHub Enterprise hostname.
         &self.url
     }
 
@@ -314,9 +312,6 @@ impl PreparedPullRequest {
         if files.is_empty() {
             return Ok(Vec::new());
         }
-        // Serve whatever this pair of commits has already produced, and ask Git
-        // only for the remainder. A pull request opened a second time without a
-        // new head asks Git for nothing at all.
         let mut cached: HashMap<PathBuf, Vec<u8>> = HashMap::new();
         let mut requested: Vec<PathBuf> = Vec::new();
         for file in &files {
@@ -432,9 +427,6 @@ impl Repository {
                 });
             }
         }
-        // A response spanning more than one page has no single validator to
-        // store, so it is returned without being cached; the caller's own key
-        // still covers it.
         if let Some(etag) = header_value(head, "etag").filter(|_| !has_next_page(head)) {
             let mut entry = etag.into_bytes();
             entry.push(b'\n');
@@ -461,8 +453,6 @@ fn split_validator(entry: &[u8]) -> (Option<String>, &[u8]) {
 
 /// `gh api -i` prints the response head, a blank line, then the body.
 fn split_http_response(output: &[u8]) -> (Cow<'_, str>, &[u8]) {
-    // The body is split on bytes so that a response the head cannot describe as
-    // UTF-8 still arrives whole; only the head itself is decoded.
     for separator in [b"\r\n\r\n".as_slice(), b"\n\n".as_slice()] {
         if let Some(index) = output
             .windows(separator.len())
@@ -857,8 +847,6 @@ impl Repository {
         let cached = cache
             .as_ref()
             .and_then(|cache| cache.read(cache_key, limit));
-        // An immutable entry is never re-read, even for an explicit refresh:
-        // its key already names exactly the content it holds.
         if !refresh || life == CacheLife::Immutable {
             if let Some(entry) = cached.as_ref() {
                 if life.accepts(entry.age) {
@@ -1179,8 +1167,6 @@ fn repository_from_remote_url(url: &str) -> Option<GitHubRepository> {
     }
     let (host, path) = rest.split_once('/')?;
     if !host.eq_ignore_ascii_case("github.com") || path.is_empty() {
-        // Enterprise and non-GitHub hosts still go through `gh repo view`, which
-        // validates the configured host instead of guessing from a generic URL.
         return None;
     }
     let mut components = path.trim_matches('/').split('/');
@@ -1424,7 +1410,6 @@ fn fetch_ref(temporary: &Path, remote: &str, refspec: &str, depth: usize) -> Res
         return Ok(());
     }
 
-    // Older GitHub Enterprise or local test remotes may not support partial clone.
     let fallback = [
         OsString::from("fetch"),
         OsString::from("--quiet"),
@@ -1491,8 +1476,6 @@ fn changed_files_in_repository(
         OsString::from("--"),
     ];
     let counts = numstat_counts(repository, merge_base, head);
-    // The listing between two fixed commits can never change, so it is keyed by
-    // those commits and kept. A moved head simply asks a different question.
     let key = format!("pr-files-v1\n{merge_base}\n{head}");
     let cached = cache_read_bounded(&key, CacheLife::Immutable, MAX_PR_PATH_BYTES);
     let output = match cached {
@@ -2287,8 +2270,6 @@ mod tests {
                 && file.status == PullRequestFileStatus::Renamed
         }));
 
-        // Every entry carries its exact totals straight from the index, so no
-        // header has to wait for its own patch before it can show `+n -n`.
         assert!(files.iter().all(|file| file.counts.is_some()));
         assert_eq!(
             files
@@ -2383,8 +2364,6 @@ mod tests {
             repository("acme/widget", remote.0.to_str().unwrap(), &["test-origin"]),
             7,
         );
-        // Empty OIDs force the isolated local workspace path even though this test
-        // repository happens to contain both commits.
         request.base_oid.clear();
         request.head_oid.clear();
         request.head_repository = None;
@@ -2415,8 +2394,6 @@ mod tests {
         }
         assert_eq!((additions, deletions), (21, 0));
 
-        // One batched read answers for the whole index and produces exactly the
-        // same per-file documents as the file-at-a-time path.
         let paths: Vec<PathBuf> = index.files.iter().map(|file| file.path.clone()).collect();
         let batch = workspace.diff_files(&paths).unwrap();
         assert_eq!(batch.len(), 21);
@@ -2529,8 +2506,6 @@ mod tests {
 
     #[test]
     fn a_body_the_head_cannot_describe_still_arrives_whole() {
-        // Splitting on bytes rather than on a decoded string keeps a body with a
-        // stray non-UTF-8 byte from silently arriving empty.
         let mut response = b"HTTP/2.0 200 OK\n\n".to_vec();
         response.extend_from_slice(&[0xff, 0xfe, b'o', b'k']);
         let (head, body) = split_http_response(&response);

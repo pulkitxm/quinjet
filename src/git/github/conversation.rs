@@ -144,10 +144,6 @@ impl Repository {
         &self,
         pull_request: &PullRequest,
     ) -> Result<PullRequestConversation> {
-        // GitHub moves `updatedAt` whenever anything in the thread changes, so
-        // it names this exact conversation. Keying on it means an unchanged
-        // thread is served without a request, and any activity asks a different
-        // question rather than aging an old answer out.
         let stamp = format!(
             "{}\n{}\n{}",
             pull_request.base_repository.url.trim_end_matches('/'),
@@ -181,8 +177,6 @@ impl Repository {
 
         let mut truncated = timeline.truncated || comments.truncated;
         if entries.len() > MAX_CONVERSATION_ENTRIES {
-            // Keep the most recent activity; the opening post is restored so the
-            // thread never loses the description it started from.
             let opened = entries.remove(0);
             entries.drain(..entries.len() - (MAX_CONVERSATION_ENTRIES - 1));
             entries.insert(0, opened);
@@ -208,11 +202,6 @@ impl Repository {
                 from_cache: true,
             });
         }
-        // Ask GitHub whether this part of the thread changed before asking for
-        // it again. A thread that fits one page answers 304 when it has not,
-        // which transfers nothing and spends nothing against the rate limit, so
-        // it can be re-checked as often as it is worth checking. Anything
-        // longer has no single validator and falls back to reading every page.
         let single_page: Vec<OsString> = args
             .iter()
             .filter(|arg| arg.as_os_str() != OsStr::new("--paginate"))
@@ -233,8 +222,6 @@ impl Repository {
         }
         let mut data = output.stdout;
         if output.stdout_truncated {
-            // A capped read can stop mid-record; drop the partial tail rather
-            // than reporting a malformed entry.
             while data.last().is_some_and(|byte| *byte != b'\n') {
                 data.pop();
             }

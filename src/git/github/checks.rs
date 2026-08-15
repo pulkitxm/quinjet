@@ -242,8 +242,6 @@ impl Repository {
             )));
         };
         let repository = &pull_request.base_repository.name_with_owner;
-        // A run that has finished can never change again, so its steps and log
-        // are keyed by the job alone and kept indefinitely.
         let life = if check.status.is_running() {
             CacheLife::Ttl(Duration::ZERO)
         } else {
@@ -263,9 +261,6 @@ impl Repository {
             loose_lines,
             truncated: truncated || line_limit_reached,
             unavailable: None,
-            // The archive only appears once a job finishes, but its steps are
-            // live: which one is running, and how long each has taken, both
-            // move on every refresh.
             log_pending: raw.is_empty(),
         })
     }
@@ -308,7 +303,6 @@ impl Repository {
             "unable to read the check run steps",
         );
         match response {
-            // A job whose steps cannot be read still has a log worth showing.
             Err(_) => Ok(Vec::new()),
             Ok(response) => parse_check_steps(&response.data),
         }
@@ -321,9 +315,6 @@ impl Repository {
         life: CacheLife,
     ) -> Result<(Vec<u8>, bool)> {
         let key = format!("check-log-v1\n{repository}\n{job}");
-        // A finished job's archive is fixed forever, so it is read once and then
-        // never again. A running job has no stable identity to key on, so it is
-        // always re-read; that is exactly what makes it tail.
         if life == CacheLife::Immutable {
             if let Some(cached) = super::cache_read_bounded(&key, life, MAX_CHECK_LOG_BYTES) {
                 return Ok((cached, false));
@@ -335,8 +326,6 @@ impl Repository {
             OsString::from("--allow-escape-sequences"),
             OsString::from(&endpoint),
         ])?;
-        // Older GitHub CLI releases print raw responses unconditionally and do
-        // not know the flag, so fall back to the plain request.
         let output = if output.status.success() || !rejects_unknown_flag(&output) {
             output
         } else {
@@ -422,8 +411,6 @@ fn parse_pull_request_checks(output: &[u8]) -> Result<Vec<PullRequestCheck>> {
             completed_at: fields[7].clone(),
         });
     }
-    // Keep ordering independent of status so a pending check completing does not
-    // move rows underneath the user's cursor during a live refresh.
     checks.sort_by_key(|check| (check.workflow.to_lowercase(), check.name.to_lowercase()));
     Ok(checks)
 }
@@ -502,8 +489,6 @@ fn strip_ansi(value: &str) -> String {
             output.push(character);
             continue;
         }
-        // Consume the control sequence: an optional `[` introducer, any number
-        // of parameter bytes, then the final byte that ends it.
         match characters.next() {
             Some('[') => {
                 for next in characters.by_ref() {
@@ -818,8 +803,6 @@ untimestamped trailing output\n";
             severity: CheckLogSeverity::Normal,
         };
 
-        // "18:59:58.4…" sorts before "18:59:58Z" as text, so a lexicographic
-        // comparison would leave checkout's own output under "Set up job".
         let loose = assign_lines_to_steps(
             &mut steps,
             vec![
@@ -879,8 +862,6 @@ untimestamped trailing output\n";
         assert_eq!(steps[0].status, PullRequestCheckStatus::Passed);
         assert_eq!(steps[1].status, PullRequestCheckStatus::Pending);
         assert_eq!(steps[2].status, PullRequestCheckStatus::Failed);
-        // A step that has started but not finished reports how long it has been
-        // running, measured against the caller's clock.
         let started = timestamp_seconds("2026-08-14T18:00:10Z").unwrap();
         assert_eq!(steps[1].duration_label(started + 95), "1m 35s…");
         assert_eq!(
@@ -932,10 +913,6 @@ untimestamped trailing output\n";
 
     #[test]
     fn a_warm_up_stops_as_soon_as_the_pull_request_it_serves_is_left() {
-        // Every settled run is worth warming while the reader is on that pull
-        // request. The moment they are not, the rest of the queue is only
-        // spending rate limit, so a superseded warm-up must reach no run at all
-        // rather than draining first and being ignored afterwards.
         let settled = |name: &str| PullRequestCheck {
             name: name.to_owned(),
             workflow: "CI".to_owned(),
@@ -951,8 +928,6 @@ untimestamped trailing output\n";
         };
         let checks = [settled("one"), settled("two"), settled("three")];
 
-        // Reaching any run here would have to read from that root, so a
-        // non-zero answer is also proof it went to the network.
         let warmed =
             repository.prefetch_check_run_logs(&PullRequest::default(), &checks, &|| false);
         assert_eq!(warmed, 0, "a superseded warm-up asks for nothing");

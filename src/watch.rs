@@ -17,8 +17,6 @@ impl RepoWatcher {
                 return;
             };
             if should_refresh(&event) {
-                // Coalesce event storms. Missing an individual event is safe because a
-                // status refresh always reads the complete Git state.
                 let _ = sender.try_send(());
             }
         })
