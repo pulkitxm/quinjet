@@ -3,3 +3,4 @@ extend-exclude = ["Cargo.lock", "target/", "extras/"]
 
 [default]
 locale = "en-us"
+extend-ignore-identifiers-re = ["[Rr]atatui", "CPY[0-9]+"]
