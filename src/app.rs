@@ -1513,7 +1513,9 @@ impl App {
             KeyCode::Char('G') => self.go_to_edge(true, now),
             KeyCode::Char('z') => self.toggle_sidebar(),
             KeyCode::Char('m') => effects.push(self.toggle_mouse_capture(now)),
-            KeyCode::Char('O') => self.open_selection_on_github(&mut effects, now),
+            KeyCode::Char('O') if self.view == View::PullRequests => {
+                self.open_selection_on_github(&mut effects, now);
+            }
             KeyCode::Char('[') if self.check_log_visible() => {
                 self.move_check_step_cursor(-1);
             }
@@ -1834,11 +1836,13 @@ impl App {
             || self.pull_request_check_log_loading
     }
 
-    /// Whether everything on screen came from cache rather than the network.
+    /// Whether the pull request itself was answered from disk rather than the
+    /// network. Check state is deliberately held for only thirty seconds, so
+    /// including it here made the answer almost always false and the label
+    /// never appeared at all.
     pub fn pull_request_served_from_cache(&self) -> bool {
         self.pull_request.is_some()
             && self.pull_request_from_cache
-            && self.pull_request_checks_from_cache
             && self.pull_request_conversation.from_cache
             && !self.pull_request_refreshing()
     }

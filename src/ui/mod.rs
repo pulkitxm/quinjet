@@ -5518,7 +5518,17 @@ terminal rows because that is what real pull-request comments look like in pract
         );
         assert!(!cached.contains('⟳'));
 
+        // Check state is held for thirty seconds by design, so it is nearly
+        // always read live. Letting it veto the label made the label
+        // unreachable: it never once appeared in a warm session.
         app.pull_request_checks_from_cache = false;
+        let live_checks = render(&mut app, &mut terminal);
+        assert!(
+            live_checks.contains("cached"),
+            "a freshly read check list does not make the pull request itself live"
+        );
+
+        app.pull_request_conversation.from_cache = false;
         let live = render(&mut app, &mut terminal);
         assert!(!live.contains("cached"));
         assert!(!live.contains('⟳'));
