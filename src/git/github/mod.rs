@@ -1,26 +1,24 @@
 mod checks;
 mod conversation;
 
-pub(crate) use self::checks::{
-    CheckLogLine, CheckLogSeverity, CheckRunLog, CheckStep, PullRequestCheck,
-    PullRequestCheckStatus, PullRequestChecks, unix_now,
-};
-pub(crate) use self::conversation::{ConversationEntry, ConversationKind, PullRequestConversation};
-
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::thread;
 use std::time::{Duration, SystemTime};
+use std::{env, thread};
 
 use anyhow::{Context, Result, anyhow, bail};
 
+pub(crate) use self::checks::{
+    CheckLogLine, CheckLogSeverity, CheckRunLog, CheckStep, PullRequestCheck,
+    PullRequestCheckStatus, PullRequestChecks, unix_now,
+};
+pub(crate) use self::conversation::{ConversationEntry, ConversationKind, PullRequestConversation};
 use super::diff::{
     DiffDocument, DiffLineCounts, PullRequestDetails, parse_diff, parse_numstat,
     split_patch_by_file,
@@ -1917,7 +1915,7 @@ impl CacheStore {
                 ))
             })
             .collect::<Vec<_>>();
-        files.sort_by_key(|(modified, _, _)| *modified);
+        files.sort_by_key(|(modified, ..)| *modified);
         let mut total = files.iter().map(|(_, bytes, _)| *bytes).sum::<u64>();
         let mut count = files.len();
         for (_, bytes, path) in files {

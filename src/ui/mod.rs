@@ -10,6 +10,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget, Wrap};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+use self::theme::Theme;
 use crate::app::{
     App, ContentFileHit, ContentStepHit, DiffLayout, Focus, Modal, PaletteCommand,
     PullRequestSection, PullRequestTreeEntry, ScmAction, ScmActionHit, SidebarHit, SidebarHitArea,
@@ -25,8 +26,6 @@ use crate::git::github::{
 use crate::git::github::{PullRequestCheck, PullRequestFile};
 use crate::git::status::{Change, ChangeArea, ChangeStatus};
 use crate::git::{Branch, HistoryBranch, Stash};
-
-use self::theme::Theme;
 
 const DETAIL_LABEL_WIDTH: usize = 12;
 const MAX_INTRALINE_SOURCE_BYTES: usize = 32 * 1024;
