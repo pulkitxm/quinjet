@@ -16,9 +16,7 @@ impl RepoWatcher {
             let Ok(event) = result else {
                 return;
             };
-            if should_refresh(&event) && sender.try_send(()).is_err() {
-                return;
-            }
+            if should_refresh(&event) && sender.try_send(()).is_err() {}
         })
         .context("failed to create filesystem watcher")?;
         watcher
