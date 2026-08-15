@@ -1,0 +1,29 @@
+msrv = "1.85"
+
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-dbg-in-tests = true
+allow-print-in-tests = true
+allow-indexing-slicing-in-tests = true
+
+avoid-breaking-exported-api = false
+cognitive-complexity-threshold = 20
+enum-variant-size-threshold = 256
+excessive-nesting-threshold = 6
+literal-representation-threshold = 4096
+too-many-arguments-threshold = 6
+too-many-lines-threshold = 120
+type-complexity-threshold = 250
+verbose-bit-mask-threshold = 1
+
+disallowed-methods = [
+  { path = "std::process::Command::new", reason = "route Git subprocesses through src/git so arguments stay shell-free" },
+  { path = "std::env::set_var", reason = "process-wide mutation is unsound once threads are running" },
+  { path = "std::env::remove_var", reason = "process-wide mutation is unsound once threads are running" },
+]
+
+disallowed-macros = [
+  { path = "std::eprint", reason = "terminal output belongs to the renderer" },
+  { path = "std::eprintln", reason = "terminal output belongs to the renderer" },
+]
