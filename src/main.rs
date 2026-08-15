@@ -140,10 +140,6 @@ fn main() -> Result<()> {
 /// Handing a URL to the desktop is best effort: the toast has already said
 /// which one, so a machine with no opener leaves the reader able to copy it
 /// rather than facing an error they cannot act on.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "handing a URL to the desktop opener is not a Git subprocess"
-)]
 fn open_url(url: &str) {
     let opener = if cfg!(target_os = "macos") {
         "open"

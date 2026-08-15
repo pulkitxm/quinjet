@@ -689,10 +689,6 @@ mod tests {
         assert_eq!(check("").job_id(), None);
     }
 
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "the test needs a real ExitStatus and only the process can mint one"
-    )]
     fn failing_status() -> std::process::ExitStatus {
         std::process::Command::new("false").status().unwrap()
     }
