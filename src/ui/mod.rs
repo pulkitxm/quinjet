@@ -225,10 +225,12 @@ fn draw_tabs(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) -> (Re
     } else {
         let mut text = format!(" {}", app.status.branch.head);
         if app.status.branch.ahead > 0 {
-            text.push_str(&format!("  ↑{}", app.status.branch.ahead));
+            text.push_str("  ↑");
+            text.push_str(&app.status.branch.ahead.to_string());
         }
         if app.status.branch.behind > 0 {
-            text.push_str(&format!("  ↓{}", app.status.branch.behind));
+            text.push_str("  ↓");
+            text.push_str(&app.status.branch.behind.to_string());
         }
         text
     };
@@ -2067,8 +2069,7 @@ const fn log_severity_color(severity: CheckLogSeverity, theme: &Theme) -> Color 
     match severity {
         CheckLogSeverity::Normal => theme.text,
         CheckLogSeverity::Command => theme.accent,
-        CheckLogSeverity::Notice => theme.modified,
-        CheckLogSeverity::Warning => theme.modified,
+        CheckLogSeverity::Notice | CheckLogSeverity::Warning => theme.modified,
         CheckLogSeverity::Error => theme.error,
     }
 }
@@ -2109,9 +2110,8 @@ enum ProseStyle {
 
 fn prose_style(style: ProseStyle, theme: &Theme) -> Style {
     match style {
-        ProseStyle::Text => Style::default().fg(theme.text),
+        ProseStyle::Text | ProseStyle::Bullet => Style::default().fg(theme.text),
         ProseStyle::Heading => Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
-        ProseStyle::Bullet => Style::default().fg(theme.text),
         ProseStyle::Code => Style::default().fg(theme.modified),
         ProseStyle::Quote => Style::default().fg(theme.muted),
     }
