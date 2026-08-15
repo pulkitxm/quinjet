@@ -135,11 +135,22 @@ impl TextBuffer {
         self.cursor += text.len();
     }
 
+    /// The text on each side of the cursor, never panicking when the cursor
+    /// sits between two bytes of the same character.
+    pub(crate) fn before_cursor(&self) -> &str {
+        self.value.get(..self.cursor).unwrap_or_default()
+    }
+
+    pub(crate) fn after_cursor(&self) -> &str {
+        self.value.get(self.cursor..).unwrap_or_default()
+    }
+
     pub(crate) fn backspace(&mut self) {
         if self.cursor == 0 {
             return;
         }
-        let previous = self.value[..self.cursor]
+        let previous = self
+            .before_cursor()
             .char_indices()
             .next_back()
             .map(|(index, _)| index)
@@ -152,7 +163,8 @@ impl TextBuffer {
         if self.cursor >= self.value.len() {
             return;
         }
-        let length = self.value[self.cursor..]
+        let length = self
+            .after_cursor()
             .chars()
             .next()
             .map(char::len_utf8)
@@ -161,7 +173,8 @@ impl TextBuffer {
     }
 
     pub(crate) fn move_left(&mut self) {
-        self.cursor = self.value[..self.cursor]
+        self.cursor = self
+            .before_cursor()
             .char_indices()
             .next_back()
             .map(|(index, _)| index)
@@ -169,20 +182,22 @@ impl TextBuffer {
     }
 
     pub(crate) fn move_right(&mut self) {
-        if let Some(character) = self.value[self.cursor..].chars().next() {
+        if let Some(character) = self.after_cursor().chars().next() {
             self.cursor += character.len_utf8();
         }
     }
 
     pub(crate) fn home(&mut self) {
-        let line_start = self.value[..self.cursor]
+        let line_start = self
+            .before_cursor()
             .rfind('\n')
             .map_or(0, |index| index + 1);
         self.cursor = line_start;
     }
 
     pub(crate) fn end(&mut self) {
-        self.cursor = self.value[self.cursor..]
+        self.cursor = self
+            .after_cursor()
             .find('\n')
             .map_or(self.value.len(), |index| self.cursor + index);
     }
@@ -247,7 +262,8 @@ impl TextBuffer {
     }
 
     pub(crate) fn delete_to_line_start(&mut self) {
-        let start = self.value[..self.cursor]
+        let start = self
+            .before_cursor()
             .rfind('\n')
             .map_or(0, |index| index + 1);
         drop(self.value.drain(start..self.cursor));
@@ -255,7 +271,8 @@ impl TextBuffer {
     }
 
     pub(crate) fn delete_to_line_end(&mut self) {
-        let end = self.value[self.cursor..]
+        let end = self
+            .after_cursor()
             .find('\n')
             .map_or(self.value.len(), |index| self.cursor + index);
         drop(self.value.drain(self.cursor..end));

@@ -4546,7 +4546,7 @@ fn set_text_cursor(
     input: &crate::app::TextBuffer,
     multiline: bool,
 ) {
-    let before = &input.value[..input.cursor.min(input.value.len())];
+    let before = input.before_cursor();
     let (row, column) = if multiline {
         let row = before
             .chars()
