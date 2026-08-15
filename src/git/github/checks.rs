@@ -125,7 +125,8 @@ impl CheckStep {
 pub(crate) fn unix_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs() as i64)
+        .ok()
+        .and_then(|elapsed| i64::try_from(elapsed.as_secs()).ok())
         .unwrap_or_default()
 }
 
@@ -486,7 +487,10 @@ fn split_log_timestamp(line: &str) -> (&str, &str) {
 fn is_log_timestamp(value: &str) -> bool {
     value.len() >= 20
         && value.ends_with('Z')
-        && value.as_bytes()[..4].iter().all(u8::is_ascii_digit)
+        && value
+            .as_bytes()
+            .get(..4)
+            .is_some_and(|year| year.iter().all(u8::is_ascii_digit))
         && value.as_bytes().get(4) == Some(&b'-')
         && value.contains('T')
 }
@@ -563,7 +567,12 @@ fn assign_lines_to_steps(steps: &mut [CheckStep], lines: Vec<CheckLogLine>) -> V
             while let Some(next) = current.map_or(Some(0), |index| {
                 (index + 1 < steps.len()).then_some(index + 1)
             }) {
-                if starts[next].is_some_and(|start| seconds >= start) {
+                if starts
+                    .get(next)
+                    .copied()
+                    .flatten()
+                    .is_some_and(|start| seconds >= start)
+                {
                     current = Some(next);
                 } else {
                     break;
@@ -571,8 +580,9 @@ fn assign_lines_to_steps(steps: &mut [CheckStep], lines: Vec<CheckLogLine>) -> V
             }
             let past_last = current.is_some_and(|index| {
                 index + 1 == steps.len()
-                    && timestamp_seconds(&steps[index].completed_at)
-                        .is_some_and(|end| seconds > end)
+                    && steps.get(index).is_some_and(|step| {
+                        timestamp_seconds(&step.completed_at).is_some_and(|end| seconds > end)
+                    })
             });
             if past_last {
                 loose.push(line);
@@ -593,6 +603,10 @@ pub(super) fn elapsed_label(started_at: &str, completed_at: &str) -> String {
     elapsed_seconds(started_at, completed_at).map_or_else(String::new, format_elapsed)
 }
 
+#[expect(
+    clippy::integer_division,
+    reason = "splitting seconds into whole minutes and hours is the point"
+)]
 fn format_elapsed(seconds: i64) -> String {
     if seconds < 60 {
         format!("{seconds}s")
@@ -627,6 +641,10 @@ fn timestamp_seconds(value: &str) -> Option<i64> {
 
 /// Howard Hinnant's civil-to-days algorithm, valid across the proleptic
 /// Gregorian calendar.
+#[expect(
+    clippy::integer_division,
+    reason = "the civil-to-days algorithm is defined in truncating arithmetic"
+)]
 const fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     let year = if month <= 2 { year - 1 } else { year };
     let era = (if year >= 0 { year } else { year - 399 }) / 400;
