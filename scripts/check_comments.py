@@ -22,6 +22,7 @@ DIRECTIVES = (
     re.compile(r"^coverage:(ignore|off|on)\b"),
     re.compile(r"^cargo-deny\b"),
     re.compile(r"^@generated\b"),
+    re.compile(r"^nosemgrep\b"),
 )
 
 

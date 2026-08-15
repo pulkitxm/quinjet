@@ -1280,6 +1280,7 @@ impl TemporaryBareRepository {
                 remove_stale_temporary_repositories(&parent);
                 parent
             }
+            // nosemgrep: rust.lang.security.temp-dir.temp-dir
             _ => env::temp_dir(),
         };
         for _ in 0..16 {
@@ -2023,6 +2024,7 @@ mod tests {
 
     fn test_directory(label: &str) -> TestDirectory {
         let id = TEST_REPOSITORY_ID.fetch_add(1, Ordering::Relaxed);
+        // nosemgrep: rust.lang.security.temp-dir.temp-dir
         let path = env::temp_dir().join(format!(
             "quinjet-github-{label}-{}-{id}",
             std::process::id()
