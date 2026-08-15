@@ -13,7 +13,7 @@ const MAX_SYNTAX_HIGHLIGHT_PATCH_BYTES: usize = 512 * 1024;
 const MAX_SYNTAX_HIGHLIGHT_LINE_BYTES: usize = 32 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DiffLineKind {
+pub(crate) enum DiffLineKind {
     FileHeader,
     FileFooter,
     HunkHeader,
@@ -24,7 +24,7 @@ pub enum DiffLineKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HighlightSpan {
+pub(crate) struct HighlightSpan {
     pub text: String,
     pub foreground: Option<(u8, u8, u8)>,
     pub bold: bool,
@@ -43,7 +43,7 @@ impl HighlightSpan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DiffLine {
+pub(crate) struct DiffLine {
     pub kind: DiffLineKind,
     pub old_line: Option<usize>,
     pub new_line: Option<usize>,
@@ -65,7 +65,7 @@ impl DiffLine {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct CommitDetails {
+pub(crate) struct CommitDetails {
     pub id: String,
     pub subject: String,
     pub author: String,
@@ -77,14 +77,14 @@ pub struct CommitDetails {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct DiffLineCounts {
+pub(crate) struct DiffLineCounts {
     pub additions: usize,
     pub deletions: usize,
     pub binary: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DiffFileIndexEntry {
+pub(crate) struct DiffFileIndexEntry {
     pub path: PathBuf,
     pub old_path: Option<PathBuf>,
     pub status: String,
@@ -133,7 +133,7 @@ impl DiffFileIndexEntry {
 /// Parse `git diff --numstat -z` output into per-path totals. Renames emit an
 /// empty path field followed by the pre-image and post-image records, so the
 /// scanner has to consume those two extra records instead of assuming one.
-pub fn parse_numstat(output: &[u8]) -> HashMap<PathBuf, DiffLineCounts> {
+pub(crate) fn parse_numstat(output: &[u8]) -> HashMap<PathBuf, DiffLineCounts> {
     let records: Vec<&[u8]> = output
         .split(|byte| *byte == 0)
         .filter(|record| !record.is_empty())
@@ -180,7 +180,7 @@ fn record_path(record: &[u8]) -> PathBuf {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DiffIndex {
+pub(crate) struct DiffIndex {
     pub title: String,
     pub files: Vec<DiffFileIndexEntry>,
     pub truncated: bool,
@@ -290,7 +290,7 @@ fn index_file_header(file: &DiffFileIndexEntry) -> DiffLine {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PullRequestDetails {
+pub(crate) struct PullRequestDetails {
     pub number: u64,
     pub title: String,
     pub description: String,
@@ -315,7 +315,7 @@ pub struct PullRequestDetails {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DiffDocument {
+pub(crate) struct DiffDocument {
     pub title: String,
     pub lines: Vec<DiffLine>,
     pub truncated: bool,
@@ -385,7 +385,7 @@ fn highlight_assets() -> &'static HighlightAssets {
 /// Parse a unified diff and highlight code on the old and new sides independently.
 /// Keeping two parser states avoids additions corrupting the old-file syntax state and
 /// removals corrupting the new-file state.
-pub fn parse_diff(
+pub(crate) fn parse_diff(
     raw: &[u8],
     title: impl Into<String>,
     path_hint: Option<&Path>,
@@ -582,7 +582,7 @@ pub fn parse_diff(
 /// Cut a multi-file patch at its `diff --git` boundaries and key each section by
 /// the paths in that header. One Git invocation can then answer for many files
 /// while each file still parses and renders as its own document.
-pub fn split_patch_by_file(patch: &[u8]) -> Vec<PatchSection<'_>> {
+pub(crate) fn split_patch_by_file(patch: &[u8]) -> Vec<PatchSection<'_>> {
     let mut starts = Vec::new();
     let mut offset = 0;
     while offset < patch.len() {
@@ -628,7 +628,7 @@ pub fn split_patch_by_file(patch: &[u8]) -> Vec<PatchSection<'_>> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PatchSection<'a> {
+pub(crate) struct PatchSection<'a> {
     pub old_path: Option<PathBuf>,
     pub new_path: Option<PathBuf>,
     pub body: &'a [u8],
