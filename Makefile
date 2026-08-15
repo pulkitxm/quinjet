@@ -4,9 +4,9 @@ COVERAGE_MIN ?= 55
 
 .PHONY: ci ci-fast fmt fmt-check lint lint-nightly test doc msrv build package install-check \
         comments secrets typos deny audit unused hack coverage shell actions yaml markdown toml \
-        editorconfig tools
+        editorconfig ruff tools
 
-ci: fmt-check lint test doc comments secrets typos deny audit unused hack shell actions yaml markdown toml package
+ci: fmt-check lint test doc comments secrets typos deny audit unused hack shell actions yaml markdown toml editorconfig ruff package
 
 ci-fast: fmt-check lint test comments secrets
 
@@ -90,6 +90,10 @@ toml:
 
 editorconfig:
 	editorconfig-checker
+
+ruff:
+	ruff check --select ALL --ignore D203,D213,COM812,ISC001 scripts
+	ruff format --check scripts
 
 tools:
 	$(CARGO) install cargo-deny cargo-audit cargo-machete cargo-hack cargo-llvm-cov typos-cli taplo-cli

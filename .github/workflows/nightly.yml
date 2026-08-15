@@ -24,10 +24,17 @@ jobs:
           components: rustfmt, clippy
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny,cargo-audit,cargo-machete,cargo-hack,shellcheck,shfmt,taplo-cli
+          tool: cargo-deny,cargo-audit,cargo-machete,cargo-hack,cargo-llvm-cov,shellcheck,shfmt,taplo-cli,typos,zizmor,editorconfig-checker
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
       - uses: Swatinem/rust-cache@v2
-      - run: pipx install yamllint
-      - run: npm install --global markdownlint-cli2
+      - name: Install the remaining checkers
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          pipx install yamllint
+          npm install --global markdownlint-cli2
       - name: make ci
         run: make ci
 
