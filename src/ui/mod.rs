@@ -613,7 +613,9 @@ enum ChangeRow<'a> {
 
 fn selected_change_row(app: &App, visible: &[usize]) -> usize {
     let selected_index = visible.get(app.change_cursor).copied();
-    let selected_area = selected_index.map(|index| app.status.changes[index].area);
+    let selected_area = selected_index
+        .and_then(|index| app.status.changes.get(index))
+        .map(|change| change.area);
     let mut row = 0;
     for area in [
         ChangeArea::Conflict,
@@ -622,7 +624,12 @@ fn selected_change_row(app: &App, visible: &[usize]) -> usize {
     ] {
         let group: Vec<_> = visible
             .iter()
-            .filter(|index| app.status.changes[**index].area == area)
+            .filter(|index| {
+                app.status
+                    .changes
+                    .get(**index)
+                    .is_some_and(|change| change.area == area)
+            })
             .copied()
             .collect();
         if group.is_empty() {
@@ -652,9 +659,12 @@ fn change_row_count(app: &App, visible: &[usize]) -> usize {
     ]
     .into_iter()
     .filter(|area| {
-        visible
-            .iter()
-            .any(|index| app.status.changes[*index].area == *area)
+        visible.iter().any(|index| {
+            app.status
+                .changes
+                .get(*index)
+                .is_some_and(|change| change.area == *area)
+        })
     })
     .count();
     visible.len() + group_count
@@ -673,7 +683,12 @@ fn build_change_rows<'a>(app: &'a App, visible: &[usize]) -> Vec<ChangeRow<'a>> 
     ] {
         let group: Vec<_> = visible
             .iter()
-            .filter(|index| app.status.changes[**index].area == area)
+            .filter(|index| {
+                app.status
+                    .changes
+                    .get(**index)
+                    .is_some_and(|change| change.area == area)
+            })
             .copied()
             .collect();
         if group.is_empty() {
@@ -684,10 +699,16 @@ fn build_change_rows<'a>(app: &'a App, visible: &[usize]) -> Vec<ChangeRow<'a>> 
             count: group.len(),
         });
         for index in group {
+            let (Some(cursor), Some(change)) = (
+                cursor_map.get(&index).copied(),
+                app.status.changes.get(index),
+            ) else {
+                continue;
+            };
             rows.push(ChangeRow::Change {
                 index,
-                cursor: cursor_map[&index],
-                change: &app.status.changes[index],
+                cursor,
+                change,
             });
         }
     }
@@ -742,7 +763,9 @@ fn draw_history_sidebar(
         .enumerate()
     {
         let cursor = app.sidebar_offset + row_offset;
-        let commit = &app.history[*index];
+        let Some(commit) = app.history.get(*index) else {
+            continue;
+        };
         let selected = cursor == app.history_cursor;
         let y = inner.y + cells(row_offset);
         let row_style = Style::default().bg(if selected {
@@ -1308,7 +1331,9 @@ fn draw_pull_request_check_list(
             )
         } else {
             let index = row - 1;
-            let check = &app.pull_request_checks[index];
+            let Some(check) = app.pull_request_checks.get(index) else {
+                continue;
+            };
             let (icon, color) = pull_request_check_icon(check.status, theme);
             let workflow = if check.workflow.is_empty() {
                 String::new()
@@ -2722,7 +2747,7 @@ fn text_preview_lines(value: &str, width: usize, maximum_lines: usize) -> Vec<St
             let used = chunk.width();
             (chunk, used)
         } else if let Some(space) = chunk.rfind(' ').filter(|space| *space > 0) {
-            let line = chunk[..space].to_owned();
+            let line = chunk.get(..space).unwrap_or_default().to_owned();
             let used = line.width().saturating_add(1);
             (line, used)
         } else {
@@ -4116,7 +4141,7 @@ fn draw_compare_branches(
     } else {
         let visible = App::filtered_history_branches(items, &query.value)
             .into_iter()
-            .filter(|index| !items[*index].current)
+            .filter(|index| items.get(*index).is_some_and(|item| !item.current))
             .collect::<Vec<_>>();
         let offset = selected.saturating_sub(list_area.height.saturating_sub(1) as usize);
         let lines = visible
