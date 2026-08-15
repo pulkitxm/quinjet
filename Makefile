@@ -114,7 +114,7 @@ coverage:
 
 shell:
 	shellcheck --severity=style --enable=all install.sh tests/install.sh
-	shfmt --diff --indent 2 --case-indent install.sh tests/install.sh
+	shfmt --diff --indent 4 --case-indent install.sh tests/install.sh
 
 actions:
 	actionlint
