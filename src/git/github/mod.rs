@@ -7,6 +7,7 @@ pub use self::checks::{
 };
 pub use self::conversation::{ConversationEntry, ConversationKind, PullRequestConversation};
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -420,6 +421,7 @@ impl Repository {
             );
         }
         let (head, body) = split_http_response(&output.stdout);
+        let head = head.as_ref();
         let status =
             String::from_utf8_lossy(head.lines().next().unwrap_or_default().as_bytes()).to_string();
         if status.contains(" 304") {
@@ -458,14 +460,21 @@ fn split_validator(entry: &[u8]) -> (Option<String>, &[u8]) {
 }
 
 /// `gh api -i` prints the response head, a blank line, then the body.
-fn split_http_response(output: &[u8]) -> (&str, &[u8]) {
-    let text = std::str::from_utf8(output).unwrap_or_default();
-    for separator in ["\r\n\r\n", "\n\n"] {
-        if let Some(index) = text.find(separator) {
-            return (&text[..index], &output[index + separator.len()..]);
+fn split_http_response(output: &[u8]) -> (Cow<'_, str>, &[u8]) {
+    // The body is split on bytes so that a response the head cannot describe as
+    // UTF-8 still arrives whole; only the head itself is decoded.
+    for separator in [b"\r\n\r\n".as_slice(), b"\n\n".as_slice()] {
+        if let Some(index) = output
+            .windows(separator.len())
+            .position(|window| window == separator)
+        {
+            return (
+                String::from_utf8_lossy(&output[..index]),
+                &output[index + separator.len()..],
+            );
         }
     }
-    (text, &[])
+    (String::from_utf8_lossy(output), &[])
 }
 
 fn header_value(head: &str, name: &str) -> Option<String> {
@@ -2505,5 +2514,48 @@ mod tests {
         let repository = repositories.into_values().next().unwrap();
         assert_eq!(repository.url, "https://github.com/acme/widget");
         assert_eq!(repository.remotes, vec!["origin", "upstream"]);
+    }
+
+    #[test]
+    fn a_response_head_is_read_apart_from_its_body() {
+        let response = b"HTTP/2.0 200 OK\r\nEtag: W/\"92ade\"\r\nContent-Type: application/json\r\n\r\n[{\"a\":1}]";
+        let (head, body) = split_http_response(response);
+        assert!(head.starts_with("HTTP/2.0 200 OK"));
+        assert_eq!(body, b"[{\"a\":1}]");
+        assert_eq!(header_value(&head, "etag").as_deref(), Some("W/\"92ade\""));
+        assert_eq!(header_value(&head, "ETAG").as_deref(), Some("W/\"92ade\""));
+        assert_eq!(header_value(&head, "link"), None);
+    }
+
+    #[test]
+    fn a_body_the_head_cannot_describe_still_arrives_whole() {
+        // Splitting on bytes rather than on a decoded string keeps a body with a
+        // stray non-UTF-8 byte from silently arriving empty.
+        let mut response = b"HTTP/2.0 200 OK\n\n".to_vec();
+        response.extend_from_slice(&[0xff, 0xfe, b'o', b'k']);
+        let (head, body) = split_http_response(&response);
+        assert_eq!(head, "HTTP/2.0 200 OK");
+        assert_eq!(body, [0xff, 0xfe, b'o', b'k']);
+    }
+
+    #[test]
+    fn only_a_single_page_answer_is_worth_a_validator() {
+        let paged = "HTTP/2.0 200 OK\nLink: <https://api.github.com/x?page=2>; rel=\"next\"";
+        let last = "HTTP/2.0 200 OK\nLink: <https://api.github.com/x?page=1>; rel=\"prev\"";
+        assert!(has_next_page(paged));
+        assert!(!has_next_page(last));
+        assert!(!has_next_page("HTTP/2.0 200 OK"));
+    }
+
+    #[test]
+    fn a_cache_entry_keeps_its_validator_beside_the_body_it_validates() {
+        let entry = b"W/\"92ade\"\nname\tvalue\n";
+        let (validator, body) = split_validator(entry);
+        assert_eq!(validator.as_deref(), Some("W/\"92ade\""));
+        assert_eq!(body, b"name\tvalue\n");
+
+        let (missing, whole) = split_validator(b"no newline here");
+        assert_eq!(missing, None);
+        assert_eq!(whole, b"no newline here");
     }
 }
