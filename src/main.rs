@@ -148,12 +148,14 @@ fn open_url(url: &str) {
     } else {
         "xdg-open"
     };
-    let _ = Command::new(opener)
-        .arg(url)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn();
+    drop(
+        Command::new(opener)
+            .arg(url)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn(),
+    );
 }
 
 fn watcher_changed(receiver: Option<&Receiver<()>>) -> bool {
@@ -235,7 +237,7 @@ impl TerminalGuard {
         let keyboard_enhancements =
             crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
         if keyboard_enhancements {
-            let _ = execute!(
+            drop(execute!(
                 stdout,
                 PushKeyboardEnhancementFlags(
                     KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
@@ -243,7 +245,7 @@ impl TerminalGuard {
                         | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
                         | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
                 )
-            );
+            ));
         }
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend).context("failed to initialize terminal")?;
@@ -258,18 +260,21 @@ impl TerminalGuard {
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        let _ = disable_raw_mode();
+        drop(disable_raw_mode());
         if self.keyboard_enhancements {
-            let _ = execute!(self.terminal.backend_mut(), PopKeyboardEnhancementFlags);
+            drop(execute!(
+                self.terminal.backend_mut(),
+                PopKeyboardEnhancementFlags
+            ));
         }
         if self.mouse {
-            let _ = execute!(self.terminal.backend_mut(), DisableMouseCapture);
+            drop(execute!(self.terminal.backend_mut(), DisableMouseCapture));
         }
-        let _ = execute!(
+        drop(execute!(
             self.terminal.backend_mut(),
             DisableBracketedPaste,
             LeaveAlternateScreen
-        );
-        let _ = self.terminal.show_cursor();
+        ));
+        drop(self.terminal.show_cursor());
     }
 }

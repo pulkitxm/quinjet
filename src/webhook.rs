@@ -59,7 +59,7 @@ impl WebhookListener {
 impl Drop for WebhookListener {
     fn drop(&mut self) {
         self.stopped.store(true, Ordering::Relaxed);
-        let _ = TcpStream::connect(self.address);
+        drop(TcpStream::connect(self.address));
     }
 }
 
@@ -79,31 +79,33 @@ fn serve(listener: &TcpListener, sender: &Sender<WebhookDelivery>, stopped: &Ato
             continue;
         }
         if let Some(delivery) = read_delivery(stream) {
-            let _ = sender.try_send(delivery);
+            drop(sender.try_send(delivery));
         }
     }
 }
 
 fn read_delivery(mut stream: TcpStream) -> Option<WebhookDelivery> {
-    let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
-    let _ = stream.set_write_timeout(Some(READ_TIMEOUT));
+    drop(stream.set_read_timeout(Some(READ_TIMEOUT)));
+    drop(stream.set_write_timeout(Some(READ_TIMEOUT)));
     let mut reader = BufReader::new(stream.try_clone().ok()?);
     let head = read_head(&mut reader)?;
     let delivery = parse_delivery(&head);
 
     if let Some(length) = content_length(&head) {
         let mut body = Vec::new();
-        let _ = reader
-            .take(length.min(MAX_BODY_BYTES))
-            .read_to_end(&mut body);
+        drop(
+            reader
+                .take(length.min(MAX_BODY_BYTES))
+                .read_to_end(&mut body),
+        );
     }
     let response = if delivery.is_some() {
         "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
     } else {
         "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
     };
-    let _ = stream.write_all(response.as_bytes());
-    let _ = stream.flush();
+    drop(stream.write_all(response.as_bytes()));
+    drop(stream.flush());
     delivery
 }
 

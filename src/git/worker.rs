@@ -514,11 +514,11 @@ fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sende
             } => WorkerEvent::PullRequestLookup {
                 generation,
                 result: {
-                    let _ = events.send(WorkerEvent::PullRequestProgress {
+                    drop(events.send(WorkerEvent::PullRequestProgress {
                         generation,
                         diff: false,
                         progress: PullRequestProgress::LoadingMetadata,
-                    });
+                    }));
                     repository
                         .pull_request_lookup(
                             &repositories,
@@ -534,11 +534,11 @@ fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sende
                 pull_request,
             } => {
                 let result = repository.prepare_pull_request_diff(&pull_request, |progress| {
-                    let _ = events.send(WorkerEvent::PullRequestProgress {
+                    drop(events.send(WorkerEvent::PullRequestProgress {
                         generation,
                         diff: true,
                         progress,
-                    });
+                    }));
                 });
                 let result = match result {
                     Ok(workspace) => {
