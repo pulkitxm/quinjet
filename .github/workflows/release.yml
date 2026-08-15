@@ -137,6 +137,7 @@ jobs:
           tool: cargo-auditable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Build with an embedded dependency list
+        shell: bash
         env:
           TARGET: ${{ matrix.target }}
         run: cargo auditable build --release --locked --target "${TARGET}"
