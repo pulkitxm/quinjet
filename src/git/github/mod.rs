@@ -1317,7 +1317,9 @@ fn remove_stale_temporary_repositories(parent: &Path) {
         let is_quinjet_pr = path
             .file_name()
             .and_then(OsStr::to_str)
-            .is_some_and(|name| name.starts_with("pr-") && name.ends_with(".git"));
+            .is_some_and(|name| {
+                name.starts_with("pr-") && Path::new(name).extension() == Some(OsStr::new("git"))
+            });
         if !is_quinjet_pr {
             continue;
         }
@@ -1957,13 +1959,13 @@ fn create_private_directory(path: &Path) -> Result<()> {
 }
 
 fn stable_cache_hash(value: &[u8]) -> (u64, u64) {
-    let mut left = 0xcbf29ce484222325_u64;
-    let mut right = 0x84222325cbf29ce4_u64;
+    let mut left = 0xcbf2_9ce4_8422_2325_u64;
+    let mut right = 0x8422_2325_cbf2_9ce4_u64;
     for byte in value {
         left ^= u64::from(*byte);
-        left = left.wrapping_mul(0x100000001b3);
+        left = left.wrapping_mul(0x0100_0000_01b3);
         right ^= u64::from(*byte).rotate_left(1);
-        right = right.wrapping_mul(0x100000001b3).rotate_left(5);
+        right = right.wrapping_mul(0x0100_0000_01b3).rotate_left(5);
     }
     (left, right)
 }

@@ -103,7 +103,7 @@ pub(crate) enum ToastLevel {
 pub(crate) struct Toast {
     pub message: String,
     pub level: ToastLevel,
-    expires_at: Instant,
+    pub expires_at: Instant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -524,6 +524,10 @@ pub(crate) enum AuxiliaryPreview {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[expect(
+    variant_size_differences,
+    reason = "both variants are pointer-sized in practice and boxing would cost an allocation per row"
+)]
 enum ChangeTarget {
     Group(ChangeArea),
     Change(usize),
@@ -553,6 +557,10 @@ pub(crate) enum AppEffect {
     Quit,
 }
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is an independent piece of interface state"
+)]
 pub(crate) struct App {
     pub repository_root: PathBuf,
     pub repository_name: String,
@@ -594,7 +602,7 @@ pub(crate) struct App {
     pub pull_request_checks_from_cache: bool,
     /// How many settled runs the background warm has already covered, so a
     /// poll that reports the same set does not queue the work again.
-    pull_request_prefetched_logs: usize,
+    pub pull_request_prefetched_logs: usize,
     pub pull_request_conversation: PullRequestConversation,
     pub pull_request_conversation_loading: bool,
     pub pull_request_conversation_error: Option<String>,
@@ -629,7 +637,7 @@ pub(crate) struct App {
     pub diff_split_percent: u16,
     pub expanded_diff: bool,
     pub files_collapsed: bool,
-    collapse_preference_set: bool,
+    pub collapse_preference_set: bool,
     pub resize_target: Option<ResizeTarget>,
     pub filter: String,
     pub modal: Option<Modal>,
@@ -950,6 +958,10 @@ impl App {
         }
     }
 
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the caller has no use for the value afterwards"
+    )]
     fn toggle_pull_request_directory(&mut self, path: PathBuf) {
         if !self.collapsed_pull_request_directories.remove(&path) {
             let _ = self.collapsed_pull_request_directories.insert(path.clone());
@@ -1242,6 +1254,10 @@ impl App {
             .and_then(|index| self.history.get(*index))
     }
 
+    #[expect(
+        clippy::unused_self,
+        reason = "the method belongs to the app surface even without state"
+    )]
     pub(crate) fn palette_commands(&self, query: &str) -> Vec<PaletteCommand> {
         let words: Vec<_> = query
             .split_ascii_whitespace()
@@ -1507,7 +1523,7 @@ impl App {
             KeyCode::PageUp => self.page(-1, now),
             KeyCode::PageDown => self.page(1, now),
             KeyCode::Home => self.go_to_edge(false, now),
-            KeyCode::End => self.go_to_edge(true, now),
+            KeyCode::End | KeyCode::Char('G') => self.go_to_edge(true, now),
             KeyCode::Char('g') => {
                 if self
                     .pending_g
@@ -1519,7 +1535,6 @@ impl App {
                     self.pending_g = Some(now);
                 }
             }
-            KeyCode::Char('G') => self.go_to_edge(true, now),
             KeyCode::Char('z') => self.toggle_sidebar(),
             KeyCode::Char('m') => effects.push(self.toggle_mouse_capture(now)),
             KeyCode::Char('O') if self.view == View::PullRequests => {
@@ -3386,6 +3401,10 @@ impl App {
     #[expect(
         clippy::unreachable,
         reason = "the branch is impossible for the states that reach it"
+    )]
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the caller has no use for the value afterwards"
     )]
     fn handle_scm_action(&mut self, action: ScmAction, effects: &mut Vec<AppEffect>) {
         match action {
@@ -6166,7 +6185,7 @@ mod tests {
                     generation: 5,
                     skip: 0,
                     limit: HISTORY_PAGE_SIZE,
-                    revision: _
+                    ..
                 }
             )
         ));
@@ -6438,6 +6457,10 @@ mod tests {
         assert_eq!(app.busy.as_deref(), Some("Renaming branch"));
     }
 
+    #[expect(
+        clippy::ref_patterns,
+        reason = "matches! can only borrow the value under test"
+    )]
     #[test]
     fn compare_branch_picker_queues_a_head_diff_without_checkout() {
         let mut app = app_with_changes();
@@ -6483,6 +6506,10 @@ mod tests {
         assert_eq!(app.focus, Focus::Content);
     }
 
+    #[expect(
+        clippy::ref_patterns,
+        reason = "matches! can only borrow the value under test"
+    )]
     #[test]
     fn background_status_and_collapse_do_not_restart_a_branch_comparison() {
         let mut app = app_with_changes();
@@ -6625,7 +6652,7 @@ mod tests {
         assert!(matches!(
             app.modal,
             Some(Modal::Prompt {
-                kind: PromptKind::RenameBranch { ref old },
+                kind: PromptKind::RenameBranch { old },
                 ..
             }) if old == "main"
         ));
