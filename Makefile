@@ -61,7 +61,7 @@ deny:
 	$(CARGO) deny --all-features check
 
 audit:
-	$(CARGO) audit --deny warnings --ignore RUSTSEC-2024-0320
+	$(CARGO) audit --deny warnings --ignore RUSTSEC-2024-0320 --ignore RUSTSEC-2025-0141
 
 unused:
 	$(CARGO) machete --with-metadata

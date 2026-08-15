@@ -1,3 +1,7 @@
 [[IgnoredVulns]]
 id = "RUSTSEC-2024-0320"
 reason = "yaml-rust is unmaintained and arrives through syntect's syntax loader, which only ever parses the syntax definitions we ship"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0141"
+reason = "bincode 1 is unmaintained and arrives through syntect's cached syntax dumps, which are built from the assets we ship"
