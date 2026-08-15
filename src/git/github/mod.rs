@@ -1,11 +1,11 @@
 mod checks;
 mod conversation;
 
-pub use self::checks::{
+pub(crate) use self::checks::{
     CheckLogLine, CheckLogSeverity, CheckRunLog, CheckStep, PullRequestCheck,
     PullRequestCheckStatus, PullRequestChecks, unix_now,
 };
-pub use self::conversation::{ConversationEntry, ConversationKind, PullRequestConversation};
+pub(crate) use self::conversation::{ConversationEntry, ConversationKind, PullRequestConversation};
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -59,7 +59,7 @@ static TEMPORARY_REPOSITORY_ID: AtomicU64 = AtomicU64::new(0);
 static CACHE_WRITE_ID: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct GitHubRepository {
+pub(crate) struct GitHubRepository {
     pub name_with_owner: String,
     pub url: String,
     pub remotes: Vec<String>,
@@ -85,7 +85,7 @@ impl GitHubRepository {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PullRequest {
+pub(crate) struct PullRequest {
     pub number: u64,
     pub title: String,
     pub description: String,
@@ -138,7 +138,7 @@ impl PullRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PullRequestSnapshot {
+pub(crate) struct PullRequestSnapshot {
     pub repositories: Vec<GitHubRepository>,
     pub selected_repository: Option<GitHubRepository>,
     pub pull_request: PullRequest,
@@ -148,7 +148,7 @@ pub struct PullRequestSnapshot {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PullRequestFileStatus {
+pub(crate) enum PullRequestFileStatus {
     Added,
     Modified,
     Deleted,
@@ -160,7 +160,7 @@ pub enum PullRequestFileStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PullRequestFile {
+pub(crate) struct PullRequestFile {
     pub path: PathBuf,
     pub old_path: Option<PathBuf>,
     pub status: PullRequestFileStatus,
@@ -168,7 +168,7 @@ pub struct PullRequestFile {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PullRequestDiffIndex {
+pub(crate) struct PullRequestDiffIndex {
     pub files: Vec<PullRequestFile>,
     pub total_files: usize,
     pub truncated: bool,
@@ -206,7 +206,7 @@ impl CacheLife {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PullRequestProgress {
+pub(crate) enum PullRequestProgress {
     LoadingMetadata,
     PreparingRepository,
     FetchingBase,

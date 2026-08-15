@@ -44,20 +44,20 @@ const MIN_DIFF_SPLIT_PERCENT: u16 = 20;
 const MAX_DIFF_SPLIT_PERCENT: u16 = 80;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum View {
+pub(crate) enum View {
     Changes,
     History,
     PullRequests,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Focus {
+pub(crate) enum Focus {
     Sidebar,
     Content,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DiffLayout {
+pub(crate) enum DiffLayout {
     Unified,
     SideBySide,
 }
@@ -66,19 +66,19 @@ pub enum DiffLayout {
 /// checks beside its conversation; `Files` lists the changed files beside their
 /// diffs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PullRequestSection {
+pub(crate) enum PullRequestSection {
     Overview,
     Files,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PullRequestFileView {
+pub(crate) enum PullRequestFileView {
     AllFiles,
     SingleFile,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PullRequestTreeEntry {
+pub(crate) enum PullRequestTreeEntry {
     Directory { path: PathBuf, depth: usize },
     File { index: usize, depth: usize },
 }
@@ -92,27 +92,27 @@ impl PullRequestTreeEntry {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ToastLevel {
+pub(crate) enum ToastLevel {
     Info,
     Success,
     Error,
 }
 
 #[derive(Debug, Clone)]
-pub struct Toast {
+pub(crate) struct Toast {
     pub message: String,
     pub level: ToastLevel,
     expires_at: Instant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResizeTarget {
+pub(crate) enum ResizeTarget {
     Sidebar,
     Diff,
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct TextBuffer {
+pub(crate) struct TextBuffer {
     pub value: String,
     pub cursor: usize,
 }
@@ -299,7 +299,7 @@ impl TextBuffer {
 }
 
 #[derive(Debug, Clone)]
-pub enum PromptKind {
+pub(crate) enum PromptKind {
     Filter {
         previous: String,
     },
@@ -316,7 +316,7 @@ pub enum PromptKind {
 }
 
 #[derive(Debug, Clone)]
-pub enum Modal {
+pub(crate) enum Modal {
     Help {
         scroll: usize,
     },
@@ -374,7 +374,7 @@ pub enum Modal {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PaletteCommand {
+pub(crate) enum PaletteCommand {
     Refresh,
     StageAll,
     UnstageAll,
@@ -460,7 +460,7 @@ impl PaletteCommand {
 }
 
 #[derive(Debug, Clone)]
-pub enum SidebarHit {
+pub(crate) enum SidebarHit {
     ChangeGroup(ChangeArea),
     Change(usize),
     Commit(usize),
@@ -475,25 +475,25 @@ pub enum SidebarHit {
 }
 
 #[derive(Debug, Clone)]
-pub struct SidebarHitArea {
+pub(crate) struct SidebarHitArea {
     pub area: Rect,
     pub target: SidebarHit,
 }
 
 #[derive(Debug, Clone)]
-pub struct ContentFileHit {
+pub(crate) struct ContentFileHit {
     pub area: Rect,
     pub path: PathBuf,
 }
 
 #[derive(Debug, Clone)]
-pub struct ContentStepHit {
+pub(crate) struct ContentStepHit {
     pub area: Rect,
     pub step: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ScmAction {
+pub(crate) enum ScmAction {
     Stage(usize),
     Unstage(usize),
     Resolve(usize),
@@ -507,13 +507,13 @@ pub enum ScmAction {
 }
 
 #[derive(Debug, Clone)]
-pub struct ScmActionHit {
+pub(crate) struct ScmActionHit {
     pub area: Rect,
     pub action: ScmAction,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AuxiliaryPreview {
+pub(crate) enum AuxiliaryPreview {
     Branch(HistoryBranch),
     Stash(Stash),
 }
@@ -525,7 +525,7 @@ enum ChangeTarget {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct UiGeometry {
+pub(crate) struct UiGeometry {
     pub changes_tab: Rect,
     pub history_tab: Rect,
     pub pull_requests_tab: Rect,
@@ -541,14 +541,14 @@ pub struct UiGeometry {
 }
 
 #[derive(Debug)]
-pub enum AppEffect {
+pub(crate) enum AppEffect {
     Git(Box<WorkerCommand>),
     SetMouseCapture(bool),
     OpenUrl(String),
     Quit,
 }
 
-pub struct App {
+pub(crate) struct App {
     pub repository_root: PathBuf,
     pub repository_name: String,
     pub view: View,

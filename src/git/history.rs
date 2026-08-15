@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Commit {
+pub(crate) struct Commit {
     pub id: String,
     pub short_id: String,
     pub parent_ids: Vec<String>,
@@ -16,10 +16,10 @@ pub struct Commit {
 
 /// The format passed to `git log`. Unit and record separators avoid ambiguity with
 /// spaces, tabs, and most text that can occur in names or commit subjects.
-pub const LOG_FORMAT: &str =
+pub(crate) const LOG_FORMAT: &str =
     "%H%x1f%h%x1f%P%x1f%aN%x1f%aE%x1f%aI%x1f%cN%x1f%cE%x1f%cI%x1f%ar%x1f%s%x1f%D%x1e";
 
-pub fn parse_log(output: &[u8]) -> Vec<Commit> {
+pub(crate) fn parse_log(output: &[u8]) -> Vec<Commit> {
     output
         .split(|byte| *byte == 0x1e)
         .filter_map(parse_record)

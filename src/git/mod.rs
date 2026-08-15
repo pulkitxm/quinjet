@@ -1,8 +1,8 @@
-pub mod diff;
-pub mod github;
-pub mod history;
-pub mod status;
-pub mod worker;
+pub(crate) mod diff;
+pub(crate) mod github;
+pub(crate) mod history;
+pub(crate) mod status;
+pub(crate) mod worker;
 
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
@@ -28,7 +28,7 @@ const MAX_GIT_ERROR_BYTES: usize = 128 * 1024;
 const DEFAULT_HISTORY_PAGE: usize = 300;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Branch {
+pub(crate) struct Branch {
     pub name: String,
     pub current: bool,
     pub upstream: Option<String>,
@@ -39,7 +39,7 @@ pub struct Branch {
 /// A local or remote-tracking branch that can be inspected without changing HEAD.
 /// `reference` is always a full ref emitted by Git and is used only as a revision.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HistoryBranch {
+pub(crate) struct HistoryBranch {
     pub name: String,
     pub reference: String,
     pub current: bool,
@@ -49,7 +49,7 @@ pub struct HistoryBranch {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Stash {
+pub(crate) struct Stash {
     pub reference: String,
     pub message: String,
     pub branch: String,
@@ -58,7 +58,7 @@ pub struct Stash {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LocalDiffRequest {
+pub(crate) enum LocalDiffRequest {
     Changes {
         changes: Vec<Change>,
         version: u64,
@@ -98,13 +98,13 @@ impl PreparedLocalDiff {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConflictChoice {
+pub(crate) enum ConflictChoice {
     Ours,
     Theirs,
 }
 
 #[derive(Debug, Clone)]
-pub enum GitOperation {
+pub(crate) enum GitOperation {
     Stage(Vec<PathBuf>),
     StageAll,
     Unstage(Vec<PathBuf>),
@@ -192,7 +192,7 @@ impl GitOperation {
 }
 
 #[derive(Debug, Clone)]
-pub struct Repository {
+pub(crate) struct Repository {
     root: PathBuf,
 }
 
