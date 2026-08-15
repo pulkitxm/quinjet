@@ -4,7 +4,12 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
-ignore = []
+ignore = [
+  # yaml-rust is unmaintained and reaches us only through syntect's syntax
+  # loader, which has no released alternative yet. Nothing user-supplied is
+  # parsed as YAML: the only inputs are the syntax definitions we ship.
+  "RUSTSEC-2024-0320",
+]
 
 [licenses]
 version = 2

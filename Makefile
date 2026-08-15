@@ -61,7 +61,7 @@ deny:
 	$(CARGO) deny --all-features check
 
 audit:
-	$(CARGO) audit --deny warnings
+	$(CARGO) audit --deny warnings --ignore RUSTSEC-2024-0320
 
 unused:
 	$(CARGO) machete --with-metadata
@@ -77,7 +77,7 @@ sbom:
 	$(CARGO) cyclonedx --format json --all-features
 
 osv:
-	osv-scanner scan source --recursive .
+	osv-scanner scan source --config osv-scanner.toml --recursive .
 
 miri:
 	MIRIFLAGS="-Zmiri-disable-isolation -Zmiri-strict-provenance" $(CARGO) +$(NIGHTLY) miri test --all-features

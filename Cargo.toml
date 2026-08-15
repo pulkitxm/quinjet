@@ -19,7 +19,7 @@ clap = { version = "4.5", features = ["derive"] }
 crossbeam-channel = "0.5"
 crossterm = "0.28"
 notify = "8.0"
-ratatui = "0.29"
+ratatui = "0.30"
 syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
 two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
 unicode-width = "0.2"
