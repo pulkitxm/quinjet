@@ -814,6 +814,10 @@ impl Repository {
         Ok(stashes)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the draw pass reads better as one top-to-bottom pass"
+    )]
     pub(crate) fn perform(&self, operation: &GitOperation) -> Result<String> {
         match operation {
             GitOperation::Stage(paths) => {
@@ -980,6 +984,10 @@ impl Repository {
         }
     }
 
+    #[expect(
+        clippy::similar_names,
+        reason = "the names follow the Git vocabulary they model"
+    )]
     fn untracked_patch(&self, change: &Change) -> Result<(Vec<u8>, bool)> {
         let path = safe_worktree_path(&self.root, &change.path)?;
         let metadata = fs::symlink_metadata(&path)

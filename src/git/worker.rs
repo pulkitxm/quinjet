@@ -463,6 +463,10 @@ fn run_warm_worker(
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the draw pass reads better as one top-to-bottom pass"
+)]
 fn run_worker(repository: &Repository, mailbox: &Arc<SharedMailbox>, events: &Sender<WorkerEvent>) {
     let mut local_diff_workspace: Option<(u64, PreparedLocalDiff)> = None;
     let mut pull_request_workspace: Option<(u64, PreparedPullRequest)> = None;
