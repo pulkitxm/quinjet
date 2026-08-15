@@ -32,26 +32,41 @@ fn parse_record(record: &[u8]) -> Option<Commit> {
         return None;
     }
     let fields: Vec<&[u8]> = record.split(|byte| *byte == 0x1f).collect();
-    if fields.len() < 12 {
+    let [
+        id,
+        short_id,
+        parent_ids,
+        author,
+        author_email,
+        authored_at,
+        committer,
+        committer_email,
+        committed_at,
+        relative_date,
+        subject,
+        decorations,
+        ..,
+    ] = fields.as_slice()
+    else {
         return None;
-    }
+    };
 
     Some(Commit {
-        id: text(fields[0]),
-        short_id: text(fields[1]),
-        parent_ids: text(fields[2])
+        id: text(id),
+        short_id: text(short_id),
+        parent_ids: text(parent_ids)
             .split_ascii_whitespace()
             .map(str::to_owned)
             .collect(),
-        author: text(fields[3]),
-        author_email: text(fields[4]),
-        authored_at: text(fields[5]),
-        committer: text(fields[6]),
-        committer_email: text(fields[7]),
-        committed_at: text(fields[8]),
-        relative_date: text(fields[9]),
-        subject: text(fields[10]),
-        decorations: text(fields[11])
+        author: text(author),
+        author_email: text(author_email),
+        authored_at: text(authored_at),
+        committer: text(committer),
+        committer_email: text(committer_email),
+        committed_at: text(committed_at),
+        relative_date: text(relative_date),
+        subject: text(subject),
+        decorations: text(decorations)
             .split(',')
             .map(str::trim)
             .filter(|value| !value.is_empty())
@@ -61,11 +76,17 @@ fn parse_record(record: &[u8]) -> Option<Commit> {
 }
 
 fn trim_ascii(mut value: &[u8]) -> &[u8] {
-    while value.first().is_some_and(u8::is_ascii_whitespace) {
-        value = &value[1..];
+    while let Some((first, rest)) = value.split_first() {
+        if !first.is_ascii_whitespace() {
+            break;
+        }
+        value = rest;
     }
-    while value.last().is_some_and(u8::is_ascii_whitespace) {
-        value = &value[..value.len() - 1];
+    while let Some((last, rest)) = value.split_last() {
+        if !last.is_ascii_whitespace() {
+            break;
+        }
+        value = rest;
     }
     value
 }
