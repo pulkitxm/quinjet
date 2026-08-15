@@ -18,7 +18,6 @@ type-complexity-threshold = 250
 verbose-bit-mask-threshold = 1
 
 disallowed-methods = [
-  { path = "std::process::Command::new", reason = "route Git subprocesses through src/git so arguments stay shell-free" },
   { path = "std::env::set_var", reason = "process-wide mutation is unsound once threads are running" },
   { path = "std::env::remove_var", reason = "process-wide mutation is unsound once threads are running" },
 ]

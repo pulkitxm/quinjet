@@ -28,6 +28,16 @@ jobs:
         run: |
           python3 scripts/check_secrets.py --selftest
           python3 scripts/check_secrets.py
+      - name: Subprocesses stay inside the Git layer
+        run: |
+          set -euo pipefail
+          stray=$(git grep -ln 'Command::new' -- 'src/**/*.rs' \
+            | grep -v -e '^src/git/' -e '^src/main.rs$' || true)
+          if [ -n "${stray}" ]; then
+            echo "${stray}" >&2
+            echo 'spawn processes from src/git so arguments stay shell-free' >&2
+            exit 1
+          fi
       - name: No stray debug markers
         run: |
           set -euo pipefail
