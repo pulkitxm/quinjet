@@ -3,17 +3,7 @@ target-version = "py311"
 
 [lint]
 select = ["ALL"]
-ignore = [
-  "ANN",
-  "COM812",
-  "CPY001",
-  "D203",
-  "D213",
-  "ISC001",
-  "S603",
-  "S607",
-  "T201",
-]
+ignore = ["ANN", "COM812", "CPY001", "D203", "D213", "ISC001", "S603", "S607", "T201"]
 
 [lint.per-file-ignores]
 # The driver is a local experiment harness, not part of the shipped tool.
