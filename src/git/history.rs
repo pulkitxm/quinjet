@@ -75,7 +75,7 @@ fn parse_record(record: &[u8]) -> Option<Commit> {
     })
 }
 
-fn trim_ascii(mut value: &[u8]) -> &[u8] {
+const fn trim_ascii(mut value: &[u8]) -> &[u8] {
     while let Some((first, rest)) = value.split_first() {
         if !first.is_ascii_whitespace() {
             break;
