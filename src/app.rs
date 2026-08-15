@@ -544,6 +544,7 @@ pub struct UiGeometry {
 pub enum AppEffect {
     Git(Box<WorkerCommand>),
     SetMouseCapture(bool),
+    OpenUrl(String),
     Quit,
 }
 
@@ -1433,6 +1434,17 @@ impl App {
             KeyCode::Char('C') if self.view == View::History => self.confirm_cherry_pick(),
             KeyCode::Char('R') if self.view == View::History => self.confirm_revert(),
             KeyCode::Char('n') if self.view == View::History => self.prompt_branch_at_commit(),
+            // Reading someone's pull request is not the place to push your own
+            // branch. The tab labels used to imply these were the section keys,
+            // and following that pushed.
+            KeyCode::Char('f') | KeyCode::Char('p') if self.view == View::PullRequests => {
+                self.show_toast(
+                    "Fetch and push live in Changes · Shift+P and Shift+F switch section"
+                        .to_owned(),
+                    ToastLevel::Error,
+                    now,
+                );
+            }
             KeyCode::Char('f') => self.queue_operation(GitOperation::Fetch, &mut effects),
             KeyCode::Char('p') => self.queue_operation(GitOperation::Push, &mut effects),
             KeyCode::Char('l')
@@ -1499,6 +1511,7 @@ impl App {
             KeyCode::Char('G') => self.go_to_edge(true, now),
             KeyCode::Char('z') => self.toggle_sidebar(),
             KeyCode::Char('m') => effects.push(self.toggle_mouse_capture(now)),
+            KeyCode::Char('O') => self.open_selection_on_github(&mut effects, now),
             KeyCode::Char('[') if self.check_log_visible() => {
                 self.move_check_step_cursor(-1);
             }
@@ -4249,6 +4262,9 @@ impl App {
         self.pull_request_prefetched_logs = settled.len();
         effects.push(AppEffect::Git(Box::new(
             WorkerCommand::PrefetchCheckRunLogs {
+                // The worker stamps this: it owns the ordering that decides
+                // which warm-up is still the current one.
+                generation: 0,
                 pull_request: Box::new(pull_request),
                 checks: settled,
             },
@@ -4638,6 +4654,39 @@ impl App {
         AppEffect::SetMouseCapture(self.mouse_capture)
     }
 
+    /// A check's own link is the run it describes; anywhere else in the pull
+    /// request view the pull request itself is what the reader is looking at.
+    fn github_url_for_selection(&self) -> Option<&str> {
+        if self.view != View::PullRequests {
+            return None;
+        }
+        let check = self
+            .selected_pull_request_check()
+            .map(|check| check.link.as_str())
+            .filter(|link| !link.is_empty());
+        check.or_else(|| {
+            self.pull_request
+                .as_ref()
+                .map(|pull_request| pull_request.url.as_str())
+                .filter(|url| !url.is_empty())
+        })
+    }
+
+    fn open_selection_on_github(&mut self, effects: &mut Vec<AppEffect>, now: Instant) {
+        match self.github_url_for_selection() {
+            Some(url) => {
+                let url = url.to_owned();
+                self.show_toast(format!("Opening {url}"), ToastLevel::Info, now);
+                effects.push(AppEffect::OpenUrl(url));
+            }
+            None => self.show_toast(
+                "Nothing to open: look up a pull request first".to_owned(),
+                ToastLevel::Error,
+                now,
+            ),
+        }
+    }
+
     fn show_toast(&mut self, message: String, level: ToastLevel, now: Instant) {
         self.toast = Some(Toast {
             message,
@@ -4968,6 +5017,72 @@ mod tests {
         assert_eq!(app.focus, Focus::Content);
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
         assert_eq!(app.focus, Focus::Sidebar);
+    }
+
+    #[test]
+    fn reading_a_pull_request_never_pushes_your_own_branch() {
+        // The section tabs used to be labelled [P] and [F], and following that
+        // pushed a branch. The labels are gone; the keys must be too.
+        let mut app = app_with_changes();
+        let now = Instant::now();
+        app.view = View::PullRequests;
+
+        for character in ['p', 'f'] {
+            let effects = app.handle_key(
+                KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
+                now,
+            );
+            assert!(
+                effects.is_empty(),
+                "{character} queued work from inside the pull-request view"
+            );
+            assert!(app.busy.is_none(), "{character} started a git operation");
+        }
+
+        // Everywhere else they still do their job.
+        app.view = View::Changes;
+        app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE), now);
+        assert!(app.busy.is_some(), "fetch still runs from the changes view");
+    }
+
+    #[test]
+    fn shift_o_opens_the_run_being_read_rather_than_always_the_pull_request() {
+        let mut app = app_with_changes();
+        let now = Instant::now();
+        app.view = View::PullRequests;
+
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Char('O'), KeyModifiers::NONE), now);
+        assert!(effects.is_empty(), "nothing is open, so nothing to open");
+
+        app.pull_request = Some(PullRequest {
+            url: "https://github.com/o/r/pull/8".to_owned(),
+            ..PullRequest::default()
+        });
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Char('O'), KeyModifiers::NONE), now);
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::OpenUrl(url)] if url == "https://github.com/o/r/pull/8"
+        ));
+
+        app.pull_request_checks = vec![PullRequestCheck {
+            name: "build".to_owned(),
+            workflow: "CI".to_owned(),
+            state: "SUCCESS".to_owned(),
+            status: crate::git::github::PullRequestCheckStatus::Passed,
+            description: String::new(),
+            link: "https://github.com/o/r/actions/runs/1/job/2".to_owned(),
+            started_at: String::new(),
+            completed_at: String::new(),
+        }];
+        app.set_check_cursor(Some(0));
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Char('O'), KeyModifiers::NONE), now);
+        assert!(
+            matches!(
+                effects.as_slice(),
+                [AppEffect::OpenUrl(url)] if url.contains("/actions/runs/1/job/2")
+            ),
+            "a selected check opens the run it names, not the pull request"
+        );
     }
 
     #[test]
@@ -5642,7 +5757,9 @@ mod tests {
                         ),
                         _ => matches!(command.as_ref(), WorkerCommand::LoadCheckRunLog { .. }),
                     },
-                    AppEffect::SetMouseCapture(_) | AppEffect::Quit => false,
+                    AppEffect::SetMouseCapture(_) | AppEffect::OpenUrl(_) | AppEffect::Quit => {
+                        false
+                    }
                 })
                 .count()
         };

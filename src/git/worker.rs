@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
@@ -81,6 +82,7 @@ pub enum WorkerCommand {
     /// Warm every finished run's log so that opening any of them is instant.
     /// It carries no generation because it changes nothing on screen.
     PrefetchCheckRunLogs {
+        generation: u64,
         pull_request: Box<PullRequest>,
         checks: Vec<PullRequestCheck>,
     },
@@ -296,6 +298,7 @@ pub struct GitWorker {
     local_preview_mailbox: Arc<SharedMailbox>,
     pull_request_preview_mailbox: Arc<SharedMailbox>,
     warm_mailbox: Arc<SharedMailbox>,
+    warm_generation: Arc<AtomicU64>,
     events: Receiver<WorkerEvent>,
 }
 
@@ -306,6 +309,8 @@ impl GitWorker {
         let local_preview_mailbox = new_mailbox();
         let pull_request_preview_mailbox = new_mailbox();
         let warm_mailbox = new_mailbox();
+        let warm_generation = Arc::new(AtomicU64::new(0));
+        let worker_warm_generation = Arc::clone(&warm_generation);
         let worker_mailbox = Arc::clone(&mailbox);
         let worker_github_mailbox = Arc::clone(&github_mailbox);
         let worker_local_preview_mailbox = Arc::clone(&local_preview_mailbox);
@@ -350,7 +355,14 @@ impl GitWorker {
             .expect("failed to start pull-request preview worker");
         thread::Builder::new()
             .name("quinjet-warm".to_owned())
-            .spawn(move || run_worker(warm_repository, worker_warm_mailbox, warm_events))
+            .spawn(move || {
+                run_warm_worker(
+                    warm_repository,
+                    worker_warm_mailbox,
+                    warm_events,
+                    worker_warm_generation,
+                )
+            })
             .expect("failed to start log warm-up worker");
         Self {
             mailbox,
@@ -358,6 +370,7 @@ impl GitWorker {
             local_preview_mailbox,
             pull_request_preview_mailbox,
             warm_mailbox,
+            warm_generation,
             events: event_rx,
         }
     }
@@ -365,7 +378,13 @@ impl GitWorker {
     /// Queue work without blocking the render thread. Read requests occupy fixed
     /// mailbox slots and replace obsolete requests; repository mutations remain an
     /// ordered queue and are additionally serialized by the app's busy state.
-    pub fn send(&self, command: WorkerCommand) -> bool {
+    pub fn send(&self, mut command: WorkerCommand) -> bool {
+        // A warm-up is only worth finishing for the pull request that asked for
+        // it. Stamping each one supersedes whatever is still running for a pull
+        // request the reader has already left.
+        if let WorkerCommand::PrefetchCheckRunLogs { generation, .. } = &mut command {
+            *generation = self.warm_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        }
         let target = match worker_lane(&command) {
             WorkerLane::GitHubMetadata => &self.github_mailbox,
             WorkerLane::LocalPreview => &self.local_preview_mailbox,
@@ -414,6 +433,32 @@ fn shutdown_mailbox(mailbox: &SharedMailbox) {
     state.push(WorkerCommand::Shutdown);
     drop(state);
     mailbox.ready.notify_one();
+}
+
+/// The warm-up lane runs one job at a time and answers to nothing but its own
+/// generation, so a pull request the reader has left stops costing requests as
+/// soon as another one asks to be warmed.
+fn run_warm_worker(
+    repository: Repository,
+    mailbox: Arc<SharedMailbox>,
+    _events: Sender<WorkerEvent>,
+    generation: Arc<AtomicU64>,
+) {
+    while let Some(command) = next_command(&mailbox) {
+        match command {
+            WorkerCommand::PrefetchCheckRunLogs {
+                generation: mine,
+                pull_request,
+                checks,
+            } => {
+                repository.prefetch_check_run_logs(&pull_request, &checks, &|| {
+                    generation.load(Ordering::SeqCst) == mine
+                });
+            }
+            WorkerCommand::Shutdown => break,
+            _ => continue,
+        }
+    }
 }
 
 fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sender<WorkerEvent>) {
@@ -571,13 +616,7 @@ fn run_worker(repository: Repository, mailbox: Arc<SharedMailbox>, events: Sende
                     .pull_request_check_log(&pull_request, &check)
                     .map_err(format_error),
             },
-            WorkerCommand::PrefetchCheckRunLogs {
-                pull_request,
-                checks,
-            } => {
-                repository.prefetch_check_run_logs(&pull_request, &checks);
-                continue;
-            }
+            WorkerCommand::PrefetchCheckRunLogs { .. } => continue,
             WorkerCommand::LoadBranches { generation } => WorkerEvent::Branches {
                 generation,
                 result: repository.branches().map_err(format_error),
@@ -640,6 +679,7 @@ mod tests {
         // would sit on "Loading…" until the warm-up drained.
         let pull_request = || Box::new(PullRequest::default());
         let warm = WorkerCommand::PrefetchCheckRunLogs {
+            generation: 0,
             pull_request: pull_request(),
             checks: Vec::new(),
         };

@@ -6,6 +6,7 @@ mod webhook;
 
 use std::io::{self, IsTerminal};
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -135,6 +136,25 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/// Handing a URL to the desktop is best effort: the toast has already said
+/// which one, so a machine with no opener leaves the reader able to copy it
+/// rather than facing an error they cannot act on.
+fn open_url(url: &str) {
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(target_os = "windows") {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
+    let _ = Command::new(opener)
+        .arg(url)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+}
+
 fn watcher_changed(receiver: Option<&Receiver<()>>) -> bool {
     let Some(receiver) = receiver else {
         return false;
@@ -171,6 +191,7 @@ fn dispatch_effects(
                 running &= worker.send(*command);
             }
             AppEffect::SetMouseCapture(enabled) => terminal.set_mouse_capture(enabled),
+            AppEffect::OpenUrl(url) => open_url(&url),
             AppEffect::Quit => running = false,
         }
     }
