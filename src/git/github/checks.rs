@@ -390,9 +390,18 @@ fn parse_pull_request_checks(output: &[u8]) -> Result<Vec<PullRequestCheck>> {
         if record.is_empty() {
             continue;
         }
-        let fields = parse_tsv_record(record, CHECK_TSV_FIELDS)
+        let [
+            name,
+            workflow,
+            state,
+            bucket,
+            description,
+            link,
+            started_at,
+            completed_at,
+        ] = parse_tsv_record::<CHECK_TSV_FIELDS>(record)
             .with_context(|| format!("invalid pull-request check record {}", index + 1))?;
-        let status = match fields[3].to_ascii_lowercase().as_str() {
+        let status = match bucket.to_ascii_lowercase().as_str() {
             "pass" => PullRequestCheckStatus::Passed,
             "fail" => PullRequestCheckStatus::Failed,
             "pending" => PullRequestCheckStatus::Pending,
@@ -401,14 +410,14 @@ fn parse_pull_request_checks(output: &[u8]) -> Result<Vec<PullRequestCheck>> {
             _ => PullRequestCheckStatus::Unknown,
         };
         checks.push(PullRequestCheck {
-            name: fields[0].clone(),
-            workflow: fields[1].clone(),
-            state: fields[2].clone(),
+            name,
+            workflow,
+            state,
             status,
-            description: fields[4].clone(),
-            link: fields[5].clone(),
-            started_at: fields[6].clone(),
-            completed_at: fields[7].clone(),
+            description,
+            link,
+            started_at,
+            completed_at,
         });
     }
     checks.sort_by_key(|check| (check.workflow.to_lowercase(), check.name.to_lowercase()));
@@ -421,15 +430,16 @@ fn parse_check_steps(output: &[u8]) -> Result<Vec<CheckStep>> {
         if record.is_empty() {
             continue;
         }
-        let fields = parse_tsv_record(record, STEP_TSV_FIELDS)
-            .with_context(|| format!("invalid check step record {}", index + 1))?;
+        let [number, name, status, conclusion, started_at, completed_at] =
+            parse_tsv_record::<STEP_TSV_FIELDS>(record)
+                .with_context(|| format!("invalid check step record {}", index + 1))?;
         steps.push(CheckStep {
-            number: fields[0].parse().unwrap_or(index + 1),
-            name: fields[1].clone(),
-            status: PullRequestCheckStatus::from_conclusion(&fields[2], &fields[3]),
-            conclusion: fields[3].clone(),
-            started_at: fields[4].clone(),
-            completed_at: fields[5].clone(),
+            number: number.parse().unwrap_or(index + 1),
+            status: PullRequestCheckStatus::from_conclusion(&status, &conclusion),
+            name,
+            conclusion,
+            started_at,
+            completed_at,
             lines: Vec::new(),
         });
     }
