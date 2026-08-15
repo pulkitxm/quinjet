@@ -341,6 +341,10 @@ fn draw_sidebar(
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the draw pass reads better as one top-to-bottom pass"
+)]
 fn draw_changes_sidebar(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -817,6 +821,11 @@ fn draw_history_sidebar(
     hits
 }
 
+#[expect(clippy::integer_division, reason = "layout maths works in whole cells")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the draw pass reads better as one top-to-bottom pass"
+)]
 fn draw_pull_requests_sidebar(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -1068,6 +1077,10 @@ fn draw_pull_request_section_tab(
     );
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the draw pass reads better as one top-to-bottom pass"
+)]
 fn draw_pull_request_file_tree(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -1524,6 +1537,10 @@ fn overview_title(app: &App, showing_check: bool) -> String {
     format!(" PR #{} · {state}{loading} ", pull_request.number)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the draw pass reads better as one top-to-bottom pass"
+)]
 fn conversation_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> {
     let mut rows = Vec::new();
     let Some(pull_request) = app.selected_pull_request() else {
@@ -2467,6 +2484,10 @@ fn draw_commit_details_scrolled(
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the draw pass reads better as one top-to-bottom pass"
+)]
 fn draw_pull_request_details_scrolled(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -2833,6 +2854,10 @@ fn draw_unified_diff(
     hits
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the renderer needs the whole row context in one call"
+)]
 fn draw_unified_line(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -3004,6 +3029,7 @@ fn draw_file_edges(frame: &mut Frame<'_>, area: Rect, kind: DiffLineKind, theme:
     );
 }
 
+#[expect(clippy::integer_division, reason = "layout maths works in whole cells")]
 fn draw_side_by_side_diff(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -3308,6 +3334,10 @@ fn draw_full_width_diff_line(
     );
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the renderer needs the whole row context in one call"
+)]
 fn draw_diff_side(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -3500,6 +3530,7 @@ const fn line_foreground(kind: DiffLineKind, theme: &Theme) -> Color {
     }
 }
 
+#[expect(clippy::integer_division, reason = "layout maths works in whole cells")]
 fn draw_scrollbar(frame: &mut Frame<'_>, area: Rect, offset: usize, length: usize, theme: &Theme) {
     if length <= area.height as usize || area.width == 0 {
         return;
@@ -4344,6 +4375,7 @@ fn draw_pull_request_repositories(
     );
 }
 
+#[expect(clippy::integer_division, reason = "layout maths works in whole cells")]
 fn draw_palette(
     frame: &mut Frame<'_>,
     app: &App,
@@ -4432,6 +4464,7 @@ fn palette_line(command: PaletteCommand, selected: bool, theme: &Theme) -> Line<
     ])
 }
 
+#[expect(clippy::integer_division, reason = "layout maths works in whole cells")]
 fn progress_bar(percent: u16, width: usize) -> String {
     let filled = usize::from(percent.min(100)).saturating_mul(width) / 100;
     format!(
@@ -4441,6 +4474,7 @@ fn progress_bar(percent: u16, width: usize) -> String {
     )
 }
 
+#[expect(clippy::integer_division, reason = "layout maths works in whole cells")]
 fn draw_toast(frame: &mut Frame<'_>, message: &str, level: ToastLevel, theme: &Theme) {
     let width = (cells(message.width()) + 6)
         .min(frame.area().width.saturating_sub(4))
@@ -4583,6 +4617,7 @@ fn ensure_offset(offset: &mut usize, cursor: usize, height: usize, length: usize
     *offset = (*offset).min(length.saturating_sub(height));
 }
 
+#[expect(clippy::integer_division, reason = "layout maths works in whole cells")]
 fn centered_rect(width: u16, height: u16, outer: Rect) -> Rect {
     let width = width.min(outer.width);
     let height = height.min(outer.height);
@@ -4607,6 +4642,7 @@ fn truncate_end(value: &str, width: usize) -> String {
     format!("{}…", slice_width(value, 0, width - 1))
 }
 
+#[expect(clippy::integer_division, reason = "layout maths works in whole cells")]
 fn truncate_middle(value: &str, width: usize) -> String {
     if width == 0 {
         return String::new();
@@ -4974,6 +5010,10 @@ mod tests {
         assert!(!rendered.contains('░'));
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the draw pass reads better as one top-to-bottom pass"
+    )]
     #[test]
     fn pull_request_preview_renders_cross_remote_metadata_and_diff() {
         use ratatui::Terminal;

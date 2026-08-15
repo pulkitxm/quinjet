@@ -430,6 +430,10 @@ impl PaletteCommand {
         Self::Quit,
     ];
 
+    #[expect(
+        clippy::struct_excessive_bools,
+        reason = "each flag is an independent piece of interface state"
+    )]
     pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::Refresh => "Refresh Repository",
@@ -1307,6 +1311,10 @@ impl App {
             .collect()
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the draw pass reads better as one top-to-bottom pass"
+    )]
     pub(crate) fn handle_key(&mut self, key: KeyEvent, now: Instant) -> Vec<AppEffect> {
         if let Some(modal) = self.modal.take() {
             return self.handle_modal_key(modal, key, now);
@@ -1581,6 +1589,14 @@ impl App {
         self.apply_live_modal_filter();
     }
 
+    #[expect(
+        clippy::excessive_nesting,
+        reason = "the key handler mirrors the shape of the input it decodes"
+    )]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the draw pass reads better as one top-to-bottom pass"
+    )]
     pub(crate) fn handle_mouse(&mut self, event: MouseEvent, now: Instant) -> Vec<AppEffect> {
         let mut effects = Vec::new();
         if self.modal.is_some() || event.modifiers.contains(KeyModifiers::SHIFT) {
@@ -1951,6 +1967,18 @@ impl App {
         self.request_refresh(effects);
     }
 
+    #[expect(
+        clippy::excessive_nesting,
+        reason = "the key handler mirrors the shape of the input it decodes"
+    )]
+    #[expect(
+        clippy::expect_used,
+        reason = "the value was assigned on the line above"
+    )]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the draw pass reads better as one top-to-bottom pass"
+    )]
     pub(crate) fn handle_worker_event(
         &mut self,
         event: WorkerEvent,
@@ -2504,6 +2532,10 @@ impl App {
         effects
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the draw pass reads better as one top-to-bottom pass"
+    )]
     fn handle_modal_key(
         &mut self,
         mut modal: Modal,
@@ -3068,6 +3100,7 @@ impl App {
             .clamp(MIN_SIDEBAR_WIDTH, maximum);
     }
 
+    #[expect(clippy::integer_division, reason = "layout maths works in whole cells")]
     fn resize_diff(&mut self, column: u16) {
         let content = self.geometry.content;
         if content.width == 0 {
@@ -3315,6 +3348,7 @@ impl App {
         }
     }
 
+    #[expect(clippy::integer_division, reason = "layout maths works in whole cells")]
     fn scroll_content_half(&mut self, down: bool) {
         let amount = (self.geometry.content.height / 2).max(1) as usize;
         if down {
@@ -3349,6 +3383,10 @@ impl App {
         }
     }
 
+    #[expect(
+        clippy::unreachable,
+        reason = "the branch is impossible for the states that reach it"
+    )]
     fn handle_scm_action(&mut self, action: ScmAction, effects: &mut Vec<AppEffect>) {
         match action {
             ScmAction::Stage(index) | ScmAction::Unstage(index) | ScmAction::Resolve(index) => {
@@ -4432,6 +4470,10 @@ impl App {
         })));
     }
 
+    #[expect(
+        clippy::unreachable,
+        reason = "the branch is impossible for the states that reach it"
+    )]
     fn request_preview(&mut self, effects: &mut Vec<AppEffect>) {
         if let Some(request) = self.local_diff_request_for_view() {
             self.prepare_local_diff(request, effects);

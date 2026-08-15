@@ -266,6 +266,10 @@ impl PreparedPullRequest {
         self.index.clone()
     }
 
+    #[expect(
+        clippy::similar_names,
+        reason = "the names follow the Git vocabulary they model"
+    )]
     pub(crate) fn diff_file(&self, path: &Path) -> Result<DiffDocument> {
         let file = self
             .index
@@ -831,6 +835,10 @@ impl Repository {
         )
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the renderer needs the whole row context in one call"
+    )]
     /// `limit` bounds both the response Quinjet will read and the entry it will
     /// keep, so a check log can use the cache without letting metadata grow.
     fn checked_cached_gh_bounded<I, S>(
@@ -1707,6 +1715,10 @@ pub(crate) struct BoundedOutput {
     pub stdout_truncated: bool,
 }
 
+#[expect(
+    clippy::large_stack_arrays,
+    reason = "the read buffer is deliberately one page of stack"
+)]
 pub(crate) fn run_bounded_command(
     command: &mut Command,
     stdout_limit: usize,
@@ -1761,6 +1773,10 @@ pub(crate) fn run_bounded_command(
     })
 }
 
+#[expect(
+    clippy::large_stack_arrays,
+    reason = "the read buffer is deliberately one page of stack"
+)]
 fn read_and_drain(mut reader: impl Read, limit: usize) -> io::Result<Vec<u8>> {
     let mut collected = Vec::with_capacity(limit.min(32 * 1024));
     let mut buffer = [0_u8; 32 * 1024];

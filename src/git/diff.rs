@@ -382,6 +382,10 @@ fn highlight_assets() -> &'static HighlightAssets {
     })
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the draw pass reads better as one top-to-bottom pass"
+)]
 /// Parse a unified diff and highlight code on the old and new sides independently.
 /// Keeping two parser states avoids additions corrupting the old-file syntax state and
 /// removals corrupting the new-file state.
@@ -579,6 +583,10 @@ pub(crate) fn parse_diff(
     }
 }
 
+#[expect(
+    clippy::similar_names,
+    reason = "the names follow the Git vocabulary they model"
+)]
 /// Cut a multi-file patch at its `diff --git` boundaries and key each section by
 /// the paths in that header. One Git invocation can then answer for many files
 /// while each file still parses and renders as its own document.
