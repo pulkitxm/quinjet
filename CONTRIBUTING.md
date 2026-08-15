@@ -35,7 +35,7 @@ make tools-deep # once, installs the expensive checkers
 make deep       # miri, sanitizers, cargo-careful, mutants, minimal versions, udeps, bloat
 ```
 
-The deep checks also run weekly, and on demand when a pull request is labelled
+The deep checks also run weekly, and on demand when a pull request is labeled
 `deep-check`.
 
 At minimum, run this before submitting a pull request:

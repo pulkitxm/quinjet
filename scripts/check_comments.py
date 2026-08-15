@@ -142,7 +142,7 @@ def skip_raw_string(source: str, raw: tuple[int, int], line: int) -> tuple[int, 
 
 
 def skip_block_comment(source: str, i: int, line: int) -> tuple[int, int, str]:
-    """Skip a block comment, honouring Rust's nesting rules."""
+    """Skip a block comment, honoring Rust's nesting rules."""
     start = i
     depth = 0
     while i < len(source):

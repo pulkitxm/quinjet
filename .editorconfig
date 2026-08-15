@@ -8,6 +8,10 @@ trim_trailing_whitespace = true
 indent_style = space
 indent_size = 4
 
+[*.rs]
+# rustfmt aligns continuation lines, which is not a multiple of the indent.
+indent_size = unset
+
 [*.{yml,yaml,json,toml,md,sh,ps1}]
 indent_size = 2
 

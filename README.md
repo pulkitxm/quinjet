@@ -145,7 +145,7 @@ Branch rename is local and deliberately does not delete or create remote branche
 The UI intentionally stays uncluttered; press `?` for the complete shortcut reference.
 
 | Key | Action |
-|---|---|
+| --- | --- |
 | `j` / `k`, arrows | Move through every file/commit or scroll the preview |
 | Mouse wheel | Naturally scroll the pane under the pointer |
 | `m` | Release the mouse so the terminal can select and copy text, and take it back |

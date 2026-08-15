@@ -177,7 +177,7 @@ impl CheckRunLog {
 
 impl Repository {
     /// `gh pr checks` exits non-zero when any run failed, so a useful response
-    /// has to be recognised by its content rather than by the exit status. That
+    /// has to be recognized by its content rather than by the exit status. That
     /// is why this reads `gh` directly instead of going through the cached
     /// helper, and caches the accepted body itself.
     pub(crate) fn pull_request_checks(
@@ -448,7 +448,7 @@ fn parse_check_steps(output: &[u8]) -> Result<Vec<CheckStep>> {
     Ok(steps)
 }
 
-/// Runner logs are one timestamped line per row, carrying ANSI colour and
+/// Runner logs are one timestamped line per row, carrying ANSI color and
 /// `##[...]` workflow commands. Both are stripped here so the renderer only
 /// deals with text plus a severity.
 fn parse_check_log(raw: &[u8]) -> (Vec<CheckLogLine>, bool) {
@@ -733,7 +733,7 @@ untimestamped trailing output\n";
         );
         assert_eq!(
             lines[2].text, "Hosted Compute Agent",
-            "colour codes never reach the renderer"
+            "color codes never reach the renderer"
         );
         assert_eq!(lines[3].text, "");
         assert_eq!(
