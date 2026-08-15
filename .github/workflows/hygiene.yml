@@ -71,8 +71,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: editorconfig-checker
-        run: npx --yes editorconfig-checker
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: editorconfig-checker
+      - run: editorconfig-checker
 
   toml:
     name: TOML
@@ -147,10 +149,15 @@ jobs:
       - uses: actions/checkout@v5
       - uses: taiki-e/install-action@v2
         with:
-          tool: actionlint
-      - run: actionlint -color
+          tool: zizmor
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - name: actionlint
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -color
       - name: zizmor
-        run: pipx run zizmor --persona=pedantic --format=plain .github/workflows
+        run: zizmor --persona=pedantic --format=plain .github/workflows
 
   links:
     name: Links
