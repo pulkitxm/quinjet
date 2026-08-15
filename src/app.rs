@@ -4771,6 +4771,10 @@ fn is_word_character(character: char) -> bool {
 }
 
 #[cfg(test)]
+#[expect(
+    unused_results,
+    reason = "test helpers return values the assertions do not use"
+)]
 mod tests {
     use super::*;
     use crate::git::github::PullRequestCheckStatus;
