@@ -8,6 +8,11 @@
         # parameters it never reads.
         'PSReviewUnusedParameter',
         # Assert-Contains reads better than the singular form the rule wants.
-        'PSUseSingularNouns'
+        'PSUseSingularNouns',
+        # The installer talks to the person running it; Write-Output would put
+        # that progress on the pipeline instead of the screen.
+        'PSAvoidUsingWriteHost',
+        # The test fixtures are plain helpers, not cmdlets with -WhatIf support.
+        'PSUseShouldProcessForStateChangingFunctions'
     )
 }
