@@ -671,10 +671,18 @@ mod tests {
         assert_eq!(check("").job_id(), None);
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the test needs a real ExitStatus and only the process can mint one"
+    )]
+    fn failing_status() -> std::process::ExitStatus {
+        std::process::Command::new("false").status().unwrap()
+    }
+
     #[test]
     fn an_unpublished_log_is_pending_rather_than_a_failure() {
         let mut output = BoundedOutput {
-            status: std::process::Command::new("false").status().unwrap(),
+            status: failing_status(),
             stdout: Vec::new(),
             stderr: b"gh: HTTP 404".to_vec(),
             stdout_truncated: false,

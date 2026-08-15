@@ -1575,7 +1575,7 @@ impl App {
             | Modal::PullRequestRepositories { query: input, .. },
         ) = self.modal.as_mut()
         {
-            input.insert_str(text)
+            input.insert_str(text);
         }
         self.apply_live_modal_filter();
     }
