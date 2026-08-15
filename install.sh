@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck disable=SC2310,SC2312 # the installer guards every command with || fail, which is exactly what these two audits flag
 # Install Quinjet from GitHub Releases.
 
 set -eu
@@ -49,7 +50,7 @@ EOF
 require_value() {
     option=$1
     count=$2
-    [ "$count" -ge 2 ] || fail "${option} requires a value"
+    [ "${count}" -ge 2 ] || fail "${option} requires a value"
 }
 
 while [ "$#" -gt 0 ]; do
@@ -86,23 +87,23 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-case "$NO_MODIFY_PATH" in
+case "${NO_MODIFY_PATH}" in
     0 | false | no | '') NO_MODIFY_PATH=0 ;;
     1 | true | yes) NO_MODIFY_PATH=1 ;;
     *) fail "QUINJET_NO_MODIFY_PATH must be 0 or 1" ;;
 esac
 
-if [ -z "$BIN_DIR" ]; then
+if [ -z "${BIN_DIR}" ]; then
     if [ -n "${XDG_BIN_HOME:-}" ]; then
-        BIN_DIR=$XDG_BIN_HOME
+        BIN_DIR=${XDG_BIN_HOME}
     else
         [ -n "${HOME:-}" ] || fail "HOME is not set; provide --bin-dir"
-        BIN_DIR=$HOME/.local/bin
+        BIN_DIR=${HOME}/.local/bin
     fi
 fi
-[ -n "$BIN_DIR" ] || fail "the installation directory cannot be empty"
+[ -n "${BIN_DIR}" ] || fail "the installation directory cannot be empty"
 
-case "$VERSION" in
+case "${VERSION}" in
     latest)
         RELEASE_URL=${RELEASES_URL}/latest/download
         VERSION_LABEL=latest
@@ -111,55 +112,56 @@ case "$VERSION" in
         fail "the release version cannot be empty"
         ;;
     *)
-        case "$VERSION" in
-            v*) RELEASE_TAG=$VERSION ;;
-            *) RELEASE_TAG=v$VERSION ;;
+        case "${VERSION}" in
+            v*) RELEASE_TAG=${VERSION} ;;
+            *) RELEASE_TAG=v${VERSION} ;;
         esac
-        case "$RELEASE_TAG" in
+        case "${RELEASE_TAG}" in
             v[0-9]*) ;;
-            *) fail "invalid release version: $VERSION" ;;
+            *) fail "invalid release version: ${VERSION}" ;;
         esac
-        case "$RELEASE_TAG" in
-            *[!0-9A-Za-z._+-]*) fail "invalid release version: $VERSION" ;;
+        case "${RELEASE_TAG}" in
+            *[!0-9A-Za-z._+-]*) fail "invalid release version: ${VERSION}" ;;
+            *) ;;
         esac
         RELEASE_URL=${RELEASES_URL}/download/${RELEASE_TAG}
-        VERSION_LABEL=$RELEASE_TAG
+        VERSION_LABEL=${RELEASE_TAG}
         ;;
 esac
 
 OS=$(uname -s 2>/dev/null) || fail "could not identify the operating system"
 ARCH=$(uname -m 2>/dev/null) || fail "could not identify the CPU architecture"
 
-case "$OS" in
+case "${OS}" in
     Darwin)
-        if [ "$ARCH" = x86_64 ] && has sysctl && [ "$(sysctl -in sysctl.proc_translated 2>/dev/null || true)" = 1 ]; then
+        if [ "${ARCH}" = x86_64 ] && has sysctl && [ "$(sysctl -in sysctl.proc_translated 2>/dev/null || true)" = 1 ]; then
             ARCH=arm64
             info "Rosetta detected; selecting the native Apple Silicon build"
         fi
-        case "$ARCH" in
+        case "${ARCH}" in
             x86_64 | amd64) ASSET=quinjet-macos-x86_64 ;;
             arm64 | aarch64) ASSET=quinjet-macos-aarch64 ;;
-            *) fail "Quinjet does not publish a macOS release for architecture '$ARCH'" ;;
+            *) fail "Quinjet does not publish a macOS release for architecture '${ARCH}'" ;;
         esac
         BINARY_NAME=quinjet
         ;;
     Linux)
-        case "$ARCH" in
+        case "${ARCH}" in
             x86_64 | amd64) ASSET=quinjet-linux-x86_64 ;;
             arm64 | aarch64) ASSET=quinjet-linux-aarch64 ;;
-            *) fail "Quinjet does not publish a Linux release for architecture '$ARCH'" ;;
+            *) fail "Quinjet does not publish a Linux release for architecture '${ARCH}'" ;;
         esac
         BINARY_NAME=quinjet
         ;;
     MINGW* | MSYS* | CYGWIN*)
-        case "$ARCH" in
+        case "${ARCH}" in
             x86_64 | amd64) ASSET=quinjet-windows-x86_64.exe ;;
-            *) fail "Quinjet does not publish a Windows release for architecture '$ARCH'" ;;
+            *) fail "Quinjet does not publish a Windows release for architecture '${ARCH}'" ;;
         esac
         BINARY_NAME=quinjet.exe
         ;;
     *)
-        fail "unsupported operating system: $OS"
+        fail "unsupported operating system: ${OS}"
         ;;
 esac
 
@@ -192,39 +194,40 @@ make_temp_dir() {
 TEMP_DIR=
 STAGED_BINARY=
 cleanup() {
-    if [ -n "$STAGED_BINARY" ]; then
-        rm -f "$STAGED_BINARY" || true
+    if [ -n "${STAGED_BINARY}" ]; then
+        rm -f "${STAGED_BINARY}" || true
     fi
-    if [ -n "$TEMP_DIR" ]; then
-        rm -rf "$TEMP_DIR" || true
+    if [ -n "${TEMP_DIR}" ]; then
+        rm -rf "${TEMP_DIR}" || true
     fi
 }
 trap cleanup EXIT HUP INT TERM
 make_temp_dir
 
-DOWNLOAD_PATH=$TEMP_DIR/$ASSET
-CHECKSUMS_PATH=$TEMP_DIR/SHA256SUMS
+DOWNLOAD_PATH=${TEMP_DIR}/${ASSET}
+CHECKSUMS_PATH=${TEMP_DIR}/SHA256SUMS
 
 download() {
     url=$1
     destination=$2
-    case "$DOWNLOADER" in
+    case "${DOWNLOADER}" in
         curl)
-            curl --proto '=https' --tlsv1.2 -fsSL "$url" -o "$destination" ||
-                fail "failed to download $url"
+            curl --proto '=https' --tlsv1.2 -fsSL "${url}" -o "${destination}" ||
+                fail "failed to download ${url}"
             ;;
         wget)
-            wget -q "$url" -O "$destination" || fail "failed to download $url"
+            wget -q "${url}" -O "${destination}" || fail "failed to download ${url}"
             ;;
+        *) fail "no supported downloader is available" ;;
     esac
 }
 
 info "detected ${OS} ${ARCH}"
 info "downloading Quinjet ${VERSION_LABEL}"
-download "${RELEASE_URL}/SHA256SUMS" "$CHECKSUMS_PATH"
-download "${RELEASE_URL}/${ASSET}" "$DOWNLOAD_PATH"
+download "${RELEASE_URL}/SHA256SUMS" "${CHECKSUMS_PATH}"
+download "${RELEASE_URL}/${ASSET}" "${DOWNLOAD_PATH}"
 
-EXPECTED_CHECKSUM=$(awk -v asset="$ASSET" '
+EXPECTED_CHECKSUM=$(awk -v asset="${ASSET}" '
     {
         name = $NF
         sub(/^\*/, "", name)
@@ -234,90 +237,92 @@ EXPECTED_CHECKSUM=$(awk -v asset="$ASSET" '
             exit
         }
     }
-' "$CHECKSUMS_PATH")
-case "$EXPECTED_CHECKSUM" in
-    '' | *[!0-9A-Fa-f]*) fail "the release checksum for $ASSET is missing or invalid" ;;
+' "${CHECKSUMS_PATH}")
+case "${EXPECTED_CHECKSUM}" in
+    '' | *[!0-9A-Fa-f]*) fail "the release checksum for ${ASSET} is missing or invalid" ;;
+    *) ;;
 esac
-[ "${#EXPECTED_CHECKSUM}" -eq 64 ] || fail "the release checksum for $ASSET is missing or invalid"
+[ "${#EXPECTED_CHECKSUM}" -eq 64 ] || fail "the release checksum for ${ASSET} is missing or invalid"
 
-case "$CHECKSUM_TOOL" in
-    sha256sum) ACTUAL_CHECKSUM=$(sha256sum "$DOWNLOAD_PATH" | awk '{print $1}') ;;
-    shasum) ACTUAL_CHECKSUM=$(shasum -a 256 "$DOWNLOAD_PATH" | awk '{print $1}') ;;
-    openssl) ACTUAL_CHECKSUM=$(openssl dgst -sha256 "$DOWNLOAD_PATH" | awk '{print $NF}') ;;
+case "${CHECKSUM_TOOL}" in
+    sha256sum) ACTUAL_CHECKSUM=$(sha256sum "${DOWNLOAD_PATH}" | awk '{print $1}') ;;
+    shasum) ACTUAL_CHECKSUM=$(shasum -a 256 "${DOWNLOAD_PATH}" | awk '{print $1}') ;;
+    openssl) ACTUAL_CHECKSUM=$(openssl dgst -sha256 "${DOWNLOAD_PATH}" | awk '{print $NF}') ;;
+    *) fail "no supported checksum tool is available" ;;
 esac
-EXPECTED_CHECKSUM=$(printf '%s' "$EXPECTED_CHECKSUM" | tr '[:upper:]' '[:lower:]')
-ACTUAL_CHECKSUM=$(printf '%s' "$ACTUAL_CHECKSUM" | tr '[:upper:]' '[:lower:]')
-[ "$EXPECTED_CHECKSUM" = "$ACTUAL_CHECKSUM" ] || fail "checksum verification failed for $ASSET"
+EXPECTED_CHECKSUM=$(printf '%s' "${EXPECTED_CHECKSUM}" | tr '[:upper:]' '[:lower:]')
+ACTUAL_CHECKSUM=$(printf '%s' "${ACTUAL_CHECKSUM}" | tr '[:upper:]' '[:lower:]')
+[ "${EXPECTED_CHECKSUM}" = "${ACTUAL_CHECKSUM}" ] || fail "checksum verification failed for ${ASSET}"
 info "verified SHA-256 checksum"
 
-mkdir -p "$BIN_DIR" || fail "could not create $BIN_DIR"
-DESTINATION=$BIN_DIR/$BINARY_NAME
-STAGED_BINARY=$(mktemp "$BIN_DIR/.quinjet-install.XXXXXX") || fail "could not write to $BIN_DIR"
-cp "$DOWNLOAD_PATH" "$STAGED_BINARY" || fail "could not write to $BIN_DIR"
-chmod 755 "$STAGED_BINARY" || fail "could not make the Quinjet binary executable"
-mv -f "$STAGED_BINARY" "$DESTINATION" || fail "could not install Quinjet to $DESTINATION"
+mkdir -p "${BIN_DIR}" || fail "could not create ${BIN_DIR}"
+DESTINATION=${BIN_DIR}/${BINARY_NAME}
+STAGED_BINARY=$(mktemp "${BIN_DIR}/.quinjet-install.XXXXXX") || fail "could not write to ${BIN_DIR}"
+cp "${DOWNLOAD_PATH}" "${STAGED_BINARY}" || fail "could not write to ${BIN_DIR}"
+chmod 755 "${STAGED_BINARY}" || fail "could not make the Quinjet binary executable"
+mv -f "${STAGED_BINARY}" "${DESTINATION}" || fail "could not install Quinjet to ${DESTINATION}"
 STAGED_BINARY=
 
 path_contains_bin_dir() {
     case ":${PATH:-}:" in
-        *:"$BIN_DIR":*) return 0 ;;
+        *:"${BIN_DIR}":*) return 0 ;;
         *) return 1 ;;
     esac
 }
 
 add_default_dir_to_path() {
-    [ "$NO_MODIFY_PATH" -eq 0 ] || return 1
+    [ "${NO_MODIFY_PATH}" -eq 0 ] || return 1
     [ -n "${HOME:-}" ] || return 1
-    [ "$BIN_DIR" = "$HOME/.local/bin" ] || return 1
+    [ "${BIN_DIR}" = "${HOME}/.local/bin" ] || return 1
 
     configured_shell=${SHELL:-}
     shell_name=${configured_shell##*/}
     dollar='$'
-    case "$shell_name" in
+    case "${shell_name}" in
         fish)
-            config_home=${XDG_CONFIG_HOME:-$HOME/.config}
-            profile=$config_home/fish/config.fish
+            config_home=${XDG_CONFIG_HOME:-${HOME}/.config}
+            profile=${config_home}/fish/config.fish
             path_line="fish_add_path \"${dollar}HOME/.local/bin\""
             ;;
         zsh)
-            profile=${ZDOTDIR:-$HOME}/.zshrc
+            profile=${ZDOTDIR:-${HOME}}/.zshrc
             path_line="export PATH=\"${dollar}HOME/.local/bin:${dollar}PATH\""
             ;;
         bash)
-            profile=$HOME/.bashrc
+            profile=${HOME}/.bashrc
             path_line="export PATH=\"${dollar}HOME/.local/bin:${dollar}PATH\""
             ;;
         *)
-            profile=$HOME/.profile
+            profile=${HOME}/.profile
             path_line="export PATH=\"${dollar}HOME/.local/bin:${dollar}PATH\""
             ;;
     esac
 
-    mkdir -p "$(dirname "$profile")" || return 1
-    if [ -f "$profile" ] && grep -F "$path_line" "$profile" >/dev/null 2>&1; then
+    mkdir -p "$(dirname "${profile}")" || return 1
+    if [ -f "${profile}" ] && grep -F "${path_line}" "${profile}" >/dev/null 2>&1; then
         return 0
     fi
     {
         printf '\n# Added by the Quinjet installer\n'
-        printf '%s\n' "$path_line"
-    } >>"$profile" || return 1
-    info "added $BIN_DIR to PATH in $profile"
+        printf '%s\n' "${path_line}"
+    } >>"${profile}" || return 1
+    info "added ${BIN_DIR} to PATH in ${profile}"
     return 0
 }
 
-printf '\nQuinjet was installed to %s\n' "$DESTINATION"
+printf '\nQuinjet was installed to %s\n' "${DESTINATION}"
 if ! path_contains_bin_dir; then
     if add_default_dir_to_path; then
         warn "restart your shell or update PATH in the current shell before running quinjet"
     else
-        warn "$BIN_DIR is not on PATH"
-        printf 'Run this before using Quinjet:\n  export PATH="%s:%sPATH"\n' "$BIN_DIR" '$'
+        warn "${BIN_DIR} is not on PATH"
+        printf 'Run this before using Quinjet:\n  export PATH="%s:%sPATH"\n' "${BIN_DIR}" '$'
     fi
 fi
 
 if ! has git; then
     warn "Git is required at runtime but was not found on PATH"
-    case "$OS" in
+    case "${OS}" in
         Darwin) warn "install Git with 'xcode-select --install' or your package manager" ;;
         Linux) warn "install Git with your system package manager" ;;
         *) warn "install Git from https://git-scm.com/downloads" ;;
