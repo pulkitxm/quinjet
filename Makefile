@@ -33,7 +33,7 @@ doc:
 		$(CARGO) doc --no-deps --all-features --document-private-items --locked
 
 msrv:
-	$(CARGO) +1.85 check --all-targets --all-features --locked
+	$(CARGO) +1.88 check --all-targets --all-features --locked
 
 build:
 	$(CARGO) build --release --locked

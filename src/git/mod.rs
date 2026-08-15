@@ -1290,10 +1290,10 @@ fn validate_stash_reference(reference: &str) -> Result<()> {
 fn parse_stash_subject(subject: &str) -> (String, String) {
     let subject = subject.trim();
     for prefix in ["WIP on ", "On "] {
-        if let Some(rest) = subject.strip_prefix(prefix) {
-            if let Some((branch, message)) = rest.split_once(": ") {
-                return (branch.to_owned(), message.to_owned());
-            }
+        if let Some(rest) = subject.strip_prefix(prefix)
+            && let Some((branch, message)) = rest.split_once(": ")
+        {
+            return (branch.to_owned(), message.to_owned());
         }
     }
     (String::new(), subject.to_owned())
