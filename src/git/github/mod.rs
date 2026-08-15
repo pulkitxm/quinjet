@@ -468,9 +468,10 @@ fn split_http_response(output: &[u8]) -> (Cow<'_, str>, &[u8]) {
             .windows(separator.len())
             .position(|window| window == separator)
         {
+            let (head, rest) = output.split_at(index);
             return (
-                String::from_utf8_lossy(&output[..index]),
-                &output[index + separator.len()..],
+                String::from_utf8_lossy(head),
+                rest.get(separator.len()..).unwrap_or_default(),
             );
         }
     }
@@ -1100,7 +1101,7 @@ fn bounded_text(value: &str, maximum: usize) -> String {
     while !value.is_char_boundary(end) {
         end = end.saturating_sub(1);
     }
-    format!("{}…", &value[..end])
+    format!("{}…", value.get(..end).unwrap_or_default())
 }
 
 fn parse_tsv_record<const FIELDS: usize>(record: &[u8]) -> Result<[String; FIELDS]> {
@@ -1536,7 +1537,9 @@ fn changed_files_in_repository(
             .stdout
             .iter()
             .rposition(|byte| *byte == 0)
-            .map_or(&[][..], |index| &output.stdout[..=index])
+            .map_or(&[][..], |index| {
+                output.stdout.get(..=index).unwrap_or(&output.stdout)
+            })
     } else {
         &output.stdout
     };
@@ -1551,7 +1554,9 @@ fn changed_files_in_repository(
             truncated = true;
             break;
         }
-        let status_record = records[index];
+        let Some(status_record) = records.get(index).copied() else {
+            break;
+        };
         index += 1;
         let status_code = status_record.first().copied().unwrap_or_default();
         let status = match status_code {
@@ -1763,12 +1768,12 @@ pub(crate) fn run_bounded_command(
         };
         let remaining = stdout_limit.saturating_sub(collected.len());
         if read > remaining {
-            collected.extend_from_slice(&buffer[..remaining]);
+            collected.extend_from_slice(buffer.get(..remaining).unwrap_or(&buffer));
             truncated = true;
             drop(child.kill());
             break;
         }
-        collected.extend_from_slice(&buffer[..read]);
+        collected.extend_from_slice(buffer.get(..read).unwrap_or(&buffer));
     }
     drop(stdout);
     let status = child.wait()?;
@@ -1798,7 +1803,7 @@ fn read_and_drain(mut reader: impl Read, limit: usize) -> io::Result<Vec<u8>> {
             Err(error) => return Err(error),
         };
         let remaining = limit.saturating_sub(collected.len());
-        collected.extend_from_slice(&buffer[..read.min(remaining)]);
+        collected.extend_from_slice(buffer.get(..read.min(remaining)).unwrap_or(&buffer));
     }
     Ok(collected)
 }
