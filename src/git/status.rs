@@ -278,6 +278,10 @@ fn bytes_to_path(bytes: &[u8]) -> PathBuf {
 }
 
 #[cfg(test)]
+#[expect(
+    unused_results,
+    reason = "test helpers return values the assertions do not use"
+)]
 mod tests {
     use std::path::Path;
 

@@ -637,6 +637,10 @@ const fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 }
 
 #[cfg(test)]
+#[expect(
+    unused_results,
+    reason = "test helpers return values the assertions do not use"
+)]
 mod tests {
     use super::*;
 
