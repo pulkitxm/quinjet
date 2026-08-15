@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 
 use super::diff::{
     DiffDocument, DiffLineCounts, PullRequestDetails, parse_diff, parse_numstat,
@@ -793,10 +793,12 @@ impl Repository {
             "gh repo view failed",
         )?;
         let record = trim_ascii(&response.data);
-        let fields = parse_tsv_record(record, 2).context("invalid gh repo view output")?;
-        if fields[0].trim().is_empty() || fields[1].trim().is_empty() {
+        let [name_with_owner, host] =
+            parse_tsv_record::<2>(record).context("invalid gh repo view output")?;
+        if name_with_owner.trim().is_empty() || host.trim().is_empty() {
             bail!("gh repo view returned an incomplete repository identity");
         }
+        let fields = [name_with_owner, host];
         Ok((
             GitHubRepository {
                 name_with_owner: fields[0].clone(),
@@ -1010,10 +1012,10 @@ fn parse_pull_requests(
         if record.is_empty() {
             continue;
         }
-        let fields = parse_tsv_record(record, PULL_REQUEST_TSV_FIELDS)
+        let fields = parse_tsv_record::<PULL_REQUEST_TSV_FIELDS>(record)
             .with_context(|| format!("invalid pull-request record {}", index + 1))?;
         pull_requests.push(parse_pull_request_fields(
-            &fields,
+            fields,
             base_repository,
             repositories,
         )?);
@@ -1022,42 +1024,56 @@ fn parse_pull_requests(
 }
 
 fn parse_pull_request_fields(
-    fields: &[String],
+    fields: [String; PULL_REQUEST_TSV_FIELDS],
     base_repository: &GitHubRepository,
     repositories: &[GitHubRepository],
 ) -> Result<PullRequest> {
-    if fields.len() != PULL_REQUEST_TSV_FIELDS {
-        bail!(
-            "expected {PULL_REQUEST_TSV_FIELDS} pull-request fields, received {}",
-            fields.len()
-        );
-    }
-    let head_repository = (!fields[10].is_empty()).then(|| fields[10].clone());
+    let [
+        number,
+        title,
+        description,
+        author,
+        state,
+        draft,
+        updated_at,
+        url,
+        base_ref,
+        head_ref,
+        head_repository_name,
+        cross_repository,
+        additions,
+        deletions,
+        changed_files,
+        base_oid,
+        head_oid,
+        created_at,
+    ] = fields;
+    let head_repository = (!head_repository_name.is_empty()).then_some(head_repository_name);
     let head_remotes = head_repository
         .as_deref()
         .map(|name| matching_remotes(repositories, base_repository.host(), name))
         .unwrap_or_default();
     Ok(PullRequest {
-        number: parse_field(&fields[0], "number")?,
-        title: bounded_text(&fields[1], MAX_PULL_REQUEST_TITLE_BYTES),
-        description: bounded_text(&fields[2], MAX_PULL_REQUEST_BODY_BYTES),
-        author: fields[3].clone(),
-        state: fields[4].to_ascii_uppercase(),
-        is_draft: parse_field(&fields[5], "draft state")?,
-        updated_at: fields[6].clone(),
-        url: fields[7].clone(),
-        base_ref: fields[8].clone(),
-        head_ref: fields[9].clone(),
+        number: parse_field(&number, "number")?,
+        title: bounded_text(&title, MAX_PULL_REQUEST_TITLE_BYTES),
+        description: bounded_text(&description, MAX_PULL_REQUEST_BODY_BYTES),
+        author,
+        state: state.to_ascii_uppercase(),
+        is_draft: parse_field(&draft, "draft state")?,
+        updated_at,
+        url,
+        base_ref,
+        head_ref,
         base_repository: base_repository.clone(),
         head_repository,
         head_remotes,
-        is_cross_repository: parse_field(&fields[11], "cross-repository state")?,
-        additions: parse_field(&fields[12], "addition count")?,
-        deletions: parse_field(&fields[13], "deletion count")?,
-        changed_files: parse_field(&fields[14], "changed-file count")?,
-        base_oid: fields[15].clone(),
-        head_oid: fields[16].clone(),
-        created_at: fields[17].clone(),
+        is_cross_repository: parse_field(&cross_repository, "cross-repository state")?,
+        additions: parse_field(&additions, "addition count")?,
+        deletions: parse_field(&deletions, "deletion count")?,
+        changed_files: parse_field(&changed_files, "changed-file count")?,
+        base_oid,
+        head_oid,
+        created_at,
     })
 }
 
@@ -1072,20 +1088,17 @@ fn bounded_text(value: &str, maximum: usize) -> String {
     format!("{}…", &value[..end])
 }
 
-fn parse_tsv_record(record: &[u8], expected_fields: usize) -> Result<Vec<String>> {
+fn parse_tsv_record<const FIELDS: usize>(record: &[u8]) -> Result<[String; FIELDS]> {
     let record = record.strip_suffix(b"\r").unwrap_or(record);
-    let fields: Vec<_> = record.split(|byte| *byte == b'\t').collect();
-    if fields.len() != expected_fields {
-        bail!(
-            "expected {expected_fields} tab-separated fields, received {}",
-            fields.len()
-        );
-    }
-    Ok(fields
-        .into_iter()
+    let fields: Vec<_> = record
+        .split(|byte| *byte == b'\t')
         .map(text)
         .map(|field| unescape_tsv(&field))
-        .collect())
+        .collect();
+    let received = fields.len();
+    fields
+        .try_into()
+        .map_err(|_| anyhow!("expected {FIELDS} tab-separated fields, received {received}"))
 }
 
 fn unescape_tsv(value: &str) -> String {
@@ -2071,8 +2084,12 @@ mod tests {
             "line one\nline two\tpath\\file\\q"
         );
         assert_eq!(
-            parse_tsv_record(b"one\ttwo\\tinside\tthree\r", 3).unwrap(),
-            vec!["one", "two\tinside", "three"]
+            parse_tsv_record::<3>(b"one\ttwo\\tinside\tthree\r").unwrap(),
+            [
+                "one".to_owned(),
+                "two\tinside".to_owned(),
+                "three".to_owned()
+            ]
         );
     }
 

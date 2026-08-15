@@ -257,17 +257,26 @@ fn parse_conversation(output: &[u8]) -> Result<Vec<ConversationEntry>> {
         if record.is_empty() {
             continue;
         }
-        let fields = parse_tsv_record(record, CONVERSATION_FIELDS)
+        let [
+            kind,
+            actor,
+            timestamp,
+            detail,
+            body,
+            url,
+            reference,
+            context,
+        ] = parse_tsv_record::<CONVERSATION_FIELDS>(record)
             .with_context(|| format!("invalid conversation record {}", index + 1))?;
         entries.push(ConversationEntry {
-            kind: ConversationKind::parse(&fields[0]),
-            actor: fields[1].clone(),
-            timestamp: fields[2].clone(),
-            detail: fields[3].clone(),
-            body: bounded_text(&fields[4], MAX_CONVERSATION_BODY_BYTES),
-            url: fields[5].clone(),
-            reference: fields[6].clone(),
-            context: bounded_text(&fields[7], MAX_CONVERSATION_CONTEXT_BYTES),
+            kind: ConversationKind::parse(&kind),
+            actor,
+            timestamp,
+            detail,
+            body: bounded_text(&body, MAX_CONVERSATION_BODY_BYTES),
+            url,
+            reference,
+            context: bounded_text(&context, MAX_CONVERSATION_CONTEXT_BYTES),
         });
     }
     Ok(entries)
