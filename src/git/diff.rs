@@ -814,7 +814,7 @@ fn advance_highlighter<'a>(
         return;
     }
     if let (Some(highlighter), Some(assets)) = (highlighter.as_mut(), assets) {
-        let _ = highlighter.highlight_line(line, &assets.syntaxes);
+        drop(highlighter.highlight_line(line, &assets.syntaxes));
     }
 }
 

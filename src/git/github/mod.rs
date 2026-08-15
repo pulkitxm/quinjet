@@ -380,7 +380,7 @@ pub(crate) fn cache_write(key: &str, data: &[u8]) {
 
 pub(crate) fn cache_write_bounded(key: &str, data: &[u8], limit: usize) {
     if let Some(cache) = CacheStore::discover() {
-        let _ = cache.write(key, data, limit);
+        drop(cache.write(key, data, limit));
     }
 }
 
@@ -875,7 +875,7 @@ impl Repository {
         };
         if output.status.success() && !output.stdout_truncated {
             if let Some(cache) = cache.as_ref() {
-                let _ = cache.write(cache_key, &output.stdout, limit);
+                drop(cache.write(cache_key, &output.stdout, limit));
             }
             return Ok(GhResponse {
                 data: output.stdout,
@@ -1296,7 +1296,7 @@ impl TemporaryBareRepository {
 
 impl Drop for TemporaryBareRepository {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
+        drop(fs::remove_dir_all(&self.path));
     }
 }
 
@@ -1320,7 +1320,7 @@ fn remove_stale_temporary_repositories(parent: &Path) {
             .and_then(|modified| SystemTime::now().duration_since(modified).ok())
             .is_some_and(|age| age >= TEMPORARY_REPOSITORY_MAX_AGE);
         if stale {
-            let _ = fs::remove_dir_all(path);
+            drop(fs::remove_dir_all(path));
         }
     }
 }
@@ -1733,9 +1733,9 @@ pub(crate) fn run_bounded_command(
             Ok(read) => read,
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = stderr_reader.join();
+                drop(child.kill());
+                drop(child.wait());
+                drop(stderr_reader.join());
                 return Err(error.into());
             }
         };
@@ -1743,7 +1743,7 @@ pub(crate) fn run_bounded_command(
         if read > remaining {
             collected.extend_from_slice(&buffer[..remaining]);
             truncated = true;
-            let _ = child.kill();
+            drop(child.kill());
             break;
         }
         collected.extend_from_slice(&buffer[..read]);
@@ -1813,7 +1813,7 @@ impl CacheStore {
         let path = self.path(key);
         let metadata = fs::metadata(&path).ok()?;
         if metadata.len() > limit as u64 + CACHE_MAGIC.len() as u64 {
-            let _ = fs::remove_file(path);
+            drop(fs::remove_file(path));
             return None;
         }
         let mut data = fs::read(path).ok()?;
@@ -1852,10 +1852,10 @@ impl CacheStore {
         file.flush()?;
         drop(file);
         if destination.exists() {
-            let _ = fs::remove_file(&destination);
+            drop(fs::remove_file(&destination));
         }
         if let Err(error) = fs::rename(&temporary, &destination) {
-            let _ = fs::remove_file(&temporary);
+            drop(fs::remove_file(&temporary));
             return Err(error.into());
         }
         self.prune();
@@ -1986,7 +1986,7 @@ mod tests {
 
     impl Drop for TestDirectory {
         fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
+            drop(fs::remove_dir_all(&self.0));
         }
     }
 
@@ -1996,7 +1996,7 @@ mod tests {
             "quinjet-github-{label}-{}-{id}",
             std::process::id()
         ));
-        let _ = fs::remove_dir_all(&path);
+        drop(fs::remove_dir_all(&path));
         fs::create_dir_all(&path).unwrap();
         TestDirectory(path)
     }
