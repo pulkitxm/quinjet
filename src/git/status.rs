@@ -232,8 +232,9 @@ fn push_xy_changes(
     original_path: Option<&[u8]>,
     changes: &mut Vec<Change>,
 ) {
-    let x = xy[0];
-    let y = xy[1];
+    let ([x, y] | [x, y, ..]) = *xy else {
+        return;
+    };
     let path = bytes_to_path(path);
     let original_path = original_path
         .filter(|value| !value.is_empty())

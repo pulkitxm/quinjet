@@ -16,8 +16,8 @@ impl RepoWatcher {
             let Ok(event) = result else {
                 return;
             };
-            if should_refresh(&event) {
-                let _ = sender.try_send(());
+            if should_refresh(&event) && sender.try_send(()).is_err() {
+                return;
             }
         })
         .context("failed to create filesystem watcher")?;
@@ -51,7 +51,7 @@ fn is_noisy_git_path(path: &Path) -> bool {
     else {
         return false;
     };
-    let tail = &components[git_index + 1..];
+    let tail = components.get(git_index + 1..).unwrap_or_default();
     if tail
         .first()
         .is_some_and(|component| component.as_os_str() == "objects")

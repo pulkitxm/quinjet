@@ -175,13 +175,14 @@ impl Repository {
         }
         entries.sort_by(|left, right| left.timestamp.cmp(&right.timestamp));
 
-        let mut truncated = timeline.truncated || comments.truncated;
-        if entries.len() > MAX_CONVERSATION_ENTRIES {
+        let overflowing = entries.len() > MAX_CONVERSATION_ENTRIES;
+        if overflowing {
             let opened = entries.remove(0);
-            entries.drain(..entries.len() - (MAX_CONVERSATION_ENTRIES - 1));
+            let dropped = entries.len() - (MAX_CONVERSATION_ENTRIES - 1);
+            drop(entries.drain(..dropped));
             entries.insert(0, opened);
-            truncated = true;
         }
+        let truncated = timeline.truncated || comments.truncated || overflowing;
         Ok(PullRequestConversation {
             entries,
             truncated,
@@ -223,7 +224,7 @@ impl Repository {
         let mut data = output.stdout;
         if output.stdout_truncated {
             while data.last().is_some_and(|byte| *byte != b'\n') {
-                data.pop();
+                drop(data.pop());
             }
         }
         let entries = parse_conversation(&data).context(error_context.to_owned())?;
