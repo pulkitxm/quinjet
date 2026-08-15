@@ -445,13 +445,16 @@ impl Repository {
 
 /// Split the stored entry into its validator and the body it validates.
 fn split_validator(entry: &[u8]) -> (Option<String>, &[u8]) {
-    match entry.iter().position(|byte| *byte == b'\n') {
-        Some(index) => (
-            Some(String::from_utf8_lossy(&entry[..index]).into_owned()),
-            &entry[index + 1..],
-        ),
-        None => (None, entry),
-    }
+    entry
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .map_or((None, entry), |index| {
+            let (validator, body) = entry.split_at(index);
+            (
+                Some(String::from_utf8_lossy(validator).into_owned()),
+                body.get(1..).unwrap_or_default(),
+            )
+        })
 }
 
 /// `gh api -i` prints the response head, a blank line, then the body.
@@ -1121,9 +1124,10 @@ fn unescape_tsv(value: &str) -> String {
             Some('t') => output.push('\t'),
             Some('n') => output.push('\n'),
             Some('r') => output.push('\r'),
-            Some('\\') => output.push('\\'),
             Some(other) => {
-                output.push('\\');
+                if other != '\\' {
+                    output.push('\\');
+                }
                 output.push(other);
             }
             None => output.push('\\'),
