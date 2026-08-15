@@ -1,7 +1,7 @@
 use ratatui::style::Color;
 
 #[derive(Debug, Clone, Copy)]
-pub struct Theme {
+pub(super) struct Theme {
     pub background: Color,
     pub panel: Color,
     pub panel_alt: Color,

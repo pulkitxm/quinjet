@@ -78,7 +78,7 @@ impl ConversationKind {
     }
 
     /// Whether the entry carries prose worth rendering under its header.
-    pub const fn has_body(self) -> bool {
+    pub(crate) const fn has_body(self) -> bool {
         matches!(
             self,
             Self::Opened | Self::Comment | Self::Review | Self::ReviewComment | Self::Commit
@@ -119,7 +119,7 @@ pub struct PullRequestConversation {
 }
 
 impl PullRequestConversation {
-    pub fn comment_count(&self) -> usize {
+    pub(crate) fn comment_count(&self) -> usize {
         self.entries
             .iter()
             .filter(|entry| {
@@ -380,7 +380,7 @@ weird_new_event\tsomebody\t2026-08-01T15:00:00Z\t\t\t\t\t\n";
 
     #[test]
     fn rejects_records_that_do_not_match_the_query_shape() {
-        assert!(parse_conversation(b"comment\tonly\ttwo\n").is_err());
+        parse_conversation(b"comment\tonly\ttwo\n").unwrap_err();
     }
 
     #[test]
