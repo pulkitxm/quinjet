@@ -389,6 +389,98 @@ pub(crate) fn cache_write_bounded(key: &str, data: &[u8], limit: usize) {
     }
 }
 
+/// A validated read: GitHub is asked whether the answer changed, and answers
+/// `304 Not Modified` when it did not. That reply carries no body and costs
+/// nothing against the rate limit, which is what lets an unchanged thread be
+/// re-checked as often as it is worth checking.
+///
+/// The entry holds the validator on its first line and the body after it, so
+/// the two can never be stored out of step with each other.
+pub(crate) struct ValidatedRead {
+    pub data: Vec<u8>,
+    pub unchanged: bool,
+}
+
+impl Repository {
+    pub(crate) fn validated_gh(&self, key: &str, args: Vec<OsString>) -> Result<ValidatedRead> {
+        let cached = cache_read(key, CacheLife::Immutable);
+        let validator = cached.as_ref().and_then(|entry| split_validator(entry).0);
+        let mut request = vec![OsString::from("api"), OsString::from("-i")];
+        if let Some(validator) = validator.as_ref() {
+            request.push(OsString::from("-H"));
+            request.push(OsString::from(format!("If-None-Match: {validator}")));
+        }
+        request.extend(args);
+
+        let output = self.run_gh(request)?;
+        if !output.status.success() {
+            bail!(
+                "{}",
+                bounded_command_error("unable to read from GitHub", &output)
+            );
+        }
+        let (head, body) = split_http_response(&output.stdout);
+        let status =
+            String::from_utf8_lossy(head.lines().next().unwrap_or_default().as_bytes()).to_string();
+        if status.contains(" 304") {
+            if let Some(entry) = cached {
+                return Ok(ValidatedRead {
+                    data: split_validator(&entry).1.to_vec(),
+                    unchanged: true,
+                });
+            }
+        }
+        // A response spanning more than one page has no single validator to
+        // store, so it is returned without being cached; the caller's own key
+        // still covers it.
+        if let Some(etag) = header_value(head, "etag").filter(|_| !has_next_page(head)) {
+            let mut entry = etag.into_bytes();
+            entry.push(b'\n');
+            entry.extend_from_slice(body);
+            cache_write(key, &entry);
+        }
+        Ok(ValidatedRead {
+            data: body.to_vec(),
+            unchanged: false,
+        })
+    }
+}
+
+/// Split the stored entry into its validator and the body it validates.
+fn split_validator(entry: &[u8]) -> (Option<String>, &[u8]) {
+    match entry.iter().position(|byte| *byte == b'\n') {
+        Some(index) => (
+            Some(String::from_utf8_lossy(&entry[..index]).into_owned()),
+            &entry[index + 1..],
+        ),
+        None => (None, entry),
+    }
+}
+
+/// `gh api -i` prints the response head, a blank line, then the body.
+fn split_http_response(output: &[u8]) -> (&str, &[u8]) {
+    let text = std::str::from_utf8(output).unwrap_or_default();
+    for separator in ["\r\n\r\n", "\n\n"] {
+        if let Some(index) = text.find(separator) {
+            return (&text[..index], &output[index + separator.len()..]);
+        }
+    }
+    (text, &[])
+}
+
+fn header_value(head: &str, name: &str) -> Option<String> {
+    head.lines().find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        key.trim()
+            .eq_ignore_ascii_case(name)
+            .then(|| value.trim().to_owned())
+    })
+}
+
+fn has_next_page(head: &str) -> bool {
+    header_value(head, "link").is_some_and(|link| link.contains("rel=\"next\""))
+}
+
 struct GhResponse {
     data: Vec<u8>,
     disposition: CacheDisposition,

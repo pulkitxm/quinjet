@@ -1,4 +1,4 @@
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 
 use anyhow::{Context, Result, bail};
 
@@ -86,6 +86,12 @@ impl ConversationKind {
     }
 }
 
+struct ConversationRecords {
+    entries: Vec<ConversationEntry>,
+    truncated: bool,
+    from_cache: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConversationEntry {
     pub kind: ConversationKind,
@@ -107,6 +113,9 @@ pub struct ConversationEntry {
 pub struct PullRequestConversation {
     pub entries: Vec<ConversationEntry>,
     pub truncated: bool,
+    /// True when nothing had to be transferred: either the thread was already
+    /// held for this update stamp, or GitHub confirmed it had not changed.
+    pub from_cache: bool,
 }
 
 impl PullRequestConversation {
@@ -145,20 +154,21 @@ impl Repository {
             pull_request.number,
             pull_request.updated_at
         );
-        let (timeline, timeline_truncated) = self.conversation_records(
+        let timeline = self.conversation_records(
             &format!("conversation-timeline-v1\n{stamp}"),
             timeline_args(pull_request),
             "unable to load the pull-request timeline",
         )?;
-        let (comments, comments_truncated) = self.conversation_records(
+        let comments = self.conversation_records(
             &format!("conversation-comments-v1\n{stamp}"),
             review_comment_args(pull_request),
             "unable to load pull-request review comments",
         )?;
 
+        let from_cache = timeline.from_cache && comments.from_cache;
         let mut entries = vec![opened_entry(pull_request)];
-        entries.extend(timeline);
-        for comment in comments {
+        entries.extend(timeline.entries);
+        for comment in comments.entries {
             if entries
                 .iter()
                 .any(|entry| !entry.url.is_empty() && entry.url == comment.url)
@@ -169,7 +179,7 @@ impl Repository {
         }
         entries.sort_by(|left, right| left.timestamp.cmp(&right.timestamp));
 
-        let mut truncated = timeline_truncated || comments_truncated;
+        let mut truncated = timeline.truncated || comments.truncated;
         if entries.len() > MAX_CONVERSATION_ENTRIES {
             // Keep the most recent activity; the opening post is restored so the
             // thread never loses the description it started from.
@@ -178,7 +188,11 @@ impl Repository {
             entries.insert(0, opened);
             truncated = true;
         }
-        Ok(PullRequestConversation { entries, truncated })
+        Ok(PullRequestConversation {
+            entries,
+            truncated,
+            from_cache,
+        })
     }
 
     fn conversation_records(
@@ -186,12 +200,32 @@ impl Repository {
         key: &str,
         args: Vec<OsString>,
         error_context: &str,
-    ) -> Result<(Vec<ConversationEntry>, bool)> {
+    ) -> Result<ConversationRecords> {
         if let Some(data) = cache_read(key, CacheLife::Immutable) {
-            return Ok((
-                parse_conversation(&data).context(error_context.to_owned())?,
-                false,
-            ));
+            return Ok(ConversationRecords {
+                entries: parse_conversation(&data).context(error_context.to_owned())?,
+                truncated: false,
+                from_cache: true,
+            });
+        }
+        // Ask GitHub whether this part of the thread changed before asking for
+        // it again. A thread that fits one page answers 304 when it has not,
+        // which transfers nothing and spends nothing against the rate limit, so
+        // it can be re-checked as often as it is worth checking. Anything
+        // longer has no single validator and falls back to reading every page.
+        let single_page: Vec<OsString> = args
+            .iter()
+            .filter(|arg| arg.as_os_str() != OsStr::new("--paginate"))
+            .cloned()
+            .collect();
+        if let Ok(read) = self.validated_gh(&format!("{key}\nvalidated"), single_page) {
+            let entries = parse_conversation(&read.data).context(error_context.to_owned())?;
+            cache_write(key, &read.data);
+            return Ok(ConversationRecords {
+                entries,
+                truncated: false,
+                from_cache: read.unchanged,
+            });
         }
         let output = self.run_gh(args)?;
         if !output.status.success() && !output.stdout_truncated {
@@ -209,7 +243,11 @@ impl Repository {
         if !output.stdout_truncated {
             cache_write(key, &data);
         }
-        Ok((entries, output.stdout_truncated))
+        Ok(ConversationRecords {
+            entries,
+            truncated: output.stdout_truncated,
+            from_cache: false,
+        })
     }
 }
 

@@ -1820,6 +1820,7 @@ impl App {
         self.pull_request.is_some()
             && self.pull_request_from_cache
             && self.pull_request_checks_from_cache
+            && self.pull_request_conversation.from_cache
             && !self.pull_request_refreshing()
     }
 
