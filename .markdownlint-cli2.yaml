@@ -1,0 +1,16 @@
+config:
+  default: true
+  MD013: false
+  MD024:
+    siblings_only: true
+  MD033:
+    allowed_elements: [img, br, details, summary, kbd, div, p]
+  MD041: false
+
+globs:
+  - "**/*.md"
+
+ignores:
+  - target/**
+  - extras/**
+  - node_modules/**

@@ -1,0 +1,6 @@
+no_progress = true
+max_retries = 3
+timeout = 20
+accept = ["200..=206", "429"]
+exclude_path = ["target", "extras", "node_modules"]
+exclude = ["^http://127\\.0\\.0\\.1", "^http://localhost"]
