@@ -217,6 +217,13 @@ cargo test --all-features
 cargo build --release --locked
 ```
 
+`scripts/drive.py` drives a real build through a pty and reads back what it drew. It opens a pull request against live GitHub, so it needs a working `gh` login and a network and is deliberately not part of CI; use it for what a unit test cannot see, such as which requests overlap and how long a pane waits.
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install pyte
+QUINJET=$PWD/target/release/quinjet .venv/bin/python scripts/drive.py switch /path/to/repo 507 506
+```
+
 ## License
 
 Quinjet is available under the [MIT License](LICENSE).
