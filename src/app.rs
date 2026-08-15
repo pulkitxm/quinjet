@@ -543,6 +543,7 @@ pub struct UiGeometry {
 #[derive(Debug)]
 pub enum AppEffect {
     Git(Box<WorkerCommand>),
+    SetMouseCapture(bool),
     Quit,
 }
 
@@ -627,6 +628,7 @@ pub struct App {
     pub filter: String,
     pub modal: Option<Modal>,
     pub toast: Option<Toast>,
+    pub mouse_capture: bool,
     pub busy: Option<String>,
     pub refreshing: bool,
     pub document_loading: bool,
@@ -749,6 +751,7 @@ impl App {
             filter: String::new(),
             modal: None,
             toast: None,
+            mouse_capture: true,
             busy: None,
             refreshing: false,
             document_loading: false,
@@ -1495,6 +1498,7 @@ impl App {
             }
             KeyCode::Char('G') => self.go_to_edge(true, now),
             KeyCode::Char('z') => self.toggle_sidebar(),
+            KeyCode::Char('m') => effects.push(self.toggle_mouse_capture(now)),
             KeyCode::Char('[') if self.check_log_visible() => {
                 self.move_check_step_cursor(-1);
             }
@@ -3645,6 +3649,9 @@ impl App {
         let mut effects = Vec::new();
         match key.code {
             KeyCode::Char('z') if key.modifiers == KeyModifiers::NONE => self.toggle_sidebar(),
+            KeyCode::Char('m') if key.modifiers == KeyModifiers::NONE => {
+                effects.push(self.toggle_mouse_capture(now));
+            }
             KeyCode::Esc => self.pull_request_lookup_active = false,
             KeyCode::Char('o') => {
                 self.pull_request_lookup_active = false;
@@ -4614,6 +4621,23 @@ impl App {
         self.change_cursor = self.change_cursor.min(visible.len().saturating_sub(1));
     }
 
+    /// Reporting the mouse to the application is what stops a terminal from
+    /// selecting text with it. Releasing it hands selection and copying back to
+    /// the terminal, which is the only place either can happen.
+    fn toggle_mouse_capture(&mut self, now: Instant) -> AppEffect {
+        self.mouse_capture = !self.mouse_capture;
+        self.show_toast(
+            if self.mouse_capture {
+                "Mouse on · quinjet handles clicks and the wheel".to_owned()
+            } else {
+                "Mouse off · select and copy with the terminal, m to restore".to_owned()
+            },
+            ToastLevel::Info,
+            now,
+        );
+        AppEffect::SetMouseCapture(self.mouse_capture)
+    }
+
     fn show_toast(&mut self, message: String, level: ToastLevel, now: Instant) {
         self.toast = Some(Toast {
             message,
@@ -4944,6 +4968,53 @@ mod tests {
         assert_eq!(app.focus, Focus::Content);
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
         assert_eq!(app.focus, Focus::Sidebar);
+    }
+
+    #[test]
+    fn the_mouse_can_be_released_so_the_terminal_can_select_text() {
+        // A terminal cannot select text with a mouse it is reporting to the
+        // application, so the only way to copy from the screen is to let go.
+        let mut app = app_with_changes();
+        let now = Instant::now();
+        assert!(app.mouse_capture);
+
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE), now);
+        assert!(!app.mouse_capture);
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::SetMouseCapture(false)]
+        ));
+        assert!(
+            app.toast
+                .as_ref()
+                .is_some_and(|toast| toast.message.contains("select and copy")),
+            "the reader is told what releasing the mouse just gave them"
+        );
+
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE), now);
+        assert!(app.mouse_capture);
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::SetMouseCapture(true)]
+        ));
+    }
+
+    #[test]
+    fn the_mouse_is_released_even_while_the_number_field_has_focus() {
+        let mut app = app_with_changes();
+        let now = Instant::now();
+        app.pull_request_lookup_active = true;
+
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE), now);
+        assert!(!app.mouse_capture);
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::SetMouseCapture(false)]
+        ));
+        assert!(
+            app.pull_request_lookup_active,
+            "releasing the mouse does not close the field"
+        );
     }
 
     #[test]
@@ -5571,7 +5642,7 @@ mod tests {
                         ),
                         _ => matches!(command.as_ref(), WorkerCommand::LoadCheckRunLog { .. }),
                     },
-                    AppEffect::Quit => false,
+                    AppEffect::SetMouseCapture(_) | AppEffect::Quit => false,
                 })
                 .count()
         };

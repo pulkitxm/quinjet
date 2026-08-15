@@ -148,7 +148,8 @@ The UI intentionally stays uncluttered; press `?` for the complete shortcut refe
 |---|---|
 | `j` / `k`, arrows | Move through every file/commit or scroll the preview |
 | Mouse wheel | Naturally scroll the pane under the pointer |
-| `Shift` + mouse drag | Select terminal text without activating Quinjet controls (`--no-mouse` disables capture entirely) |
+| `m` | Release the mouse so the terminal can select and copy text, and take it back |
+| `Shift` + mouse drag | Select terminal text without activating Quinjet controls (`--no-mouse` starts with the mouse released) |
 | `Tab` / `Enter` | Toggle sidebar/preview focus |
 | `z` | Hide/show the sidebar |
 | `e` / `E` | Collapse/expand every file diff; keep that preference across selections/views |
