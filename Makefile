@@ -134,7 +134,7 @@ editorconfig:
 	editorconfig-checker
 
 ruff:
-	ruff check --select ALL --ignore D203,D213,COM812,ISC001 scripts
+	ruff check scripts
 	ruff format --check scripts
 
 tools:

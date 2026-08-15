@@ -27,11 +27,14 @@ DIRECTIVES = (
 
 @dataclass(frozen=True)
 class Finding:
+    """One rejected comment, ready to print."""
+
     path: str
     line: int
     text: str
 
     def __str__(self) -> str:
+        """Render the finding the way a compiler would."""
         return f"{self.path}:{self.line}: {self.text}"
 
 
@@ -62,14 +65,14 @@ def spans(source: str) -> list[tuple[int, int, int, str, bool]]:
             stop = source.find("\n", i)
             stop = end if stop == -1 else stop
             body = source[start:stop]
-            is_doc = body.startswith("///") or body.startswith("//!")
+            is_doc = body.startswith(("///", "//!"))
             found.append((start, stop, line, body.strip(), is_doc))
             i = stop
         elif source.startswith("/*", i):
             start = i
             start_line = line
             i, line, body = skip_block_comment(source, i, line)
-            is_doc = body.startswith("/**") or body.startswith("/*!")
+            is_doc = body.startswith(("/**", "/*!"))
             found.append((start, i, start_line, body.strip().splitlines()[0], is_doc))
         else:
             i += 1
@@ -98,6 +101,7 @@ def strip(source: str) -> str:
 
 
 def skip_string(source: str, i: int, line: int) -> tuple[int, int]:
+    """Skip past a double-quoted string literal."""
     i += 1
     while i < len(source):
         char = source[i]
@@ -113,6 +117,7 @@ def skip_string(source: str, i: int, line: int) -> tuple[int, int]:
 
 
 def skip_char_or_lifetime(source: str, i: int, line: int) -> tuple[int, int]:
+    """Skip a character literal, or step over a lifetime tick."""
     literal = re.match(r"'(\\.|[^\\'])'", source[i : i + 6])
     if literal:
         return i + literal.end(), line
@@ -120,6 +125,7 @@ def skip_char_or_lifetime(source: str, i: int, line: int) -> tuple[int, int]:
 
 
 def raw_string_start(source: str, i: int) -> tuple[int, int] | None:
+    """Return where a raw string body starts and how many hashes fence it."""
     match = re.match(r'(?:b|c)?r(#*)"', source[i : i + 16])
     if not match:
         return None
@@ -127,6 +133,7 @@ def raw_string_start(source: str, i: int) -> tuple[int, int] | None:
 
 
 def skip_raw_string(source: str, raw: tuple[int, int], line: int) -> tuple[int, int]:
+    """Skip past a raw string literal."""
     start, hashes = raw
     terminator = '"' + "#" * hashes
     stop = source.find(terminator, start)
@@ -135,6 +142,7 @@ def skip_raw_string(source: str, raw: tuple[int, int], line: int) -> tuple[int, 
 
 
 def skip_block_comment(source: str, i: int, line: int) -> tuple[int, int, str]:
+    """Skip a block comment, honouring Rust's nesting rules."""
     start = i
     depth = 0
     while i < len(source):
@@ -154,11 +162,13 @@ def skip_block_comment(source: str, i: int, line: int) -> tuple[int, int, str]:
 
 
 def allowed(text: str) -> bool:
+    """Say whether a comment carries a directive a tool actually reads."""
     body = text.lstrip("/").lstrip("*").strip()
     return any(pattern.search(body) for pattern in DIRECTIVES)
 
 
 def scan(path: Path, source: str) -> list[Finding]:
+    """Report every comment in one file that the rules reject."""
     return [
         Finding(str(path), line, text)
         for line, text, is_doc in comments(source)
@@ -167,6 +177,7 @@ def scan(path: Path, source: str) -> list[Finding]:
 
 
 def tracked_rust_files(root: Path) -> list[Path]:
+    """List the Rust files Git tracks."""
     listed = subprocess.run(
         ["git", "ls-files", "-z", "*.rs"],
         cwd=root,
@@ -178,6 +189,7 @@ def tracked_rust_files(root: Path) -> list[Path]:
 
 
 def repository_root() -> Path:
+    """Return the working tree root."""
     return Path(
         subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
@@ -189,6 +201,7 @@ def repository_root() -> Path:
 
 
 def rewrite() -> int:
+    """Strip the rejected comments from every tracked Rust file."""
     root = repository_root()
     changed = 0
     for path in tracked_rust_files(root):
@@ -202,6 +215,7 @@ def rewrite() -> int:
 
 
 def selftest() -> int:
+    """Prove the checker on known input before trusting it on the tree."""
     cases: list[tuple[str, int]] = [
         ("fn main() {}\n", 0),
         ("// plain\nfn main() {}\n", 1),
@@ -248,6 +262,7 @@ def selftest() -> int:
 
 
 def main(argv: list[str]) -> int:
+    """Run the checker, the stripper, or the selftest."""
     if "--selftest" in argv:
         return selftest()
 
