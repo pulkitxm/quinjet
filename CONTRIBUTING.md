@@ -23,15 +23,33 @@ The `extras/` directory is ignored and is only for local reference repositories 
 
 ## Required Checks
 
-Run these before submitting a pull request:
+CI runs formatting, linting, tests, documentation, MSRV, feature powerset, cross-target
+builds, coverage, packaging, installer smoke tests, repository hygiene, spelling, workflow
+linting, and dependency auditing. The same set runs locally:
+
+```bash
+make tools   # once, installs the cargo-based checkers
+make ci      # everything CI runs
+make ci-fast # format, lint, test, comments, secrets
+```
+
+At minimum, run this before submitting a pull request:
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-features
-cargo build --release --locked
-cargo package --locked
+cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo test --all-features --locked
+python3 scripts/check_comments.py
+python3 scripts/check_secrets.py
 ```
+
+Lints are strict on purpose: the clippy `pedantic`, `nursery` and `cargo` groups are denied
+along with a broad restriction set, so `unwrap`, `expect`, `panic`, indexing, and printing
+to stdout all fail the build. Reach for a scoped `#[expect(lint, reason = "...")]` when a
+lint is genuinely wrong for a piece of code, rather than relaxing it repository-wide.
+
+Comments are checked too. Doc comments (`///`, `//!`) stay because clap and rustdoc render
+them; ordinary `//` comments fail the build, so let names and structure carry the meaning.
 
 Add focused tests for behavior changes, especially status parsing, destructive Git operations, input editing, scrolling, and pane geometry.
 
