@@ -850,19 +850,20 @@ fn draw_pull_requests_sidebar(
     } else {
         ""
     };
-    let title = if let Some(pull_request) = app.selected_pull_request() {
-        let state = if pull_request.is_draft {
-            "DRAFT"
-        } else {
-            pull_request.state.as_str()
-        };
-        format!(
-            " Pull Request #{} · {state}{loading}{cache}{warning} ",
-            pull_request.number
-        )
-    } else {
-        format!(" Open Pull Request · on demand{loading}{warning} ")
-    };
+    let title = app.selected_pull_request().map_or_else(
+        || format!(" Open Pull Request · on demand{loading}{warning} "),
+        |pull_request| {
+            let state = if pull_request.is_draft {
+                "DRAFT"
+            } else {
+                pull_request.state.as_str()
+            };
+            format!(
+                " Pull Request #{} · {state}{loading}{cache}{warning} ",
+                pull_request.number
+            )
+        },
+    );
     let block = panel_block(
         title,
         app.focus == Focus::Sidebar && app.modal.is_none(),
@@ -2167,6 +2168,10 @@ fn shift_line(line: &Line<'static>, skip: usize, width: usize) -> Line<'static> 
     Line::from(spans)
 }
 
+#[expect(
+    clippy::option_if_let_else,
+    reason = "the branch is one arm of a longer chain that map_or_else cannot express"
+)]
 /// Wrap a Markdown body to a fixed width, keeping paragraph breaks, list
 /// structure and fenced code intact. Code is truncated rather than wrapped so
 /// its own indentation still reads correctly.
@@ -3067,11 +3072,15 @@ fn draw_side_by_side_diff(
     let rows = side_by_side_rows(&app.document, app);
     let sticky = rows.get(diff_scroll).and_then(|first| match first {
         SideBySideRow::FileHeader(_) | SideBySideRow::FileFooter => None,
-        _ => rows[..diff_scroll].iter().rev().find_map(|row| match row {
-            SideBySideRow::FileHeader(header) => Some(*header),
-            SideBySideRow::FileFooter => None,
-            _ => None,
-        }),
+        _ => rows
+            .get(..diff_scroll)
+            .unwrap_or_default()
+            .iter()
+            .rev()
+            .find_map(|row| match row {
+                SideBySideRow::FileHeader(header) => Some(*header),
+                _ => None,
+            }),
     });
     let content_y = area.y + u16::from(sticky.is_some());
     let content_height = area.height.saturating_sub(u16::from(sticky.is_some()));
@@ -3559,6 +3568,10 @@ fn draw_scrollbar(frame: &mut Frame<'_>, area: Rect, offset: usize, length: usiz
     }
 }
 
+#[expect(
+    clippy::option_if_let_else,
+    reason = "the branch is one arm of a longer chain that map_or_else cannot express"
+)]
 fn draw_footer(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) {
     let left = if let Some(busy) = app.busy.as_deref() {
         Line::from(vec![
