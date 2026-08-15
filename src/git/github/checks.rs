@@ -1,8 +1,7 @@
 use std::ffi::OsString;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-
-use std::time::Duration;
 
 use super::{
     BoundedOutput, CacheLife, PullRequest, Repository, bounded_command_error, parse_tsv_record,
