@@ -12,6 +12,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 
 use anyhow::{Context, Result, bail};
+use serde::Serialize;
 
 use self::diff::{
     CommitDetails, DiffDocument, DiffFileIndexEntry, DiffIndex, DiffLineCounts, parse_diff,
@@ -27,7 +28,8 @@ const MAX_DIFF_INDEX_FILES: usize = 16_384;
 const MAX_GIT_ERROR_BYTES: usize = 128 * 1024;
 const DEFAULT_HISTORY_PAGE: usize = 300;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct Branch {
     pub name: String,
     pub current: bool,
@@ -38,7 +40,8 @@ pub(crate) struct Branch {
 
 /// A local or remote-tracking branch that can be inspected without changing HEAD.
 /// `reference` is always a full ref emitted by Git and is used only as a revision.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct HistoryBranch {
     pub name: String,
     pub reference: String,
@@ -48,7 +51,8 @@ pub(crate) struct HistoryBranch {
     pub short_id: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct Stash {
     pub reference: String,
     pub message: String,
@@ -97,7 +101,8 @@ impl PreparedLocalDiff {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub(crate) enum ConflictChoice {
     Ours,
     Theirs,

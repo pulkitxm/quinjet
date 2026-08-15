@@ -1239,6 +1239,8 @@ dependencies = [
  "crossterm 0.28.1",
  "notify",
  "ratatui",
+ "serde",
+ "serde_json",
  "syntect",
  "two-face",
  "unicode-width",

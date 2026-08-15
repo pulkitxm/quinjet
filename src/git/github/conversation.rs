@@ -1,6 +1,7 @@
 use std::ffi::{OsStr, OsString};
 
 use anyhow::{Context, Result, bail};
+use serde::Serialize;
 
 use super::{
     CacheLife, PullRequest, Repository, bounded_command_error, bounded_text, cache_read,
@@ -22,7 +23,8 @@ const HIDDEN_TIMELINE_EVENTS: &str = r#"["subscribed","unsubscribed","mentioned"
 
 const REVIEW_COMMENT_TSV_JQ: &str = r#".[] | ["review_comment", (.user.login // ""), (.created_at // ""), ((.path // "") + ":" + (((.line // .original_line) // 0)|tostring)), (.body // ""), (.html_url // ""), ((.pull_request_review_id // 0)|tostring), (.diff_hunk // "")] | @tsv"#;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub(crate) enum ConversationKind {
     Opened,
     Comment,
@@ -92,7 +94,8 @@ struct ConversationRecords {
     from_cache: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ConversationEntry {
     pub kind: ConversationKind,
     pub actor: String,
@@ -109,7 +112,8 @@ pub(crate) struct ConversationEntry {
     pub context: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct PullRequestConversation {
     pub entries: Vec<ConversationEntry>,
     pub truncated: bool,
