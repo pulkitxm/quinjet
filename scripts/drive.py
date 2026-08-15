@@ -117,15 +117,17 @@ class Session:
 def command_open(repository, number):
     session = Session(repository)
     try:
-        started = time.time()
         if not session.open_pull_request(number):
             print("the pane never opened")
             return 1
-        print(f"pane opened in {time.time() - started:.1f}s")
+        # Timed from the pane opening, not from the first keystroke: the driver
+        # paces its own input and that pacing is not the app's latency.
+        opened = time.time()
         for _ in range(60):
-            session.pump(1.0)
+            session.pump(0.25)
             if "Loading the conversation" not in session.body():
-                print(f"conversation rendered in {time.time() - started:.1f}s")
+                print(f"conversation rendered {time.time() - opened:.1f}s after the pane opened")
+                print("served from cache" if "cached" in session.body() else "read live")
                 return 0
         print("the conversation never rendered")
         return 1
