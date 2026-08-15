@@ -2799,19 +2799,20 @@ fn detail_line<'a>(label: &'a str, value: String, theme: &Theme) -> Line<'a> {
 fn unified_row_indices(document: &DiffDocument, app: &App) -> Vec<usize> {
     let mut rows = Vec::new();
     let mut index = 0;
-    while index < document.lines.len() {
-        if document.lines[index].kind == DiffLineKind::HunkHeader {
+    while let Some(line) = document.lines.get(index) {
+        if line.kind == DiffLineKind::HunkHeader {
             index += 1;
             continue;
         }
         rows.push(index);
-        let collapsed = document.lines[index].kind == DiffLineKind::FileHeader
-            && file_header_path(&document.lines[index])
-                .is_some_and(|path| app.preview_file_collapsed(path));
+        let collapsed = line.kind == DiffLineKind::FileHeader
+            && file_header_path(line).is_some_and(|path| app.preview_file_collapsed(path));
         index += 1;
         if collapsed {
-            while index < document.lines.len()
-                && document.lines[index].kind != DiffLineKind::FileFooter
+            while document
+                .lines
+                .get(index)
+                .is_some_and(|line| line.kind != DiffLineKind::FileFooter)
             {
                 index += 1;
             }
@@ -2834,10 +2835,12 @@ fn draw_unified_diff(
     let first_index = rows.get(diff_scroll).copied().unwrap_or_default();
     let mut in_file = inside_file_before(&app.document, first_index);
     let emphasis = intraline_emphasis(&app.document.lines);
-    let sticky = (first_index < app.document.lines.len()
-        && app.document.lines[first_index].kind != DiffLineKind::FileHeader)
-        .then(|| sticky_file_header(&app.document, first_index))
-        .flatten();
+    let sticky = app
+        .document
+        .lines
+        .get(first_index)
+        .filter(|line| line.kind != DiffLineKind::FileHeader)
+        .and_then(|_| sticky_file_header(&app.document, first_index));
     let content_y = area.y + u16::from(sticky.is_some());
     let content_height = area.height.saturating_sub(u16::from(sticky.is_some()));
     let mut hits = Vec::new();
@@ -2858,7 +2861,9 @@ fn draw_unified_diff(
         .take(content_height as usize)
         .enumerate()
     {
-        let line = &app.document.lines[line_index];
+        let Some(line) = app.document.lines.get(line_index) else {
+            continue;
+        };
         let row_area = Rect::new(area.x, content_y + cells(offset), area.width, 1);
         match line.kind {
             DiffLineKind::FileHeader => {
@@ -2881,7 +2886,7 @@ fn draw_unified_diff(
                 line,
                 in_file,
                 app.horizontal_scroll,
-                emphasis[line_index].as_ref(),
+                emphasis.get(line_index).and_then(Option::as_ref),
                 theme,
             ),
         }
@@ -3192,16 +3197,17 @@ fn side_by_side_rows<'a>(document: &'a DiffDocument, app: &App) -> Vec<SideBySid
     let mut rows = Vec::new();
     let mut index = 0;
     let mut in_file = false;
-    while index < document.lines.len() {
-        let line = &document.lines[index];
+    while let Some(line) = document.lines.get(index) {
         match line.kind {
             DiffLineKind::FileHeader => {
                 rows.push(SideBySideRow::FileHeader(line));
                 in_file = true;
                 index += 1;
                 if file_header_path(line).is_some_and(|path| app.preview_file_collapsed(path)) {
-                    while index < document.lines.len()
-                        && document.lines[index].kind != DiffLineKind::FileFooter
+                    while document
+                        .lines
+                        .get(index)
+                        .is_some_and(|line| line.kind != DiffLineKind::FileFooter)
                     {
                         index += 1;
                     }
@@ -3236,19 +3242,26 @@ fn side_by_side_rows<'a>(document: &'a DiffDocument, app: &App) -> Vec<SideBySid
             }
             DiffLineKind::Removed => {
                 let removed_start = index;
-                while index < document.lines.len()
-                    && document.lines[index].kind == DiffLineKind::Removed
+                while document
+                    .lines
+                    .get(index)
+                    .is_some_and(|line| line.kind == DiffLineKind::Removed)
                 {
                     index += 1;
                 }
                 let added_start = index;
-                while index < document.lines.len()
-                    && document.lines[index].kind == DiffLineKind::Added
+                while document
+                    .lines
+                    .get(index)
+                    .is_some_and(|line| line.kind == DiffLineKind::Added)
                 {
                     index += 1;
                 }
-                let removed = &document.lines[removed_start..added_start];
-                let added = &document.lines[added_start..index];
+                let removed = document
+                    .lines
+                    .get(removed_start..added_start)
+                    .unwrap_or_default();
+                let added = document.lines.get(added_start..index).unwrap_or_default();
                 for pair_index in 0..removed.len().max(added.len()) {
                     rows.push(SideBySideRow::Split(
                         removed.get(pair_index),
@@ -3264,17 +3277,23 @@ fn side_by_side_rows<'a>(document: &'a DiffDocument, app: &App) -> Vec<SideBySid
 fn intraline_emphasis(lines: &[DiffLine]) -> Vec<Option<Range<usize>>> {
     let mut emphasis = vec![None; lines.len()];
     let mut index = 0;
-    while index < lines.len() {
-        if lines[index].kind != DiffLineKind::Removed {
+    while let Some(line) = lines.get(index) {
+        if line.kind != DiffLineKind::Removed {
             index += 1;
             continue;
         }
         let removed_start = index;
-        while index < lines.len() && lines[index].kind == DiffLineKind::Removed {
+        while lines
+            .get(index)
+            .is_some_and(|line| line.kind == DiffLineKind::Removed)
+        {
             index += 1;
         }
         let added_start = index;
-        while index < lines.len() && lines[index].kind == DiffLineKind::Added {
+        while lines
+            .get(index)
+            .is_some_and(|line| line.kind == DiffLineKind::Added)
+        {
             index += 1;
         }
         let pair_count = (added_start - removed_start).min(index - added_start);
@@ -3282,9 +3301,13 @@ fn intraline_emphasis(lines: &[DiffLine]) -> Vec<Option<Range<usize>>> {
             let old_index = removed_start + pair_index;
             let new_index = added_start + pair_index;
             let (old_range, new_range) =
-                paired_intraline_emphasis(Some(&lines[old_index]), Some(&lines[new_index]));
-            emphasis[old_index] = old_range;
-            emphasis[new_index] = new_range;
+                paired_intraline_emphasis(lines.get(old_index), lines.get(new_index));
+            if let Some(slot) = emphasis.get_mut(old_index) {
+                *slot = old_range;
+            }
+            if let Some(slot) = emphasis.get_mut(new_index) {
+                *slot = new_range;
+            }
         }
     }
     emphasis
