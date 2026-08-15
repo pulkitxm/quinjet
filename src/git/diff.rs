@@ -107,9 +107,11 @@ impl DiffFileIndexEntry {
     fn label(&self) -> String {
         let mut label = self.path.display().to_string();
         if let Some(old_path) = self.old_path.as_ref().filter(|old| *old != &self.path) {
-            label.push_str(&format!("  · renamed from {}", old_path.display()));
+            label.push_str("  · renamed from ");
+            label.push_str(&old_path.display().to_string());
         } else if !self.status.is_empty() {
-            label.push_str(&format!("  · {}", self.status));
+            label.push_str("  · ");
+            label.push_str(&self.status);
         }
         if self.counts.is_some_and(|counts| counts.binary) {
             label.push_str("  · binary");
@@ -474,7 +476,9 @@ pub(crate) fn parse_diff(
         }
         if let Some(path) = raw_line.strip_prefix("+++ ") {
             let new_path = patch_path(path, "b/");
-            file_mut(&mut current_file, path_hint).new_path = new_path.clone();
+            file_mut(&mut current_file, path_hint)
+                .new_path
+                .clone_from(&new_path);
             active_path =
                 new_path.or_else(|| current_file.as_ref().and_then(|file| file.old_path.clone()));
             old_highlighter = highlighter_for_path(assets, active_path.as_deref());
@@ -766,7 +770,6 @@ fn decode_git_path(value: &str) -> String {
             Some(b'n') => output.push(b'\n'),
             Some(b'r') => output.push(b'\r'),
             Some(b't') => output.push(b'\t'),
-            Some(b'\\') => output.push(b'\\'),
             Some(b'"') => output.push(b'"'),
             Some(first @ b'0'..=b'7') => {
                 let mut value = first - b'0';
@@ -780,7 +783,7 @@ fn decode_git_path(value: &str) -> String {
                 output.push(value);
             }
             Some(other) => output.push(other),
-            None => output.push(b'\\'),
+            None | Some(b'\\') => output.push(b'\\'),
         }
     }
     String::from_utf8_lossy(&output).into_owned()

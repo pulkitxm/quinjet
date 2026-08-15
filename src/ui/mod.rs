@@ -16,8 +16,9 @@ use crate::app::{
     ToastLevel, UiGeometry, View,
 };
 use crate::convert::cells;
-use crate::git::diff::CommitDetails;
-use crate::git::diff::{DiffDocument, DiffLine, DiffLineKind, HighlightSpan, PullRequestDetails};
+use crate::git::diff::{
+    CommitDetails, DiffDocument, DiffLine, DiffLineKind, HighlightSpan, PullRequestDetails,
+};
 use crate::git::github::{
     CheckLogLine, CheckLogSeverity, CheckStep, ConversationEntry, ConversationKind,
     GitHubRepository, PullRequestCheckStatus, PullRequestFileStatus,
@@ -1049,6 +1050,10 @@ fn draw_pull_requests_sidebar(
     hits
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the caller has no use for the value afterwards"
+)]
 fn draw_pull_request_section_tab(
     frame: &mut Frame<'_>,
     area: Rect,
