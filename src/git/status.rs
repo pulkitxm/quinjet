@@ -116,25 +116,27 @@ impl RepoStatus {
 pub(crate) fn parse_porcelain_v2(output: &[u8]) -> RepoStatus {
     let mut status = RepoStatus::default();
     let records: Vec<&[u8]> = output.split(|byte| *byte == 0).collect();
-    let mut index = 0;
+    let mut remaining = records.as_slice();
 
-    while index < records.len() {
-        let record = records[index];
-        index += 1;
-        if record.is_empty() {
+    while let Some((record, rest)) = remaining.split_first() {
+        let record = *record;
+        remaining = rest;
+        let Some((marker, _)) = record.split_first() else {
             continue;
-        }
+        };
 
         if record.starts_with(b"# ") {
             parse_branch_header(record, &mut status.branch);
             continue;
         }
 
-        match record[0] {
+        match *marker {
             b'1' => parse_ordinary(record, &mut status.changes),
             b'2' => {
-                let original_path = records.get(index).copied().unwrap_or_default();
-                index += usize::from(index < records.len());
+                let (original_path, rest) = remaining
+                    .split_first()
+                    .map_or_else(|| (b"".as_slice(), remaining), |(path, rest)| (*path, rest));
+                remaining = rest;
                 parse_renamed(record, original_path, &mut status.changes);
             }
             b'u' => parse_unmerged(record, &mut status.changes),
@@ -191,27 +193,33 @@ fn parse_branch_header(record: &[u8], branch: &mut BranchState) {
 
 fn parse_ordinary(record: &[u8], changes: &mut Vec<Change>) {
     let fields = splitn_bytes(record, b' ', 9);
-    if fields.len() != 9 || fields[1].len() < 2 {
+    let [_, xy, _, _, _, _, _, _, path] = fields.as_slice() else {
+        return;
+    };
+    if xy.len() < 2 {
         return;
     }
-    push_xy_changes(fields[1], fields[8], None, changes);
+    push_xy_changes(xy, path, None, changes);
 }
 
 fn parse_renamed(record: &[u8], original_path: &[u8], changes: &mut Vec<Change>) {
     let fields = splitn_bytes(record, b' ', 10);
-    if fields.len() != 10 || fields[1].len() < 2 {
+    let [_, xy, _, _, _, _, _, _, _, path] = fields.as_slice() else {
+        return;
+    };
+    if xy.len() < 2 {
         return;
     }
-    push_xy_changes(fields[1], fields[9], Some(original_path), changes);
+    push_xy_changes(xy, path, Some(original_path), changes);
 }
 
 fn parse_unmerged(record: &[u8], changes: &mut Vec<Change>) {
     let fields = splitn_bytes(record, b' ', 11);
-    if fields.len() != 11 {
+    let [_, _, _, _, _, _, _, _, _, _, path] = fields.as_slice() else {
         return;
-    }
+    };
     changes.push(Change {
-        path: bytes_to_path(fields[10]),
+        path: bytes_to_path(path),
         original_path: None,
         area: ChangeArea::Conflict,
         status: ChangeStatus::Conflicted,
