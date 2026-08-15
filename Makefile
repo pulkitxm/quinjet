@@ -99,7 +99,7 @@ udeps:
 	$(CARGO) +$(NIGHTLY) udeps --all-targets --all-features
 
 deadlinks: doc
-	$(CARGO) deadlinks --dir target/doc
+	$(CARGO) deadlinks --dir target/doc/quinjet
 
 bloat:
 	$(CARGO) bloat --release --crates -n 30
