@@ -57,7 +57,7 @@ const PULL_REQUEST_TSV_FIELDS: usize = 18;
 static TEMPORARY_REPOSITORY_ID: AtomicU64 = AtomicU64::new(0);
 static CACHE_WRITE_ID: AtomicU64 = AtomicU64::new(0);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GitHubRepository {
     pub name_with_owner: String,
     pub url: String,
@@ -85,7 +85,7 @@ impl GitHubRepository {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PullRequest {
     pub number: u64,
     pub title: String,
