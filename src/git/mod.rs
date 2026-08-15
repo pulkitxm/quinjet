@@ -1401,8 +1401,9 @@ mod tests {
     impl TestRepository {
         fn new() -> Self {
             let id = TEST_REPOSITORY_ID.fetch_add(1, Ordering::Relaxed);
-            let path =
-                std::env::temp_dir().join(format!("quinjet-git-test-{}-{id}", std::process::id()));
+            let name = format!("quinjet-git-test-{}-{id}", std::process::id());
+            // nosemgrep: rust.lang.security.temp-dir.temp-dir
+            let path = std::env::temp_dir().join(name);
             drop(fs::remove_dir_all(&path));
             fs::create_dir_all(&path).unwrap();
             run_test_git(&path, ["init", "--initial-branch=main"]);
