@@ -66,15 +66,15 @@ pub struct GitHubRepository {
 }
 
 impl GitHubRepository {
-    pub fn selector(&self) -> &str {
+    pub(crate) fn selector(&self) -> &str {
         &self.url
     }
 
-    pub fn host(&self) -> &str {
+    pub(crate) fn host(&self) -> &str {
         repository_host(&self.url).unwrap_or_default()
     }
 
-    pub fn display_name(&self) -> String {
+    pub(crate) fn display_name(&self) -> String {
         let host = self.host();
         if host.is_empty() || host.eq_ignore_ascii_case("github.com") {
             self.name_with_owner.clone()
@@ -109,11 +109,11 @@ pub struct PullRequest {
 }
 
 impl PullRequest {
-    pub fn base_label(&self) -> String {
+    pub(crate) fn base_label(&self) -> String {
         format!("{}:{}", self.base_repository.display_name(), self.base_ref)
     }
 
-    pub fn head_label(&self) -> String {
+    pub(crate) fn head_label(&self) -> String {
         self.head_repository.as_ref().map_or_else(
             || format!("deleted fork:{}", self.head_ref),
             |repository| {
@@ -216,7 +216,7 @@ pub enum PullRequestProgress {
 }
 
 impl PullRequestProgress {
-    pub const fn percent(self) -> u16 {
+    pub(crate) const fn percent(self) -> u16 {
         match self {
             Self::LoadingMetadata => 10,
             Self::PreparingRepository => 20,
@@ -227,7 +227,7 @@ impl PullRequestProgress {
         }
     }
 
-    pub const fn label(self) -> &'static str {
+    pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::LoadingMetadata => "Fetching pull-request metadata",
             Self::PreparingRepository => "Preparing an isolated diff workspace",
@@ -337,20 +337,19 @@ impl PreparedPullRequest {
         Ok(files
             .into_iter()
             .map(|file| {
-                let body = match cached.get(&file.path) {
-                    Some(patch) => patch.as_slice(),
-                    None => {
-                        let body = sections
-                            .iter()
-                            .find(|section| section.matches(&file.path))
-                            .map(|section| section.body)
-                            .unwrap_or_default();
-                        if !truncated {
-                            let key = patch_cache_key(&self.merge_base, &self.head, &file.path);
-                            cache_write_bounded(&key, body, MAX_CACHED_PATCH_BYTES);
-                        }
-                        body
+                let body = if let Some(patch) = cached.get(&file.path) {
+                    patch.as_slice()
+                } else {
+                    let body = sections
+                        .iter()
+                        .find(|section| section.matches(&file.path))
+                        .map(|section| section.body)
+                        .unwrap_or_default();
+                    if !truncated {
+                        let key = patch_cache_key(&self.merge_base, &self.head, &file.path);
+                        cache_write_bounded(&key, body, MAX_CACHED_PATCH_BYTES);
                     }
+                    body
                 };
                 (
                     file.path.clone(),
@@ -486,7 +485,7 @@ struct GhResponse {
 }
 
 impl Repository {
-    pub fn pull_request_lookup(
+    pub(crate) fn pull_request_lookup(
         &self,
         known_repositories: &[GitHubRepository],
         selected_repository: Option<&GitHubRepository>,
@@ -629,8 +628,7 @@ impl Repository {
         {
             match repository_from_remote_url(url)
                 .map(|repository| (repository, CacheDisposition::Fresh))
-                .map(Ok)
-                .unwrap_or_else(|| self.resolve_github_repository(Some(url), refresh))
+                .map_or_else(|| self.resolve_github_repository(Some(url), refresh), Ok)
             {
                 Ok((repository, disposition)) => {
                     if disposition == CacheDisposition::Stale {
@@ -776,13 +774,16 @@ impl Repository {
             OsString::from("--template"),
             OsString::from(REPOSITORY_TSV_TEMPLATE),
         ]);
-        let identity = url.map(remote_url_for_gh).unwrap_or_else(|| {
-            format!(
-                "inferred\n{}\n{}",
-                self.root.display(),
-                env::var("GH_REPO").unwrap_or_default()
-            )
-        });
+        let identity = url.map_or_else(
+            || {
+                format!(
+                    "inferred\n{}\n{}",
+                    self.root.display(),
+                    env::var("GH_REPO").unwrap_or_default()
+                )
+            },
+            remote_url_for_gh,
+        );
         let key = format!("repository\n{identity}");
         let response = self.checked_cached_gh(
             &key,
@@ -1478,26 +1479,25 @@ fn changed_files_in_repository(
     let counts = numstat_counts(repository, merge_base, head);
     let key = format!("pr-files-v1\n{merge_base}\n{head}");
     let cached = cache_read_bounded(&key, CacheLife::Immutable, MAX_PR_PATH_BYTES);
-    let output = match cached {
-        Some(data) => BoundedOutput {
+    let output = if let Some(data) = cached {
+        BoundedOutput {
             status: successful_status(),
             stdout: data,
             stderr: Vec::new(),
             stdout_truncated: false,
-        },
-        None => {
-            let output = run_repository_git(repository, &args, MAX_PR_PATH_BYTES, 128 * 1024)?;
-            if !output.status.success() && !output.stdout_truncated {
-                bail!(
-                    "{}",
-                    bounded_command_error("unable to enumerate pull-request files", &output)
-                );
-            }
-            if !output.stdout_truncated {
-                cache_write_bounded(&key, &output.stdout, MAX_PR_PATH_BYTES);
-            }
-            output
         }
+    } else {
+        let output = run_repository_git(repository, &args, MAX_PR_PATH_BYTES, 128 * 1024)?;
+        if !output.status.success() && !output.stdout_truncated {
+            bail!(
+                "{}",
+                bounded_command_error("unable to enumerate pull-request files", &output)
+            );
+        }
+        if !output.stdout_truncated {
+            cache_write_bounded(&key, &output.stdout, MAX_PR_PATH_BYTES);
+        }
+        output
     };
     let mut truncated = output.stdout_truncated;
     let complete_output = if output.stdout_truncated && !output.stdout.ends_with(&[0]) {
@@ -1767,7 +1767,7 @@ fn read_and_drain(mut reader: impl Read, limit: usize) -> io::Result<Vec<u8>> {
 pub(crate) fn bounded_command_error(context: &str, output: &BoundedOutput) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    let details = if !stderr.is_empty() { stderr } else { stdout };
+    let details = if stderr.is_empty() { stdout } else { stderr };
     if details.is_empty() {
         format!("{context} (exit status {})", output.status)
     } else {
@@ -1792,7 +1792,7 @@ impl CacheStore {
     }
 
     #[cfg(test)]
-    fn at(root: PathBuf) -> Self {
+    const fn at(root: PathBuf) -> Self {
         Self { root }
     }
 
@@ -2456,7 +2456,7 @@ mod tests {
     #[test]
     fn rejects_malformed_pull_request_output_without_panicking() {
         let base = repository("acme/widget", "https://github.com/acme/widget", &["origin"]);
-        assert!(parse_pull_requests(b"not tsv", &base, std::slice::from_ref(&base)).is_err());
+        parse_pull_requests(b"not tsv", &base, std::slice::from_ref(&base)).unwrap_err();
     }
 
     #[test]

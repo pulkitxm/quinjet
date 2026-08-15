@@ -9,7 +9,7 @@ pub enum ChangeArea {
 }
 
 impl ChangeArea {
-    pub const fn label(self) -> &'static str {
+    pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::Conflict => "Merge Changes",
             Self::Staged => "Staged Changes",
@@ -31,7 +31,7 @@ pub enum ChangeStatus {
 }
 
 impl ChangeStatus {
-    pub const fn code(self) -> &'static str {
+    pub(crate) const fn code(self) -> &'static str {
         match self {
             Self::Added => "A",
             Self::Modified => "M",
@@ -44,7 +44,7 @@ impl ChangeStatus {
         }
     }
 
-    pub const fn label(self) -> &'static str {
+    pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::Added => "Added",
             Self::Modified => "Modified",
@@ -67,18 +67,18 @@ pub struct Change {
 }
 
 impl Change {
-    pub fn display_path(&self) -> String {
+    pub(crate) fn display_path(&self) -> String {
         self.path.to_string_lossy().into_owned()
     }
 
-    pub fn file_name(&self) -> String {
-        self.path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| self.display_path())
+    pub(crate) fn file_name(&self) -> String {
+        self.path.file_name().map_or_else(
+            || self.display_path(),
+            |name| name.to_string_lossy().into_owned(),
+        )
     }
 
-    pub fn parent_path(&self) -> String {
+    pub(crate) fn parent_path(&self) -> String {
         self.path
             .parent()
             .filter(|path| !path.as_os_str().is_empty())
@@ -104,7 +104,7 @@ pub struct RepoStatus {
 }
 
 impl RepoStatus {
-    pub fn staged_count(&self) -> usize {
+    pub(crate) fn staged_count(&self) -> usize {
         self.changes
             .iter()
             .filter(|change| change.area == ChangeArea::Staged)
@@ -169,11 +169,10 @@ fn parse_branch_header(record: &[u8], branch: &mut BranchState) {
     } else if let Some(value) = line.strip_prefix("# branch.head ") {
         branch.detached = value == "(detached)";
         branch.head = if branch.detached {
-            branch
-                .oid
-                .as_deref()
-                .map(|oid| oid.chars().take(8).collect())
-                .unwrap_or_else(|| "detached".to_owned())
+            branch.oid.as_deref().map_or_else(
+                || "detached".to_owned(),
+                |oid| oid.chars().take(8).collect(),
+            )
         } else {
             value.to_owned()
         };
@@ -250,7 +249,7 @@ fn push_xy_changes(
     }
 }
 
-fn status_from_code(code: u8) -> ChangeStatus {
+const fn status_from_code(code: u8) -> ChangeStatus {
     match code {
         b'A' => ChangeStatus::Added,
         b'D' => ChangeStatus::Deleted,

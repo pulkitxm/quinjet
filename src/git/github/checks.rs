@@ -32,7 +32,7 @@ pub enum PullRequestCheckStatus {
 }
 
 impl PullRequestCheckStatus {
-    pub const fn is_running(self) -> bool {
+    pub(crate) const fn is_running(self) -> bool {
         matches!(self, Self::Pending)
     }
 
@@ -63,13 +63,13 @@ pub struct PullRequestCheck {
 }
 
 impl PullRequestCheck {
-    pub fn duration_label(&self) -> String {
+    pub(crate) fn duration_label(&self) -> String {
         elapsed_label(&self.started_at, &self.completed_at)
     }
 
     /// GitHub Actions check links end in `/actions/runs/<run>/job/<job>`, which
     /// is the only place a check run exposes the job identity its logs need.
-    pub fn job_id(&self) -> Option<u64> {
+    pub(crate) fn job_id(&self) -> Option<u64> {
         let (_, job) = self.link.rsplit_once("/job/")?;
         let job = job.split(['?', '#', '/']).next()?;
         job.parse().ok()
@@ -106,7 +106,7 @@ pub struct CheckStep {
 impl CheckStep {
     /// How long the step took, or how long it has been running so far when it
     /// has started but not finished.
-    pub fn duration_label(&self, now: i64) -> String {
+    pub(crate) fn duration_label(&self, now: i64) -> String {
         if self.completed_at.is_empty() {
             let Some(started) = timestamp_seconds(&self.started_at) else {
                 return String::new();
@@ -161,13 +161,13 @@ impl CheckRunLog {
     }
 
     /// The step a runner is currently executing, if any.
-    pub fn running_step(&self) -> Option<&CheckStep> {
+    pub(crate) fn running_step(&self) -> Option<&CheckStep> {
         self.steps
             .iter()
             .find(|step| step.status == PullRequestCheckStatus::Pending)
     }
 
-    pub fn failed_step(&self) -> Option<&CheckStep> {
+    pub(crate) fn failed_step(&self) -> Option<&CheckStep> {
         self.steps
             .iter()
             .find(|step| step.status == PullRequestCheckStatus::Failed)
@@ -579,7 +579,7 @@ fn assign_lines_to_steps(steps: &mut [CheckStep], lines: Vec<CheckLogLine>) -> V
 
 /// Render an elapsed span between two RFC 3339 stamps, or nothing when either
 /// is missing or the pair does not describe a forward span.
-pub fn elapsed_label(started_at: &str, completed_at: &str) -> String {
+pub(super) fn elapsed_label(started_at: &str, completed_at: &str) -> String {
     elapsed_seconds(started_at, completed_at).map_or_else(String::new, format_elapsed)
 }
 
@@ -617,7 +617,7 @@ fn timestamp_seconds(value: &str) -> Option<i64> {
 
 /// Howard Hinnant's civil-to-days algorithm, valid across the proleptic
 /// Gregorian calendar.
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+const fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     let year = if month <= 2 { year - 1 } else { year };
     let era = (if year >= 0 { year } else { year - 399 }) / 400;
     let year_of_era = year - era * 400;
@@ -923,7 +923,7 @@ untimestamped trailing output\n";
             started_at: String::new(),
             completed_at: String::new(),
         };
-        let repository = crate::git::Repository {
+        let repository = Repository {
             root: std::path::PathBuf::from("/nonexistent-on-purpose"),
         };
         let checks = [settled("one"), settled("two"), settled("three")];
