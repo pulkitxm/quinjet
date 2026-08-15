@@ -143,7 +143,7 @@ impl TextBuffer {
             .next_back()
             .map(|(index, _)| index)
             .unwrap_or_default();
-        self.value.drain(previous..self.cursor);
+        drop(self.value.drain(previous..self.cursor));
         self.cursor = previous;
     }
 
@@ -156,7 +156,7 @@ impl TextBuffer {
             .next()
             .map(char::len_utf8)
             .unwrap_or_default();
-        self.value.drain(self.cursor..self.cursor + length);
+        drop(self.value.drain(self.cursor..self.cursor + length));
     }
 
     pub(crate) fn move_left(&mut self) {
@@ -216,7 +216,7 @@ impl TextBuffer {
                 start = index;
             }
         }
-        self.value.drain(start..self.cursor);
+        drop(self.value.drain(start..self.cursor));
         self.cursor = start;
     }
 
@@ -242,14 +242,14 @@ impl TextBuffer {
                 end = next;
             }
         }
-        self.value.drain(self.cursor..end);
+        drop(self.value.drain(self.cursor..end));
     }
 
     pub(crate) fn delete_to_line_start(&mut self) {
         let start = self.value[..self.cursor]
             .rfind('\n')
             .map_or(0, |index| index + 1);
-        self.value.drain(start..self.cursor);
+        drop(self.value.drain(start..self.cursor));
         self.cursor = start;
     }
 
@@ -257,7 +257,7 @@ impl TextBuffer {
         let end = self.value[self.cursor..]
             .find('\n')
             .map_or(self.value.len(), |index| self.cursor + index);
-        self.value.drain(self.cursor..end);
+        drop(self.value.drain(self.cursor..end));
     }
 
     pub(crate) fn move_word_left(&mut self) {
@@ -947,7 +947,7 @@ impl App {
 
     fn toggle_pull_request_directory(&mut self, path: PathBuf) {
         if !self.collapsed_pull_request_directories.remove(&path) {
-            self.collapsed_pull_request_directories.insert(path.clone());
+            let _ = self.collapsed_pull_request_directories.insert(path.clone());
         }
         self.pull_request_tree_cursor = self
             .pull_request_tree_entries()
@@ -1152,7 +1152,7 @@ impl App {
             &mut self.collapsed_preview_files
         };
         if !overrides.remove(&path) {
-            overrides.insert(path.clone());
+            let _ = overrides.insert(path.clone());
         }
         self.selected_preview_file = Some(path.clone());
         self.preview_file_cursor = self
@@ -1405,7 +1405,7 @@ impl App {
                     && self.pull_request_section == PullRequestSection::Files
                     && self.focus == Focus::Sidebar =>
             {
-                self.toggle_selected_pull_request_directory();
+                let _ = self.toggle_selected_pull_request_directory();
             }
             KeyCode::Char(' ') if self.check_log_visible() => {
                 self.toggle_check_step(self.pull_request_step_cursor);
@@ -1517,10 +1517,10 @@ impl App {
                 self.open_selection_on_github(&mut effects, now);
             }
             KeyCode::Char('[') if self.check_log_visible() => {
-                self.move_check_step_cursor(-1);
+                let _ = self.move_check_step_cursor(-1);
             }
             KeyCode::Char(']') if self.check_log_visible() => {
-                self.move_check_step_cursor(1);
+                let _ = self.move_check_step_cursor(1);
             }
             KeyCode::Char('[' | ']')
                 if self.view == View::PullRequests
@@ -2060,7 +2060,7 @@ impl App {
                             self.document = document;
                             self.local_diff_single_loaded = true;
                         } else {
-                            self.local_diff_documents.insert(path, document);
+                            drop(self.local_diff_documents.insert(path, document));
                             self.rebuild_local_diff_document();
                         }
                     }
@@ -2109,7 +2109,7 @@ impl App {
                         match self.pull_request_file_view {
                             PullRequestFileView::AllFiles => {
                                 if let Some(path) = path {
-                                    self.pull_request_documents.insert(path, document);
+                                    drop(self.pull_request_documents.insert(path, document));
                                     self.rebuild_pull_request_all_files_document();
                                 } else {
                                     self.document = document;
@@ -2140,7 +2140,7 @@ impl App {
                 self.pull_request_prefetching = false;
                 if let Ok(documents) = result {
                     for (path, document) in documents {
-                        self.pull_request_documents.entry(path).or_insert(document);
+                        let _ = self.pull_request_documents.entry(path).or_insert(document);
                     }
                     if self.pull_request_file_view == PullRequestFileView::AllFiles {
                         self.rebuild_pull_request_all_files_document();
@@ -2169,7 +2169,7 @@ impl App {
                                     == (selected.0.as_str(), selected.1.as_str())
                             })
                         });
-                        self.set_check_cursor(cursor);
+                        let _ = self.set_check_cursor(cursor);
                         self.pull_request_checks_error = None;
                         if was_running {
                             self.request_check_run_log(true, &mut effects);
@@ -2193,7 +2193,7 @@ impl App {
                         if self.expanded_check_steps.is_empty() {
                             if let Some(step) = log.failed_step().or_else(|| log.running_step()) {
                                 let number = step.number;
-                                self.expanded_check_steps.insert(number);
+                                let _ = self.expanded_check_steps.insert(number);
                                 self.reveal_check_step(number);
                             }
                         }
@@ -3302,7 +3302,7 @@ impl App {
                         let cursor = end
                             .then(|| self.pull_request_checks.len().checked_sub(1))
                             .flatten();
-                        self.set_check_cursor(cursor);
+                        let _ = self.set_check_cursor(cursor);
                         self.schedule_preview(now);
                     }
                 }
@@ -3895,8 +3895,10 @@ impl App {
         if self.pull_request_documents.contains_key(&path) {
             return;
         }
-        self.pull_request_documents
-            .insert(path, std::mem::take(&mut self.document));
+        drop(
+            self.pull_request_documents
+                .insert(path, std::mem::take(&mut self.document)),
+        );
     }
 
     fn show_pull_request_all_files(&mut self) {
@@ -4050,7 +4052,7 @@ impl App {
     /// the cursor walks one row above index zero and stops there.
     fn move_check_cursor(&mut self, amount: isize) {
         if self.pull_request_checks.is_empty() {
-            self.set_check_cursor(None);
+            let _ = self.set_check_cursor(None);
             return;
         }
         let last = self.pull_request_checks.len() - 1;
@@ -4062,7 +4064,7 @@ impl App {
         } else {
             row.saturating_add(amount as usize).min(last + 1)
         };
-        self.set_check_cursor(next.checked_sub(1));
+        let _ = self.set_check_cursor(next.checked_sub(1));
     }
 
     /// Every row in the overview sidebar shows a different document on the right,
@@ -4109,7 +4111,7 @@ impl App {
 
     fn toggle_check_step(&mut self, step: usize) {
         if !self.expanded_check_steps.remove(&step) {
-            self.expanded_check_steps.insert(step);
+            let _ = self.expanded_check_steps.insert(step);
         }
         self.reveal_check_step(step);
     }

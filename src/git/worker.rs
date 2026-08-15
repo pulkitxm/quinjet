@@ -314,45 +314,55 @@ impl GitWorker {
         let local_preview_events = event_tx.clone();
         let pull_request_preview_events = event_tx.clone();
         let warm_events = event_tx.clone();
-        thread::Builder::new()
-            .name("quinjet-git".to_owned())
-            .spawn(move || run_worker(repository, worker_mailbox, event_tx))
-            .expect("failed to start Git worker");
-        thread::Builder::new()
-            .name("quinjet-github".to_owned())
-            .spawn(move || run_worker(github_repository, worker_github_mailbox, github_events))
-            .expect("failed to start GitHub metadata worker");
-        thread::Builder::new()
-            .name("quinjet-preview".to_owned())
-            .spawn(move || {
-                run_worker(
-                    local_preview_repository,
-                    worker_local_preview_mailbox,
-                    local_preview_events,
-                );
-            })
-            .expect("failed to start local preview worker");
-        thread::Builder::new()
-            .name("quinjet-pr-preview".to_owned())
-            .spawn(move || {
-                run_worker(
-                    pull_request_preview_repository,
-                    worker_pull_request_preview_mailbox,
-                    pull_request_preview_events,
-                );
-            })
-            .expect("failed to start pull-request preview worker");
-        thread::Builder::new()
-            .name("quinjet-warm".to_owned())
-            .spawn(move || {
-                run_warm_worker(
-                    warm_repository,
-                    worker_warm_mailbox,
-                    warm_events,
-                    worker_warm_generation,
-                );
-            })
-            .expect("failed to start log warm-up worker");
+        drop(
+            thread::Builder::new()
+                .name("quinjet-git".to_owned())
+                .spawn(move || run_worker(repository, worker_mailbox, event_tx))
+                .expect("failed to start Git worker"),
+        );
+        drop(
+            thread::Builder::new()
+                .name("quinjet-github".to_owned())
+                .spawn(move || run_worker(github_repository, worker_github_mailbox, github_events))
+                .expect("failed to start GitHub metadata worker"),
+        );
+        drop(
+            thread::Builder::new()
+                .name("quinjet-preview".to_owned())
+                .spawn(move || {
+                    run_worker(
+                        local_preview_repository,
+                        worker_local_preview_mailbox,
+                        local_preview_events,
+                    );
+                })
+                .expect("failed to start local preview worker"),
+        );
+        drop(
+            thread::Builder::new()
+                .name("quinjet-pr-preview".to_owned())
+                .spawn(move || {
+                    run_worker(
+                        pull_request_preview_repository,
+                        worker_pull_request_preview_mailbox,
+                        pull_request_preview_events,
+                    );
+                })
+                .expect("failed to start pull-request preview worker"),
+        );
+        drop(
+            thread::Builder::new()
+                .name("quinjet-warm".to_owned())
+                .spawn(move || {
+                    run_warm_worker(
+                        warm_repository,
+                        worker_warm_mailbox,
+                        warm_events,
+                        worker_warm_generation,
+                    );
+                })
+                .expect("failed to start log warm-up worker"),
+        );
         Self {
             mailbox,
             github_mailbox,
@@ -437,7 +447,7 @@ fn run_warm_worker(
                 pull_request,
                 checks,
             } => {
-                repository.prefetch_check_run_logs(&pull_request, &checks, &|| {
+                let _ = repository.prefetch_check_run_logs(&pull_request, &checks, &|| {
                     generation.load(Ordering::SeqCst) == mine
                 });
             }

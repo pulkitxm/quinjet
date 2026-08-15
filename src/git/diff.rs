@@ -160,9 +160,9 @@ pub(crate) fn parse_numstat(output: &[u8]) -> HashMap<PathBuf, DiffLineCounts> {
                 break;
             };
             cursor += 2;
-            counts.insert(record_path(new_path), entry);
+            let _ = counts.insert(record_path(new_path), entry);
         } else {
-            counts.insert(record_path(path), entry);
+            let _ = counts.insert(record_path(path), entry);
         }
     }
     counts
@@ -766,7 +766,7 @@ fn decode_git_path(value: &str) -> String {
                     let Some(next @ b'0'..=b'7') = bytes.peek().copied() else {
                         break;
                     };
-                    bytes.next();
+                    let _ = bytes.next();
                     value = value.saturating_mul(8).saturating_add(next - b'0');
                 }
                 output.push(value);

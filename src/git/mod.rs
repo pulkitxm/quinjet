@@ -817,7 +817,7 @@ impl Repository {
     pub(crate) fn perform(&self, operation: &GitOperation) -> Result<String> {
         match operation {
             GitOperation::Stage(paths) => {
-                self.with_paths(["add"], paths)?;
+                drop(self.with_paths(["add"], paths)?);
                 Ok(plural_message(
                     paths.len(),
                     "change staged",
@@ -825,7 +825,7 @@ impl Repository {
                 ))
             }
             GitOperation::StageAll => {
-                self.checked(strings(["add", "-A"]))?;
+                drop(self.checked(strings(["add", "-A"]))?);
                 Ok("All changes staged".to_owned())
             }
             GitOperation::Unstage(paths) => {
@@ -858,7 +858,7 @@ impl Repository {
                 }
                 args.push(OsString::from("--message"));
                 args.push(OsString::from(message));
-                self.checked(args)?;
+                drop(self.checked(args)?);
                 Ok(if *amend {
                     "Commit amended".to_owned()
                 } else {
@@ -866,11 +866,11 @@ impl Repository {
                 })
             }
             GitOperation::Fetch => {
-                self.checked(strings(["fetch", "--all", "--prune"]))?;
+                drop(self.checked(strings(["fetch", "--all", "--prune"]))?);
                 Ok("Fetch complete".to_owned())
             }
             GitOperation::Pull => {
-                self.checked(strings(["pull"]))?;
+                drop(self.checked(strings(["pull"]))?);
                 Ok("Pull complete".to_owned())
             }
             GitOperation::Push => {
@@ -878,12 +878,12 @@ impl Repository {
                 Ok("Push complete".to_owned())
             }
             GitOperation::Sync => {
-                self.checked(strings(["pull"]))?;
+                drop(self.checked(strings(["pull"]))?);
                 self.push()?;
                 Ok("Synchronization complete".to_owned())
             }
             GitOperation::Checkout(branch) => {
-                self.checked(strings(["switch", "--", branch]))?;
+                drop(self.checked(strings(["switch", "--", branch]))?);
                 Ok(format!("Switched to {branch}"))
             }
             GitOperation::CreateBranch { name, start } => {
@@ -896,7 +896,7 @@ impl Repository {
                 if let Some(start) = start {
                     args.push(OsString::from(start));
                 }
-                self.checked(args)?;
+                drop(self.checked(args)?);
                 Ok(format!("Created and switched to {name}"))
             }
             GitOperation::RenameBranch { old, new } => {
@@ -904,11 +904,11 @@ impl Repository {
                 if old == new {
                     bail!("New branch name must be different from the current name");
                 }
-                self.checked(strings(["branch", "--move", "--", old, new]))?;
+                drop(self.checked(strings(["branch", "--move", "--", old, new]))?);
                 Ok(format!("Renamed local branch {old} to {new}"))
             }
             GitOperation::DeleteBranch(branch) => {
-                self.checked(strings(["branch", "--delete", "--", branch]))?;
+                drop(self.checked(strings(["branch", "--delete", "--", branch]))?);
                 Ok(format!("Deleted {branch}"))
             }
             GitOperation::StashPush {
@@ -927,12 +927,12 @@ impl Repository {
                     args.push(OsString::from("--message"));
                     args.push(OsString::from(message.trim()));
                 }
-                self.checked(args)?;
+                drop(self.checked(args)?);
                 Ok("Changes stashed".to_owned())
             }
             GitOperation::StashApply(reference) => {
                 validate_stash_reference(reference)?;
-                self.checked(strings(["stash", "apply", "--index", reference]))?;
+                drop(self.checked(strings(["stash", "apply", "--index", reference]))?);
                 Ok(format!("Applied {reference}"))
             }
             GitOperation::StashPop(reference) => {
@@ -945,7 +945,7 @@ impl Repository {
                     validate_stash_reference(reference)?;
                     args.push(OsString::from(reference));
                 }
-                self.checked(args)?;
+                drop(self.checked(args)?);
                 Ok(reference.as_ref().map_or_else(
                     || "Popped latest stash".to_owned(),
                     |reference| format!("Popped {reference}"),
@@ -953,11 +953,11 @@ impl Repository {
             }
             GitOperation::StashDrop(reference) => {
                 validate_stash_reference(reference)?;
-                self.checked(strings(["stash", "drop", reference]))?;
+                drop(self.checked(strings(["stash", "drop", reference]))?);
                 Ok(format!("Dropped {reference}"))
             }
             GitOperation::StashClear => {
-                self.checked(strings(["stash", "clear"]))?;
+                drop(self.checked(strings(["stash", "clear"]))?);
                 Ok("Dropped all stashes".to_owned())
             }
             GitOperation::ResolveConflict { path, choice } => {
@@ -965,16 +965,16 @@ impl Repository {
                     ConflictChoice::Ours => "--ours",
                     ConflictChoice::Theirs => "--theirs",
                 };
-                self.with_paths(["checkout", side], std::slice::from_ref(path))?;
-                self.with_paths(["add"], std::slice::from_ref(path))?;
+                drop(self.with_paths(["checkout", side], std::slice::from_ref(path))?);
+                drop(self.with_paths(["add"], std::slice::from_ref(path))?);
                 Ok(format!("Accepted {side} for {}", path.to_string_lossy()))
             }
             GitOperation::CherryPick(commit) => {
-                self.checked(strings(["cherry-pick", commit]))?;
+                drop(self.checked(strings(["cherry-pick", commit]))?);
                 Ok(format!("Cherry-picked {}", short_id(commit)))
             }
             GitOperation::Revert(commit) => {
-                self.checked(strings(["revert", "--no-edit", commit]))?;
+                drop(self.checked(strings(["revert", "--no-edit", commit]))?);
                 Ok(format!("Reverted {}", short_id(commit)))
             }
         }
@@ -996,7 +996,7 @@ impl Repository {
         }
 
         let mut contents = Vec::with_capacity(64 * 1024);
-        fs::File::open(&path)
+        let _ = fs::File::open(&path)
             .with_context(|| format!("failed to read {}", change.display_path()))?
             .take(MAX_DIFF_BYTES as u64 + 1)
             .read_to_end(&mut contents)
@@ -1046,29 +1046,29 @@ impl Repository {
         }
 
         if !restore_worktree.is_empty() {
-            self.with_paths(["restore", "--worktree"], &restore_worktree)?;
+            drop(self.with_paths(["restore", "--worktree"], &restore_worktree)?);
         }
         if !restore_both.is_empty() {
-            self.with_paths(
+            drop(self.with_paths(
                 ["restore", "--staged", "--worktree", "--source=HEAD"],
                 &restore_both,
-            )?;
+            )?);
         }
         Ok(())
     }
 
     fn unstage(&self, paths: &[PathBuf]) -> Result<()> {
         if self.has_head() {
-            self.with_paths(["restore", "--staged"], paths)?;
+            drop(self.with_paths(["restore", "--staged"], paths)?);
         } else {
-            self.with_paths(["rm", "--cached", "--ignore-unmatch"], paths)?;
+            drop(self.with_paths(["rm", "--cached", "--ignore-unmatch"], paths)?);
         }
         Ok(())
     }
 
     fn unstage_all(&self) -> Result<()> {
         if self.has_head() {
-            self.checked(strings(["reset", "--mixed", "--quiet", "HEAD", "--"]))?;
+            drop(self.checked(strings(["reset", "--mixed", "--quiet", "HEAD", "--"]))?);
         } else {
             let output = self.run(strings(["rm", "--recursive", "--cached", "."]))?;
             if !output.status.success() && !self.status()?.changes.is_empty() {
@@ -1081,7 +1081,7 @@ impl Repository {
     fn push(&self) -> Result<()> {
         let status = self.status()?;
         if status.branch.upstream.is_some() {
-            self.checked(strings(["push"]))?;
+            drop(self.checked(strings(["push"]))?);
             return Ok(());
         }
 
@@ -1089,7 +1089,7 @@ impl Repository {
         if !origin.status.success() {
             bail!("Current branch has no upstream and no `origin` remote exists");
         }
-        self.checked(strings(["push", "--set-upstream", "origin", "HEAD"]))?;
+        drop(self.checked(strings(["push", "--set-upstream", "origin", "HEAD"]))?);
         Ok(())
     }
 
@@ -1097,7 +1097,7 @@ impl Repository {
         if name.trim().is_empty() {
             bail!("Branch name cannot be empty");
         }
-        self.checked(strings(["check-ref-format", "--branch", name]))?;
+        drop(self.checked(strings(["check-ref-format", "--branch", name]))?);
         Ok(())
     }
 
@@ -1122,7 +1122,7 @@ impl Repository {
         S: AsRef<OsStr>,
     {
         let mut command = Command::new("git");
-        command
+        let _ = command
             .arg("-C")
             .arg(&self.root)
             .args(["-c", "core.quotepath=false"])
@@ -1156,7 +1156,7 @@ impl Repository {
         S: AsRef<OsStr>,
     {
         let mut command = Command::new("git");
-        command
+        let _ = command
             .arg("-C")
             .arg(&self.root)
             .args(["-c", "core.quotepath=false"])
@@ -1322,7 +1322,7 @@ fn truncate(bytes: &mut Vec<u8>, maximum: usize) -> bool {
 
 fn truncate_to_complete_line(bytes: &mut Vec<u8>) {
     while bytes.last().is_some_and(|byte| *byte != b'\n') {
-        bytes.pop();
+        let _ = bytes.pop();
     }
 }
 
