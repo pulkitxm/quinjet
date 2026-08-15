@@ -32,11 +32,16 @@ jobs:
       - name: cargo fmt
         run: cargo fmt --all -- --check
       - name: cargo fmt (nightly style rules)
-        run: >-
-          cargo fmt --all --
-          --check
-          --unstable-features
-          --config group_imports=StdExternalCrate,imports_granularity=Module,reorder_impl_items=true,normalize_comments=true,format_code_in_doc_comments=true,format_macro_matchers=true,condense_wildcard_suffixes=true,use_field_init_shorthand=true
+        env:
+          NIGHTLY_RULES: >-
+            group_imports=StdExternalCrate,imports_granularity=Module,
+            reorder_impl_items=true,normalize_comments=true,
+            format_code_in_doc_comments=true,format_macro_matchers=true,
+            condense_wildcard_suffixes=true
+        run: |
+          set -euo pipefail
+          rules=$(printf '%s' "${NIGHTLY_RULES}" | tr -d ' ')
+          cargo fmt --all -- --check --unstable-features --config "${rules}"
 
   clippy:
     name: Clippy (${{ matrix.toolchain }})
@@ -103,7 +108,7 @@ jobs:
         with:
           tool: cargo-deadlinks
       - name: No dead links in the generated docs
-        run: cargo deadlinks --dir target/doc
+        run: cargo deadlinks --dir target/doc/quinjet
 
   msrv:
     name: Minimum supported Rust
