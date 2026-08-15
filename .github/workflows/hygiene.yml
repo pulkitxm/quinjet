@@ -81,11 +81,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@v2
         with:
-          tool: taplo-cli
+          tool: taplo-cli,cargo-sort
       - run: taplo fmt --check --diff
       - run: taplo lint
+      - run: cargo sort --check --check-format
+
+  doc-comments:
+    name: Doc comment spelling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-spellcheck
+      - run: cargo spellcheck --code 1 check
 
   yaml:
     name: YAML
@@ -178,6 +191,7 @@ jobs:
       - typos
       - editorconfig
       - toml
+      - doc-comments
       - yaml
       - markdown
       - shell

@@ -12,3 +12,9 @@ extras/
 # Added by cargo
 
 /target
+
+# Check output
+lcov.info
+mutants.out/
+mutants.out.old/
+*.cdx.json

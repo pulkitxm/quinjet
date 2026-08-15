@@ -2,11 +2,13 @@ CARGO ?= cargo
 NIGHTLY ?= nightly
 COVERAGE_MIN ?= 55
 
-.PHONY: ci ci-fast fmt fmt-check lint lint-nightly test doc msrv build package install-check \
-        comments secrets typos deny audit unused hack coverage shell actions yaml markdown toml \
-        editorconfig ruff tools
+.PHONY: ci ci-fast deep fmt fmt-check lint lint-nightly test doc deadlinks msrv build package \
+        install-check comments secrets typos spellcheck deny audit osv sbom unused sort hack \
+        coverage shell actions yaml markdown toml editorconfig ruff miri careful sanitize mutants \
+        minimal-versions udeps bloat tools tools-deep
 
-ci: fmt-check lint test doc comments secrets typos deny audit unused hack shell actions yaml markdown toml editorconfig ruff package
+ci: fmt-check lint test doc deadlinks comments secrets typos spellcheck deny audit osv unused sort hack \
+    shell actions yaml markdown toml editorconfig ruff package
 
 ci-fast: fmt-check lint test comments secrets
 
@@ -63,6 +65,46 @@ audit:
 
 unused:
 	$(CARGO) machete --with-metadata
+	$(CARGO) shear
+
+sort:
+	$(CARGO) sort --check --check-format
+
+spellcheck:
+	$(CARGO) spellcheck --code 1 check
+
+sbom:
+	$(CARGO) cyclonedx --format json --all-features
+
+osv:
+	osv-scanner scan source --recursive .
+
+miri:
+	MIRIFLAGS="-Zmiri-disable-isolation -Zmiri-strict-provenance" $(CARGO) +$(NIGHTLY) miri test --all-features
+
+careful:
+	$(CARGO) +$(NIGHTLY) careful test --all-features
+
+sanitize:
+	RUSTFLAGS="-Zsanitizer=address" $(CARGO) +$(NIGHTLY) test --all-features \
+	  --target x86_64-unknown-linux-gnu -Zbuild-std
+
+mutants:
+	$(CARGO) mutants --no-shuffle --in-place --timeout 120
+
+minimal-versions:
+	$(CARGO) minimal-versions check --all-targets --all-features
+
+udeps:
+	$(CARGO) +$(NIGHTLY) udeps --all-targets --all-features
+
+deadlinks: doc
+	$(CARGO) deadlinks --dir target/doc
+
+bloat:
+	$(CARGO) bloat --release --crates -n 30
+
+deep: miri careful sanitize mutants minimal-versions udeps bloat
 
 hack:
 	$(CARGO) hack --feature-powerset --no-dev-deps check --locked
@@ -96,4 +138,9 @@ ruff:
 	ruff format --check scripts
 
 tools:
-	$(CARGO) install cargo-deny cargo-audit cargo-machete cargo-hack cargo-llvm-cov typos-cli taplo-cli
+	$(CARGO) install cargo-deny cargo-audit cargo-machete cargo-shear cargo-hack cargo-llvm-cov \
+	  cargo-nextest cargo-sort cargo-spellcheck cargo-deadlinks cargo-cyclonedx typos-cli taplo-cli
+
+tools-deep:
+	$(CARGO) install cargo-mutants cargo-careful cargo-minimal-versions cargo-udeps cargo-bloat \
+	  cargo-outdated cargo-msrv osv-scanner
