@@ -143,7 +143,9 @@ pub(crate) fn parse_numstat(output: &[u8]) -> HashMap<PathBuf, DiffLineCounts> {
     let mut counts = HashMap::new();
     let mut cursor = 0;
     while cursor < records.len() {
-        let record = records[cursor];
+        let Some(record) = records.get(cursor).copied() else {
+            break;
+        };
         cursor += 1;
         let mut fields = record.splitn(3, |byte| *byte == b'\t');
         let (Some(additions), Some(deletions), Some(path)) =
@@ -598,11 +600,13 @@ pub(crate) fn split_patch_by_file(patch: &[u8]) -> Vec<PatchSection<'_>> {
     let mut starts = Vec::new();
     let mut offset = 0;
     while offset < patch.len() {
-        let end = patch[offset..]
+        let end = patch
+            .get(offset..)
+            .unwrap_or_default()
             .iter()
             .position(|byte| *byte == b'\n')
             .map_or(patch.len(), |index| offset + index + 1);
-        let line = &patch[offset..end];
+        let line = patch.get(offset..end).unwrap_or_default();
         if line.starts_with(b"diff --git ")
             || line.starts_with(b"diff --cc ")
             || line.starts_with(b"diff --combined ")
@@ -617,7 +621,7 @@ pub(crate) fn split_patch_by_file(patch: &[u8]) -> Vec<PatchSection<'_>> {
         .enumerate()
         .map(|(index, start)| {
             let end = starts.get(index + 1).copied().unwrap_or(patch.len());
-            let body = &patch[*start..end];
+            let body = patch.get(*start..end).unwrap_or_default();
             let header = body.split(|byte| *byte == b'\n').next().unwrap_or_default();
             let header = String::from_utf8_lossy(header);
             let (old_path, new_path) = header.strip_prefix("diff --git ").map_or_else(
@@ -737,8 +741,8 @@ fn diff_header_paths(header: &str) -> (Option<PathBuf>, Option<PathBuf>) {
     let Some(separator) = header.rfind(" b/").or_else(|| header.rfind(" \"b/")) else {
         return (None, None);
     };
-    let old = patch_path(&header[..separator], "a/");
-    let new = patch_path(&header[separator + 1..], "b/");
+    let old = patch_path(header.get(..separator).unwrap_or_default(), "a/");
+    let new = patch_path(header.get(separator + 1..).unwrap_or_default(), "b/");
     (old, new)
 }
 
