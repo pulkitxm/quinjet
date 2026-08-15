@@ -3,12 +3,12 @@ NIGHTLY ?= nightly
 COVERAGE_MIN ?= 55
 
 .PHONY: ci ci-fast deep fmt fmt-check lint lint-nightly test doc deadlinks msrv build package \
-        install-check comments secrets typos spellcheck deny audit osv sbom unused sort hack \
-        coverage shell actions yaml markdown toml editorconfig ruff miri careful sanitize mutants \
-        minimal-versions udeps bloat tools tools-deep
+	install-check comments secrets typos spellcheck deny audit osv sbom unused sort hack \
+	coverage shell actions yaml markdown toml editorconfig ruff miri careful sanitize mutants \
+	minimal-versions udeps bloat tools tools-deep
 
 ci: fmt-check lint test doc deadlinks comments secrets typos spellcheck deny audit osv unused sort hack \
-    shell actions yaml markdown toml editorconfig ruff package
+	shell actions yaml markdown toml editorconfig ruff package
 
 ci-fast: fmt-check lint test comments secrets
 
@@ -30,7 +30,7 @@ test:
 
 doc:
 	RUSTDOCFLAGS="-D warnings -D rustdoc::broken_intra_doc_links -D rustdoc::private_intra_doc_links" \
-	  $(CARGO) doc --no-deps --all-features --document-private-items --locked
+		$(CARGO) doc --no-deps --all-features --document-private-items --locked
 
 msrv:
 	$(CARGO) +1.85 check --all-targets --all-features --locked
@@ -87,7 +87,7 @@ careful:
 
 sanitize:
 	RUSTFLAGS="-Zsanitizer=address" $(CARGO) +$(NIGHTLY) test --all-features \
-	  --target x86_64-unknown-linux-gnu -Zbuild-std
+		--target x86_64-unknown-linux-gnu -Zbuild-std
 
 mutants:
 	$(CARGO) mutants --no-shuffle --in-place --timeout 120
@@ -139,8 +139,8 @@ ruff:
 
 tools:
 	$(CARGO) install cargo-deny cargo-audit cargo-machete cargo-shear cargo-hack cargo-llvm-cov \
-	  cargo-nextest cargo-sort cargo-spellcheck cargo-deadlinks cargo-cyclonedx typos-cli taplo-cli
+		cargo-nextest cargo-sort cargo-spellcheck cargo-deadlinks cargo-cyclonedx typos-cli taplo-cli
 
 tools-deep:
 	$(CARGO) install cargo-mutants cargo-careful cargo-minimal-versions cargo-udeps cargo-bloat \
-	  cargo-outdated cargo-msrv osv-scanner
+		cargo-outdated cargo-msrv osv-scanner
