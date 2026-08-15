@@ -937,16 +937,9 @@ fn draw_pull_requests_sidebar(
                 Rect::new(body_area.x, y, body_area.width, 1),
             );
         }
-    } else if body_area.height > 0 {
-        frame.render_widget(
-            Paragraph::new(
-                "\n  Enter a pull-request number below\n\n  Nothing is fetched until you press Enter.",
-            )
-            .style(Style::default().fg(theme.muted))
-            .wrap(Wrap { trim: false }),
-            body_area,
-        );
     }
+    // Nothing fills the empty list: the field below already reads
+    // "PR #  Enter lookup", and the pane beside it says the same thing once.
 
     let controls_y = body_area.bottom();
     let repository_name = app
