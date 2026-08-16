@@ -3,13 +3,16 @@ mod render;
 mod watch;
 
 use std::collections::HashMap;
+use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap_complete::{Shell, generate};
+use clap_mangen::Man;
 pub(crate) use command::{Command, Outcome, Session};
 use serde::Serialize;
 
@@ -23,6 +26,10 @@ use crate::git::{ConflictChoice, GitOperation, LocalDiffRequest, Repository};
 pub(crate) const EXIT_FAILURE: u8 = 1;
 pub(crate) const EXIT_NOT_FOUND: u8 = 3;
 pub(crate) const EXIT_UNAVAILABLE: u8 = 4;
+
+/// The name the binary is invoked by, and the name its generated shell
+/// completions and manual pages are written under.
+const PROGRAM: &str = "quinjet";
 
 const CHECK_WATCH_INTERVAL: u64 = 5;
 const CHECK_WATCH_FLOOR: u64 = 2;
@@ -162,6 +169,24 @@ enum Verb {
         #[command(subcommand)]
         command: PrVerb,
     },
+    /// Print a shell completion script
+    Completions(CompletionsArgs),
+    /// Print the manual page, or write one page per command
+    Man(ManArgs),
+}
+
+#[derive(Debug, Args)]
+struct CompletionsArgs {
+    /// Shell to write a completion script for
+    #[arg(value_enum)]
+    shell: Shell,
+}
+
+#[derive(Debug, Args)]
+struct ManArgs {
+    /// Write one page per command into this directory instead of printing one
+    #[arg(long, value_name = "DIR")]
+    dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -432,25 +457,127 @@ struct PrLogsArgs {
 
 pub(crate) fn dispatch() -> Result<Launch> {
     let cli = Cli::parse();
-    let json = cli.json;
-    let Some(verb) = cli.command else {
-        return Ok(Launch::Terminal(Box::new(TerminalOptions {
-            path: cli.path,
-            no_mouse: cli.no_mouse,
-            webhook_listen: cli.webhook_listen,
-        })));
+    let out = Emitter { json: cli.json };
+    let verb = match cli.command {
+        None => {
+            return Ok(Launch::Terminal(Box::new(TerminalOptions {
+                path: cli.path,
+                no_mouse: cli.no_mouse,
+                webhook_listen: cli.webhook_listen,
+            })));
+        }
+        Some(Verb::Tui(args)) => {
+            return Ok(Launch::Terminal(Box::new(TerminalOptions {
+                path: args.path,
+                no_mouse: args.no_mouse,
+                webhook_listen: args.webhook_listen,
+            })));
+        }
+        Some(Verb::Completions(args)) => {
+            return completions(&out, &args).map(Launch::Finished);
+        }
+        Some(Verb::Man(args)) => return manual(&out, &args).map(Launch::Finished),
+        Some(other) => other,
     };
-    if let Verb::Tui(args) = verb {
-        return Ok(Launch::Terminal(Box::new(TerminalOptions {
-            path: args.path,
-            no_mouse: args.no_mouse,
-            webhook_listen: args.webhook_listen,
-        })));
-    }
     let repository = Repository::discover(&cli.repository)?;
     let mut session = Session::new(repository);
-    let out = Emitter { json };
     run(&mut session, &out, verb).map(Launch::Finished)
+}
+
+/// Write the completion script for one shell.
+///
+/// Generated rather than committed, so a verb or flag added to `Verb` is
+/// offered by the shell the moment it exists.
+fn completions(out: &Emitter, args: &CompletionsArgs) -> Result<u8> {
+    let mut command = Cli::command();
+    let mut script = Vec::new();
+    generate(args.shell, &mut command, PROGRAM, &mut script);
+    let script = String::from_utf8(script).context("the completion script was not valid UTF-8")?;
+    out.emit(
+        &CompletionScript {
+            shell: args.shell.to_string(),
+            script: &script,
+        },
+        || script.clone(),
+    )?;
+    Ok(0)
+}
+
+/// Write the manual, either as one page or as a directory of them.
+fn manual(out: &Emitter, args: &ManArgs) -> Result<u8> {
+    let command = Cli::command();
+    let Some(directory) = args.dir.as_deref() else {
+        let page = render_page(&command, PROGRAM)?;
+        let text = String::from_utf8(page).context("the manual page was not valid UTF-8")?;
+        return out
+            .emit(&ManualPage { page: &text }, || text.clone())
+            .map(|()| 0);
+    };
+    fs::create_dir_all(directory)
+        .with_context(|| format!("failed to create {}", directory.display()))?;
+    let mut written = Vec::new();
+    write_pages(&command, PROGRAM, directory, &mut written)?;
+    out.emit(&ManualPages { pages: &written }, || {
+        let mut text = format!("Wrote {} pages to {}\n", written.len(), directory.display());
+        for page in &written {
+            text.push_str("  ");
+            text.push_str(page);
+            text.push('\n');
+        }
+        text
+    })?;
+    Ok(0)
+}
+
+/// Render one command's manual page under the name it is invoked by.
+fn render_page(command: &clap::Command, name: &str) -> Result<Vec<u8>> {
+    let mut page = Vec::new();
+    Man::new(command.clone().display_name(name.to_owned()))
+        .title(name.to_uppercase())
+        .render(&mut page)
+        .with_context(|| format!("failed to render the manual page for {name}"))?;
+    Ok(page)
+}
+
+/// Write a page for this command and for every command under it.
+///
+/// Subcommand pages are named the way `man` expects to find them, so
+/// `quinjet branch create` is `quinjet-branch-create.1`.
+fn write_pages(
+    command: &clap::Command,
+    name: &str,
+    directory: &Path,
+    written: &mut Vec<String>,
+) -> Result<()> {
+    let file = directory.join(format!("{name}.1"));
+    fs::write(&file, render_page(command, name)?)
+        .with_context(|| format!("failed to write {}", file.display()))?;
+    written.push(file.display().to_string());
+    for child in command.get_subcommands() {
+        write_pages(
+            child,
+            &format!("{name}-{}", child.get_name()),
+            directory,
+            written,
+        )?;
+    }
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct CompletionScript<'a> {
+    shell: String,
+    script: &'a str,
+}
+
+#[derive(Serialize)]
+struct ManualPage<'a> {
+    page: &'a str,
+}
+
+#[derive(Serialize)]
+struct ManualPages<'a> {
+    pages: &'a [String],
 }
 
 struct Emitter {
@@ -484,6 +611,11 @@ fn run(session: &mut Session, out: &Emitter, verb: Verb) -> Result<u8> {
         Verb::Tui(_) => Err(Failure::new(
             EXIT_FAILURE,
             "the terminal interface is launched before any verb runs",
+        )
+        .into()),
+        Verb::Completions(_) | Verb::Man(_) => Err(Failure::new(
+            EXIT_FAILURE,
+            "the generated references are written before a repository is opened",
         )
         .into()),
         Verb::Status(args) => status(session, out, &args),
@@ -1239,8 +1371,6 @@ pub(crate) fn stdout_is_terminal() -> bool {
 mod tests {
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
-
-    use clap::CommandFactory;
 
     use super::*;
     use crate::git::github::PullRequestCheck;
