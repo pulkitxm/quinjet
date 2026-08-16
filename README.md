@@ -62,6 +62,19 @@ curl --proto '=https' --tlsv1.2 -LsSf https://quinjet.pulkit.page/install.sh | s
 
 The equivalent PowerShell environment variables are `QUINJET_VERSION` and `QUINJET_INSTALL_DIR`.
 
+Whichever installation path you chose, Quinjet can check for and install the
+latest stable release itself:
+
+```bash
+quinjet update --check
+quinjet update
+```
+
+The updater replaces the executable that is actually running, so it works for
+script, Cargo, cargo-binstall, and custom-directory installations without
+guessing where the binary lives. It pins the download to one release and
+verifies the published SHA-256 checksum before replacing anything.
+
 ### Cargo
 
 From crates.io:
@@ -117,7 +130,7 @@ Only loopback connections are accepted, and a delivery is treated purely as a si
 
 ### Command line
 
-Every user-visible Git and GitHub operation the interface performs is also reachable through a subcommand, and the interface executes the same command layer rather than reaching Git itself. Presentation state such as focus, scrolling, folding, and filtering remains terminal-only:
+Every user-visible Git and GitHub operation the interface performs is also reachable through a subcommand, and repository data operations execute the same command layer rather than reaching Git itself. Browser opening uses the same helper on both faces. Presentation state such as focus, scrolling, folding, and filtering remains terminal-only:
 
 ```bash
 quinjet status                        # the Changes view, as text
@@ -131,6 +144,7 @@ quinjet pr conversation 12 --watch    # follow conversation updates
 quinjet pr checks 12 --watch          # block until CI settles
 quinjet pr logs 12 clippy --watch     # tail a running job's log
 quinjet pr open 12 --check clippy      # open one check run in a browser
+quinjet update --check                 # report whether a stable update exists
 ```
 
 `quinjet --help` lists the whole tree. Subcommands are dispatched before the terminal is claimed, so a piped run never meets the interactive-terminal refusal. `-C <dir>` chooses the repository, `--json` prints one document on stdout, and `--watch` prints one compact document per read. Destructive subcommands report what they would do and change nothing until `--yes`.

@@ -36,6 +36,7 @@ src/
     command.rs     the command vocabulary, outcomes, and the session
     mod.rs         the subcommand tree, exit codes, the --json emitter
     render.rs      plain-text renderings, no terminal and no color
+    update.rs      verified release lookup and executable replacement
     watch.rs       the non-interactive refresh loop
   git/             argv construction, status, history, diff, worker, github/
   ui/              viewport-only rendering, theme, mouse hit map

@@ -12,8 +12,9 @@ libgit2: every local operation is a real `git` subprocess with an argument
 array, which is why your hooks, your credential helper, your signing
 configuration and your `.gitattributes` all behave exactly as they do when you
 type `git` yourself. The pull-request verbs additionally need the GitHub CLI,
-`gh`, authenticated. `completions` and `man` are pre-repository metadata verbs,
-so they need neither `git` nor `gh` and work from any directory.
+`gh`, authenticated. `completions`, `man`, and `update` are pre-repository
+metadata verbs, so they need neither `git` nor `gh` and work from any directory.
+`update` makes its own HTTPS requests to GitHub Releases.
 
 This page covers installing, the shape of an invocation, the first handful of
 commands worth running, how to explore the rest of the tree, and what a script
@@ -73,6 +74,31 @@ toolchain will refuse the build rather than fail halfway through it.
 released supported target: x86-64 and AArch64 Linux, x86-64 and Apple Silicon
 macOS, and x86-64 Windows. The Linux GNU and musl target triples map to the
 published static Linux artifacts.
+
+### Updating an installation
+
+Every installation method can use the built-in updater:
+
+```bash
+quinjet update --check
+quinjet update
+```
+
+The original installation method is not persisted. Instead of guessing from
+`PATH`, Cargo defaults, or installer defaults, `update` replaces the executable
+that handled the command. This covers `cargo install`, cargo-binstall, both
+release scripts, custom Cargo roots, and custom installer directories. A later
+`cargo install --force` or cargo-binstall run can still replace that binary and
+update Cargo's own bookkeeping.
+
+The updater reads GitHub's latest stable release, compares semantic versions,
+and never downgrades. For a newer release it selects the same platform artifact
+as the installers, downloads `SHA256SUMS` and the binary from URLs pinned to the
+resolved tag, verifies the exact SHA-256 entry, stages the verified bytes beside
+the running executable, and replaces it while preserving its permissions. It
+does not need `git`, `gh`, Cargo, `curl`, PowerShell, or an external checksum
+tool. `--check` stops after version and target selection and never downloads or
+replaces a binary. See [`quinjet update`](./update.md) for its complete contract.
 
 ### What the installers check, and what they do not
 

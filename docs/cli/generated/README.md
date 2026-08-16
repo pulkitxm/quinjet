@@ -1,6 +1,6 @@
 # Generated references
 
-Two verbs print things about Quinjet rather than about a repository: shell
+Two verbs generate references rather than reading a repository: shell
 completion scripts and manual pages. Both are generated on demand from the
 same command definition the parser itself runs. Neither is installed
 automatically, and neither needs a repository or `git`, so both work anywhere.

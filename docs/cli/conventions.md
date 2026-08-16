@@ -2,8 +2,8 @@
 
 These are the shared command-line contracts. Repository and GitHub verbs pass
 through `cli::dispatch`, `cli::Session`, the `Emitter`, and `cli::Failure`.
-`completions` and `man` dispatch before a session is built because their answers
-come from clap metadata and do not require a repository.
+`completions`, `man`, and `update` dispatch before a session is built because
+their answers do not require a repository.
 
 ## One command layer, two callers
 
@@ -162,8 +162,8 @@ job whose steps and archive are both still empty, in the first seconds of a run:
 `--path`, spelled `-C` for the muscle memory Git already built, chooses the
 repository for every repository or GitHub verb and defaults to the current
 directory. Quinjet discovers the worktree root from it, so running from a
-subdirectory is the same as running from the top. `completions` and `man` accept
-the global option but do not use it.
+subdirectory is the same as running from the top. `completions`, `man`, and
+`update` accept the global option but do not use it.
 
 ```bash
 quinjet -C ~/code/project status
@@ -200,7 +200,8 @@ stale. See [the caching rules](#what-is-cached).
 
 `--help` is generated for every verb and every group, prints on stdout, and
 exits 0. `--version` exists on the root only. `completions` and `man` generate
-their output on demand from the same fully defined clap command tree.
+their output on demand from the same fully defined clap command tree. `update
+--check` checks release metadata without replacing the executable.
 
 ## What needs `git`, and what needs `gh`
 
@@ -212,6 +213,7 @@ nothing else. The metadata verbs run without a repository.
 | Verb | Also needs |
 | --- | --- |
 | `completions`, `man` | nothing, including no repository and no `git` |
+| `update` | network access to GitHub Releases and permission to replace the running executable; no `git`, `gh`, Cargo, shell, or external downloader |
 | `status`, `diff`, `log`, `show`, `stage`, `unstage`, `discard`, `commit`, `resolve`, `branch`, `stash`, `cherry-pick`, `revert` | nothing |
 | `fetch`, `pull`, `push`, `sync` | network and whatever credentials Git is configured with |
 | `repos` | `gh`, but only for a host Quinjet cannot recognize locally |

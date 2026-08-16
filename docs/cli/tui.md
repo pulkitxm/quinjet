@@ -313,6 +313,8 @@ The command line can do these, and no key can:
   revision. History paginates 300 commits at a time from the branch on screen.
 - `quinjet cherry-pick` and `quinjet revert` for a commit the History view is
   not listing. Both preview until `--yes` is passed.
+- `quinjet update`, which replaces the running executable rather than changing
+  a repository or terminal view.
 - `-C`, and running at all without a terminal.
 
 ## Notes and gotchas
