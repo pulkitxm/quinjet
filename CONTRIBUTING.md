@@ -5,7 +5,7 @@ Thank you for helping improve Quinjet. Bug reports, design feedback, documentati
 ## Before You Start
 
 - Search existing issues and pull requests before opening a duplicate.
-- For a substantial feature or architectural change, open an issue first so the approach can be discussed.
+- For a substantial feature or architectural change, start a discussion or open an issue first so the approach can be discussed.
 - Keep changes focused. Separate unrelated fixes into separate pull requests.
 - Never include credentials, private repository data, or generated build artifacts.
 
@@ -84,12 +84,11 @@ command paths and inherited global options.
 
 ## Pull Requests
 
-A good pull request includes:
-
-1. A concise description of the problem and solution.
-2. Screenshots or terminal recordings for visual changes when useful.
-3. Tests or an explanation of why automated testing is impractical.
-4. Notes about compatibility, performance, and destructive behavior.
+A pull request description is one line that states what changed and why. Keep
+the diff focused, use conventional commit subjects, and add tests for changed
+behavior. After verification is complete, post one short evidence comment that
+shows the end result through a screenshot, recording, or clean terminal output
+when the change has something meaningful to demonstrate.
 
 Maintainers may request changes before merge. By contributing, you agree that your contribution is licensed under the repository's MIT License.
 
@@ -106,7 +105,9 @@ Edit the docs in this repository, never the wiki: a push to `main` overwrites ev
 
 ## Reporting Security Issues
 
-Do not publish exploitable security issues in a public issue. Use GitHub's private security advisory flow for this repository instead.
+Do not publish exploitable security issues in a public issue. Follow
+[SECURITY.md](SECURITY.md) and use GitHub's private vulnerability reporting
+form instead.
 
 ## Releases
 

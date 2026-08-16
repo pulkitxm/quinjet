@@ -1,0 +1,11 @@
+{
+  "name": "quinjet-ci-tools",
+  "private": true,
+  "version": "1.0.0",
+  "devDependencies": {
+    "markdownlint-cli2": "0.23.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

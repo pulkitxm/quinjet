@@ -39,7 +39,8 @@ jobs:
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
           pipx install yamllint==1.38.0
-          npm install --global markdownlint-cli2@0.23.2
+          npm ci --ignore-scripts --prefix .github/tools
+          echo "${GITHUB_WORKSPACE}/.github/tools/node_modules/.bin" >>"${GITHUB_PATH}"
       - name: make ci
         run: make ci
 
@@ -74,10 +75,23 @@ jobs:
           args: --config lychee.toml './**/*.md'
           fail: true
 
+  fuzz:
+    name: Fuzz webhook parsing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@7c8d7d138f5c09cef361f8214cf96882cd029cdb # nightly
+      - uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780 # v2
+        with:
+          tool: cargo-fuzz
+      - run: cargo fuzz run webhook -- -runs=5000
+
   report:
     name: Report
     if: always() && contains(needs.*.result, 'failure')
-    needs: [full-check, future-toolchain, links]
+    needs: [full-check, future-toolchain, links, fuzz]
     runs-on: ubuntu-latest
     permissions:
       contents: read # read the checkout

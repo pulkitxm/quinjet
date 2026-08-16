@@ -11,7 +11,7 @@ license = "MIT"
 rust-version = "1.88"
 keywords = ["git", "tui", "terminal", "source-control", "diff"]
 categories = ["command-line-utilities", "development-tools"]
-exclude = ["extras/", ".github/", ".agents/"]
+exclude = ["extras/", ".github/", ".agents/", "fuzz/"]
 
 [package.metadata.binstall]
 pkg-fmt = "bin"

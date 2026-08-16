@@ -255,7 +255,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for implementation details.
 
 ## Contributing
 
-Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md), the [Code of Conduct](CODE_OF_CONDUCT.md), and [Security Policy](SECURITY.md) before opening a pull request or report.
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md), the
+[Code of Conduct](CODE_OF_CONDUCT.md), [Security Policy](SECURITY.md),
+[Support guide](SUPPORT.md), and [Governance](GOVERNANCE.md) before opening a
+pull request or report.
 
 ```bash
 cargo fmt --all -- --check

@@ -5,6 +5,7 @@ mod git;
 mod ui;
 mod watch;
 mod webhook;
+mod webhook_parser;
 
 use std::io::{self, IsTerminal};
 use std::process::ExitCode;
