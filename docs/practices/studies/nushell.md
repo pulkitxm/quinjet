@@ -241,7 +241,7 @@ note: "You can get the span using the `Value::span()` method."
 
 The `if-matches` rule even rewrites `if matches!(v, pat)` into `if let pat = v` via
 `fix: "let $$$PAT = $VAL"`, and the rules themselves have snapshot tests under
-extras/nushell/ast-grep/tests/__snapshots__. This is lint infrastructure as reviewable,
+`extras/nushell/ast-grep/tests/__snapshots__`. This is lint infrastructure as reviewable,
 tested code.
 
 ## 6. CI/CD
