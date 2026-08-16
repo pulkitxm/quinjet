@@ -1,4 +1,5 @@
 mod app;
+mod cli;
 mod convert;
 mod git;
 mod ui;
@@ -6,12 +7,10 @@ mod watch;
 mod webhook;
 
 use std::io::{self, IsTerminal};
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use clap::Parser;
 use crossbeam_channel::{Receiver, tick};
 use crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -26,52 +25,44 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
 use crate::app::{App, AppEffect};
+use crate::cli::{Launch, TerminalOptions};
 use crate::git::Repository;
 use crate::git::worker::GitWorker;
 use crate::watch::RepoWatcher;
 use crate::webhook::WebhookListener;
 
-#[derive(Debug, Parser)]
-#[command(name = "quinjet", version, about)]
-struct Cli {
-    /// Git repository to open
-    #[arg(default_value = ".")]
-    path: PathBuf,
-
-    /// Disable mouse capture (all features remain keyboard-accessible)
-    #[arg(long)]
-    no_mouse: bool,
-
-    /// Refresh the open pull request the moment a forwarded GitHub webhook
-    /// arrives, given a port or host:port to listen on. Pair with
-    /// `gh webhook forward --repo <repo> --events '*' --url http://127.0.0.1:<port>`.
-    /// Only loopback connections are accepted.
-    #[arg(long, value_name = "ADDRESS")]
-    webhook_listen: Option<String>,
+fn main() -> ExitCode {
+    match cli::dispatch() {
+        Ok(Launch::Terminal(options)) => match open_terminal(&options) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => ExitCode::from(cli::report(&error)),
+        },
+        Ok(Launch::Finished(code)) => ExitCode::from(code),
+        Err(error) => ExitCode::from(cli::report(&error)),
+    }
 }
 
-fn main() -> Result<()> {
-    let cli = Cli::parse();
-    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+fn open_terminal(options: &TerminalOptions) -> Result<()> {
+    if !io::stdin().is_terminal() || !cli::stdout_is_terminal() {
         anyhow::bail!("Quinjet requires an interactive terminal");
     }
 
-    let repository = Repository::discover(&cli.path)?;
+    let repository = Repository::discover(&options.path)?;
     let worker = GitWorker::start(repository.clone());
     let watcher = RepoWatcher::new(repository.root()).ok();
-    let webhooks = cli
+    let webhooks = options
         .webhook_listen
         .as_deref()
         .map(WebhookListener::bind)
         .transpose()?;
     let mut app = App::new(repository.root(), repository.name());
-    let mut terminal = TerminalGuard::enter(!cli.no_mouse)?;
+    let mut terminal = TerminalGuard::enter(!options.no_mouse)?;
     let render_tick = tick(Duration::from_millis(16));
     let periodic_refresh = tick(Duration::from_secs(10));
     let mut dirty = true;
     let mut running = true;
 
-    app.mouse_capture = !cli.no_mouse;
+    app.mouse_capture = !options.no_mouse;
     app.webhooks_listening = webhooks.is_some();
     running &= dispatch_effects(&worker, &mut terminal, app.initial_effects());
     while running {
@@ -137,27 +128,6 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Handing a URL to the desktop is best effort: the toast has already said
-/// which one, so a machine with no opener leaves the reader able to copy it
-/// rather than facing an error they cannot act on.
-fn open_url(url: &str) {
-    let opener = if cfg!(target_os = "macos") {
-        "open"
-    } else if cfg!(target_os = "windows") {
-        "explorer"
-    } else {
-        "xdg-open"
-    };
-    drop(
-        Command::new(opener)
-            .arg(url)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn(),
-    );
-}
-
 fn watcher_changed(receiver: Option<&Receiver<()>>) -> bool {
     let Some(receiver) = receiver else {
         return false;
@@ -194,7 +164,9 @@ fn dispatch_effects(
                 running &= worker.send(*command);
             }
             AppEffect::SetMouseCapture(enabled) => terminal.set_mouse_capture(enabled),
-            AppEffect::OpenUrl(url) => open_url(&url),
+            AppEffect::OpenUrl(url) => {
+                drop(cli::open_url(&url));
+            }
             AppEffect::Quit => running = false,
         }
     }

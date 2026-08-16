@@ -10,6 +10,8 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 
 ## Features
 
+- One command layer behind both faces: every operation is a subcommand, and the terminal interface runs those same subcommands
+- Non-interactive `--json` output and a `--watch` flag that streams one document per read
 - Live working-tree, index, conflict, branch, and ahead/behind refresh
 - Scrollable staged, unstaged, untracked, renamed, deleted, and conflict groups
 - Visible, clickable per-file and per-group stage/unstage actions with immediate authoritative refresh
@@ -103,6 +105,25 @@ gh webhook forward --repo owner/name --events '*' --url http://127.0.0.1:8787
 ```
 
 Only loopback connections are accepted, and a delivery is treated purely as a signal to re-read the pull request through `gh`; nothing from the request body is trusted or displayed.
+
+### Command line
+
+Every operation the interface performs is also a subcommand, and the interface executes those subcommands rather than reaching Git itself, so the two can never drift:
+
+```bash
+quinjet status                        # the Changes view, as text
+quinjet diff --staged                 # the patch a commit would record
+quinjet log -n 10                     # the History view
+quinjet branch list --all             # local and remote-tracking branches
+quinjet stash show 'stash@{0}'        # a stash as a patch
+quinjet pr view 12                    # a pull request's metadata
+quinjet pr checks 12 --watch          # block until CI settles
+quinjet pr logs 12 clippy --watch     # tail a running job's log
+```
+
+`quinjet --help` lists the whole tree. Subcommands are dispatched before the terminal is claimed, so a piped run never meets the interactive-terminal refusal. `-C <dir>` chooses the repository, `--json` prints one document on stdout, and `--watch` prints one compact document per read. Destructive subcommands report what they would do and change nothing until `--yes`.
+
+Exit codes are part of the contract: `0` success, `1` failure or a watched run that did not go green, `2` a bad command line, `3` a name that matches nothing or matches too much, `4` something that exists but cannot be read. The [command-line reference](docs/cli/README.md) documents every subcommand, and the [conventions page](docs/cli/conventions.md) is the whole contract.
 
 ### Changes, staging, branch comparison, and stashes
 

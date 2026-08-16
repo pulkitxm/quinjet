@@ -13,6 +13,7 @@ use std::time::{Duration, SystemTime};
 use std::{env, thread};
 
 use anyhow::{Context, Result, anyhow, bail};
+use serde::Serialize;
 
 pub(crate) use self::checks::{
     CheckLogLine, CheckLogSeverity, CheckRunLog, CheckStep, PullRequestCheck,
@@ -56,7 +57,8 @@ const PULL_REQUEST_TSV_FIELDS: usize = 18;
 static TEMPORARY_REPOSITORY_ID: AtomicU64 = AtomicU64::new(0);
 static CACHE_WRITE_ID: AtomicU64 = AtomicU64::new(0);
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct GitHubRepository {
     pub name_with_owner: String,
     pub url: String,
@@ -82,7 +84,8 @@ impl GitHubRepository {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct PullRequest {
     pub number: u64,
     pub title: String,
@@ -135,7 +138,8 @@ impl PullRequest {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct PullRequestSnapshot {
     pub repositories: Vec<GitHubRepository>,
     pub selected_repository: Option<GitHubRepository>,
@@ -145,7 +149,8 @@ pub(crate) struct PullRequestSnapshot {
     pub from_cache: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub(crate) enum PullRequestFileStatus {
     Added,
     Modified,
@@ -157,7 +162,8 @@ pub(crate) enum PullRequestFileStatus {
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct PullRequestFile {
     pub path: PathBuf,
     pub old_path: Option<PathBuf>,
@@ -165,7 +171,8 @@ pub(crate) struct PullRequestFile {
     pub counts: Option<DiffLineCounts>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct PullRequestDiffIndex {
     pub files: Vec<PullRequestFile>,
     pub total_files: usize,
@@ -203,7 +210,8 @@ impl CacheLife {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub(crate) enum PullRequestProgress {
     LoadingMetadata,
     PreparingRepository,

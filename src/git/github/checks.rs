@@ -2,6 +2,7 @@ use std::ffi::OsString;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+use serde::Serialize;
 
 use super::{
     BoundedOutput, CacheLife, PullRequest, Repository, bounded_command_error, parse_tsv_record,
@@ -20,7 +21,8 @@ const STEP_TSV_FIELDS: usize = 6;
 const CHECK_TSV_JQ: &str = r#".[] | [.name, .workflow, .state, .bucket, (.description // ""), (.link // ""), (.startedAt // ""), (.completedAt // "")] | @tsv"#;
 const JOB_STEPS_TSV_JQ: &str = r#".steps[]? | [((.number // 0)|tostring), (.name // ""), (.status // ""), (.conclusion // ""), (.started_at // ""), (.completed_at // "")] | @tsv"#;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub(crate) enum PullRequestCheckStatus {
     Pending,
     Passed,
@@ -49,7 +51,8 @@ impl PullRequestCheckStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct PullRequestCheck {
     pub name: String,
     pub workflow: String,
@@ -75,7 +78,8 @@ impl PullRequestCheck {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub(crate) enum CheckLogSeverity {
     Normal,
     Command,
@@ -84,14 +88,16 @@ pub(crate) enum CheckLogSeverity {
     Error,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct CheckLogLine {
     pub timestamp: String,
     pub text: String,
     pub severity: CheckLogSeverity,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct CheckStep {
     pub number: usize,
     pub name: String,
@@ -131,13 +137,15 @@ pub(crate) fn unix_now() -> i64 {
 
 /// A check list plus where it came from, so the view can say whether it is
 /// showing a cached answer or one just read from GitHub.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct PullRequestChecks {
     pub checks: Vec<PullRequestCheck>,
     pub from_cache: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct CheckRunLog {
     pub steps: Vec<CheckStep>,
     /// Output produced before the first step or after the last one, which is

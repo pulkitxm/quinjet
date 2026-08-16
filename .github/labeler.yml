@@ -13,3 +13,6 @@ ui:
 git:
   - changed-files:
       - any-glob-to-any-file: ['src/git/**', 'src/watch.rs']
+cli:
+  - changed-files:
+      - any-glob-to-any-file: ['src/cli/**', 'src/main.rs', 'docs/cli/**']

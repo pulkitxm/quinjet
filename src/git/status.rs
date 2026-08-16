@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
+use serde::Serialize;
+
 /// Where a change lives in Git's three-tree model.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub(crate) enum ChangeArea {
     Conflict,
     Staged,
@@ -18,7 +21,8 @@ impl ChangeArea {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub(crate) enum ChangeStatus {
     Added,
     Modified,
@@ -58,7 +62,8 @@ impl ChangeStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct Change {
     pub path: PathBuf,
     pub original_path: Option<PathBuf>,
@@ -87,7 +92,8 @@ impl Change {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct BranchState {
     pub head: String,
     pub oid: Option<String>,
@@ -97,7 +103,8 @@ pub(crate) struct BranchState {
     pub detached: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct RepoStatus {
     pub branch: BranchState,
     pub changes: Vec<Change>,

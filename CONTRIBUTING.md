@@ -25,7 +25,7 @@ The `extras/` directory is ignored and is only for local reference repositories 
 
 CI runs formatting, linting, tests, documentation, MSRV, feature powerset, cross-target
 builds, coverage, packaging, installer smoke tests, repository hygiene, spelling, workflow
-linting, and dependency auditing. The same set runs locally:
+linting, dependency auditing, and the wiki build. The same set runs locally:
 
 ```bash
 make tools      # once, installs the cargo-based checkers
@@ -67,7 +67,8 @@ Add focused tests for behavior changes, especially status parsing, destructive G
 - Ensure every action remains keyboard-accessible even when mouse support is added.
 - Avoid unbounded output, queues, histories, or caches.
 - Prefer small, typed domain changes over UI-specific Git logic.
-- Update `README.md` and in-app help when user-facing behavior changes.
+- Put every operation in `src/cli`. The terminal interface is a caller of that layer, never a second implementation, so a new action means a new `cli::Command` and a subcommand that reaches it.
+- Update `README.md`, the in-app help, and `docs/cli/` when user-facing behavior changes. A new or changed flag that is not in `docs/cli/` is an incomplete change.
 
 ## Pull Requests
 
@@ -79,6 +80,17 @@ A good pull request includes:
 4. Notes about compatibility, performance, and destructive behavior.
 
 Maintainers may request changes before merge. By contributing, you agree that your contribution is licensed under the repository's MIT License.
+
+## Documentation
+
+`docs/` is the source of the [project wiki](https://github.com/pulkitxm/quinjet/wiki). One Markdown file becomes one wiki page, a directory becomes a group whose `README.md` is the group's own page, and the order that `README.md` lists its pages in is the order the sidebar shows them.
+
+```bash
+python3 scripts/sync_wiki.py --check      # every page builds and every link resolves
+python3 scripts/sync_wiki.py              # write .wiki-build/ and read it locally
+```
+
+Edit the docs in this repository, never the wiki: a push to `main` overwrites every wiki page from `docs/`. Links between pages are relative (`./verb.md`, `../conventions.md`) and are rewritten to wiki slugs during the sync, so a link that resolves to no file, or an anchor that matches no heading, fails the hygiene workflow.
 
 ## Reporting Security Issues
 
