@@ -8,14 +8,13 @@ use crossbeam_channel::{Receiver, Sender, unbounded};
 
 use super::diff::DiffDocument;
 use super::github::{
-    CheckRunLog, PreparedPullRequest, PullRequest, PullRequestCheck, PullRequestChecks,
-    PullRequestConversation, PullRequestDiffIndex, PullRequestProgress, PullRequestSnapshot,
+    CheckRunLog, PullRequest, PullRequestCheck, PullRequestChecks, PullRequestConversation,
+    PullRequestDiffIndex, PullRequestProgress, PullRequestSnapshot,
 };
 use super::history::Commit;
 use super::status::RepoStatus;
-use super::{
-    Branch, GitOperation, HistoryBranch, LocalDiffRequest, PreparedLocalDiff, Repository, Stash,
-};
+use super::{Branch, GitOperation, HistoryBranch, LocalDiffRequest, Repository, Stash};
+use crate::cli::{Command, Outcome, Session};
 
 #[derive(Debug)]
 pub(crate) enum WorkerCommand {
@@ -446,6 +445,7 @@ fn run_warm_worker(
     _events: &Sender<WorkerEvent>,
     generation: &Arc<AtomicU64>,
 ) {
+    let mut session = Session::new(repository.clone_for_worker());
     while let Some(command) = next_command(mailbox) {
         match command {
             WorkerCommand::PrefetchCheckRunLogs {
@@ -453,9 +453,14 @@ fn run_warm_worker(
                 pull_request,
                 checks,
             } => {
-                let _ = repository.prefetch_check_run_logs(&pull_request, &checks, &|| {
-                    generation.load(Ordering::SeqCst) == mine
-                });
+                drop(session.execute_with(
+                    Command::WarmCheckRunLogs {
+                        pull_request,
+                        checks,
+                    },
+                    &mut |_| {},
+                    &|| generation.load(Ordering::SeqCst) == mine,
+                ));
             }
             WorkerCommand::Shutdown => break,
             _ => {}
@@ -468,29 +473,27 @@ fn run_warm_worker(
     reason = "the draw pass reads better as one top-to-bottom pass"
 )]
 fn run_worker(repository: &Repository, mailbox: &Arc<SharedMailbox>, events: &Sender<WorkerEvent>) {
-    let mut local_diff_workspace: Option<(u64, PreparedLocalDiff)> = None;
-    let mut pull_request_workspace: Option<(u64, PreparedPullRequest)> = None;
+    let mut session = Session::new(repository.clone_for_worker());
     while let Some(command) = next_command(mailbox) {
         let event = match command {
             WorkerCommand::Refresh { generation } => WorkerEvent::Status {
                 generation,
-                result: repository.status().map_err(|error| format_error(&error)),
+                result: answer(session.execute(Command::Status).and_then(Outcome::status)),
             },
             WorkerCommand::PrepareLocalDiff {
                 generation,
                 request,
-            } => {
-                let result = repository.prepare_local_diff(&request);
-                let result = match result {
-                    Ok(workspace) => {
-                        let index = workspace.index();
-                        local_diff_workspace = Some((generation, workspace));
-                        Ok(index)
-                    }
-                    Err(error) => Err(format_error(&error)),
-                };
-                WorkerEvent::LocalDiffIndex { generation, result }
-            }
+            } => WorkerEvent::LocalDiffIndex {
+                generation,
+                result: answer(
+                    session
+                        .execute(Command::PrepareLocalDiff {
+                            workspace: generation,
+                            request,
+                        })
+                        .and_then(Outcome::local_diff_index),
+                ),
+            },
             WorkerCommand::LoadLocalDiffFile {
                 generation,
                 workspace_generation,
@@ -498,15 +501,15 @@ fn run_worker(repository: &Repository, mailbox: &Arc<SharedMailbox>, events: &Se
             } => WorkerEvent::LocalDiffFile {
                 generation,
                 path: path.clone(),
-                result: local_diff_workspace
-                    .as_ref()
-                    .filter(|(prepared_generation, _)| *prepared_generation == workspace_generation)
-                    .ok_or_else(|| "Local diff workspace is no longer available".to_owned())
-                    .and_then(|(_, workspace)| {
-                        workspace
-                            .diff_file(&path)
-                            .map_err(|error| format_error(&error))
-                    }),
+                result: answer(
+                    session
+                        .execute(Command::LocalDiffFile {
+                            workspace: workspace_generation,
+                            path,
+                        })
+                        .and_then(Outcome::local_diff_file)
+                        .map(|(_, document)| document),
+                ),
             },
             WorkerCommand::LoadHistory {
                 generation,
@@ -516,18 +519,26 @@ fn run_worker(repository: &Repository, mailbox: &Arc<SharedMailbox>, events: &Se
             } => WorkerEvent::History {
                 generation,
                 skip,
-                result: repository
-                    .history(&revision, skip, limit)
-                    .map_err(|error| format_error(&error)),
+                result: answer(
+                    session
+                        .execute(Command::History {
+                            revision,
+                            skip,
+                            limit,
+                        })
+                        .and_then(Outcome::history),
+                ),
             },
             WorkerCommand::LoadGitHubRepositories {
                 generation,
                 refresh,
             } => WorkerEvent::GitHubRepositories {
                 generation,
-                result: repository
-                    .github_repositories(refresh)
-                    .map_err(|error| format_error(&error)),
+                result: answer(
+                    session
+                        .execute(Command::GitHubRepositories { refresh })
+                        .and_then(Outcome::github_repositories),
+                ),
             },
             WorkerCommand::LookupPullRequest {
                 generation,
@@ -537,73 +548,79 @@ fn run_worker(repository: &Repository, mailbox: &Arc<SharedMailbox>, events: &Se
                 refresh,
             } => WorkerEvent::PullRequestLookup {
                 generation,
-                result: {
-                    drop(events.send(WorkerEvent::PullRequestProgress {
-                        generation,
-                        diff: false,
-                        progress: PullRequestProgress::LoadingMetadata,
-                    }));
-                    repository
-                        .pull_request_lookup(
-                            &repositories,
-                            selected_repository.as_deref(),
-                            number,
-                            refresh,
+                result: answer(
+                    session
+                        .execute_with(
+                            Command::PullRequestLookup {
+                                repositories,
+                                repository: selected_repository,
+                                number,
+                                refresh,
+                            },
+                            &mut |progress| {
+                                drop(events.send(WorkerEvent::PullRequestProgress {
+                                    generation,
+                                    diff: false,
+                                    progress,
+                                }));
+                            },
+                            &|| true,
                         )
-                        .map_err(|error| format_error(&error))
-                },
+                        .and_then(Outcome::pull_request),
+                ),
             },
             WorkerCommand::PreparePullRequest {
                 generation,
                 pull_request,
-            } => {
-                let result = repository.prepare_pull_request_diff(&pull_request, |progress| {
-                    drop(events.send(WorkerEvent::PullRequestProgress {
-                        generation,
-                        diff: true,
-                        progress,
-                    }));
-                });
-                let result = match result {
-                    Ok(workspace) => {
-                        let index = workspace.index();
-                        pull_request_workspace = Some((generation, workspace));
-                        Ok(index)
-                    }
-                    Err(error) => Err(format_error(&error)),
-                };
-                WorkerEvent::PullRequestIndex { generation, result }
-            }
+            } => WorkerEvent::PullRequestIndex {
+                generation,
+                result: answer(
+                    session
+                        .execute_with(
+                            Command::PreparePullRequest {
+                                workspace: generation,
+                                pull_request,
+                            },
+                            &mut |progress| {
+                                drop(events.send(WorkerEvent::PullRequestProgress {
+                                    generation,
+                                    diff: true,
+                                    progress,
+                                }));
+                            },
+                            &|| true,
+                        )
+                        .and_then(Outcome::pull_request_index),
+                ),
+            },
             WorkerCommand::LoadPullRequestFile {
                 generation,
                 workspace_generation,
                 path,
             } => WorkerEvent::PullRequestDiff {
                 generation,
-                result: pull_request_workspace
-                    .as_ref()
-                    .filter(|(prepared_generation, _)| *prepared_generation == workspace_generation)
-                    .ok_or_else(|| "Pull-request diff workspace is no longer available".to_owned())
-                    .and_then(|(_, workspace)| {
-                        workspace
-                            .diff_file(&path)
-                            .map_err(|error| format_error(&error))
-                    }),
+                result: answer(
+                    session
+                        .execute(Command::PullRequestFile {
+                            workspace: workspace_generation,
+                            path,
+                        })
+                        .and_then(Outcome::pull_request_diff),
+                ),
             },
             WorkerCommand::LoadPullRequestFileBatch {
                 workspace_generation,
                 paths,
             } => WorkerEvent::PullRequestDiffBatch {
                 workspace_generation,
-                result: pull_request_workspace
-                    .as_ref()
-                    .filter(|(prepared_generation, _)| *prepared_generation == workspace_generation)
-                    .ok_or_else(|| "Pull-request diff workspace is no longer available".to_owned())
-                    .and_then(|(_, workspace)| {
-                        workspace
-                            .diff_files(&paths)
-                            .map_err(|error| format_error(&error))
-                    }),
+                result: answer(
+                    session
+                        .execute(Command::PullRequestFileBatch {
+                            workspace: workspace_generation,
+                            paths,
+                        })
+                        .and_then(Outcome::pull_request_diff_batch),
+                ),
             },
             WorkerCommand::LoadPullRequestChecks {
                 generation,
@@ -611,18 +628,25 @@ fn run_worker(repository: &Repository, mailbox: &Arc<SharedMailbox>, events: &Se
                 refresh,
             } => WorkerEvent::PullRequestChecks {
                 generation,
-                result: repository
-                    .pull_request_checks(&pull_request, refresh)
-                    .map_err(|error| format_error(&error)),
+                result: answer(
+                    session
+                        .execute(Command::PullRequestChecks {
+                            pull_request,
+                            refresh,
+                        })
+                        .and_then(Outcome::checks),
+                ),
             },
             WorkerCommand::LoadPullRequestConversation {
                 generation,
                 pull_request,
             } => WorkerEvent::PullRequestConversation {
                 generation,
-                result: repository
-                    .pull_request_conversation(&pull_request)
-                    .map_err(|error| format_error(&error)),
+                result: answer(
+                    session
+                        .execute(Command::PullRequestConversation { pull_request })
+                        .and_then(Outcome::conversation),
+                ),
             },
             WorkerCommand::LoadCheckRunLog {
                 generation,
@@ -630,24 +654,35 @@ fn run_worker(repository: &Repository, mailbox: &Arc<SharedMailbox>, events: &Se
                 check,
             } => WorkerEvent::CheckRunLog {
                 generation,
-                result: repository
-                    .pull_request_check_log(&pull_request, &check)
-                    .map_err(|error| format_error(&error)),
+                result: answer(
+                    session
+                        .execute(Command::CheckRunLog {
+                            pull_request,
+                            check,
+                        })
+                        .and_then(Outcome::check_log),
+                ),
             },
             WorkerCommand::PrefetchCheckRunLogs { .. } => continue,
             WorkerCommand::LoadBranches { generation } => WorkerEvent::Branches {
                 generation,
-                result: repository.branches().map_err(|error| format_error(&error)),
+                result: answer(
+                    session
+                        .execute(Command::Branches)
+                        .and_then(Outcome::branches),
+                ),
             },
             WorkerCommand::LoadHistoryBranches { generation } => WorkerEvent::HistoryBranches {
                 generation,
-                result: repository
-                    .history_branches()
-                    .map_err(|error| format_error(&error)),
+                result: answer(
+                    session
+                        .execute(Command::HistoryBranches)
+                        .and_then(Outcome::history_branches),
+                ),
             },
             WorkerCommand::LoadStashes { generation } => WorkerEvent::Stashes {
                 generation,
-                result: repository.stashes().map_err(|error| format_error(&error)),
+                result: answer(session.execute(Command::Stashes).and_then(Outcome::stashes)),
             },
             WorkerCommand::Operate { id, operation } => {
                 let label = operation.label().to_owned();
@@ -656,9 +691,12 @@ fn run_worker(repository: &Repository, mailbox: &Arc<SharedMailbox>, events: &Se
                     id,
                     label,
                     changes_history,
-                    result: repository
-                        .perform(&operation)
-                        .map_err(|error| format_error(&error)),
+                    result: answer(
+                        session
+                            .execute(Command::Operate(operation))
+                            .and_then(Outcome::operation)
+                            .map(|(_, _, message)| message),
+                    ),
                 }
             }
             WorkerCommand::Shutdown => break,
@@ -683,8 +721,8 @@ fn next_command(mailbox: &SharedMailbox) -> Option<WorkerCommand> {
     }
 }
 
-fn format_error(error: &anyhow::Error) -> String {
-    format!("{error:#}")
+fn answer<T>(result: anyhow::Result<T>) -> Result<T, String> {
+    result.map_err(|error| format!("{error:#}"))
 }
 
 #[cfg(test)]

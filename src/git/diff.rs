@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+use serde::Serialize;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle, Theme, ThemeSet};
 use syntect::parsing::{SyntaxReference, SyntaxSet};
@@ -12,7 +13,8 @@ const TAB_WIDTH: usize = 4;
 const MAX_SYNTAX_HIGHLIGHT_PATCH_BYTES: usize = 512 * 1024;
 const MAX_SYNTAX_HIGHLIGHT_LINE_BYTES: usize = 32 * 1024;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub(crate) enum DiffLineKind {
     FileHeader,
     FileFooter,
@@ -23,7 +25,8 @@ pub(crate) enum DiffLineKind {
     Meta,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct HighlightSpan {
     pub text: String,
     pub foreground: Option<(u8, u8, u8)>,
@@ -42,7 +45,8 @@ impl HighlightSpan {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct DiffLine {
     pub kind: DiffLineKind,
     pub old_line: Option<usize>,
@@ -64,7 +68,8 @@ impl DiffLine {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct CommitDetails {
     pub id: String,
     pub subject: String,
@@ -76,14 +81,16 @@ pub(crate) struct CommitDetails {
     pub committed_at: String,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct DiffLineCounts {
     pub additions: usize,
     pub deletions: usize,
     pub binary: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct DiffFileIndexEntry {
     pub path: PathBuf,
     pub old_path: Option<PathBuf>,
@@ -183,7 +190,8 @@ fn record_path(record: &[u8]) -> PathBuf {
     PathBuf::from(String::from_utf8_lossy(record).into_owned())
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct DiffIndex {
     pub title: String,
     pub files: Vec<DiffFileIndexEntry>,
@@ -292,7 +300,8 @@ fn index_file_header(file: &DiffFileIndexEntry) -> DiffLine {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct PullRequestDetails {
     pub number: u64,
     pub title: String,
@@ -317,7 +326,8 @@ pub(crate) struct PullRequestDetails {
     pub selected_file_deletions: usize,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct DiffDocument {
     pub title: String,
     pub lines: Vec<DiffLine>,
