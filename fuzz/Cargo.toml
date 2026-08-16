@@ -8,7 +8,6 @@ edition = "2024"
 cargo-fuzz = true
 
 [dependencies]
-anyhow = "1.0"
 libfuzzer-sys = "0.4"
 
 [[bin]]

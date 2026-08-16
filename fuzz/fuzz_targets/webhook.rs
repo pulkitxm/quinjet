@@ -9,7 +9,6 @@ mod webhook_parser {
         if let Ok(head) = std::str::from_utf8(input) {
             let _delivery = parse_delivery(head);
             let _length = content_length(head);
-            let _address = parse_listen_address(head);
         }
     });
 }

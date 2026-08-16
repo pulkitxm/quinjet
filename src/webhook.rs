@@ -1,16 +1,14 @@
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use crossbeam_channel::{Receiver, Sender, bounded};
 
-use crate::webhook_parser::{
-    WebhookDelivery, content_length, parse_delivery, parse_listen_address,
-};
+use crate::webhook_parser::{WebhookDelivery, content_length, parse_delivery};
 
 const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_BODY_BYTES: u64 = 4 * 1024 * 1024;
@@ -119,6 +117,19 @@ fn read_head(reader: &mut BufReader<TcpStream>) -> Option<String> {
             return None;
         }
     }
+}
+
+/// Accept either a full socket address or a bare port, which is what anyone
+/// pairing this with `gh webhook forward` reaches for first.
+fn parse_listen_address(target: &str) -> Result<SocketAddr> {
+    let target = target.trim();
+    if let Ok(address) = target.parse::<SocketAddr>() {
+        return Ok(address);
+    }
+    if let Ok(port) = target.parse::<u16>() {
+        return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port));
+    }
+    bail!("`{target}` is not a port or a host:port address")
 }
 
 #[cfg(test)]

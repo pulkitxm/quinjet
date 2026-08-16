@@ -1,7 +1,3 @@
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-
-use anyhow::{Result, bail};
-
 /// A GitHub delivery forwarded to this session, reduced to the event name.
 ///
 /// Quinjet treats a delivery purely as a signal that something changed and then
@@ -39,17 +35,4 @@ pub(crate) fn content_length(head: &str) -> Option<u64> {
             .then(|| value.trim().parse().ok())
             .flatten()
     })
-}
-
-/// Accept either a full socket address or a bare port, which is what anyone
-/// pairing this with `gh webhook forward` reaches for first.
-pub(crate) fn parse_listen_address(target: &str) -> Result<SocketAddr> {
-    let target = target.trim();
-    if let Ok(address) = target.parse::<SocketAddr>() {
-        return Ok(address);
-    }
-    if let Ok(port) = target.parse::<u16>() {
-        return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port));
-    }
-    bail!("`{target}` is not a port or a host:port address")
 }
