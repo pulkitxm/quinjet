@@ -8,10 +8,12 @@ mod webhook;
 
 use std::io::{self, IsTerminal};
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use crossbeam_channel::{Receiver, tick};
+use crossterm::cursor::Show;
 use crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
     Event, KeyEventKind, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
@@ -42,11 +44,54 @@ fn main() -> ExitCode {
     }
 }
 
+/// Whether the alternate screen is currently ours to leave.
+static TERMINAL_ENTERED: AtomicBool = AtomicBool::new(false);
+/// Whether a keyboard enhancement entry is ours to pop.
+static KEYBOARD_ENHANCED: AtomicBool = AtomicBool::new(false);
+
+/// Put the terminal back the way it was found.
+///
+/// Both the guard's `Drop` and the panic hook call this, and the first one
+/// through does the work, so a panic during a normal teardown cannot send the
+/// escape sequences twice.
+fn restore_terminal() {
+    if !TERMINAL_ENTERED.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    drop(disable_raw_mode());
+    let mut stdout = io::stdout();
+    if KEYBOARD_ENHANCED.swap(false, Ordering::SeqCst) {
+        drop(execute!(stdout, PopKeyboardEnhancementFlags));
+    }
+    drop(execute!(
+        stdout,
+        DisableMouseCapture,
+        DisableBracketedPaste,
+        LeaveAlternateScreen,
+        Show
+    ));
+}
+
+/// Restore the terminal before anything reports a panic.
+///
+/// A release build aborts rather than unwinds, so `Drop` never runs and the
+/// hook is the only chance to leave the alternate screen. Without it a panic
+/// from any dependency hands the reader a shell still in raw mode, with the
+/// message painted on a screen that is about to disappear.
+fn install_panic_hook() {
+    let report = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        restore_terminal();
+        report(info);
+    }));
+}
+
 fn open_terminal(options: &TerminalOptions) -> Result<()> {
     if !io::stdin().is_terminal() || !cli::stdout_is_terminal() {
         anyhow::bail!("Quinjet requires an interactive terminal");
     }
 
+    install_panic_hook();
     let repository = Repository::discover(&options.path)?;
     let worker = GitWorker::start(repository.clone());
     let watcher = RepoWatcher::new(repository.root()).ok();
@@ -176,7 +221,6 @@ fn dispatch_effects(
 struct TerminalGuard {
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
     mouse: bool,
-    keyboard_enhancements: bool,
 }
 
 impl TerminalGuard {
@@ -206,9 +250,8 @@ impl TerminalGuard {
         if mouse {
             execute!(stdout, EnableMouseCapture).context("failed to enable mouse capture")?;
         }
-        let keyboard_enhancements =
-            crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
-        if keyboard_enhancements {
+        TERMINAL_ENTERED.store(true, Ordering::SeqCst);
+        if crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false) {
             drop(execute!(
                 stdout,
                 PushKeyboardEnhancementFlags(
@@ -218,35 +261,17 @@ impl TerminalGuard {
                         | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
                 )
             ));
+            KEYBOARD_ENHANCED.store(true, Ordering::SeqCst);
         }
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend).context("failed to initialize terminal")?;
         terminal.clear().context("failed to clear terminal")?;
-        Ok(Self {
-            terminal,
-            mouse,
-            keyboard_enhancements,
-        })
+        Ok(Self { terminal, mouse })
     }
 }
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        drop(disable_raw_mode());
-        if self.keyboard_enhancements {
-            drop(execute!(
-                self.terminal.backend_mut(),
-                PopKeyboardEnhancementFlags
-            ));
-        }
-        if self.mouse {
-            drop(execute!(self.terminal.backend_mut(), DisableMouseCapture));
-        }
-        drop(execute!(
-            self.terminal.backend_mut(),
-            DisableBracketedPaste,
-            LeaveAlternateScreen
-        ));
-        drop(self.terminal.show_cursor());
+        restore_terminal();
     }
 }
