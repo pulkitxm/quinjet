@@ -12,7 +12,7 @@ libgit2: every local operation is a real `git` subprocess with an argument
 array, which is why your hooks, your credential helper, your signing
 configuration and your `.gitattributes` all behave exactly as they do when you
 type `git` yourself. The pull-request verbs additionally need the GitHub CLI,
-`gh`, authenticated. `completions`, `man`, and `update` are pre-repository
+`gh`, authenticated. `completions`, `man`, `capabilities`, and `update` are pre-repository
 metadata verbs, so they need neither `git` nor `gh` and work from any directory.
 `update` makes its own HTTPS requests to GitHub Releases.
 
@@ -134,7 +134,7 @@ uses `curl` or `wget` on Linux and macOS and PowerShell on Windows. See
 
 ```bash
 quinjet                      open the terminal interface in the current repository
-quinjet ~/code/project       open it somewhere else
+quinjet tui ~/code/project   open it somewhere else
 quinjet tui --no-mouse       the same thing, spelled as a verb, with the mouse released
 quinjet status               print what its Changes tab shows, then exit
 ```
@@ -169,18 +169,10 @@ quinjet status --json -C ~/code/project
 the same as pointing it at the top: `quinjet -C src/cli status` reports on the
 whole repository.
 
-The bare positional path is a different argument that belongs to the terminal
-interface. Do not reach for it when you are running a verb: with a verb present
-it is parsed and then unused, and the verb still reads `-C`. So
-`quinjet ~/code/project status` reports on the directory you are standing in,
-quietly and with exit 0. Spell it `quinjet -C ~/code/project status`.
-
-A verb always wins over a directory of the same name, so `quinjet status` in a
-repository containing a directory called `status` runs the status verb; write
-`quinjet ./status` for the directory. The inverse is worth knowing too: a word
-that is not a verb is read as a repository path for the terminal interface, so a
-typo like `quinjet status` does not produce a usage error, it tries to open a
-directory that does not exist.
+A terminal path belongs to `tui`, as in `quinjet tui ~/code/project`. The root
+command accepts only real verbs, so a typo produces a clap usage error and a
+suggestion. Use `quinjet -C ~/code/project status` when a one-shot verb should
+run in another checkout.
 
 ## At a glance
 
@@ -328,8 +320,7 @@ The root help is the map:
 $ quinjet --help
 A fast, live, keyboard-first Git source-control interface for the terminal
 
-Usage: quinjet [OPTIONS] [PATH]
-       quinjet [OPTIONS] [PATH] <COMMAND>
+Usage: quinjet [OPTIONS] [COMMAND]
 
 Commands:
   tui          Open the terminal interface
@@ -352,6 +343,10 @@ Commands:
   resolve      Take one side of a merge conflict
   repos        List the GitHub repositories this checkout points at
   pr           Read a pull request, its files, its conversation and its checks
+  completions  Print a shell completion script
+  man          Print the manual page, or write one page per command
+  capabilities Describe commands and arguments for automation
+  update       Update this executable to the latest stable release
   help         Print this message or the help of the given subcommand(s)
 ```
 

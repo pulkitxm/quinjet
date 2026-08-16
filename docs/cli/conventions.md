@@ -2,7 +2,7 @@
 
 These are the shared command-line contracts. Repository and GitHub verbs pass
 through `cli::dispatch`, `cli::Session`, the `Emitter`, and `cli::Failure`.
-`completions`, `man`, and `update` dispatch before a session is built because
+`completions`, `man`, `capabilities`, and `update` dispatch before a session is built because
 their answers do not require a repository.
 
 ## One command layer, two callers
@@ -94,9 +94,11 @@ patch, the log. stderr carries everything about the answer:
   such as a repository the remote discovery had to skip or a stale cache it fell
   back to.
 
-Nothing else writes anywhere. There is no progress bar and no spinner on the
-command line: the terminal interface has one because it can repaint, a pipe
-cannot, and a half-written line in a log is worse than silence.
+Interactive stderr may show a spinner while a one-shot command is waiting on
+Git, GitHub, or the network. The spinner is cleared before the answer or an
+error is written. It is disabled under `--json`, when stderr is redirected, and
+during `--watch`, so scripts and logs never receive animation or half-written
+lines.
 
 When a verb fails, stdout is empty, so `quinjet pr view 12 --json > out.json`
 either writes a whole document or writes nothing. The exceptions are the two
@@ -162,7 +164,8 @@ job whose steps and archive are both still empty, in the first seconds of a run:
 `--path`, spelled `-C` for the muscle memory Git already built, chooses the
 repository for every repository or GitHub verb and defaults to the current
 directory. Quinjet discovers the worktree root from it, so running from a
-subdirectory is the same as running from the top. `completions`, `man`, and
+subdirectory is the same as running from the top. `completions`, `man`,
+`capabilities`, and
 `update` accept the global option but do not use it.
 
 ```bash
@@ -170,16 +173,10 @@ quinjet -C ~/code/project status
 quinjet status -C ~/code/project
 ```
 
-The bare positional path is different and belongs to the terminal interface
-alone: `quinjet ~/code/project` opens the interface there. A verb ignores it
-rather than rejecting it, so `quinjet ~/code/project status` parses, discards
-the path, reads `-C` (still `.`), and reports on the directory you are standing
-in with exit 0. Spell it `quinjet -C ~/code/project status` when a verb should
-run somewhere else.
-
-A verb always wins over a directory of the same name. `quinjet status` runs the
-status verb even in a repository that contains a directory called `status`; use
-`quinjet ./status` for the directory.
+Repository paths for the terminal interface belong to the explicit `tui` verb:
+`quinjet tui ~/code/project`. The bare `quinjet` form still opens the current
+directory. Any other first word must be a real verb, so a typo is a clap usage
+error instead of an attempt to open a similarly named directory.
 
 Boolean flags are presence only. There are no `--no-` inversions. Long options
 take their value as the next word or after an equals sign, so `--interval 5`
@@ -198,10 +195,11 @@ again rather than answer from the on-disk cache. It does not affect entries
 whose cache key already names what they contain, because those can never be
 stale. See [the caching rules](#what-is-cached).
 
-`--help` is generated for every verb and every group, prints on stdout, and
-exits 0. `--version` exists on the root only. `completions` and `man` generate
-their output on demand from the same fully defined clap command tree. `update
---check` checks release metadata without replacing the executable.
+`--help` and `--version` are generated for every verb and every group, print on
+stdout, and exit 0. The root help includes common examples and the web reference.
+`completions`, `man`, and `capabilities` generate their output on demand from the
+same fully defined clap command tree. `update --check` checks release metadata
+without replacing the executable.
 
 ## What needs `git`, and what needs `gh`
 
@@ -212,7 +210,7 @@ nothing else. The metadata verbs run without a repository.
 
 | Verb | Also needs |
 | --- | --- |
-| `completions`, `man` | nothing, including no repository and no `git` |
+| `completions`, `man`, `capabilities` | nothing, including no repository and no `git` |
 | `update` | network access to GitHub Releases, permission to replace the running executable, and `curl`/`wget` on Unix or PowerShell on Windows; no `git`, `gh`, or Cargo |
 | `status`, `diff`, `log`, `show`, `stage`, `unstage`, `discard`, `commit`, `resolve`, `branch`, `stash`, `cherry-pick`, `revert` | nothing |
 | `fetch`, `pull`, `push`, `sync` | network and whatever credentials Git is configured with |

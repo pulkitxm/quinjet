@@ -11,7 +11,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::{Shell, generate};
 use clap_mangen::Man;
 pub(crate) use command::{Command, Outcome, Session};
@@ -30,6 +30,13 @@ pub(crate) const EXIT_NOT_FOUND: u8 = 3;
 pub(crate) const EXIT_UNAVAILABLE: u8 = 4;
 
 const PROGRAM: &str = "quinjet";
+const ROOT_HELP: &str = "Examples:
+  quinjet
+  quinjet status --json
+  quinjet -C ../project diff --staged
+  quinjet pr checks 42 --watch
+
+Documentation: https://github.com/pulkitxm/quinjet/wiki/Command-Line";
 
 const CHECK_WATCH_INTERVAL: u64 = 5;
 const CHECK_WATCH_FLOOR: u64 = 2;
@@ -84,24 +91,11 @@ pub(crate) enum Launch {
 #[derive(Debug, Parser)]
 #[command(name = "quinjet", version, about)]
 #[command(subcommand_negates_reqs = true)]
+#[command(propagate_version = true)]
+#[command(after_long_help = ROOT_HELP)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Verb>,
-
-    /// Git repository to open in the terminal interface
-    #[arg(default_value = ".")]
-    path: PathBuf,
-
-    /// Disable mouse capture (all features remain keyboard-accessible)
-    #[arg(long)]
-    no_mouse: bool,
-
-    /// Refresh the open pull request the moment a forwarded GitHub webhook
-    /// arrives, given a port or host:port to listen on. Pair with
-    /// `gh webhook forward --repo <repo> --events '*' --url http://127.0.0.1:<port>`.
-    /// Only loopback connections are accepted.
-    #[arg(long, value_name = "ADDRESS")]
-    webhook_listen: Option<String>,
 
     /// Repository to run a subcommand against
     #[arg(
@@ -109,7 +103,8 @@ struct Cli {
         long = "path",
         value_name = "DIR",
         default_value = ".",
-        global = true
+        global = true,
+        value_hint = ValueHint::DirPath
     )]
     repository: PathBuf,
 
@@ -170,9 +165,12 @@ enum Verb {
         command: PrVerb,
     },
     /// Print a shell completion script
+    #[command(visible_alias = "completion")]
     Completions(CompletionsArgs),
     /// Print the manual page, or write one page per command
     Man(ManArgs),
+    /// Describe commands and arguments for automation
+    Capabilities,
     /// Update this executable to the latest stable release
     Update(UpdateArgs),
 }
@@ -187,7 +185,7 @@ struct CompletionsArgs {
 #[derive(Debug, Args)]
 struct ManArgs {
     /// Write one page per command into this directory instead of printing one
-    #[arg(long, value_name = "DIR")]
+    #[arg(long, value_name = "DIR", value_hint = ValueHint::DirPath)]
     dir: Option<PathBuf>,
 }
 
@@ -201,7 +199,7 @@ struct UpdateArgs {
 #[derive(Debug, Args)]
 struct TuiArgs {
     /// Git repository to open
-    #[arg(default_value = ".")]
+    #[arg(default_value = ".", value_hint = ValueHint::DirPath)]
     path: PathBuf,
     /// Disable mouse capture
     #[arg(long)]
@@ -217,13 +215,20 @@ struct WatchableArgs {
     #[arg(long)]
     watch: bool,
     /// Seconds between refreshes
-    #[arg(long, value_name = "SECONDS", default_value_t = 2)]
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        default_value_t = 2,
+        requires = "watch",
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
     interval: u64,
 }
 
 #[derive(Debug, Args)]
 struct DiffArgs {
     /// Limit the diff to these paths
+    #[arg(value_name = "PATH", value_hint = ValueHint::AnyPath)]
     paths: Vec<PathBuf>,
     /// Only what is staged
     #[arg(long)]
@@ -239,6 +244,11 @@ struct DiffArgs {
 #[derive(Debug, Args)]
 struct SelectionArgs {
     /// Paths to act on
+    #[arg(
+        value_name = "PATH",
+        value_hint = ValueHint::AnyPath,
+        required_unless_present = "all"
+    )]
     paths: Vec<PathBuf>,
     /// Act on every change instead
     #[arg(long, conflicts_with = "paths")]
@@ -248,6 +258,11 @@ struct SelectionArgs {
 #[derive(Debug, Args)]
 struct DiscardArgs {
     /// Paths whose changes are thrown away
+    #[arg(
+        value_name = "PATH",
+        value_hint = ValueHint::AnyPath,
+        required_unless_present = "all"
+    )]
     paths: Vec<PathBuf>,
     /// Throw away every change instead
     #[arg(long, conflicts_with = "paths")]
@@ -270,7 +285,7 @@ struct CommitArgs {
 #[derive(Debug, Args)]
 struct LogArgs {
     /// Branch, tag, or commit to read from
-    #[arg(default_value = "HEAD")]
+    #[arg(default_value = "HEAD", value_name = "REVISION", value_hint = ValueHint::Other)]
     revision: String,
     /// Commits to skip
     #[arg(long, default_value_t = 0)]
@@ -283,7 +298,7 @@ struct LogArgs {
 #[derive(Debug, Args)]
 struct ShowArgs {
     /// Commit to show
-    #[arg(default_value = "HEAD")]
+    #[arg(default_value = "HEAD", value_name = "REVISION", value_hint = ValueHint::Other)]
     revision: String,
     /// Print whole files instead of three lines of context
     #[arg(long)]
@@ -293,6 +308,7 @@ struct ShowArgs {
 #[derive(Debug, Args)]
 struct RevisionArgs {
     /// Commit to act on
+    #[arg(value_name = "REVISION", value_hint = ValueHint::Other)]
     revision: String,
     /// Confirm; without it the command reports what it would do
     #[arg(long)]
@@ -302,9 +318,14 @@ struct RevisionArgs {
 #[derive(Debug, Args)]
 struct ResolveArgs {
     /// Conflicted path
+    #[arg(value_name = "PATH", value_hint = ValueHint::AnyPath)]
     path: PathBuf,
     /// Keep the version already on this branch
-    #[arg(long, group = "side")]
+    #[arg(
+        long,
+        group = "side",
+        required_unless_present_any = ["theirs", "stage"]
+    )]
     ours: bool,
     /// Keep the version being merged in
     #[arg(long, group = "side")]
@@ -326,17 +347,33 @@ enum BranchVerb {
     /// List local branches
     List(BranchListArgs),
     /// Switch to a branch
-    Switch { name: String },
+    Switch {
+        /// Branch to switch to
+        #[arg(value_name = "BRANCH", value_hint = ValueHint::Other)]
+        name: String,
+    },
     /// Create a branch and switch to it
     Create {
+        /// New branch name
+        #[arg(value_name = "BRANCH", value_hint = ValueHint::Other)]
         name: String,
         /// Commit to branch from
+        #[arg(value_name = "START", value_hint = ValueHint::Other)]
         start: Option<String>,
     },
     /// Rename a branch
-    Rename { old: String, new: String },
+    Rename {
+        /// Existing branch name
+        #[arg(value_name = "OLD", value_hint = ValueHint::Other)]
+        old: String,
+        /// New branch name
+        #[arg(value_name = "NEW", value_hint = ValueHint::Other)]
+        new: String,
+    },
     /// Delete a branch
     Delete {
+        /// Branch to delete
+        #[arg(value_name = "BRANCH", value_hint = ValueHint::Other)]
         name: String,
         /// Confirm; without it the command reports what it would delete
         #[arg(long)]
@@ -344,6 +381,8 @@ enum BranchVerb {
     },
     /// Diff a branch against the current one without checking anything out
     Compare {
+        /// Local or remote-tracking branch to compare
+        #[arg(value_name = "BRANCH", value_hint = ValueHint::Other)]
         reference: String,
         /// Print whole files instead of three lines of context
         #[arg(long)]
@@ -375,11 +414,21 @@ enum StashVerb {
         staged: bool,
     },
     /// Apply a stash and keep it
-    Apply { reference: String },
+    Apply {
+        /// Stash reference to apply
+        #[arg(value_name = "STASH", value_hint = ValueHint::Other)]
+        reference: String,
+    },
     /// Apply a stash and drop it
-    Pop { reference: Option<String> },
+    Pop {
+        /// Stash reference to apply and drop
+        #[arg(value_name = "STASH", value_hint = ValueHint::Other)]
+        reference: Option<String>,
+    },
     /// Drop a stash
     Drop {
+        /// Stash reference to drop
+        #[arg(value_name = "STASH", value_hint = ValueHint::Other)]
         reference: String,
         /// Confirm; without it the command reports what it would drop
         #[arg(long)]
@@ -393,6 +442,8 @@ enum StashVerb {
     },
     /// Print a stash as a patch
     Show {
+        /// Stash reference to print
+        #[arg(value_name = "STASH", value_hint = ValueHint::Other)]
         reference: String,
         /// Print whole files instead of three lines of context
         #[arg(long)]
@@ -421,9 +472,10 @@ enum PrVerb {
 #[derive(Debug, Args, Clone)]
 struct PrArgs {
     /// Pull-request number
+    #[arg(value_name = "NUMBER", value_hint = ValueHint::Other)]
     number: u64,
     /// Repository the number belongs to, as owner/name
-    #[arg(long, value_name = "OWNER/NAME")]
+    #[arg(long, value_name = "OWNER/NAME", value_hint = ValueHint::Other)]
     repo: Option<String>,
     /// Ask GitHub again instead of answering from the cache
     #[arg(long)]
@@ -438,7 +490,13 @@ struct PrWatchArgs {
     #[arg(long)]
     watch: bool,
     /// Seconds between refreshes
-    #[arg(long, value_name = "SECONDS", default_value_t = CHECK_WATCH_INTERVAL)]
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        default_value_t = CHECK_WATCH_INTERVAL,
+        requires = "watch",
+        value_parser = clap::value_parser!(u64).range(CHECK_WATCH_FLOOR..)
+    )]
     interval: u64,
 }
 
@@ -447,7 +505,7 @@ struct PrOpenArgs {
     #[command(flatten)]
     pull_request: PrArgs,
     /// Open a matching check run instead of the pull request
-    #[arg(long, value_name = "NAME")]
+    #[arg(long, value_name = "NAME", value_hint = ValueHint::Other)]
     check: Option<String>,
 }
 
@@ -456,6 +514,7 @@ struct PrDiffArgs {
     #[command(flatten)]
     pull_request: PrArgs,
     /// Limit the patch to one path
+    #[arg(value_name = "PATH", value_hint = ValueHint::AnyPath)]
     path: Option<PathBuf>,
 }
 
@@ -467,10 +526,16 @@ struct PrChecksArgs {
     #[arg(long)]
     watch: bool,
     /// Seconds between reads while watching
-    #[arg(long, value_name = "SECONDS", default_value_t = CHECK_WATCH_INTERVAL)]
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        default_value_t = CHECK_WATCH_INTERVAL,
+        requires = "watch",
+        value_parser = clap::value_parser!(u64).range(CHECK_WATCH_FLOOR..)
+    )]
     interval: u64,
     /// Exit 1 when a check has not passed
-    #[arg(long)]
+    #[arg(long, conflicts_with = "watch")]
     exit_code: bool,
 }
 
@@ -479,12 +544,19 @@ struct PrLogsArgs {
     #[command(flatten)]
     pull_request: PrArgs,
     /// Check run to read, by name
+    #[arg(value_name = "CHECK", value_hint = ValueHint::Other)]
     check: String,
     /// Keep reading while the run is still going
     #[arg(long)]
     watch: bool,
     /// Seconds between reads while watching
-    #[arg(long, value_name = "SECONDS", default_value_t = LOG_WATCH_INTERVAL)]
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        default_value_t = LOG_WATCH_INTERVAL,
+        requires = "watch",
+        value_parser = clap::value_parser!(u64).range(LOG_WATCH_FLOOR..)
+    )]
     interval: u64,
 }
 
@@ -494,9 +566,9 @@ pub(crate) fn dispatch() -> Result<Launch> {
     let verb = match cli.command {
         None => {
             return Ok(Launch::Terminal(Box::new(TerminalOptions {
-                path: cli.path,
-                no_mouse: cli.no_mouse,
-                webhook_listen: cli.webhook_listen,
+                path: PathBuf::from("."),
+                no_mouse: false,
+                webhook_listen: None,
             })));
         }
         Some(Verb::Tui(args)) => {
@@ -510,6 +582,7 @@ pub(crate) fn dispatch() -> Result<Launch> {
             return completions(&out, &args).map(Launch::Finished);
         }
         Some(Verb::Man(args)) => return manual(&out, &args).map(Launch::Finished),
+        Some(Verb::Capabilities) => return capabilities(&out).map(Launch::Finished),
         Some(Verb::Update(args)) => {
             return update::run(&out, args.check).map(Launch::Finished);
         }
@@ -559,6 +632,113 @@ fn manual(out: &Emitter, args: &ManArgs) -> Result<u8> {
         text
     })?;
     Ok(0)
+}
+
+fn capabilities(out: &Emitter) -> Result<u8> {
+    let mut command = Cli::command();
+    command.build();
+    let mut commands = Vec::new();
+    collect_capabilities(&command, &[], &mut commands);
+    let document = CapabilityDocument {
+        schema_version: 1,
+        version: env!("CARGO_PKG_VERSION"),
+        output_modes: ["text", "json"],
+        commands,
+    };
+    out.emit(&document, || render_capabilities(&document))?;
+    Ok(0)
+}
+
+fn collect_capabilities(
+    command: &clap::Command,
+    parent: &[String],
+    commands: &mut Vec<CommandCapability>,
+) {
+    let mut path = parent.to_vec();
+    path.push(command.get_name().to_owned());
+    let arguments = command
+        .get_arguments()
+        .filter(|argument| argument.get_id() != "help" && argument.get_id() != "version")
+        .map(|argument| ArgumentCapability {
+            id: argument.get_id().to_string(),
+            help: argument.get_help().map(ToString::to_string),
+            short: argument.get_short(),
+            long: argument.get_long().map(str::to_owned),
+            required: argument.is_required_set(),
+            value_names: argument
+                .get_value_names()
+                .map(|names| names.iter().map(ToString::to_string).collect())
+                .unwrap_or_default(),
+            possible_values: argument
+                .get_value_parser()
+                .possible_values()
+                .map(|values| values.map(|value| value.get_name().to_owned()).collect())
+                .unwrap_or_default(),
+        })
+        .collect();
+    commands.push(CommandCapability {
+        path: path.join(" "),
+        about: command.get_about().map(ToString::to_string),
+        arguments,
+        subcommands: command
+            .get_subcommands()
+            .filter(|child| child.get_name() != "help")
+            .map(|child| child.get_name().to_owned())
+            .collect(),
+    });
+    for child in command
+        .get_subcommands()
+        .filter(|child| child.get_name() != "help")
+    {
+        collect_capabilities(child, &path, commands);
+    }
+}
+
+fn render_capabilities(document: &CapabilityDocument) -> String {
+    let mut text = format!(
+        "Quinjet {} command capabilities (schema {})\n\n",
+        document.version, document.schema_version
+    );
+    for command in &document.commands {
+        text.push_str(&command.path);
+        if let Some(about) = &command.about {
+            text.push_str("  ");
+            text.push_str(about);
+        }
+        text.push('\n');
+    }
+    text.push_str("\nUse --json for arguments, values, and command relationships.\n");
+    text
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CapabilityDocument {
+    schema_version: u8,
+    version: &'static str,
+    output_modes: [&'static str; 2],
+    commands: Vec<CommandCapability>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CommandCapability {
+    path: String,
+    about: Option<String>,
+    arguments: Vec<ArgumentCapability>,
+    subcommands: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ArgumentCapability {
+    id: String,
+    help: Option<String>,
+    short: Option<char>,
+    long: Option<String>,
+    required: bool,
+    value_names: Vec<String>,
+    possible_values: Vec<String>,
 }
 
 fn render_page(command: &clap::Command, name: &str) -> Result<Vec<u8>> {
@@ -640,11 +820,13 @@ fn run(session: &mut Session, out: &Emitter, verb: Verb) -> Result<u8> {
             "the terminal interface is launched before any verb runs",
         )
         .into()),
-        Verb::Completions(_) | Verb::Man(_) | Verb::Update(_) => Err(Failure::new(
-            EXIT_FAILURE,
-            "metadata commands run before a repository is opened",
-        )
-        .into()),
+        Verb::Completions(_) | Verb::Man(_) | Verb::Capabilities | Verb::Update(_) => {
+            Err(Failure::new(
+                EXIT_FAILURE,
+                "metadata commands run before a repository is opened",
+            )
+            .into())
+        }
         Verb::Status(args) => status(session, out, &args),
         Verb::Diff(args) => working_diff(session, out, &args),
         Verb::Stage(args) => {
@@ -1562,10 +1744,43 @@ mod tests {
     }
 
     #[test]
-    fn a_repository_path_with_no_verb_opens_the_terminal_interface() {
-        let cli = Cli::try_parse_from(["quinjet", "/tmp/somewhere"]).unwrap();
-        assert!(cli.command.is_none());
-        assert_eq!(cli.path, PathBuf::from("/tmp/somewhere"));
+    fn completion_hints_distinguish_paths_from_identifiers() {
+        let root = Cli::command();
+        let diff = root.find_subcommand("diff").unwrap();
+        let diff_path = diff
+            .get_arguments()
+            .find(|argument| argument.get_id() == "paths")
+            .unwrap();
+        assert_eq!(diff_path.get_value_hint(), ValueHint::AnyPath);
+
+        let branch = root.find_subcommand("branch").unwrap();
+        let switch = branch.find_subcommand("switch").unwrap();
+        let branch_name = switch
+            .get_arguments()
+            .find(|argument| argument.get_id() == "name")
+            .unwrap();
+        assert_eq!(branch_name.get_value_hint(), ValueHint::Other);
+
+        let status = root.find_subcommand("status").unwrap();
+        let interval = status
+            .get_arguments()
+            .find(|argument| argument.get_id() == "interval")
+            .unwrap();
+        assert_eq!(interval.get_value_hint(), ValueHint::Unknown);
+    }
+
+    #[test]
+    fn a_terminal_path_belongs_to_the_tui_verb() {
+        let cli = Cli::try_parse_from(["quinjet", "tui", "/tmp/somewhere"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Verb::Tui(TuiArgs { path, .. })) if path == Path::new("/tmp/somewhere")
+        ));
+    }
+
+    #[test]
+    fn an_unknown_verb_is_a_usage_error() {
+        assert!(Cli::try_parse_from(["quinjet", "statsu"]).is_err());
     }
 
     #[test]
@@ -1934,6 +2149,7 @@ mod tests {
             ["tui"].as_slice(),
             ["completions"].as_slice(),
             ["man"].as_slice(),
+            ["capabilities"].as_slice(),
         ] {
             assert!(resolves(path), "the command tree is missing {path:?}");
         }

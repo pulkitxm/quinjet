@@ -1,7 +1,7 @@
 # Generated references
 
-Two verbs generate references rather than reading a repository: shell
-completion scripts and manual pages. Both are generated on demand from the
+Three verbs generate references rather than reading a repository: shell
+completion scripts, manual pages, and machine-readable capabilities. All are generated on demand from the
 same command definition the parser itself runs. Neither is installed
 automatically, and neither needs a repository or `git`, so both work anywhere.
 
@@ -10,6 +10,7 @@ automatically, and neither needs a repository or `git`, so both work anywhere.
 - [`quinjet completions`](./completions.md): a completion script for bash,
   zsh, fish, elvish, or PowerShell.
 - [`quinjet man`](./man.md): the manual page, or one page per command.
+- [`quinjet capabilities`](./capabilities.md): the installed command and argument schema.
 
 ## Why they are generated
 
