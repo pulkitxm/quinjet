@@ -330,6 +330,20 @@ fn status_reports_the_branch_in_both_faces() -> Result<()> {
 }
 
 #[test]
+fn captured_and_json_output_never_include_progress() -> Result<()> {
+    let scratch = Scratch::repository()?;
+    for args in [vec!["status"], vec!["status", "--json"]] {
+        let run = scratch.quinjet(&args)?.success()?;
+        ensure!(
+            run.stderr.is_empty(),
+            "{args:?} wrote progress to captured stderr: {}",
+            run.stderr
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn stage_commit_log_show_round_trip() -> Result<()> {
     let scratch = Scratch::repository()?;
     scratch.write("feature.txt", "feature\n")?;

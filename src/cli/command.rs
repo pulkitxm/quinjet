@@ -72,6 +72,30 @@ pub(crate) enum Command {
     Operate(GitOperation),
 }
 
+impl Command {
+    pub(crate) const fn progress_label(&self) -> &'static str {
+        match self {
+            Self::Status => "Reading repository status",
+            Self::History { .. } => "Reading commit history",
+            Self::Branches | Self::HistoryBranches => "Reading branches",
+            Self::Stashes => "Reading stashes",
+            Self::PrepareLocalDiff { .. } => "Preparing local diff",
+            Self::LocalDiffFile { .. } => "Loading file patch",
+            Self::GitHubRepositories { .. } => "Discovering GitHub repositories",
+            Self::PullRequestLookup { .. } => "Fetching pull-request metadata",
+            Self::PreparePullRequest { .. } => "Preparing pull-request diff",
+            Self::PullRequestFile { .. } | Self::PullRequestFileBatch { .. } => {
+                "Loading pull-request patches"
+            }
+            Self::PullRequestChecks { .. } => "Fetching pull-request checks",
+            Self::PullRequestConversation { .. } => "Fetching pull-request conversation",
+            Self::CheckRunLog { .. } => "Fetching check-run log",
+            Self::WarmCheckRunLogs { .. } => "Caching check-run logs",
+            Self::Operate(operation) => operation.label(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum Outcome {
     Status(Box<RepoStatus>),
