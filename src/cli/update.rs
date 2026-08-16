@@ -448,6 +448,42 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn replacement_failure_preserves_the_executable_and_removes_the_stage() -> Result<()> {
+        let scratch = tempfile::tempdir()?;
+        let executable = scratch.path().join("quinjet");
+        fs::write(&executable, b"old")?;
+        let context = context(&executable, "1.2.3");
+        let binary = b"new release binary";
+        let checksum = sha256(binary);
+        let staged_path = RefCell::new(None::<PathBuf>);
+        let result = perform_update(
+            &context,
+            false,
+            |url, _limit| {
+                if url == context.api_url {
+                    Ok(br#"{"tag_name":"v1.3.0"}"#.to_vec())
+                } else if url.ends_with("/SHA256SUMS") {
+                    Ok(format!("{checksum}  quinjet-linux-x86_64\n").into_bytes())
+                } else {
+                    Ok(binary.to_vec())
+                }
+            },
+            |staged, _destination| {
+                drop(staged_path.replace(Some(staged.to_path_buf())));
+                bail!("simulated replacement failure")
+            },
+        );
+        ensure!(result.is_err());
+        ensure!(fs::read(&executable)? == b"old");
+        let staged_path = staged_path
+            .borrow()
+            .clone()
+            .context("the replacer did not receive a staged path")?;
+        ensure!(!staged_path.exists());
+        Ok(())
+    }
+
     fn context<'a>(executable: &'a Path, current_version: &'a str) -> UpdateContext<'a> {
         UpdateContext {
             current_version,
