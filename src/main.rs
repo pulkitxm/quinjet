@@ -8,7 +8,9 @@ mod webhook;
 
 use std::io::{self, IsTerminal};
 use std::process::ExitCode;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -44,16 +46,10 @@ fn main() -> ExitCode {
     }
 }
 
-/// Whether the alternate screen is currently ours to leave.
 static TERMINAL_ENTERED: AtomicBool = AtomicBool::new(false);
-/// Whether a keyboard enhancement entry is ours to pop.
 static KEYBOARD_ENHANCED: AtomicBool = AtomicBool::new(false);
+static TERMINAL_THREAD: OnceLock<thread::ThreadId> = OnceLock::new();
 
-/// Put the terminal back the way it was found.
-///
-/// Both the guard's `Drop` and the panic hook call this, and the first one
-/// through does the work, so a panic during a normal teardown cannot send the
-/// escape sequences twice.
 fn restore_terminal() {
     if !TERMINAL_ENTERED.swap(false, Ordering::SeqCst) {
         return;
@@ -72,16 +68,19 @@ fn restore_terminal() {
     ));
 }
 
-/// Restore the terminal before anything reports a panic.
-///
-/// A release build aborts rather than unwinds, so `Drop` never runs and the
-/// hook is the only chance to leave the alternate screen. Without it a panic
-/// from any dependency hands the reader a shell still in raw mode, with the
-/// message painted on a screen that is about to disappear.
 fn install_panic_hook() {
+    let current = thread::current().id();
+    let owner = TERMINAL_THREAD.get_or_init(|| current);
+    debug_assert_eq!(owner, &current, "terminal hook installed on another thread");
     let report = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        restore_terminal();
+        if cfg!(panic = "abort")
+            || TERMINAL_THREAD
+                .get()
+                .is_some_and(|owner| owner == &thread::current().id())
+        {
+            restore_terminal();
+        }
         report(info);
     }));
 }
@@ -223,10 +222,19 @@ struct TerminalGuard {
     mouse: bool,
 }
 
+struct TerminalRollback {
+    armed: bool,
+}
+
+impl Drop for TerminalRollback {
+    fn drop(&mut self) {
+        if self.armed {
+            restore_terminal();
+        }
+    }
+}
+
 impl TerminalGuard {
-    /// A terminal cannot select text with a mouse it is reporting to the
-    /// application, so releasing it is the only way to make the screen
-    /// selectable and copyable.
     fn set_mouse_capture(&mut self, enabled: bool) {
         if self.mouse == enabled {
             return;
@@ -244,15 +252,16 @@ impl TerminalGuard {
 
     fn enter(mouse: bool) -> Result<Self> {
         enable_raw_mode().context("failed to enable terminal raw mode")?;
+        TERMINAL_ENTERED.store(true, Ordering::SeqCst);
+        let mut rollback = TerminalRollback { armed: true };
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)
             .context("failed to enter alternate screen")?;
         if mouse {
             execute!(stdout, EnableMouseCapture).context("failed to enable mouse capture")?;
         }
-        TERMINAL_ENTERED.store(true, Ordering::SeqCst);
-        if crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false) {
-            drop(execute!(
+        if crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false)
+            && execute!(
                 stdout,
                 PushKeyboardEnhancementFlags(
                     KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
@@ -260,12 +269,15 @@ impl TerminalGuard {
                         | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
                         | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
                 )
-            ));
+            )
+            .is_ok()
+        {
             KEYBOARD_ENHANCED.store(true, Ordering::SeqCst);
         }
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend).context("failed to initialize terminal")?;
         terminal.clear().context("failed to clear terminal")?;
+        rollback.armed = false;
         Ok(Self { terminal, mouse })
     }
 }
