@@ -46,7 +46,7 @@ clap_mangen = "0.3.3"
 crossbeam-channel = "0.5"
 crossterm = "0.29"
 hex = "0.4"
-indicatif = "0.18.3"
+indicatif = { version = "0.18.3", features = ["in_memory"] }
 notify = "8.0"
 ratatui = "0.30"
 self-replace = "1.5"
@@ -58,9 +58,6 @@ syntect = { version = "5.3", default-features = false, features = ["default-fanc
 tempfile = "3.20"
 two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
 unicode-width = "0.2"
-
-[dev-dependencies]
-indicatif = { version = "0.18.3", features = ["in_memory"] }
 
 [lints.rust]
 unsafe_code = "forbid"
