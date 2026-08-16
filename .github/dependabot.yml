@@ -15,6 +15,32 @@ updates:
         patterns: ['*']
         update-types: [minor, patch]
 
+  - package-ecosystem: cargo
+    directory: /fuzz
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: 'chore'
+      include: scope
+    groups:
+      fuzz:
+        patterns: ['*']
+
+  - package-ecosystem: npm
+    directory: /.github/tools
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: 'chore'
+      include: scope
+    groups:
+      ci-tools:
+        patterns: ['*']
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
