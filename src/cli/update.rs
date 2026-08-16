@@ -32,8 +32,18 @@ pub(super) fn run(out: &Emitter, check_only: bool) -> Result<u8> {
     let result = perform_update(
         &context,
         check_only,
-        |url, limit| downloader.fetch(url, limit),
+        |url, limit| {
+            if url == API_URL {
+                out.set_progress("Fetching release metadata");
+            } else if url.ends_with("SHA256SUMS") {
+                out.set_progress("Fetching release checksums");
+            } else {
+                out.set_progress("Downloading update");
+            }
+            downloader.fetch(url, limit)
+        },
         |staged| {
+            out.set_progress("Installing verified update");
             self_replace::self_replace(staged).context("failed to replace the running executable")
         },
     )?;

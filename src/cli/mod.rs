@@ -11,10 +11,11 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::{Shell, generate};
 use clap_mangen::Man;
 pub(crate) use command::{Command, Outcome, Session};
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use serde::Serialize;
 
 use crate::git::diff::{DiffDocument, DiffIndex};
@@ -30,6 +31,13 @@ pub(crate) const EXIT_NOT_FOUND: u8 = 3;
 pub(crate) const EXIT_UNAVAILABLE: u8 = 4;
 
 const PROGRAM: &str = "quinjet";
+const ROOT_HELP: &str = "Examples:
+  quinjet
+  quinjet status --json
+  quinjet -C ../project diff --staged
+  quinjet pr checks 42 --watch
+
+Documentation: https://github.com/pulkitxm/quinjet/wiki/Command-Line";
 
 const CHECK_WATCH_INTERVAL: u64 = 5;
 const CHECK_WATCH_FLOOR: u64 = 2;
@@ -84,24 +92,11 @@ pub(crate) enum Launch {
 #[derive(Debug, Parser)]
 #[command(name = "quinjet", version, about)]
 #[command(subcommand_negates_reqs = true)]
+#[command(propagate_version = true)]
+#[command(after_long_help = ROOT_HELP)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Verb>,
-
-    /// Git repository to open in the terminal interface
-    #[arg(default_value = ".")]
-    path: PathBuf,
-
-    /// Disable mouse capture (all features remain keyboard-accessible)
-    #[arg(long)]
-    no_mouse: bool,
-
-    /// Refresh the open pull request the moment a forwarded GitHub webhook
-    /// arrives, given a port or host:port to listen on. Pair with
-    /// `gh webhook forward --repo <repo> --events '*' --url http://127.0.0.1:<port>`.
-    /// Only loopback connections are accepted.
-    #[arg(long, value_name = "ADDRESS")]
-    webhook_listen: Option<String>,
 
     /// Repository to run a subcommand against
     #[arg(
@@ -109,7 +104,8 @@ struct Cli {
         long = "path",
         value_name = "DIR",
         default_value = ".",
-        global = true
+        global = true,
+        value_hint = ValueHint::DirPath
     )]
     repository: PathBuf,
 
@@ -170,11 +166,52 @@ enum Verb {
         command: PrVerb,
     },
     /// Print a shell completion script
+    #[command(visible_alias = "completion")]
     Completions(CompletionsArgs),
     /// Print the manual page, or write one page per command
     Man(ManArgs),
+    /// Describe commands and arguments for automation
+    Capabilities,
     /// Update this executable to the latest stable release
     Update(UpdateArgs),
+}
+
+impl Verb {
+    const fn progress_label(&self) -> Option<&'static str> {
+        match self {
+            Self::Tui(_) | Self::Completions(_) | Self::Man(_) | Self::Capabilities => None,
+            Self::Status(args) if args.watch => None,
+            Self::Status(_) => Some("Reading repository status"),
+            Self::Diff(_) => Some("Loading the working-tree diff"),
+            Self::Stage(_) => Some("Staging changes"),
+            Self::Unstage(_) => Some("Unstaging changes"),
+            Self::Discard(_) => Some("Reading changes to discard"),
+            Self::Commit(_) => Some("Creating commit"),
+            Self::Fetch => Some("Fetching remotes"),
+            Self::Pull => Some("Pulling changes"),
+            Self::Push => Some("Pushing changes"),
+            Self::Sync => Some("Synchronizing changes"),
+            Self::Log(_) => Some("Reading commit history"),
+            Self::Show(_) => Some("Loading commit patch"),
+            Self::Branch { .. } => Some("Reading branch state"),
+            Self::Stash { .. } => Some("Reading stash state"),
+            Self::CherryPick(_) => Some("Resolving commit to cherry-pick"),
+            Self::Revert(_) => Some("Resolving commit to revert"),
+            Self::Resolve(_) => Some("Resolving conflict"),
+            Self::Repos(_) => Some("Discovering GitHub repositories"),
+            Self::Pr {
+                command: PrVerb::View(args) | PrVerb::Conversation(args),
+            } if args.watch => None,
+            Self::Pr {
+                command: PrVerb::Checks(args),
+            } if args.watch => None,
+            Self::Pr {
+                command: PrVerb::Logs(args),
+            } if args.watch => None,
+            Self::Pr { .. } => Some("Loading pull request"),
+            Self::Update(_) => Some("Checking for updates"),
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -187,7 +224,7 @@ struct CompletionsArgs {
 #[derive(Debug, Args)]
 struct ManArgs {
     /// Write one page per command into this directory instead of printing one
-    #[arg(long, value_name = "DIR")]
+    #[arg(long, value_name = "DIR", value_hint = ValueHint::DirPath)]
     dir: Option<PathBuf>,
 }
 
@@ -201,7 +238,7 @@ struct UpdateArgs {
 #[derive(Debug, Args)]
 struct TuiArgs {
     /// Git repository to open
-    #[arg(default_value = ".")]
+    #[arg(default_value = ".", value_hint = ValueHint::DirPath)]
     path: PathBuf,
     /// Disable mouse capture
     #[arg(long)]
@@ -217,13 +254,21 @@ struct WatchableArgs {
     #[arg(long)]
     watch: bool,
     /// Seconds between refreshes
-    #[arg(long, value_name = "SECONDS", default_value_t = 2)]
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        default_value_t = 2,
+        requires = "watch",
+        value_parser = clap::value_parser!(u64).range(1..),
+        value_hint = ValueHint::Other
+    )]
     interval: u64,
 }
 
 #[derive(Debug, Args)]
 struct DiffArgs {
     /// Limit the diff to these paths
+    #[arg(value_name = "PATH", value_hint = ValueHint::AnyPath)]
     paths: Vec<PathBuf>,
     /// Only what is staged
     #[arg(long)]
@@ -237,8 +282,10 @@ struct DiffArgs {
 }
 
 #[derive(Debug, Args)]
+#[group(required = true, multiple = false)]
 struct SelectionArgs {
     /// Paths to act on
+    #[arg(value_name = "PATH", value_hint = ValueHint::AnyPath)]
     paths: Vec<PathBuf>,
     /// Act on every change instead
     #[arg(long, conflicts_with = "paths")]
@@ -247,11 +294,8 @@ struct SelectionArgs {
 
 #[derive(Debug, Args)]
 struct DiscardArgs {
-    /// Paths whose changes are thrown away
-    paths: Vec<PathBuf>,
-    /// Throw away every change instead
-    #[arg(long, conflicts_with = "paths")]
-    all: bool,
+    #[command(flatten)]
+    selection: SelectionArgs,
     /// Confirm; without it the command reports what it would discard
     #[arg(long)]
     yes: bool,
@@ -270,20 +314,20 @@ struct CommitArgs {
 #[derive(Debug, Args)]
 struct LogArgs {
     /// Branch, tag, or commit to read from
-    #[arg(default_value = "HEAD")]
+    #[arg(default_value = "HEAD", value_name = "REVISION", value_hint = ValueHint::Other)]
     revision: String,
     /// Commits to skip
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 0, value_hint = ValueHint::Other)]
     skip: usize,
     /// Commits to print
-    #[arg(long, short = 'n', default_value_t = 30)]
+    #[arg(long, short = 'n', default_value_t = 30, value_hint = ValueHint::Other)]
     limit: usize,
 }
 
 #[derive(Debug, Args)]
 struct ShowArgs {
     /// Commit to show
-    #[arg(default_value = "HEAD")]
+    #[arg(default_value = "HEAD", value_name = "REVISION", value_hint = ValueHint::Other)]
     revision: String,
     /// Print whole files instead of three lines of context
     #[arg(long)]
@@ -293,6 +337,7 @@ struct ShowArgs {
 #[derive(Debug, Args)]
 struct RevisionArgs {
     /// Commit to act on
+    #[arg(value_name = "REVISION", value_hint = ValueHint::Other)]
     revision: String,
     /// Confirm; without it the command reports what it would do
     #[arg(long)]
@@ -302,15 +347,23 @@ struct RevisionArgs {
 #[derive(Debug, Args)]
 struct ResolveArgs {
     /// Conflicted path
+    #[arg(value_name = "PATH", value_hint = ValueHint::AnyPath)]
     path: PathBuf,
+    #[command(flatten)]
+    side: ConflictSide,
+}
+
+#[derive(Debug, Args)]
+#[group(required = true, multiple = false)]
+struct ConflictSide {
     /// Keep the version already on this branch
-    #[arg(long, group = "side")]
+    #[arg(long)]
     ours: bool,
     /// Keep the version being merged in
-    #[arg(long, group = "side")]
+    #[arg(long)]
     theirs: bool,
     /// Accept the file as it stands and stage it
-    #[arg(long, group = "side")]
+    #[arg(long)]
     stage: bool,
 }
 
@@ -326,17 +379,33 @@ enum BranchVerb {
     /// List local branches
     List(BranchListArgs),
     /// Switch to a branch
-    Switch { name: String },
+    Switch {
+        /// Branch to switch to
+        #[arg(value_name = "BRANCH", value_hint = ValueHint::Other)]
+        name: String,
+    },
     /// Create a branch and switch to it
     Create {
+        /// New branch name
+        #[arg(value_name = "BRANCH", value_hint = ValueHint::Other)]
         name: String,
         /// Commit to branch from
+        #[arg(value_name = "START", value_hint = ValueHint::Other)]
         start: Option<String>,
     },
     /// Rename a branch
-    Rename { old: String, new: String },
+    Rename {
+        /// Existing branch name
+        #[arg(value_name = "OLD", value_hint = ValueHint::Other)]
+        old: String,
+        /// New branch name
+        #[arg(value_name = "NEW", value_hint = ValueHint::Other)]
+        new: String,
+    },
     /// Delete a branch
     Delete {
+        /// Branch to delete
+        #[arg(value_name = "BRANCH", value_hint = ValueHint::Other)]
         name: String,
         /// Confirm; without it the command reports what it would delete
         #[arg(long)]
@@ -344,6 +413,8 @@ enum BranchVerb {
     },
     /// Diff a branch against the current one without checking anything out
     Compare {
+        /// Local or remote-tracking branch to compare
+        #[arg(value_name = "BRANCH", value_hint = ValueHint::Other)]
         reference: String,
         /// Print whole files instead of three lines of context
         #[arg(long)]
@@ -375,11 +446,21 @@ enum StashVerb {
         staged: bool,
     },
     /// Apply a stash and keep it
-    Apply { reference: String },
+    Apply {
+        /// Stash reference to apply
+        #[arg(value_name = "STASH", value_hint = ValueHint::Other)]
+        reference: String,
+    },
     /// Apply a stash and drop it
-    Pop { reference: Option<String> },
+    Pop {
+        /// Stash reference to apply and drop
+        #[arg(value_name = "STASH", value_hint = ValueHint::Other)]
+        reference: Option<String>,
+    },
     /// Drop a stash
     Drop {
+        /// Stash reference to drop
+        #[arg(value_name = "STASH", value_hint = ValueHint::Other)]
         reference: String,
         /// Confirm; without it the command reports what it would drop
         #[arg(long)]
@@ -393,6 +474,8 @@ enum StashVerb {
     },
     /// Print a stash as a patch
     Show {
+        /// Stash reference to print
+        #[arg(value_name = "STASH", value_hint = ValueHint::Other)]
         reference: String,
         /// Print whole files instead of three lines of context
         #[arg(long)]
@@ -421,9 +504,10 @@ enum PrVerb {
 #[derive(Debug, Args, Clone)]
 struct PrArgs {
     /// Pull-request number
+    #[arg(value_name = "NUMBER", value_hint = ValueHint::Other)]
     number: u64,
     /// Repository the number belongs to, as owner/name
-    #[arg(long, value_name = "OWNER/NAME")]
+    #[arg(long, value_name = "OWNER/NAME", value_hint = ValueHint::Other)]
     repo: Option<String>,
     /// Ask GitHub again instead of answering from the cache
     #[arg(long)]
@@ -438,7 +522,14 @@ struct PrWatchArgs {
     #[arg(long)]
     watch: bool,
     /// Seconds between refreshes
-    #[arg(long, value_name = "SECONDS", default_value_t = CHECK_WATCH_INTERVAL)]
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        default_value_t = CHECK_WATCH_INTERVAL,
+        requires = "watch",
+        value_parser = clap::value_parser!(u64).range(CHECK_WATCH_FLOOR..),
+        value_hint = ValueHint::Other
+    )]
     interval: u64,
 }
 
@@ -447,7 +538,7 @@ struct PrOpenArgs {
     #[command(flatten)]
     pull_request: PrArgs,
     /// Open a matching check run instead of the pull request
-    #[arg(long, value_name = "NAME")]
+    #[arg(long, value_name = "NAME", value_hint = ValueHint::Other)]
     check: Option<String>,
 }
 
@@ -456,6 +547,7 @@ struct PrDiffArgs {
     #[command(flatten)]
     pull_request: PrArgs,
     /// Limit the patch to one path
+    #[arg(value_name = "PATH", value_hint = ValueHint::AnyPath)]
     path: Option<PathBuf>,
 }
 
@@ -467,10 +559,17 @@ struct PrChecksArgs {
     #[arg(long)]
     watch: bool,
     /// Seconds between reads while watching
-    #[arg(long, value_name = "SECONDS", default_value_t = CHECK_WATCH_INTERVAL)]
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        default_value_t = CHECK_WATCH_INTERVAL,
+        requires = "watch",
+        value_parser = clap::value_parser!(u64).range(CHECK_WATCH_FLOOR..),
+        value_hint = ValueHint::Other
+    )]
     interval: u64,
     /// Exit 1 when a check has not passed
-    #[arg(long)]
+    #[arg(long, conflicts_with = "watch")]
     exit_code: bool,
 }
 
@@ -479,24 +578,32 @@ struct PrLogsArgs {
     #[command(flatten)]
     pull_request: PrArgs,
     /// Check run to read, by name
+    #[arg(value_name = "CHECK", value_hint = ValueHint::Other)]
     check: String,
     /// Keep reading while the run is still going
     #[arg(long)]
     watch: bool,
     /// Seconds between reads while watching
-    #[arg(long, value_name = "SECONDS", default_value_t = LOG_WATCH_INTERVAL)]
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        default_value_t = LOG_WATCH_INTERVAL,
+        requires = "watch",
+        value_parser = clap::value_parser!(u64).range(LOG_WATCH_FLOOR..),
+        value_hint = ValueHint::Other
+    )]
     interval: u64,
 }
 
 pub(crate) fn dispatch() -> Result<Launch> {
     let cli = Cli::parse();
-    let out = Emitter { json: cli.json };
+    let mut out = Emitter::new(cli.json);
     let verb = match cli.command {
         None => {
             return Ok(Launch::Terminal(Box::new(TerminalOptions {
-                path: cli.path,
-                no_mouse: cli.no_mouse,
-                webhook_listen: cli.webhook_listen,
+                path: PathBuf::from("."),
+                no_mouse: false,
+                webhook_listen: None,
             })));
         }
         Some(Verb::Tui(args)) => {
@@ -510,14 +617,25 @@ pub(crate) fn dispatch() -> Result<Launch> {
             return completions(&out, &args).map(Launch::Finished);
         }
         Some(Verb::Man(args)) => return manual(&out, &args).map(Launch::Finished),
+        Some(Verb::Capabilities) => return capabilities(&out).map(Launch::Finished),
         Some(Verb::Update(args)) => {
-            return update::run(&out, args.check).map(Launch::Finished);
+            out.start_progress("Checking for updates")?;
+            let result = update::run(&out, args.check);
+            out.finish_progress();
+            return result.map(Launch::Finished);
         }
         Some(other) => other,
     };
-    let repository = Repository::discover(&cli.repository)?;
-    let mut session = Session::new(repository);
-    run(&mut session, &out, verb).map(Launch::Finished)
+    if let Some(label) = verb.progress_label() {
+        out.start_progress(label)?;
+    }
+    let result = (|| {
+        let repository = Repository::discover(&cli.repository)?;
+        let mut session = Session::new(repository);
+        run(&mut session, &out, verb)
+    })();
+    out.finish_progress();
+    result.map(Launch::Finished)
 }
 
 fn completions(out: &Emitter, args: &CompletionsArgs) -> Result<u8> {
@@ -559,6 +677,176 @@ fn manual(out: &Emitter, args: &ManArgs) -> Result<u8> {
         text
     })?;
     Ok(0)
+}
+
+fn capabilities(out: &Emitter) -> Result<u8> {
+    let mut command = Cli::command();
+    command.build();
+    let mut commands = Vec::new();
+    collect_capabilities(&command, &[], &mut commands);
+    let document = CapabilityDocument {
+        schema_version: 1,
+        version: env!("CARGO_PKG_VERSION"),
+        output_modes: ["text", "json"],
+        commands,
+    };
+    out.emit(&document, || render_capabilities(&document))?;
+    Ok(0)
+}
+
+fn collect_capabilities(
+    command: &clap::Command,
+    parent: &[String],
+    commands: &mut Vec<CommandCapability>,
+) {
+    let mut path = parent.to_vec();
+    path.push(command.get_name().to_owned());
+    let arguments = command
+        .get_arguments()
+        .filter(|argument| argument.get_id() != "help" && argument.get_id() != "version")
+        .map(|argument| {
+            let (min_values, max_values) = argument.get_num_args().map_or((0, Some(0)), |range| {
+                let maximum = range.max_values();
+                (
+                    range.min_values(),
+                    (maximum != usize::MAX).then_some(maximum),
+                )
+            });
+            ArgumentCapability {
+                id: argument.get_id().to_string(),
+                help: argument.get_help().map(ToString::to_string),
+                short: argument.get_short(),
+                long: argument.get_long().map(str::to_owned),
+                positional: argument.is_positional(),
+                required: argument.is_required_set(),
+                action: argument_action(argument.get_action()),
+                min_values,
+                max_values,
+                value_names: argument
+                    .get_value_names()
+                    .map(|names| names.iter().map(ToString::to_string).collect())
+                    .unwrap_or_default(),
+                possible_values: argument
+                    .get_possible_values()
+                    .iter()
+                    .map(|value| value.get_name().to_owned())
+                    .collect(),
+                default_values: argument
+                    .get_default_values()
+                    .iter()
+                    .map(|value| value.to_string_lossy().into_owned())
+                    .collect(),
+            }
+        })
+        .collect();
+    let usage = command.clone().render_usage().to_string();
+    let groups = command
+        .get_groups()
+        .map(|group| {
+            let mut configured = group.clone();
+            ArgumentGroupCapability {
+                id: configured.get_id().to_string(),
+                arguments: configured.get_args().map(ToString::to_string).collect(),
+                required: configured.is_required_set(),
+                multiple: configured.is_multiple(),
+            }
+        })
+        .collect();
+    commands.push(CommandCapability {
+        path: path.join(" "),
+        about: command.get_about().map(ToString::to_string),
+        usage,
+        arguments,
+        groups,
+        subcommands: command
+            .get_subcommands()
+            .filter(|child| child.get_name() != "help")
+            .map(|child| child.get_name().to_owned())
+            .collect(),
+    });
+    for child in command
+        .get_subcommands()
+        .filter(|child| child.get_name() != "help")
+    {
+        collect_capabilities(child, &path, commands);
+    }
+}
+
+const fn argument_action(action: &clap::ArgAction) -> &'static str {
+    match action {
+        clap::ArgAction::Set => "set",
+        clap::ArgAction::Append => "append",
+        clap::ArgAction::SetTrue => "set_true",
+        clap::ArgAction::SetFalse => "set_false",
+        clap::ArgAction::Count => "count",
+        clap::ArgAction::Help => "help",
+        clap::ArgAction::HelpShort => "help_short",
+        clap::ArgAction::HelpLong => "help_long",
+        clap::ArgAction::Version => "version",
+        _ => "other",
+    }
+}
+
+fn render_capabilities(document: &CapabilityDocument) -> String {
+    let mut text = format!(
+        "Quinjet {} command capabilities (schema {})\n\n",
+        document.version, document.schema_version
+    );
+    for command in &document.commands {
+        text.push_str(&command.path);
+        if let Some(about) = &command.about {
+            text.push_str("  ");
+            text.push_str(about);
+        }
+        text.push('\n');
+    }
+    text.push_str("\nUse --json for arguments, values, and command relationships.\n");
+    text
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CapabilityDocument {
+    schema_version: u8,
+    version: &'static str,
+    output_modes: [&'static str; 2],
+    commands: Vec<CommandCapability>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CommandCapability {
+    path: String,
+    about: Option<String>,
+    usage: String,
+    arguments: Vec<ArgumentCapability>,
+    groups: Vec<ArgumentGroupCapability>,
+    subcommands: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct ArgumentGroupCapability {
+    id: String,
+    arguments: Vec<String>,
+    required: bool,
+    multiple: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ArgumentCapability {
+    id: String,
+    help: Option<String>,
+    short: Option<char>,
+    long: Option<String>,
+    positional: bool,
+    required: bool,
+    action: &'static str,
+    min_values: usize,
+    max_values: Option<usize>,
+    value_names: Vec<String>,
+    possible_values: Vec<String>,
+    default_values: Vec<String>,
 }
 
 fn render_page(command: &clap::Command, name: &str) -> Result<Vec<u8>> {
@@ -609,10 +897,58 @@ struct ManualPages<'a> {
 
 struct Emitter {
     json: bool,
+    progress: Option<ProgressBar>,
 }
 
 impl Emitter {
+    const fn new(json: bool) -> Self {
+        Self {
+            json,
+            progress: None,
+        }
+    }
+
+    fn start_progress(&mut self, label: &'static str) -> Result<()> {
+        if !progress_enabled(self.json, io::stderr().is_terminal()) {
+            return Ok(());
+        }
+        let progress = progress_bar(label, ProgressDrawTarget::stderr())?;
+        progress.enable_steady_tick(Duration::from_millis(100));
+        self.progress = Some(progress);
+        Ok(())
+    }
+
+    fn set_progress(&self, label: &'static str) {
+        if let Some(progress) = &self.progress {
+            progress.set_message(label);
+        }
+    }
+
+    fn note(&self, text: &str) {
+        if let Some(progress) = &self.progress {
+            progress.println(text);
+        } else {
+            note(text);
+        }
+    }
+
+    fn finish_progress(&self) {
+        if let Some(progress) = &self.progress {
+            progress.finish_and_clear();
+        }
+    }
+
+    fn execute(&self, session: &mut Session, command: Command) -> Result<Outcome> {
+        self.set_progress(command.progress_label());
+        session.execute_with(
+            command,
+            &mut |event| self.set_progress(event.label()),
+            &|| true,
+        )
+    }
+
     fn emit<T: Serialize>(&self, value: &T, text: impl FnOnce() -> String) -> Result<()> {
+        self.finish_progress();
         let mut stdout = io::stdout().lock();
         if self.json {
             writeln!(stdout, "{}", serde_json::to_string_pretty(value)?)?;
@@ -628,6 +964,19 @@ impl Emitter {
     }
 }
 
+const fn progress_enabled(json: bool, stderr_terminal: bool) -> bool {
+    !json && stderr_terminal
+}
+
+fn progress_bar(label: &'static str, target: ProgressDrawTarget) -> Result<ProgressBar> {
+    let progress = ProgressBar::with_draw_target(None, target);
+    progress.set_style(
+        ProgressStyle::with_template("{spinner:.cyan} {msg}")?.tick_strings(&["-", "\\", "|", "/"]),
+    );
+    progress.set_message(label);
+    Ok(progress)
+}
+
 #[derive(Serialize)]
 struct Message<'a> {
     message: &'a str,
@@ -640,11 +989,13 @@ fn run(session: &mut Session, out: &Emitter, verb: Verb) -> Result<u8> {
             "the terminal interface is launched before any verb runs",
         )
         .into()),
-        Verb::Completions(_) | Verb::Man(_) | Verb::Update(_) => Err(Failure::new(
-            EXIT_FAILURE,
-            "metadata commands run before a repository is opened",
-        )
-        .into()),
+        Verb::Completions(_) | Verb::Man(_) | Verb::Capabilities | Verb::Update(_) => {
+            Err(Failure::new(
+                EXIT_FAILURE,
+                "metadata commands run before a repository is opened",
+            )
+            .into())
+        }
         Verb::Status(args) => status(session, out, &args),
         Verb::Diff(args) => working_diff(session, out, &args),
         Verb::Stage(args) => {
@@ -949,10 +1300,10 @@ fn discard(session: &mut Session, out: &Emitter, args: &DiscardArgs) -> Result<u
         .changes
         .iter()
         .filter(|change| change.area != ChangeArea::Conflict)
-        .filter(|change| args.all || matches(&change.path, &args.paths))
+        .filter(|change| args.selection.all || matches(&change.path, &args.selection.paths))
         .cloned()
         .collect();
-    if !args.all && args.paths.is_empty() {
+    if !args.selection.all && args.selection.paths.is_empty() {
         return Err(Failure::new(
             EXIT_FAILURE,
             "discard needs paths, or --all for every change",
@@ -976,14 +1327,14 @@ fn discard(session: &mut Session, out: &Emitter, args: &DiscardArgs) -> Result<u
 }
 
 fn resolve(session: &mut Session, out: &Emitter, args: ResolveArgs) -> Result<u8> {
-    let operation = if args.stage {
+    let operation = if args.side.stage {
         GitOperation::Stage(vec![args.path])
-    } else if args.ours {
+    } else if args.side.ours {
         GitOperation::ResolveConflict {
             path: args.path,
             choice: ConflictChoice::Ours,
         }
-    } else if args.theirs {
+    } else if args.side.theirs {
         GitOperation::ResolveConflict {
             path: args.path,
             choice: ConflictChoice::Theirs,
@@ -1026,20 +1377,20 @@ fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb) -> Result
             if args.watch {
                 return watch_pull_request(session, out, &args);
             }
-            let snapshot = lookup_snapshot(session, &args.pull_request)?;
-            report_warnings(&snapshot);
+            let snapshot = lookup_snapshot(session, out, &args.pull_request)?;
+            report_warnings(out, &snapshot);
             out.emit(&snapshot, || render::pull_request(&snapshot.pull_request))?;
             Ok(0)
         }
         PrVerb::Files(args) => {
-            let request = lookup(session, &args)?;
-            let index = prepare(session, &request)?;
+            let request = lookup(session, out, &args)?;
+            let index = prepare(session, out, &request)?;
             out.emit(&index, || render::pull_request_files(&index))?;
             Ok(0)
         }
         PrVerb::Diff(args) => {
-            let request = lookup(session, &args.pull_request)?;
-            let document = pull_request_diff(session, &request, args.path.as_deref())?;
+            let request = lookup(session, out, &args.pull_request)?;
+            let document = pull_request_diff(session, out, &request, args.path.as_deref())?;
             out.emit(&document, || render::diff(&document))?;
             Ok(0)
         }
@@ -1047,11 +1398,14 @@ fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb) -> Result
             if args.watch {
                 return watch_conversation(session, out, &args);
             }
-            let request = lookup(session, &args.pull_request)?;
-            let conversation = session
-                .execute(Command::PullRequestConversation {
-                    pull_request: Box::new(request),
-                })?
+            let request = lookup(session, out, &args.pull_request)?;
+            let conversation = out
+                .execute(
+                    session,
+                    Command::PullRequestConversation {
+                        pull_request: Box::new(request),
+                    },
+                )?
                 .conversation()?;
             out.emit(&conversation, || render::conversation(&conversation))?;
             Ok(0)
@@ -1059,15 +1413,18 @@ fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb) -> Result
         PrVerb::Checks(args) => checks(session, out, &args),
         PrVerb::Logs(args) => logs(session, out, &args),
         PrVerb::Open(args) => {
-            let request = lookup(session, &args.pull_request)?;
+            let request = lookup(session, out, &args.pull_request)?;
             let url = match args.check {
                 None => request.url,
                 Some(name) => {
-                    let listing = session
-                        .execute(Command::PullRequestChecks {
-                            pull_request: Box::new(request),
-                            refresh: args.pull_request.refresh,
-                        })?
+                    let listing = out
+                        .execute(
+                            session,
+                            Command::PullRequestChecks {
+                                pull_request: Box::new(request),
+                                refresh: args.pull_request.refresh,
+                            },
+                        )?
                         .checks()?;
                     let check = select_check(&listing.checks, &name)?;
                     if check.link.is_empty() {
@@ -1091,7 +1448,7 @@ fn watch_pull_request(session: &mut Session, out: &Emitter, args: &PrWatchArgs) 
     watch::run(interval(args.interval, CHECK_WATCH_FLOOR), out.json, || {
         let mut request = args.pull_request.clone();
         request.refresh = true;
-        let snapshot = lookup_snapshot(session, &request)?;
+        let snapshot = lookup_snapshot(session, out, &request)?;
         Ok(watch::Frame {
             text: render::pull_request(&snapshot.pull_request),
             value: snapshot,
@@ -1105,7 +1462,7 @@ fn watch_conversation(session: &mut Session, out: &Emitter, args: &PrWatchArgs) 
     watch::run(interval(args.interval, CHECK_WATCH_FLOOR), out.json, || {
         let mut lookup_args = args.pull_request.clone();
         lookup_args.refresh = true;
-        let request = lookup_snapshot(session, &lookup_args)?.pull_request;
+        let request = lookup_snapshot(session, out, &lookup_args)?.pull_request;
         let conversation = session
             .execute(Command::PullRequestConversation {
                 pull_request: Box::new(request),
@@ -1121,7 +1478,7 @@ fn watch_conversation(session: &mut Session, out: &Emitter, args: &PrWatchArgs) 
 }
 
 fn checks(session: &mut Session, out: &Emitter, args: &PrChecksArgs) -> Result<u8> {
-    let request = lookup(session, &args.pull_request)?;
+    let request = lookup(session, out, &args.pull_request)?;
     if args.watch {
         return watch::run(interval(args.interval, CHECK_WATCH_FLOOR), out.json, || {
             let checks = session
@@ -1139,11 +1496,14 @@ fn checks(session: &mut Session, out: &Emitter, args: &PrChecksArgs) -> Result<u
             })
         });
     }
-    let checks = session
-        .execute(Command::PullRequestChecks {
-            pull_request: Box::new(request),
-            refresh: args.pull_request.refresh,
-        })?
+    let checks = out
+        .execute(
+            session,
+            Command::PullRequestChecks {
+                pull_request: Box::new(request),
+                refresh: args.pull_request.refresh,
+            },
+        )?
         .checks()?;
     out.emit(&checks, || render::checks(&checks.checks))?;
     Ok(if args.exit_code {
@@ -1154,12 +1514,15 @@ fn checks(session: &mut Session, out: &Emitter, args: &PrChecksArgs) -> Result<u
 }
 
 fn logs(session: &mut Session, out: &Emitter, args: &PrLogsArgs) -> Result<u8> {
-    let request = lookup(session, &args.pull_request)?;
-    let listing = session
-        .execute(Command::PullRequestChecks {
-            pull_request: Box::new(request.clone()),
-            refresh: args.pull_request.refresh,
-        })?
+    let request = lookup(session, out, &args.pull_request)?;
+    let listing = out
+        .execute(
+            session,
+            Command::PullRequestChecks {
+                pull_request: Box::new(request.clone()),
+                refresh: args.pull_request.refresh,
+            },
+        )?
         .checks()?;
     let check = select_check(&listing.checks, &args.check)?;
     if args.watch {
@@ -1187,11 +1550,14 @@ fn logs(session: &mut Session, out: &Emitter, args: &PrLogsArgs) -> Result<u8> {
             })
         });
     }
-    let log = session
-        .execute(Command::CheckRunLog {
-            pull_request: Box::new(request),
-            check: Box::new(check.clone()),
-        })?
+    let log = out
+        .execute(
+            session,
+            Command::CheckRunLog {
+                pull_request: Box::new(request),
+                check: Box::new(check.clone()),
+            },
+        )?
         .check_log()?;
     ensure_log_available(&log)?;
     out.emit(&log, || render::check_log(&check, &log))?;
@@ -1256,18 +1622,21 @@ fn exit_for(checks: &[PullRequestCheck]) -> u8 {
     u8::from(unhappy)
 }
 
-fn lookup(session: &mut Session, args: &PrArgs) -> Result<PullRequest> {
-    let snapshot = lookup_snapshot(session, args)?;
-    report_warnings(&snapshot);
+fn lookup(session: &mut Session, out: &Emitter, args: &PrArgs) -> Result<PullRequest> {
+    let snapshot = lookup_snapshot(session, out, args)?;
+    report_warnings(out, &snapshot);
     Ok(snapshot.pull_request)
 }
 
-fn lookup_snapshot(session: &mut Session, args: &PrArgs) -> Result<PullRequestSnapshot> {
+fn lookup_snapshot(
+    session: &mut Session,
+    out: &Emitter,
+    args: &PrArgs,
+) -> Result<PullRequestSnapshot> {
     let repositories = match &args.repo {
         None => Vec::new(),
         Some(_) => {
-            session
-                .execute(Command::GitHubRepositories { refresh: false })?
+            out.execute(session, Command::GitHubRepositories { refresh: false })?
                 .github_repositories()?
                 .0
         }
@@ -1295,37 +1664,46 @@ fn lookup_snapshot(session: &mut Session, args: &PrArgs) -> Result<PullRequestSn
             }
         }
     };
-    session
-        .execute(Command::PullRequestLookup {
+    out.execute(
+        session,
+        Command::PullRequestLookup {
             repositories,
             repository: selected,
             number: args.number,
             refresh: args.refresh,
-        })?
-        .pull_request()
+        },
+    )?
+    .pull_request()
 }
 
-fn report_warnings(snapshot: &PullRequestSnapshot) {
+fn report_warnings(out: &Emitter, snapshot: &PullRequestSnapshot) {
     for warning in &snapshot.warnings {
-        note(&format!("warning: {warning}"));
+        out.note(&format!("warning: {warning}"));
     }
 }
 
-fn prepare(session: &mut Session, request: &PullRequest) -> Result<PullRequestDiffIndex> {
-    session
-        .execute(Command::PreparePullRequest {
+fn prepare(
+    session: &mut Session,
+    out: &Emitter,
+    request: &PullRequest,
+) -> Result<PullRequestDiffIndex> {
+    out.execute(
+        session,
+        Command::PreparePullRequest {
             workspace: 0,
             pull_request: Box::new(request.clone()),
-        })?
-        .pull_request_index()
+        },
+    )?
+    .pull_request_index()
 }
 
 fn pull_request_diff(
     session: &mut Session,
+    out: &Emitter,
     request: &PullRequest,
     path: Option<&Path>,
 ) -> Result<DiffDocument> {
-    let index = prepare(session, request)?;
+    let index = prepare(session, out, request)?;
     let paths: Vec<PathBuf> = match path {
         Some(wanted) => {
             if !index.files.iter().any(|file| file.path == wanted) {
@@ -1342,11 +1720,14 @@ fn pull_request_diff(
     };
     let mut loaded = HashMap::new();
     for chunk in paths.chunks(16) {
-        for (path, document) in session
-            .execute(Command::PullRequestFileBatch {
-                workspace: 0,
-                paths: chunk.to_vec(),
-            })?
+        for (path, document) in out
+            .execute(
+                session,
+                Command::PullRequestFileBatch {
+                    workspace: 0,
+                    paths: chunk.to_vec(),
+                },
+            )?
             .pull_request_diff_batch()?
         {
             drop(loaded.insert(path, document));
@@ -1489,6 +1870,8 @@ mod tests {
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use indicatif::InMemoryTerm;
+
     use super::*;
     use crate::git::github::PullRequestCheck;
 
@@ -1562,10 +1945,79 @@ mod tests {
     }
 
     #[test]
-    fn a_repository_path_with_no_verb_opens_the_terminal_interface() {
-        let cli = Cli::try_parse_from(["quinjet", "/tmp/somewhere"]).unwrap();
-        assert!(cli.command.is_none());
-        assert_eq!(cli.path, PathBuf::from("/tmp/somewhere"));
+    fn progress_requires_human_output_and_an_interactive_stderr() {
+        assert!(progress_enabled(false, true));
+        assert!(!progress_enabled(true, true));
+        assert!(!progress_enabled(false, false));
+    }
+
+    #[test]
+    fn progress_updates_its_phase_and_clears_when_finished() {
+        let terminal = InMemoryTerm::new(2, 80);
+        let progress = progress_bar(
+            "Loading pull request",
+            ProgressDrawTarget::term_like(Box::new(terminal.clone())),
+        )
+        .unwrap();
+        progress.tick();
+        assert!(terminal.contents().contains("Loading pull request"));
+        let out = Emitter {
+            json: false,
+            progress: Some(progress),
+        };
+
+        out.set_progress("Fetching pull-request checks");
+        out.progress.as_ref().unwrap().tick();
+        assert!(terminal.contents().contains("Fetching pull-request checks"));
+        out.note("warning: using stale metadata");
+        assert!(
+            terminal
+                .contents()
+                .contains("warning: using stale metadata")
+        );
+
+        out.finish_progress();
+        assert_eq!(terminal.contents(), "warning: using stale metadata");
+    }
+
+    #[test]
+    fn completion_hints_distinguish_paths_from_identifiers() {
+        let root = Cli::command();
+        let diff = root.find_subcommand("diff").unwrap();
+        let diff_path = diff
+            .get_arguments()
+            .find(|argument| argument.get_id() == "paths")
+            .unwrap();
+        assert_eq!(diff_path.get_value_hint(), ValueHint::AnyPath);
+
+        let branch = root.find_subcommand("branch").unwrap();
+        let switch = branch.find_subcommand("switch").unwrap();
+        let branch_name = switch
+            .get_arguments()
+            .find(|argument| argument.get_id() == "name")
+            .unwrap();
+        assert_eq!(branch_name.get_value_hint(), ValueHint::Other);
+
+        let status = root.find_subcommand("status").unwrap();
+        let interval = status
+            .get_arguments()
+            .find(|argument| argument.get_id() == "interval")
+            .unwrap();
+        assert_eq!(interval.get_value_hint(), ValueHint::Other);
+    }
+
+    #[test]
+    fn a_terminal_path_belongs_to_the_tui_verb() {
+        let cli = Cli::try_parse_from(["quinjet", "tui", "/tmp/somewhere"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Verb::Tui(TuiArgs { path, .. })) if path == Path::new("/tmp/somewhere")
+        ));
+    }
+
+    #[test]
+    fn an_unknown_verb_is_a_usage_error() {
+        drop(Cli::try_parse_from(["quinjet", "statsu"]).unwrap_err());
     }
 
     #[test]
@@ -1825,14 +2277,16 @@ mod tests {
         let repository = TestRepository::new();
         fs::write(repository.path.join("README.md"), "changed\n").unwrap();
         let mut session = repository.session();
-        let out = Emitter { json: true };
+        let out = Emitter::new(true);
 
         discard(
             &mut session,
             &out,
             &DiscardArgs {
-                paths: vec![PathBuf::from("README.md")],
-                all: false,
+                selection: SelectionArgs {
+                    paths: vec![PathBuf::from("README.md")],
+                    all: false,
+                },
                 yes: false,
             },
         )
@@ -1934,6 +2388,7 @@ mod tests {
             ["tui"].as_slice(),
             ["completions"].as_slice(),
             ["man"].as_slice(),
+            ["capabilities"].as_slice(),
         ] {
             assert!(resolves(path), "the command tree is missing {path:?}");
         }

@@ -24,6 +24,9 @@ Options:
 The script is rendered from the same command tree the parser uses, so it
 always offers exactly the verbs and flags this build has. There is no
 committed copy to fall behind, and nothing to regenerate after adding a verb.
+Paths are marked as paths, while branch names, revisions, stash references,
+pull-request numbers, check names, and intervals are marked as non-path values,
+so the generated shell integration does not offer unrelated filenames for IDs.
 
 This verb reads no repository. `-C` is accepted because it is global, and is
 ignored: the answer does not depend on where you are, so it works outside a
@@ -81,6 +84,7 @@ Examples:
 quinjet completions zsh
 quinjet completions fish > ~/.config/fish/completions/quinjet.fish
 quinjet completions bash --json
+quinjet completion bash
 ```
 
 ## Where to go next

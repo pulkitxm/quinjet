@@ -32,9 +32,9 @@ The exit code is 0 only when no check is `failed` and none is `pending`. A
 is a failure of the code. That matters for a repository with conditional jobs:
 a workflow that skips its deploy job on a fork still exits 0.
 
-`--watch` refreshes on its own clock: every 5 seconds by default, with a floor
-of 2 seconds, so `--interval 1` and `--interval 0` both become 2. Each read is
-forced past the cache, which is what makes it a watch rather than a replay.
+`--watch` refreshes on its own clock: every 5 seconds by default, with a minimum
+of 2 seconds. A lower value is a usage error. Each read is forced past the
+cache, which is what makes it a watch rather than a replay.
 
 Without a terminal, the output is appended rather than repainted, so a
 redirected watch produces a readable log instead of a file full of escape
@@ -277,9 +277,8 @@ Actions job gets by default is more limited again. Practical settings:
 - Tailing a talkative job: `--interval 30`, or read it once after it finishes,
   which is a single cached request.
 
-`--interval` only means anything alongside `--watch`. On a single read it
-parses and is ignored, so `quinjet pr checks 8 --interval 30` is just
-`quinjet pr checks 8`.
+`--interval` requires `--watch`. A single read with `--interval` is a usage
+error, which prevents a caller from passing a tuning option that does nothing.
 
 The caching rules do the rest. A settled run's steps and log are keyed by job
 id and kept forever, so reading a finished job twice costs one request and one

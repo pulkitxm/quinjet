@@ -23,7 +23,7 @@ Options:
 | `--repo <OWNER/NAME>` | string | unset | Chooses which discovered repository the number belongs to. |
 | `--refresh` | flag | off | Skips the 30 second cache when reading the check list to resolve `<CHECK>`. It does not affect the log, which is either immutable or never cached. |
 | `--watch` | flag | off | Keeps re-reading while the run is still going, then exits with the run's verdict. |
-| `--interval <SECONDS>` | unsigned integer | `8` | Seconds between reads while watching. Values below 3 are raised to 3. |
+| `--interval <SECONDS>` | integer of at least 3 | `8` | Seconds between reads while watching. Requires `--watch`; lower values are usage errors. |
 | `-C, --path <DIR>` | path | `.` | The repository to run against. Global. |
 | `--json` | flag | off | Prints one JSON object on stdout, or one compact object per read under `--watch`. Global. |
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |

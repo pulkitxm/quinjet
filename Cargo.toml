@@ -46,6 +46,7 @@ clap_mangen = "0.3.3"
 crossbeam-channel = "0.5"
 crossterm = "0.29"
 hex = "0.4"
+indicatif = { version = "0.18.3", features = ["in_memory"] }
 notify = "8.0"
 ratatui = "0.30"
 self-replace = "1.5"

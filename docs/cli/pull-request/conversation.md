@@ -23,7 +23,7 @@ Options:
 | `--repo <OWNER/NAME>` | string | unset | Chooses which discovered repository the number belongs to. |
 | `--refresh` | flag | off | Asks GitHub again for the metadata. The conversation itself is keyed by `updatedAt` and can never be stale, so this only helps when the metadata cache is holding an old stamp. |
 | `--watch` | flag | off | Keeps refreshing the metadata stamp and conversation until stopped. |
-| `--interval <SECONDS>` | unsigned integer | `5` | Seconds between reads while watching. Values below 2 are raised to 2. |
+| `--interval <SECONDS>` | integer of at least 2 | `5` | Seconds between reads while watching. Requires `--watch`; lower values are usage errors. |
 | `-C, --path <DIR>` | path | `.` | The repository to run against. Global. |
 | `--json` | flag | off | Prints one JSON object on stdout. Global. |
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |

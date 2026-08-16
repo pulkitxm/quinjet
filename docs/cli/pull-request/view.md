@@ -21,7 +21,7 @@ Options:
 | `--repo <OWNER/NAME>` | string | unset | Chooses which discovered repository the number belongs to. Matched case-insensitively against `owner/name`, or against the tail of the repository URL. |
 | `--refresh` | flag | off | Asks GitHub again instead of answering from the five-minute metadata cache. |
 | `--watch` | flag | off | Keeps refreshing the pull-request metadata until stopped. |
-| `--interval <SECONDS>` | unsigned integer | `5` | Seconds between reads while watching. Values below 2 are raised to 2. |
+| `--interval <SECONDS>` | integer of at least 2 | `5` | Seconds between reads while watching. Requires `--watch`; lower values are usage errors. |
 | `-C, --path <DIR>` | path | `.` | The repository to run against. Global. |
 | `--json` | flag | off | Prints one JSON object on stdout instead of the text block. Global. |
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |

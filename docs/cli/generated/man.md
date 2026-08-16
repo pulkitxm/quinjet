@@ -50,7 +50,7 @@ expects to find a subcommand's page. Nested verbs are joined with hyphens, so
 
 ```console
 $ quinjet man --dir /tmp/quinjet-man
-Wrote manual pages to /tmp/quinjet-man
+Wrote 45 pages to /tmp/quinjet-man
   /tmp/quinjet-man/quinjet.1
   /tmp/quinjet-man/quinjet-tui.1
   /tmp/quinjet-man/quinjet-status.1
