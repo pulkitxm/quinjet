@@ -49,6 +49,12 @@ quinjet pr logs 12 clippy        one check run's steps and its log
 | --- | --- |
 | [`quinjet pr`](./pull-request/README.md) | Metadata, changed files, patches, the conversation, checks, run logs, and `--watch` |
 
+## About Quinjet itself
+
+| Page | What it covers |
+| --- | --- |
+| [`quinjet completions`, `man`](./generated/README.md) | Shell completion scripts and manual pages, generated from the command tree |
+
 ## Guides
 
 | Page | What it covers |
