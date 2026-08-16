@@ -8,10 +8,14 @@ mod webhook;
 
 use std::io::{self, IsTerminal};
 use std::process::ExitCode;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use crossbeam_channel::{Receiver, tick};
+use crossterm::cursor::Show;
 use crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
     Event, KeyEventKind, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
@@ -42,11 +46,51 @@ fn main() -> ExitCode {
     }
 }
 
+static TERMINAL_ENTERED: AtomicBool = AtomicBool::new(false);
+static KEYBOARD_ENHANCED: AtomicBool = AtomicBool::new(false);
+static TERMINAL_THREAD: OnceLock<thread::ThreadId> = OnceLock::new();
+
+fn restore_terminal() {
+    if !TERMINAL_ENTERED.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    drop(disable_raw_mode());
+    let mut stdout = io::stdout();
+    if KEYBOARD_ENHANCED.swap(false, Ordering::SeqCst) {
+        drop(execute!(stdout, PopKeyboardEnhancementFlags));
+    }
+    drop(execute!(
+        stdout,
+        DisableMouseCapture,
+        DisableBracketedPaste,
+        LeaveAlternateScreen,
+        Show
+    ));
+}
+
+fn install_panic_hook() {
+    let current = thread::current().id();
+    let owner = TERMINAL_THREAD.get_or_init(|| current);
+    debug_assert_eq!(owner, &current, "terminal hook installed on another thread");
+    let report = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if cfg!(panic = "abort")
+            || TERMINAL_THREAD
+                .get()
+                .is_some_and(|owner| owner == &thread::current().id())
+        {
+            restore_terminal();
+        }
+        report(info);
+    }));
+}
+
 fn open_terminal(options: &TerminalOptions) -> Result<()> {
     if !io::stdin().is_terminal() || !cli::stdout_is_terminal() {
         anyhow::bail!("Quinjet requires an interactive terminal");
     }
 
+    install_panic_hook();
     let repository = Repository::discover(&options.path)?;
     let worker = GitWorker::start(repository.clone());
     let watcher = RepoWatcher::new(repository.root()).ok();
@@ -176,13 +220,21 @@ fn dispatch_effects(
 struct TerminalGuard {
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
     mouse: bool,
-    keyboard_enhancements: bool,
+}
+
+struct TerminalRollback {
+    armed: bool,
+}
+
+impl Drop for TerminalRollback {
+    fn drop(&mut self) {
+        if self.armed {
+            restore_terminal();
+        }
+    }
 }
 
 impl TerminalGuard {
-    /// A terminal cannot select text with a mouse it is reporting to the
-    /// application, so releasing it is the only way to make the screen
-    /// selectable and copyable.
     fn set_mouse_capture(&mut self, enabled: bool) {
         if self.mouse == enabled {
             return;
@@ -200,16 +252,16 @@ impl TerminalGuard {
 
     fn enter(mouse: bool) -> Result<Self> {
         enable_raw_mode().context("failed to enable terminal raw mode")?;
+        TERMINAL_ENTERED.store(true, Ordering::SeqCst);
+        let mut rollback = TerminalRollback { armed: true };
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)
             .context("failed to enter alternate screen")?;
         if mouse {
             execute!(stdout, EnableMouseCapture).context("failed to enable mouse capture")?;
         }
-        let keyboard_enhancements =
-            crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
-        if keyboard_enhancements {
-            drop(execute!(
+        if crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false)
+            && execute!(
                 stdout,
                 PushKeyboardEnhancementFlags(
                     KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
@@ -217,36 +269,21 @@ impl TerminalGuard {
                         | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
                         | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
                 )
-            ));
+            )
+            .is_ok()
+        {
+            KEYBOARD_ENHANCED.store(true, Ordering::SeqCst);
         }
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend).context("failed to initialize terminal")?;
         terminal.clear().context("failed to clear terminal")?;
-        Ok(Self {
-            terminal,
-            mouse,
-            keyboard_enhancements,
-        })
+        rollback.armed = false;
+        Ok(Self { terminal, mouse })
     }
 }
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        drop(disable_raw_mode());
-        if self.keyboard_enhancements {
-            drop(execute!(
-                self.terminal.backend_mut(),
-                PopKeyboardEnhancementFlags
-            ));
-        }
-        if self.mouse {
-            drop(execute!(self.terminal.backend_mut(), DisableMouseCapture));
-        }
-        drop(execute!(
-            self.terminal.backend_mut(),
-            DisableBracketedPaste,
-            LeaveAlternateScreen
-        ));
-        drop(self.terminal.show_cursor());
+        restore_terminal();
     }
 }

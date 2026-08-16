@@ -54,6 +54,7 @@ READING_ORDER = (
     "branch",
     "stash",
     "pull-request",
+    "generated",
     "studies",
     "patterns",
     "gap-analysis",

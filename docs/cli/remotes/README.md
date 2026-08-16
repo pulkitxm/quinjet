@@ -83,8 +83,9 @@ and nothing here reads a check run's log.
 - No verb in this group takes `--yes`, and none of them asks. `push` and `sync`
   send commits the moment they are run. The guard rails are Git's own: a
   non-fast-forward push is rejected by the remote, not by Quinjet.
-- Nothing in this group is watchable. `--watch` exists on `status`,
-  `pr checks` and `pr logs` only, so there is no built-in way to poll a remote.
+- Nothing in this group is watchable. `--watch` exists on `status` and on
+  `pr view`, `pr conversation`, `pr checks`, and `pr logs`, so there is no
+  built-in way to poll a remote operation.
   A shell loop around `quinjet fetch` is the honest way to do it.
 - There is no `--remote`, no `--branch`, no `--force`, no `--tags` and no
   `--rebase` anywhere in this group. If you need one, run Git directly. The

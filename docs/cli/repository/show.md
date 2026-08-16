@@ -106,11 +106,11 @@ see [`quinjet diff`](./diff.md) for what that changes.
     "committerEmail": "41898282+github-actions[bot]@users.noreply.github.com",
     "committedAt": "2026-08-15T13:20:42+00:00",
     "relativeDate": "5 hours ago",
-    "subject": "chore: release v0.0.6",
-    "decorations": ["tag: v0.0.6", "origin/main", "main"]
+    "subject": "chore: release vX.Y.Z",
+    "decorations": ["tag: vX.Y.Z", "origin/main", "main"]
   },
   "diff": {
-    "title": "6ce4acd \u2014 chore: release v0.0.6",
+    "title": "6ce4acd \u2014 chore: release vX.Y.Z",
     "lines": [
       {
         "kind": "file-header",
@@ -126,7 +126,7 @@ see [`quinjet diff`](./diff.md) for what that changes.
     "truncated": false,
     "commitDetails": {
       "id": "6ce4acd7ae455e8783860945f574a3d329ff663e",
-      "subject": "chore: release v0.0.6",
+      "subject": "chore: release vX.Y.Z",
       "author": "github-actions[bot]",
       "authorEmail": "41898282+github-actions[bot]@users.noreply.github.com",
       "authoredAt": "2026-08-15T13:20:42+00:00",
@@ -156,7 +156,7 @@ Examples:
 ```bash
 quinjet show
 quinjet show 6ce4acd
-quinjet show v0.0.6 --expanded
+quinjet show vX.Y.Z --expanded
 quinjet show origin/main --json
 quinjet show HEAD~3 --json | jq -r '.commit.subject'
 ```
@@ -167,7 +167,7 @@ commit 6ce4acd7ae455e8783860945f574a3d329ff663e
 Author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
 Date:   2026-08-15T13:20:42+00:00
 
-    chore: release v0.0.6
+    chore: release vX.Y.Z
 
 Cargo.lock  · modified +1 -1
 @@ -658,7 +658,7 @@ dependencies = [

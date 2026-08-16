@@ -17,7 +17,7 @@ upstream repository.
   corpus agrees on, where it splits, and why.
 
 - [Gap Analysis](./gap-analysis.md): Quinjet audited against everything the
-  study found, strengths first, then prioritized gaps.
+  study found, with completed recommendations and remaining gaps tracked.
 
 - [Rust Dump](./rust-dump.md): the whole reference bound into one file for
   reading straight through or searching in one place.
@@ -53,4 +53,4 @@ Start with the [patterns](./patterns/README.md) if you want the conclusions:
 each one ends with a checklist a new Rust project can apply directly. Reach
 into a [study](./studies/README.md) when you want the full context behind a
 citation, and read the [gap analysis](./gap-analysis.md) to see the corpus
-turned into a concrete, prioritized plan for this repository.
+turned into a concrete status and prioritized plan for this repository.

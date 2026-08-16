@@ -11,7 +11,7 @@ Thank you for helping improve Quinjet. Bug reports, design feedback, documentati
 
 ## Development Setup
 
-Quinjet requires stable Rust and Git.
+Quinjet requires Rust 1.88 or newer and Git.
 
 ```bash
 git clone https://github.com/pulkitxm/quinjet.git
@@ -23,17 +23,22 @@ The `extras/` directory is ignored and is only for local reference repositories 
 
 ## Required Checks
 
-CI runs formatting, linting, tests, documentation, MSRV, feature powerset, cross-target
-builds, coverage, packaging, installer smoke tests, repository hygiene, spelling, workflow
-linting, dependency auditing, and the wiki build. The same set runs locally:
+CI runs formatting, linting, tests, documentation, MSRV, feature powerset,
+cross-target builds, coverage, packaging, installer smoke tests, repository
+hygiene, spelling, workflow linting, dependency auditing, and generated-wiki
+checks. The broad local targets are:
 
 ```bash
-make tools      # once, installs the cargo-based checkers
-make ci         # everything CI runs on a pull request
-make ci-fast    # format, lint, test, comments, secrets
-make tools-deep # once, installs the expensive checkers
-make deep       # miri, sanitizers, cargo-careful, mutants, minimal versions, udeps, bloat
+make tools
+make ci
+make ci-fast
+make tools-deep
+make deep
 ```
+
+`make ci` does not reproduce every GitHub-only gate. Platform matrices,
+cross-target builds, installer smoke tests, coverage, security scans, and other
+workflow jobs still run in GitHub.
 
 The deep checks also run weekly, and on demand when a pull request is labeled
 `deep-check`.
@@ -67,8 +72,15 @@ Add focused tests for behavior changes, especially status parsing, destructive G
 - Ensure every action remains keyboard-accessible even when mouse support is added.
 - Avoid unbounded output, queues, histories, or caches.
 - Prefer small, typed domain changes over UI-specific Git logic.
-- Put every operation in `src/cli`. The terminal interface is a caller of that layer, never a second implementation, so a new action means a new `cli::Command` and a subcommand that reaches it.
+- Put every user-visible repository or GitHub operation in `src/cli`. The terminal interface is a caller of that layer, never a second implementation. Focus, scrolling, folding, filtering, and other presentation state do not need verbs.
 - Update `README.md`, the in-app help, and `docs/cli/` when user-facing behavior changes. A new or changed flag that is not in `docs/cli/` is an incomplete change.
+
+`tests/cli.rs` runs the built binary in isolated scratch directories. Keep
+repository-affecting Git environment variables scrubbed there. Add process
+coverage for argument parsing, output, exit codes, confirmation gates, and
+metadata generators. Completion tests cover bash, zsh, fish, elvish, and
+PowerShell, validate bash syntax with `bash -n`, and manual tests verify nested
+command paths and inherited global options.
 
 ## Pull Requests
 

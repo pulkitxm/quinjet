@@ -40,11 +40,11 @@ id. If both fail the verb exits 3 with
 `` run `quinjet log` or `quinjet branch list --all` for what this repository
 holds ``. A revision that starts with `-` or is empty exits 3 the same way.
 
-So `HEAD`, `main`, `origin/main`, `v0.0.6`, a short id such as `e2d95c2`, and an
+So `HEAD`, `main`, `origin/main`, `vX.Y.Z`, a short id such as `e2d95c2`, and an
 expression such as `HEAD~3` or `main^2` all work. A name that resolves to a ref
 keeps its full ref name rather than becoming an id: `main` becomes
 `refs/heads/main`, `origin/main` becomes `refs/remotes/origin/main` and the tag
-`v0.0.6` becomes `refs/tags/v0.0.6`. Only the two forms that no ref answers, a
+`vX.Y.Z` becomes `refs/tags/vX.Y.Z`. Only the two forms that no ref answers, a
 short id and a `~`/`^` expression, come back as a full 40 character object id.
 A branch and a tag of the same name are resolved by Git's own precedence, since
 Quinjet asks `rev-parse` rather than guessing.
@@ -72,7 +72,7 @@ subject containing tabs, pipes or newlines parses correctly. The fields are
 `%H %h %P %aN %aE %aI %cN %cE %cI %ar %s %D`. `%aN` and `%aE` are the
 mailmap-respecting forms, so `.mailmap` changes what you see. `%D` is the
 decoration list, which `--decorate=short` renders as `HEAD -> main`,
-`origin/main` and `tag: v0.0.6`.
+`origin/main` and `tag: vX.Y.Z`.
 
 The text form is one line per commit: short id, relative date, author padded to
 16 columns and truncated with an ellipsis past that, subject, and the
@@ -87,6 +87,11 @@ is no `HEAD`, so the verb exits 1 with
 
 Reading another branch never changes yours. There is no checkout, no ref
 written, and no index or worktree touched by this verb.
+
+The History view's `C` and `R` actions use the selected commit for
+`cherry-pick` and `revert`. Their command-line forms are preview-first:
+`quinjet cherry-pick <revision>` and `quinjet revert <revision>` report the
+resolved commit and do not mutate until `--yes` is passed.
 
 `--json` shape, an array of commit objects, newest first:
 
@@ -128,7 +133,7 @@ Examples:
 quinjet log
 quinjet log -n 10
 quinjet log origin/main -n 5
-quinjet log v0.0.6 -n 1
+quinjet log vX.Y.Z -n 1
 quinjet log --skip 30 -n 30 --json
 ```
 
@@ -138,7 +143,7 @@ e2d95c2  6 minutes ago  Pulkit            test: pin the command line's contract 
 629a805  8 minutes ago  Pulkit            feat: give every operation a subcommand
 fe6a382  15 minutes ago  Pulkit            feat: name every operation once, in one command layer
 32a089f  20 minutes ago  Pulkit            feat: make every value the app renders serializable
-6ce4acd  5 hours ago  github-actions[…  chore: release v0.0.6  (tag: v0.0.6, origin/main, main)
+6ce4acd  5 hours ago  github-actions[…  chore: release vX.Y.Z  (tag: vX.Y.Z, origin/main, main)
 58eae9b  5 hours ago  Pulkit            Merge pull request #8 from pulkitxm/feat/pr-conversation-live-checks
 ```
 
