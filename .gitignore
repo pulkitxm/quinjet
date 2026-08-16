@@ -12,6 +12,10 @@ extras/
 # Added by cargo
 
 /target
+/.github/tools/node_modules/
+/fuzz/artifacts/
+/fuzz/corpus/
+/fuzz/target/
 
 # pty harness virtualenv (see scripts/drive.py)
 .venv/

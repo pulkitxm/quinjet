@@ -14,4 +14,4 @@ globs:
 ignores:
   - target/**
   - extras/**
-  - node_modules/**
+  - "**/node_modules/**"
