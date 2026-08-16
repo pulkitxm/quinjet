@@ -172,8 +172,8 @@ leaves stdout empty.
   [what is cached](../conventions.md#what-is-cached).
 - `--watch` exists on `view`, `conversation`, `checks`, and `logs`. `view`,
   `conversation`, and `checks` default to 5 seconds and never go below 2;
-  `logs` defaults to 8 seconds and never goes below 3. `--interval 0` is
-  accepted and silently raised to the applicable floor.
+  `logs` defaults to 8 seconds and never goes below 3. Lower values are usage
+  errors, and `--interval` requires `--watch`.
 - While watching, every read is forced (`refresh: true`), so the 30 second check
   cache is bypassed and the poll interval is what actually governs request rate.
 - Watching writes one compact JSON document per read under `--json`, repaints
@@ -185,8 +185,8 @@ leaves stdout empty.
   That is deliberate: a workflow that has not yet been scheduled looks identical
   to one that does not exist. Use `quinjet pr checks <n> --exit-code` if you
   need a single reading instead.
-- `pr checks --watch` ignores `--exit-code`. Watching always reports the
-  verdict, so passing both is harmless and redundant.
+- `pr checks --watch` always reports the verdict, so clap rejects the redundant
+  `--exit-code` combination.
 - `pr logs` and `pr checks` disagree about what counts as bad. `checks` treats
   pending as unhappy and returns 1 for it; `logs --watch` returns 1 only for a
   failed run. Skipped, cancelled and unknown runs are 0 for both.

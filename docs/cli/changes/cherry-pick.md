@@ -28,7 +28,7 @@ no editor, and stdin closed. Git's configured hooks and identity still apply.
 
 ```console
 $ quinjet cherry-pick a1b2c3d --yes
-Commit cherry-picked
+Cherry-picked a1b2c3d
 ```
 
 An unknown or ambiguous revision exits 3 and suggests `quinjet log` or
@@ -41,7 +41,7 @@ JSON success and preview responses have the same shape:
 
 ```json
 {
-  "message": "Commit cherry-picked"
+  "message": "Cherry-picked a1b2c3d"
 }
 ```
 

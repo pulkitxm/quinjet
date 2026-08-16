@@ -59,6 +59,9 @@ tempfile = "3.20"
 two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
 unicode-width = "0.2"
 
+[dev-dependencies]
+indicatif = { version = "0.18.3", features = ["in_memory"] }
+
 [lints.rust]
 unsafe_code = "forbid"
 deprecated_in_future = "deny"
@@ -170,6 +173,3 @@ strip = "symbols"
 
 [profile.dev]
 debug = 1
-
-[dev-dependencies]
-indicatif = { version = "0.18.3", features = ["in_memory"] }

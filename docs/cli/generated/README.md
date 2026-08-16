@@ -1,9 +1,9 @@
 # Generated references
 
 Three verbs generate references rather than reading a repository: shell
-completion scripts, manual pages, and machine-readable capabilities. All are generated on demand from the
-same command definition the parser itself runs. Neither is installed
-automatically, and neither needs a repository or `git`, so both work anywhere.
+completion scripts, manual pages, and machine-readable capabilities. All are
+generated on demand from the same command definition the parser itself runs. None is installed
+automatically, and none needs a repository or `git`, so all work anywhere.
 
 ## Commands
 
@@ -27,7 +27,7 @@ quinjet man --dir ~/.local/share/man/man1
 
 ## Installing the output
 
-Neither verb installs anything itself: each writes to stdout, or to a
+None of these verbs installs anything itself: each writes to stdout, or to a
 directory you name, so you decide where it lands and nothing runs as root
 behind your back. The pages linked above give the path for each shell and for
 `man` on Linux and macOS.

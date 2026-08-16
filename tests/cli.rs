@@ -577,6 +577,47 @@ fn capabilities_describe_the_installed_command_tree() -> Result<()> {
         completion["arguments"][0]["possibleValues"]
             == serde_json::json!(["bash", "elvish", "fish", "powershell", "zsh"])
     );
+    let stage = commands
+        .iter()
+        .find(|command| command["path"] == "quinjet stage")
+        .context("capabilities omitted stage")?;
+    ensure!(
+        stage["usage"]
+            .as_str()
+            .is_some_and(|usage| usage.contains("<PATH|--all>"))
+    );
+    let all = stage["arguments"]
+        .as_array()
+        .and_then(|arguments| arguments.iter().find(|argument| argument["id"] == "all"))
+        .context("stage capabilities omitted --all")?;
+    ensure!(all["action"] == "set_true");
+    ensure!(all["minValues"] == 0 && all["maxValues"] == 0);
+    ensure!(all["possibleValues"] == serde_json::json!([]));
+    let selection = stage["groups"]
+        .as_array()
+        .and_then(|groups| {
+            groups
+                .iter()
+                .find(|group| group["arguments"] == serde_json::json!(["paths", "all"]))
+        })
+        .context("stage capabilities omitted its required selection group")?;
+    ensure!(selection["required"] == true);
+    ensure!(selection["multiple"] == false);
+
+    let status = commands
+        .iter()
+        .find(|command| command["path"] == "quinjet status")
+        .context("capabilities omitted status")?;
+    let interval = status["arguments"]
+        .as_array()
+        .and_then(|arguments| {
+            arguments
+                .iter()
+                .find(|argument| argument["id"] == "interval")
+        })
+        .context("status capabilities omitted --interval")?;
+    ensure!(interval["action"] == "set");
+    ensure!(interval["defaultValues"] == serde_json::json!(["2"]));
     Ok(())
 }
 

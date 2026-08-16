@@ -17,7 +17,7 @@ Options:
 | Name | Type / values | Default | What it does |
 | --- | --- | --- | --- |
 | `--watch` | flag | off | Re-reads the repository forever and reprints it, instead of printing once and exiting. Never stops on its own. |
-| `--interval <SECONDS>` | unsigned integer | `2` | Seconds to sleep between reads while watching. Values below 1, including `0`, are raised to 1. Ignored without `--watch`. |
+| `--interval <SECONDS>` | integer of at least 1 | `2` | Seconds to sleep between reads while watching. Requires `--watch`; lower values are usage errors. |
 | `-C, --path <DIR>` | path | `.` | The repository to read. Global, so `quinjet -C x status` and `quinjet status -C x` are the same. |
 | `--json` | flag | off | Prints one JSON document on stdout instead of text. Global. |
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |
@@ -67,7 +67,8 @@ as your last fetch. `status` never fetches.
 `--watch` prints a frame, sleeps, and prints another, forever. On a terminal
 each frame clears the screen first and is followed by
 `watching, refreshing every Ns (Ctrl+C to stop)`; redirected to a file or a
-pipe, frames simply append with no escape sequences and no footer. With
+pipe, frames simply append with no escape sequences. Every unfinished frame has
+the same watching footer. With
 `--json` each frame is one compact line, so
 `quinjet status --watch --json | jq .` gives a reading at a time.
 

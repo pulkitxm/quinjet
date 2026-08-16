@@ -259,7 +259,8 @@ struct WatchableArgs {
         value_name = "SECONDS",
         default_value_t = 2,
         requires = "watch",
-        value_parser = clap::value_parser!(u64).range(1..)
+        value_parser = clap::value_parser!(u64).range(1..),
+        value_hint = ValueHint::Other
     )]
     interval: u64,
 }
@@ -281,13 +282,10 @@ struct DiffArgs {
 }
 
 #[derive(Debug, Args)]
+#[group(required = true, multiple = false)]
 struct SelectionArgs {
     /// Paths to act on
-    #[arg(
-        value_name = "PATH",
-        value_hint = ValueHint::AnyPath,
-        required_unless_present = "all"
-    )]
+    #[arg(value_name = "PATH", value_hint = ValueHint::AnyPath)]
     paths: Vec<PathBuf>,
     /// Act on every change instead
     #[arg(long, conflicts_with = "paths")]
@@ -296,16 +294,8 @@ struct SelectionArgs {
 
 #[derive(Debug, Args)]
 struct DiscardArgs {
-    /// Paths whose changes are thrown away
-    #[arg(
-        value_name = "PATH",
-        value_hint = ValueHint::AnyPath,
-        required_unless_present = "all"
-    )]
-    paths: Vec<PathBuf>,
-    /// Throw away every change instead
-    #[arg(long, conflicts_with = "paths")]
-    all: bool,
+    #[command(flatten)]
+    selection: SelectionArgs,
     /// Confirm; without it the command reports what it would discard
     #[arg(long)]
     yes: bool,
@@ -327,10 +317,10 @@ struct LogArgs {
     #[arg(default_value = "HEAD", value_name = "REVISION", value_hint = ValueHint::Other)]
     revision: String,
     /// Commits to skip
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 0, value_hint = ValueHint::Other)]
     skip: usize,
     /// Commits to print
-    #[arg(long, short = 'n', default_value_t = 30)]
+    #[arg(long, short = 'n', default_value_t = 30, value_hint = ValueHint::Other)]
     limit: usize,
 }
 
@@ -359,18 +349,21 @@ struct ResolveArgs {
     /// Conflicted path
     #[arg(value_name = "PATH", value_hint = ValueHint::AnyPath)]
     path: PathBuf,
+    #[command(flatten)]
+    side: ConflictSide,
+}
+
+#[derive(Debug, Args)]
+#[group(required = true, multiple = false)]
+struct ConflictSide {
     /// Keep the version already on this branch
-    #[arg(
-        long,
-        group = "side",
-        required_unless_present_any = ["theirs", "stage"]
-    )]
+    #[arg(long)]
     ours: bool,
     /// Keep the version being merged in
-    #[arg(long, group = "side")]
+    #[arg(long)]
     theirs: bool,
     /// Accept the file as it stands and stage it
-    #[arg(long, group = "side")]
+    #[arg(long)]
     stage: bool,
 }
 
@@ -534,7 +527,8 @@ struct PrWatchArgs {
         value_name = "SECONDS",
         default_value_t = CHECK_WATCH_INTERVAL,
         requires = "watch",
-        value_parser = clap::value_parser!(u64).range(CHECK_WATCH_FLOOR..)
+        value_parser = clap::value_parser!(u64).range(CHECK_WATCH_FLOOR..),
+        value_hint = ValueHint::Other
     )]
     interval: u64,
 }
@@ -570,7 +564,8 @@ struct PrChecksArgs {
         value_name = "SECONDS",
         default_value_t = CHECK_WATCH_INTERVAL,
         requires = "watch",
-        value_parser = clap::value_parser!(u64).range(CHECK_WATCH_FLOOR..)
+        value_parser = clap::value_parser!(u64).range(CHECK_WATCH_FLOOR..),
+        value_hint = ValueHint::Other
     )]
     interval: u64,
     /// Exit 1 when a check has not passed
@@ -594,7 +589,8 @@ struct PrLogsArgs {
         value_name = "SECONDS",
         default_value_t = LOG_WATCH_INTERVAL,
         requires = "watch",
-        value_parser = clap::value_parser!(u64).range(LOG_WATCH_FLOOR..)
+        value_parser = clap::value_parser!(u64).range(LOG_WATCH_FLOOR..),
+        value_hint = ValueHint::Other
     )]
     interval: u64,
 }
@@ -708,27 +704,60 @@ fn collect_capabilities(
     let arguments = command
         .get_arguments()
         .filter(|argument| argument.get_id() != "help" && argument.get_id() != "version")
-        .map(|argument| ArgumentCapability {
-            id: argument.get_id().to_string(),
-            help: argument.get_help().map(ToString::to_string),
-            short: argument.get_short(),
-            long: argument.get_long().map(str::to_owned),
-            required: argument.is_required_set(),
-            value_names: argument
-                .get_value_names()
-                .map(|names| names.iter().map(ToString::to_string).collect())
-                .unwrap_or_default(),
-            possible_values: argument
-                .get_value_parser()
-                .possible_values()
-                .map(|values| values.map(|value| value.get_name().to_owned()).collect())
-                .unwrap_or_default(),
+        .map(|argument| {
+            let (min_values, max_values) = argument.get_num_args().map_or((0, Some(0)), |range| {
+                let maximum = range.max_values();
+                (
+                    range.min_values(),
+                    (maximum != usize::MAX).then_some(maximum),
+                )
+            });
+            ArgumentCapability {
+                id: argument.get_id().to_string(),
+                help: argument.get_help().map(ToString::to_string),
+                short: argument.get_short(),
+                long: argument.get_long().map(str::to_owned),
+                positional: argument.is_positional(),
+                required: argument.is_required_set(),
+                action: argument_action(argument.get_action()),
+                min_values,
+                max_values,
+                value_names: argument
+                    .get_value_names()
+                    .map(|names| names.iter().map(ToString::to_string).collect())
+                    .unwrap_or_default(),
+                possible_values: argument
+                    .get_possible_values()
+                    .iter()
+                    .map(|value| value.get_name().to_owned())
+                    .collect(),
+                default_values: argument
+                    .get_default_values()
+                    .iter()
+                    .map(|value| value.to_string_lossy().into_owned())
+                    .collect(),
+            }
+        })
+        .collect();
+    let usage = command.clone().render_usage().to_string();
+    let groups = command
+        .get_groups()
+        .map(|group| {
+            let mut configured = group.clone();
+            ArgumentGroupCapability {
+                id: configured.get_id().to_string(),
+                arguments: configured.get_args().map(ToString::to_string).collect(),
+                required: configured.is_required_set(),
+                multiple: configured.is_multiple(),
+            }
         })
         .collect();
     commands.push(CommandCapability {
         path: path.join(" "),
         about: command.get_about().map(ToString::to_string),
+        usage,
         arguments,
+        groups,
         subcommands: command
             .get_subcommands()
             .filter(|child| child.get_name() != "help")
@@ -740,6 +769,21 @@ fn collect_capabilities(
         .filter(|child| child.get_name() != "help")
     {
         collect_capabilities(child, &path, commands);
+    }
+}
+
+const fn argument_action(action: &clap::ArgAction) -> &'static str {
+    match action {
+        clap::ArgAction::Set => "set",
+        clap::ArgAction::Append => "append",
+        clap::ArgAction::SetTrue => "set_true",
+        clap::ArgAction::SetFalse => "set_false",
+        clap::ArgAction::Count => "count",
+        clap::ArgAction::Help => "help",
+        clap::ArgAction::HelpShort => "help_short",
+        clap::ArgAction::HelpLong => "help_long",
+        clap::ArgAction::Version => "version",
+        _ => "other",
     }
 }
 
@@ -774,8 +818,18 @@ struct CapabilityDocument {
 struct CommandCapability {
     path: String,
     about: Option<String>,
+    usage: String,
     arguments: Vec<ArgumentCapability>,
+    groups: Vec<ArgumentGroupCapability>,
     subcommands: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct ArgumentGroupCapability {
+    id: String,
+    arguments: Vec<String>,
+    required: bool,
+    multiple: bool,
 }
 
 #[derive(Serialize)]
@@ -785,9 +839,14 @@ struct ArgumentCapability {
     help: Option<String>,
     short: Option<char>,
     long: Option<String>,
+    positional: bool,
     required: bool,
+    action: &'static str,
+    min_values: usize,
+    max_values: Option<usize>,
     value_names: Vec<String>,
     possible_values: Vec<String>,
+    default_values: Vec<String>,
 }
 
 fn render_page(command: &clap::Command, name: &str) -> Result<Vec<u8>> {
@@ -862,6 +921,14 @@ impl Emitter {
     fn set_progress(&self, label: &'static str) {
         if let Some(progress) = &self.progress {
             progress.set_message(label);
+        }
+    }
+
+    fn note(&self, text: &str) {
+        if let Some(progress) = &self.progress {
+            progress.println(text);
+        } else {
+            note(text);
         }
     }
 
@@ -1233,10 +1300,10 @@ fn discard(session: &mut Session, out: &Emitter, args: &DiscardArgs) -> Result<u
         .changes
         .iter()
         .filter(|change| change.area != ChangeArea::Conflict)
-        .filter(|change| args.all || matches(&change.path, &args.paths))
+        .filter(|change| args.selection.all || matches(&change.path, &args.selection.paths))
         .cloned()
         .collect();
-    if !args.all && args.paths.is_empty() {
+    if !args.selection.all && args.selection.paths.is_empty() {
         return Err(Failure::new(
             EXIT_FAILURE,
             "discard needs paths, or --all for every change",
@@ -1260,14 +1327,14 @@ fn discard(session: &mut Session, out: &Emitter, args: &DiscardArgs) -> Result<u
 }
 
 fn resolve(session: &mut Session, out: &Emitter, args: ResolveArgs) -> Result<u8> {
-    let operation = if args.stage {
+    let operation = if args.side.stage {
         GitOperation::Stage(vec![args.path])
-    } else if args.ours {
+    } else if args.side.ours {
         GitOperation::ResolveConflict {
             path: args.path,
             choice: ConflictChoice::Ours,
         }
-    } else if args.theirs {
+    } else if args.side.theirs {
         GitOperation::ResolveConflict {
             path: args.path,
             choice: ConflictChoice::Theirs,
@@ -1311,7 +1378,7 @@ fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb) -> Result
                 return watch_pull_request(session, out, &args);
             }
             let snapshot = lookup_snapshot(session, out, &args.pull_request)?;
-            report_warnings(&snapshot);
+            report_warnings(out, &snapshot);
             out.emit(&snapshot, || render::pull_request(&snapshot.pull_request))?;
             Ok(0)
         }
@@ -1557,7 +1624,7 @@ fn exit_for(checks: &[PullRequestCheck]) -> u8 {
 
 fn lookup(session: &mut Session, out: &Emitter, args: &PrArgs) -> Result<PullRequest> {
     let snapshot = lookup_snapshot(session, out, args)?;
-    report_warnings(&snapshot);
+    report_warnings(out, &snapshot);
     Ok(snapshot.pull_request)
 }
 
@@ -1609,9 +1676,9 @@ fn lookup_snapshot(
     .pull_request()
 }
 
-fn report_warnings(snapshot: &PullRequestSnapshot) {
+fn report_warnings(out: &Emitter, snapshot: &PullRequestSnapshot) {
     for warning in &snapshot.warnings {
-        note(&format!("warning: {warning}"));
+        out.note(&format!("warning: {warning}"));
     }
 }
 
@@ -1894,13 +1961,23 @@ mod tests {
         .unwrap();
         progress.tick();
         assert!(terminal.contents().contains("Loading pull request"));
+        let out = Emitter {
+            json: false,
+            progress: Some(progress),
+        };
 
-        progress.set_message("Fetching pull-request checks");
-        progress.tick();
+        out.set_progress("Fetching pull-request checks");
+        out.progress.as_ref().unwrap().tick();
         assert!(terminal.contents().contains("Fetching pull-request checks"));
+        out.note("warning: using stale metadata");
+        assert!(
+            terminal
+                .contents()
+                .contains("warning: using stale metadata")
+        );
 
-        progress.finish_and_clear();
-        assert!(terminal.contents().is_empty());
+        out.finish_progress();
+        assert_eq!(terminal.contents(), "warning: using stale metadata");
     }
 
     #[test]
@@ -1926,7 +2003,7 @@ mod tests {
             .get_arguments()
             .find(|argument| argument.get_id() == "interval")
             .unwrap();
-        assert_eq!(interval.get_value_hint(), ValueHint::Unknown);
+        assert_eq!(interval.get_value_hint(), ValueHint::Other);
     }
 
     #[test]
@@ -2206,8 +2283,10 @@ mod tests {
             &mut session,
             &out,
             &DiscardArgs {
-                paths: vec![PathBuf::from("README.md")],
-                all: false,
+                selection: SelectionArgs {
+                    paths: vec![PathBuf::from("README.md")],
+                    all: false,
+                },
                 yes: false,
             },
         )

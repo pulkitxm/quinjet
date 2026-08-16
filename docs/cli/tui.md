@@ -104,7 +104,7 @@ react the instant GitHub says something happened, by pairing with the GitHub
 CLI's forwarder:
 
 ```bash
-quinjet --webhook-listen 8787
+quinjet tui --webhook-listen 8787
 gh webhook forward --repo owner/name --events '*' --url http://127.0.0.1:8787
 ```
 
@@ -317,7 +317,7 @@ The command line can do these, and no key can:
   that is not a repository, a `--webhook-listen` address that will not parse or
   will not bind, or a draw that fails.
 - `--json` and `-C` are accepted here because clap declares them globally.
-  Neither does anything. `-V` is declared on the root only.
+  Neither does anything. `-V` prints the propagated binary version and exits.
 - On an unborn branch the branch line reads the branch name with no object id,
   History is empty, and every change is untracked. Staging and committing work;
   the first commit creates the branch.

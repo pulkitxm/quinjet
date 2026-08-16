@@ -9,9 +9,12 @@ quinjet capabilities [--json]
 ```
 
 The human form lists every command path and its one-line purpose. The JSON form
-adds each command's arguments, short and long flags, required state, value names,
-accepted enum values, and direct subcommands. It is generated from the same
-built clap tree used for parsing, help, completions, and manual pages.
+adds each command's complete usage, arguments, short and long flags, actions,
+value arity, defaults, accepted enum values, argument groups, and direct subcommands. It is
+generated from the same built clap tree used for parsing, help, completions, and
+manual pages. The usage string carries required positional and option groups in
+clap's own notation. Detailed semantic constraints remain in each command's
+help and reference page.
 
 ```console
 $ quinjet capabilities
@@ -44,28 +47,36 @@ and ignore fields they do not use.
     {
       "path": "quinjet branch switch",
       "about": "Switch to a branch",
+      "usage": "Usage: quinjet branch switch [OPTIONS] <BRANCH>",
       "arguments": [
         {
           "id": "name",
           "help": "Branch to switch to",
           "short": null,
           "long": null,
+          "positional": true,
           "required": true,
+          "action": "set",
+          "minValues": 1,
+          "maxValues": 1,
           "valueNames": ["BRANCH"],
-          "possibleValues": []
+          "possibleValues": [],
+          "defaultValues": []
         }
       ],
+      "groups": [],
       "subcommands": []
     }
   ]
 }
 ```
 
-Global arguments appear on the commands that inherit them. Boolean flags expose
-clap's `true` and `false` parser values, while user-entered identifiers have no
-fixed `possibleValues`. The synthetic `help` command and generated `--help` and
-`--version` flags are omitted because they are parser facilities rather than
-Quinjet operations.
+Global arguments appear on the commands that inherit them. Presence-only flags
+use `set_true` or `set_false` and accept zero values. User-entered identifiers
+have no fixed `possibleValues`. Required one-of groups identify alternatives
+such as paths or `--all`, and whether more than one member may be present. The synthetic `help` command and generated
+`--help` and `--version` flags are omitted because they are parser facilities
+rather than Quinjet operations.
 
 Examples:
 

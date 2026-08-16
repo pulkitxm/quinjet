@@ -551,11 +551,11 @@ Quinjet saw it.
   committed, reads as `"oid": null` with the branch name still present. On a
   detached HEAD the human output says `HEAD detached at <8 hex characters>`,
   `"detached"` is `true`, and `"head"` is that short id rather than a name.
-- `quinjet --version` prints the crate version and exists on the root only.
-  `quinjet status --version` is a usage error.
-- There is no progress bar and no spinner on the command line. The terminal
-  interface has one because it can repaint; a pipe cannot, and a half-written
-  line in a log is worse than silence.
+- `quinjet --version` prints the crate version. It is propagated to every verb.
+  `quinjet status --version` is another spelling.
+- One-shot human commands may animate on interactive stderr while working. The
+  indicator is disabled under `--json` and whenever stderr is redirected, so a
+  pipe never receives progress output or half-written lines.
 - The command line has no color to disable. Diffs print with `+`, `-` and a
   leading space in the manner of `git diff`, and check states are the ASCII
   glyphs above, so output is safe to store and to compare.

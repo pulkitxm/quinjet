@@ -29,7 +29,7 @@ remains in history, and a new commit records its inverse.
 
 ```console
 $ quinjet revert a1b2c3d --yes
-Revert commit created
+Reverted a1b2c3d
 ```
 
 An unknown or ambiguous revision exits 3. A conflict, empty revert, hook
@@ -40,7 +40,7 @@ JSON success and preview responses have the same shape:
 
 ```json
 {
-  "message": "Revert commit created"
+  "message": "Reverted a1b2c3d"
 }
 ```
 

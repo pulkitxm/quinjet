@@ -72,16 +72,17 @@ an error. Nothing else here has a confirmation gate: `stage`, `unstage`,
 
 | Code | When this group produces it |
 | --- | --- |
-| 0 | The operation finished and its sentence printed. Also `discard` without `--yes`, which reports and changes nothing, and `discard` whose paths match no change, which prints `No changes match`. Also `--help` on any of the five. |
+| 0 | The operation finished and its sentence printed. Also `discard` without `--yes`, which reports and changes nothing, and `discard` whose paths match no change, which prints `No changes match`. Also `--help` on any of the seven. |
 | 1 | Git refused: nothing staged for `commit`, a pathspec that matches no file for `stage` or `unstage`, an ignored path for `stage`, a path with no such side for `resolve`, or `--amend` with no commit to amend. A blank commit message is also refused before Git runs. |
-| 2 | clap rejected the command line: missing paths and `--all`, `commit` without `--message`, `resolve` without a side, `--all` together with paths, two conflict sides, a flag given twice, or an unknown flag. |
+| 2 | clap rejected the command line: missing paths and `--all`, `commit` without `--message`, `resolve` without a side, a revision verb without a revision, `--all` together with paths, two conflict sides, a flag given twice, or an unknown flag. |
+| 3 | `cherry-pick` or `revert` could not resolve the named revision. |
 
-Codes **3** and **4** never come from this group. Nothing here names a thing
-that has to be looked up, and nothing here reads from GitHub.
+Code **4** never comes from this group because nothing here reads content that
+can exist but be unavailable.
 
 ## Notes and gotchas
 
-- There is no `quinjet changes` command. The five are top-level verbs, so there
+- There is no `quinjet changes` command. The seven are top-level verbs, so there
   is no group `--help` to run; `quinjet --help` lists them among the rest, and
   `quinjet stage --help` and friends work as usual.
 - Paths are interpreted from the repository root, always. Running
@@ -179,7 +180,7 @@ that has to be looked up, and nothing here reads from GitHub.
   worktree recursively and refreshes when anything that is not `.git/objects`,
   `index.lock` or a Watchman cookie changes, so a `quinjet commit` in another
   window repaints the Changes tab within a redraw.
-- On a detached `HEAD` all five work, and `commit` makes a commit that only
+- On a detached `HEAD` all seven work, and `commit` makes a commit that only
   `HEAD` points at. Note the id with `quinjet log -n 1` before switching away,
   or it is reachable only through the reflog.
 - None of these verbs takes `--watch`, `--expanded` or `--refresh`. They finish.

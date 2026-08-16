@@ -21,8 +21,8 @@ Options:
 | `--repo <OWNER/NAME>` | string | unset | Chooses which discovered repository the number belongs to. |
 | `--refresh` | flag | off | Skips the 30 second check cache for this read. Ignored under `--watch`, which always refreshes. |
 | `--watch` | flag | off | Keeps reading until every check has settled, then exits with the verdict. |
-| `--interval <SECONDS>` | unsigned integer | `5` | Seconds between reads while watching. Values below 2 are raised to 2. |
-| `--exit-code` | flag | off | Exit 1 when any check has failed or is still pending. Ignored under `--watch`, which always reports the verdict. |
+| `--interval <SECONDS>` | integer of at least 2 | `5` | Seconds between reads while watching. Requires `--watch`; lower values are usage errors. |
+| `--exit-code` | flag | off | Exit 1 when any check has failed or is still pending. Conflicts with `--watch`, which always reports the verdict. |
 | `-C, --path <DIR>` | path | `.` | The repository to run against. Global. |
 | `--json` | flag | off | Prints one JSON object on stdout, or one compact object per read under `--watch`. Global. |
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |
