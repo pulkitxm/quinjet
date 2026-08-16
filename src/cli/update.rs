@@ -325,7 +325,7 @@ fn release_checksum(document: &str, asset: &str) -> Result<String> {
 }
 
 fn sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    hex::encode(Sha256::digest(bytes))
 }
 
 #[cfg(target_os = "macos")]
