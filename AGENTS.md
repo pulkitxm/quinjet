@@ -2,27 +2,28 @@
 
 Quinjet is a single-crate Rust 2024 binary: a keyboard-first Git interface for
 the terminal, built on ratatui, crossterm and clap. This file is the contract
-for anyone changing it, human or otherwise. It is tool-agnostic; assistants
-that read `CLAUDE.md` are pointed here for everything that matters.
+for contributors changing it.
 
 ## The one rule that shapes the codebase
 
-Every operation the terminal interface performs is also a command-line verb.
-There is one command vocabulary, `cli::Command`, executed by `cli::Session`.
-The terminal and the command line are two faces of that one surface, so an
-operation reachable on screen but not from a shell cannot exist.
+Every user-visible repository or GitHub operation in the terminal interface is
+also reachable from a command-line verb. Repository reads and mutations use the
+`cli::Command` vocabulary executed by `cli::Session`. Browser opening uses the
+same `cli::open_url` helper from both faces. Presentation state such as focus,
+scrolling, folding, filtering, and mouse capture remains specific to the terminal
+interface.
 
-This is enforced, not merely documented. `src/cli/mod.rs` holds an exhaustive
-match naming the verb for every `GitOperation`, so adding an operation without
-a verb fails to compile, and a test resolves each named path in the real clap
-command tree.
+This is enforced for mutations, not merely documented. One macro declaration
+in `src/cli/mod.rs` generates the exhaustive `GitOperation` route match and one
+fixture per variant. Adding a variant without a route fails to compile, and the
+test resolves every route in the real clap command tree.
 
 When you add an operation, do all of it:
 
 1. Add the variant to `GitOperation` in `src/git/mod.rs`, or to `Command` in `src/cli/command.rs` for a read.
 2. Execute it in `cli::Session` in `src/cli/command.rs`.
 3. Render its `Outcome` as plain text in `src/cli/render.rs`.
-4. Add the subcommand to `Verb` in `src/cli/mod.rs`, and give it a `verb_for` arm.
+4. Add the subcommand to `Verb` in `src/cli/mod.rs`, and add its pattern, fixture, and path to `operation_routes!` when it is a `GitOperation`.
 5. Reach it from the terminal in `src/app.rs`.
 6. Write its reference page under `docs/cli/`, linked from the group's `README.md`.
 
@@ -52,7 +53,6 @@ the worker, the caches, or anything that touches a generation.
   rustdoc render them. Ordinary `//` comments fail the build; let names and
   structure carry the meaning. `scripts/check_comments.py` enforces this.
 - Never use the em-dash character, in code, docs, or commit messages.
-- No AI attribution anywhere: not in commits, branches, code, or docs.
 - Prefer established crates over hand-rolled implementations.
 - Do not preserve backward compatibility for its own sake; choose the simplest
   implementation that meets the current requirement.
@@ -80,10 +80,14 @@ Expect to meet it. Some consequences worth knowing before you write code:
 ## Verifying
 
 ```bash
-make ci-fast   # format, lint, tests, comments, secrets
-make ci        # everything a pull request runs
-make deep      # miri, sanitizers, cargo-careful, mutants, minimal versions
+make ci-fast
+make ci
+make deep
 ```
+
+`make ci` is the broad local gate. GitHub also runs platform matrices,
+cross-target builds, installer tests, coverage, security scans, and other
+workflow-only jobs that the local target does not reproduce.
 
 `make tools` installs the cargo-based checkers once; `make tools-deep`
 installs the expensive ones. At minimum, before pushing:
@@ -94,9 +98,8 @@ cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test --all-features --locked
 ```
 
-Documentation has its own gates: `python3 scripts/sync_wiki.py --check` proves
-every link resolves and the wiki still builds, and `markdownlint-cli2` plus
-`typos` run over every Markdown file. Run them after touching `docs/`.
+Documentation is checked by `markdownlint-cli2` and `typos`. The repository also
+has a separate generated-wiki link check for changes that affect that output.
 
 ## Tests
 
@@ -104,8 +107,13 @@ every link resolves and the wiki still builds, and `markdownlint-cli2` plus
 - `tests/cli.rs` runs the built binary through argv in scratch repositories.
   Anything about argument parsing, exit codes, or the shape of `--json`
   belongs there rather than in a unit test.
-- Scratch repositories set `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` so a
-  contributor's own Git configuration cannot change a result.
+- Process tests remove repository-affecting Git environment variables, disable
+  system configuration, and point global configuration at the null device.
+- Completion coverage runs all five generators outside a repository and checks
+  the bash result with `bash -n`. Manual coverage also runs outside a repository
+  and verifies a nested page's full command path and inherited global options.
+- Destructive process tests prove previews do not mutate, then prove `--yes`
+  performs discard, cherry-pick, and revert.
 
 ## Commits and pull requests
 

@@ -29,6 +29,10 @@ This verb reads no repository. `-C` is accepted because it is global, and is
 ignored: the answer does not depend on where you are, so it works outside a
 Git repository.
 
+The five supported generators are bash, zsh, fish, elvish, and PowerShell.
+Process tests run every generator from a directory that is not a repository,
+and pass the generated bash script to `bash -n` for a real syntax check.
+
 ```console
 $ quinjet completions bash | head -3
 _quinjet() {
@@ -38,8 +42,9 @@ _quinjet() {
 
 ## Installing it
 
-Each shell looks in a different place, and none of them read stdout, so the
-script has to land somewhere the shell searches.
+Generation does not install anything. Each shell looks in a different place,
+and none of them reads Quinjet's stdout automatically, so save or evaluate the
+script explicitly.
 
 ```bash
 quinjet completions bash > /usr/share/bash-completion/completions/quinjet

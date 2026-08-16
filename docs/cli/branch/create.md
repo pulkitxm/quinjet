@@ -29,7 +29,7 @@ First, if `[START]` was given, it goes through Quinjet's revision resolution,
 the same one [`quinjet log`](../repository/README.md) and `show` use. A name
 that resolves to a branch, a remote-tracking branch or a tag becomes its full
 ref: `main` becomes `refs/heads/main`, `origin/main` becomes
-`refs/remotes/origin/main`, `v0.0.6` becomes `refs/tags/v0.0.6`. `HEAD` stays
+`refs/remotes/origin/main`, `vX.Y.Z` becomes `refs/tags/vX.Y.Z`. `HEAD` stays
 `HEAD`. Anything else is verified as a commit with
 `git rev-parse --verify --quiet <start>^{commit}` and becomes a full
 forty-character object id, so `HEAD~3` is pinned to one commit before the

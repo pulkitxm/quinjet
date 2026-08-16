@@ -7,12 +7,13 @@ opens the terminal interface; with a verb it answers one question on stdout and
 exits. Both faces are the same executable and the same command layer, so
 nothing you learn here is specific to one of them.
 
-The only hard runtime requirement is `git` on `PATH`. Quinjet never links
+Repository operations require `git` on `PATH`. Quinjet never links
 libgit2: every local operation is a real `git` subprocess with an argument
 array, which is why your hooks, your credential helper, your signing
 configuration and your `.gitattributes` all behave exactly as they do when you
 type `git` yourself. The pull-request verbs additionally need the GitHub CLI,
-`gh`, authenticated. Everything that is not a `pr` verb works without it.
+`gh`, authenticated. `completions` and `man` are pre-repository metadata verbs,
+so they need neither `git` nor `gh` and work from any directory.
 
 This page covers installing, the shape of an invocation, the first handful of
 commands worth running, how to explore the rest of the tree, and what a script
@@ -51,7 +52,7 @@ The shell installer takes `-v`/`--version`, `-b`/`--bin-dir`,
 after `sh -s --`:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://quinjet.pulkit.page/install.sh | sh -s -- --version v0.0.6
+curl --proto '=https' --tlsv1.2 -LsSf https://quinjet.pulkit.page/install.sh | sh -s -- --version vX.Y.Z
 curl --proto '=https' --tlsv1.2 -LsSf https://quinjet.pulkit.page/install.sh | sh -s -- --bin-dir /usr/local/bin
 ```
 
@@ -65,8 +66,13 @@ cargo install quinjet
 cargo install --git https://github.com/pulkitxm/quinjet --locked
 ```
 
-Quinjet is edition 2024 and declares `rust-version = "1.85"`, so an older
+Quinjet is edition 2024 and declares `rust-version = "1.88"`, so an older
 toolchain will refuse the build rather than fail halfway through it.
+
+`cargo binstall quinjet` uses package metadata that maps every currently
+released supported target: x86-64 and AArch64 Linux, x86-64 and Apple Silicon
+macOS, and x86-64 Windows. The Linux GNU and musl target triples map to the
+published static Linux artifacts.
 
 ### What the installers check, and what they do not
 
@@ -170,7 +176,7 @@ Start by proving the binary is there:
 
 ```console
 $ quinjet --version
-quinjet 0.0.6
+quinjet <version>
 ```
 
 Then stand in a repository and ask for its state. The first line is the branch,
@@ -203,7 +209,7 @@ e2d95c2  6 minutes ago  Pulkit            test: pin the command line's contract 
 629a805  8 minutes ago  Pulkit            feat: give every operation a subcommand
 fe6a382  15 minutes ago  Pulkit            feat: name every operation once, in one command layer
 32a089f  20 minutes ago  Pulkit            feat: make every value the app renders serializable
-6ce4acd  5 hours ago  github-actions[…  chore: release v0.0.6  (tag: v0.0.6, origin/main, main)
+6ce4acd  5 hours ago  github-actions[…  chore: release vX.Y.Z  (tag: vX.Y.Z, origin/main, main)
 ```
 
 Author names are truncated to sixteen characters with a `…`, and the
@@ -472,10 +478,9 @@ Two small things worth knowing before you parse anything:
 - A list verb with nothing to list prints nothing on the human path and exits 0.
   `quinjet stash list` in a repository with no stashes writes zero bytes. Under
   `--json` the same call prints `[]`, which is easier to test.
-- A missing `--yes` is not an error. `quinjet discard README.md` with no `--yes`
-  reports what it would discard, changes nothing, and exits 0. A script that
-  means it must pass `--yes`, and a script that checks exit codes must not read
-  0 as "it happened".
+- A missing `--yes` is not an error. `discard`, `cherry-pick`, and `revert`
+  preview their work, change nothing, and exit 0 without it. A script that means
+  to mutate must pass `--yes`, and must not read exit 0 as "it happened".
 
 ## Exit codes
 

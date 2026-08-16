@@ -1,11 +1,9 @@
 # Conventions and contracts
 
-These hold for every verb, and they are what to rely on when something other
-than a person is reading the output. Almost none of it is written per command.
-It comes from four pieces of shared machinery every verb passes through:
-`cli::dispatch`, `cli::Session`, the `Emitter`, and `cli::Failure`. A verb added
-tomorrow already obeys this page, and a command page that repeats a rule from
-here is repeating it for convenience rather than adding one.
+These are the shared command-line contracts. Repository and GitHub verbs pass
+through `cli::dispatch`, `cli::Session`, the `Emitter`, and `cli::Failure`.
+`completions` and `man` dispatch before a session is built because their answers
+come from clap metadata and do not require a repository.
 
 ## One command layer, two callers
 
@@ -16,7 +14,8 @@ only two things a verb does not need: a generation tag, so an answer to a
 question the reader has moved on from is discarded, and a lane, so a slow GitHub
 read cannot block a diff.
 
-The practical consequence is that behavior cannot drift. `quinjet stage` and
+The practical consequence is that repository and GitHub operations share their
+behavior. `quinjet stage` and
 pressing `s` on a row build the same `GitOperation::Stage`, run the same
 `git add -- <path>`, and produce the same sentence. The interface shows it in a
 toast; the command line prints it on stdout.
@@ -161,9 +160,10 @@ job whose steps and archive are both still empty, in the first seconds of a run:
 ## Flags and values
 
 `--path`, spelled `-C` for the muscle memory Git already built, chooses the
-repository for every verb and defaults to the current directory. Quinjet
-discovers the worktree root from it, so running from a subdirectory is the same
-as running from the top.
+repository for every repository or GitHub verb and defaults to the current
+directory. Quinjet discovers the worktree root from it, so running from a
+subdirectory is the same as running from the top. `completions` and `man` accept
+the global option but do not use it.
 
 ```bash
 quinjet -C ~/code/project status
@@ -186,8 +186,8 @@ take their value as the next word or after an equals sign, so `--interval 5`
 and `--interval=5` are the same.
 
 `--yes` means the same thing everywhere it appears, on `discard`,
-`branch delete`, `stash drop` and `stash clear`: without it the verb reports
-what it would do and changes nothing.
+`branch delete`, `stash drop`, `stash clear`, `cherry-pick`, and `revert`:
+without it the verb reports what it would do and changes nothing.
 
 `--expanded` means the same thing everywhere it appears, on `diff`, `show`,
 `branch compare` and `stash show`: print whole files instead of three lines of
@@ -199,17 +199,19 @@ whose cache key already names what they contain, because those can never be
 stale. See [the caching rules](#what-is-cached).
 
 `--help` is generated for every verb and every group, prints on stdout, and
-exits 0. `--version` exists on the root only.
+exits 0. `--version` exists on the root only. `completions` and `man` generate
+their output on demand from the same fully defined clap command tree.
 
 ## What needs `git`, and what needs `gh`
 
-Everything needs `git` on `PATH`. Quinjet never links libgit2 and never runs a
-shell: `git` and `gh` receive argument arrays directly, so a branch name or a
-path containing a space, a quote or a semicolon is one argument and nothing
-else.
+Repository verbs need `git` on `PATH`. Quinjet never links libgit2 and never
+runs a shell: `git` and `gh` receive argument arrays directly, so a branch name
+or a path containing a space, a quote or a semicolon is one argument and
+nothing else. The metadata verbs run without a repository.
 
 | Verb | Also needs |
 | --- | --- |
+| `completions`, `man` | nothing, including no repository and no `git` |
 | `status`, `diff`, `log`, `show`, `stage`, `unstage`, `discard`, `commit`, `resolve`, `branch`, `stash`, `cherry-pick`, `revert` | nothing |
 | `fetch`, `pull`, `push`, `sync` | network and whatever credentials Git is configured with |
 | `repos` | `gh`, but only for a host Quinjet cannot recognize locally |

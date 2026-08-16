@@ -1,15 +1,14 @@
 # Generated references
 
-Two verbs print things about Quinjet rather than about a repository: the shell
-completion script, and the manual pages. Both are generated from the same
-command definition the parser itself runs, so they cannot describe a verb that
-does not exist or miss one that does. Neither needs a repository, so both work
-anywhere.
+Two verbs print things about Quinjet rather than about a repository: shell
+completion scripts and manual pages. Both are generated on demand from the
+same command definition the parser itself runs. Neither is installed
+automatically, and neither needs a repository or `git`, so both work anywhere.
 
 ## Commands
 
 - [`quinjet completions`](./completions.md): a completion script for bash,
-  zsh, fish, elvish or powershell.
+  zsh, fish, elvish, or PowerShell.
 - [`quinjet man`](./man.md): the manual page, or one page per command.
 
 ## Why they are generated

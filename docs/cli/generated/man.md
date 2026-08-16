@@ -19,9 +19,11 @@ Options:
 | `--json` | flag | off | Prints the page, or the list of written paths, as one JSON object. |
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |
 
-Like [`completions`](./completions.md), the pages are rendered from the command
-tree this build carries, so they describe exactly the verbs and flags it has.
-No repository is read, and `-C` is ignored.
+Like [`completions`](./completions.md), the pages are rendered on demand from
+the command tree this build carries. Quinjet fully builds that clap tree once,
+then renders the root and every nested command from it. Nested pages therefore
+retain their complete command path and inherited global options such as `-C`
+and `--json`. No repository is read, and `-C` is ignored.
 
 Without `--dir` the output is the top-level page, in roff, on stdout:
 
@@ -29,7 +31,7 @@ Without `--dir` the output is the top-level page, in roff, on stdout:
 $ quinjet man | head -5
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH QUINJET 1  "quinjet 0.0.6"
+.TH QUINJET 1  "quinjet <version>"
 .SH NAME
 quinjet \- A fast, live, keyboard-first Git source-control interface for the terminal
 ```
@@ -48,7 +50,7 @@ expects to find a subcommand's page. Nested verbs are joined with hyphens, so
 
 ```console
 $ quinjet man --dir /tmp/quinjet-man
-Wrote 43 pages to /tmp/quinjet-man
+Wrote manual pages to /tmp/quinjet-man
   /tmp/quinjet-man/quinjet.1
   /tmp/quinjet-man/quinjet-tui.1
   /tmp/quinjet-man/quinjet-status.1
@@ -68,7 +70,8 @@ man quinjet-branch-create
 macOS. A system-wide install is the same command against
 `/usr/local/share/man/man1`, which needs root.
 
-Every page is rewritten on each run, so upgrading Quinjet and repeating the
+The command generates pages but does not install them automatically. Every page
+is rewritten on each run, so upgrading Quinjet and repeating the
 command is all that is needed to bring installed pages up to date. Files in
 the directory that Quinjet did not write are left alone.
 
