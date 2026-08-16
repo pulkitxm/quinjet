@@ -19,6 +19,9 @@ upstream repository.
 - [Gap Analysis](./gap-analysis.md): Quinjet audited against everything the
   study found, strengths first, then prioritized gaps.
 
+- [Rust Dump](./rust-dump.md): the whole reference bound into one file for
+  reading straight through or searching in one place.
+
 ## The corpus
 
 | Repository | Stars | Study |

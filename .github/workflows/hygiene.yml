@@ -48,9 +48,14 @@ jobs:
             exit 1
           fi
       - name: No large files
+        # docs/practices/rust-dump.md is the practices reference deliberately
+        # bound into one searchable text file; it is the one tracked file
+        # allowed past the blob cap.
         run: |
           set -euo pipefail
-          oversized=$(git ls-files -z | xargs -0 -I{} find {} -size +512k -print)
+          oversized=$(git ls-files -z \
+            | grep -zv '^docs/practices/rust-dump\.md$' \
+            | xargs -0 -r -I{} find {} -size +512k -print)
           if [ -n "${oversized}" ]; then
             echo "${oversized}" >&2
             echo "tracked files over 512k" >&2
