@@ -61,20 +61,21 @@ and accepts either code as long as something came back on stdout. `logs` takes
 the `link` of a check run, pulls the Actions job id out of the trailing
 `/job/<id>`, and reads `repos/<owner>/<name>/actions/jobs/<id>` for the steps and
 `.../logs` for the archive, then attaches each timestamped log line to the step
-whose window contains it. Both take `--watch`, and under `--watch` their exit
-code is a verdict on the pull request rather than on the command.
+whose window contains it. `view`, `conversation`, `checks`, and `logs` take
+`--watch`. The first two keep refreshing until stopped; the latter two stop
+when their check state settles.
 
 ## At a glance
 
 | Command | What it does |
 | --- | --- |
-| `quinjet pr view` | Prints one pull request's metadata and its description. |
+| `quinjet pr view` | Prints one pull request's metadata and its description, optionally refreshing until stopped. |
 | `quinjet pr files` | Lists the files the pull request changes, with per-file line counts. |
 | `quinjet pr diff` | Prints the whole patch, or one path's patch. |
-| `quinjet pr conversation` | Prints the timeline and the inline review comments as one thread. |
+| `quinjet pr conversation` | Prints the timeline and the inline review comments as one thread, optionally refreshing until stopped. |
 | `quinjet pr checks` | Lists the checks, optionally blocking until they settle. |
 | `quinjet pr logs` | Prints one check run's steps and its GitHub Actions log. |
-| `quinjet pr open` | Hands the pull request's URL to the desktop browser. |
+| `quinjet pr open` | Hands the pull request URL, or one selected check URL, to the desktop browser. |
 
 ## Commands
 
@@ -93,8 +94,8 @@ code is a verdict on the pull request rather than on the command.
 | 0 | The verb printed its answer. Also `pr checks --watch` when every check settled and none failed, `pr logs --watch` when the run finished without failing, and `--help` on the group or any verb. |
 | 1 | The lookup failed: `gh` is missing or unauthenticated, no configured fetch or push remote resolves to a GitHub repository, the number does not exist (`Could not resolve to a PullRequest with the number of 99999`), or the number was `0` (`Pull-request numbers must be positive integers`). Also `files` and `diff` when the merge base could not be found within 4,096 commits, `checks --exit-code` when any check failed or is pending, `checks --watch` when the settled result contains a failure, `logs --watch` when the run ended failed, and `open` when the desktop opener could not be spawned. |
 | 2 | clap rejected the command line: a missing `<NUMBER>`, a `<NUMBER>` that is not an unsigned integer, `quinjet pr` with no verb, or an unknown flag. |
-| 3 | `--repo` matched none of the discovered repositories, `pr diff <n> <path>` named a path that is not part of the pull request, or `pr logs <n> <check>` matched zero checks or more than one. Every one of these prints a `hint:` listing the valid choices. |
-| 4 | `pr logs` only: the check has nothing readable behind it. Two things produce that, and both print their reason: the check's `link` is not an Actions job URL, so there is no job id to read, or GitHub has published neither steps nor an archive for the job yet. |
+| 3 | `--repo` matched none of the discovered repositories, `pr diff <n> <path>` named a path that is not part of the pull request, or a check name passed to `pr logs` or `pr open --check` matched zero checks or more than one. Every one of these prints a `hint:` listing the valid choices. |
+| 4 | `pr logs` found a check with no readable log, in either one-shot or watch mode, or `pr open --check` found a check with no browser URL. |
 
 The exit 1 that `checks --exit-code`, `checks --watch` and `logs --watch`
 produce is unlike every other exit 1 here, and worth stating plainly: the answer
@@ -169,10 +170,10 @@ leaves stdout empty.
 - The whole cache is bounded to 128 MiB and 2,048 entries and pruned oldest
   first, with owner-only permissions. See
   [what is cached](../conventions.md#what-is-cached).
-- `--watch` exists on `checks` and on `logs` and nowhere else in this group.
-  Its interval has a floor: 5 seconds by default and never below 2 for `checks`,
-  8 seconds by default and never below 3 for `logs`. `--interval 0` is accepted
-  and silently raised to the floor rather than rejected.
+- `--watch` exists on `view`, `conversation`, `checks`, and `logs`. `view`,
+  `conversation`, and `checks` default to 5 seconds and never go below 2;
+  `logs` defaults to 8 seconds and never goes below 3. `--interval 0` is
+  accepted and silently raised to the applicable floor.
 - While watching, every read is forced (`refresh: true`), so the 30 second check
   cache is bypassed and the poll interval is what actually governs request rate.
 - Watching writes one compact JSON document per read under `--json`, repaints
@@ -189,6 +190,9 @@ leaves stdout empty.
 - `pr logs` and `pr checks` disagree about what counts as bad. `checks` treats
   pending as unhappy and returns 1 for it; `logs --watch` returns 1 only for a
   failed run. Skipped, cancelled and unknown runs are 0 for both.
+- `pr logs` applies the same unavailable-log check in one-shot and watch modes.
+  A check that has no Actions log, or for which GitHub has published neither
+  steps nor an archive, exits 4 as soon as that reading is encountered.
 - `pr logs` matches its `<CHECK>` argument by exact name first, and only falls
   back to a case-insensitive substring match when no name matches exactly. A
   matrix job called `Format, lint, and test (ubuntu-latest)` is therefore
@@ -228,6 +232,9 @@ leaves stdout empty.
   only one that is platform-dependent: `open` on macOS, `explorer` on Windows,
   `xdg-open` everywhere else. It spawns and does not wait, so a browser that
   fails to start afterwards is invisible to the exit code.
+- `pr open --check <name>` resolves the check by exact name first and then by a
+  unique case-insensitive substring, using the same selection rule as
+  `pr logs`. It opens the check's `link`; a selected check with no link exits 4.
 - Every one of these verbs is a `cli::Command` the terminal interface also
   issues, so a reading on the command line and a reading on screen come from the
   same code path and the same cache. See

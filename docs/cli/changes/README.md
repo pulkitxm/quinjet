@@ -185,7 +185,7 @@ that has to be looked up, and nothing here reads from GitHub.
   same sentence the human form prints. On a non-zero exit stdout is empty.
 - `quinjet cherry-pick` and `quinjet revert` also change the repository, but
   they act on commits rather than on the index, so they are not part of this
-  group.
+  group. Both preview by default and require `--yes` to mutate.
 - Removal behavior follows the platform. `discard` unlinks a symlink rather
   than following it, because it reads the entry with `symlink_metadata`. On
   Windows a file another process holds open, or one marked read-only, cannot be

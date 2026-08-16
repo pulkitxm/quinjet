@@ -59,7 +59,7 @@ upstream repository.
   corpus agrees on, where it splits, and why.
 
 - [Gap Analysis](./gap-analysis.md): Quinjet audited against everything the
-  study found, strengths first, then prioritized gaps.
+  study found, with completed recommendations and remaining gaps tracked.
 
 - [Rust Dump](./rust-dump.md): the whole reference bound into one file for
   reading straight through or searching in one place.
@@ -95,7 +95,7 @@ Start with the [patterns](./patterns/README.md) if you want the conclusions:
 each one ends with a checklist a new Rust project can apply directly. Reach
 into a [study](./studies/README.md) when you want the full context behind a
 citation, and read the [gap analysis](./gap-analysis.md) to see the corpus
-turned into a concrete, prioritized plan for this repository.
+turned into a concrete status and prioritized plan for this repository.
 
 ---
 
@@ -13841,14 +13841,16 @@ product names like "PyPI" and "CPython" spelled correctly inside doc comments.
 
 This chapter closes the series by turning chapters 01 through 27 back onto quinjet itself.
 Part 1 records where quinjet already sits at or above the bar set by the eighteen reference
-repositories. Part 2 verifies the strongest claim in ARCHITECTURE.md: that every operation
-reachable in the terminal interface is also a command-line subcommand. Part 3 lists every gap
-that remains, ordered by priority, each with the reference evidence that makes it a gap.
+repositories. Part 2 verifies the scoped claim in ARCHITECTURE.md: every user-visible
+repository and GitHub operation reachable in the terminal interface is also reachable from a
+command-line subcommand, while presentation state remains terminal-only. Part 3 records the
+status of every original gap and retains the evidence that motivated it.
 
 Priorities: P0 is a clear industry consensus quinjet lacks and would gain real value from.
 P1 is a strong practice with moderate value. P2 is optional polish. Every recommendation
 respects three constraints: the single-crate binary stays single-crate, every feature stays
-reachable through the CLI, and each change lands in under roughly 2,000 diff lines.
+reachable through the appropriate interface, and each change lands in under roughly 2,000
+diff lines.
 
 ### Part 1: Where quinjet already meets or exceeds the industry bar
 
@@ -13940,19 +13942,20 @@ broken-pipe rule (extras/bat/src/error.rs), and the uv `Hint` pattern
 (extras/uv/crates/uv-errors/src/lib.rs) all present. The `Emitter` in src/cli/mod.rs
 guarantees one JSON document per invocation on a locked stdout, documented as a contract in
 docs/cli/conventions.md. Destructive verbs (`discard`, `branch delete`, `stash drop`,
-`stash clear`) report what they would do and require `--yes`, which is the alacritty
-dry-run-before-wet-run lesson (extras/alacritty/alacritty/src/migrate/mod.rs) already built
-into the CLI surface.
+`stash clear`, `cherry-pick`, and `revert`) report what they would do and require `--yes`.
+This is the alacritty dry-run-before-wet-run lesson
+(extras/alacritty/alacritty/src/migrate/mod.rs) already built into the CLI surface.
 
-#### Tests exist at every layer short of the process boundary
+#### Tests cover the process boundary
 
-The crate carries about 180 inline `#[test]` functions: `TestRepository` fixtures in
-src/cli/mod.rs run real `git` in scratch directories; src/ui/mod.rs renders into
-`ratatui::backend::TestBackend` and asserts geometry and buffer content, the gitui frame-test
-idea from extras/gitui/src/gitui.rs; src/cli/mod.rs holds `Cli::command().debug_assert()`,
-verb-versus-path disambiguation tests, a test that every subcommand answers `-C` and
-`--json`, generation-scoped workspace tests, and dry-run tests for every destructive verb.
-.config/nextest.toml defines default and ci profiles with `fail-fast = false` and a
+Inline tests cover real Git fixtures, terminal geometry, parser behavior, generations, and
+the clap tree. tests/cli.rs additionally executes `CARGO_BIN_EXE_quinjet` with real argv and
+captured stdout, stderr, and exit status. Its process fixture removes repository-affecting Git
+environment variables, disables system configuration, and points global configuration at the
+null device. It covers all five completion generators outside a repository, validates bash
+output with `bash -n`, verifies nested man pages include their full command path and inherited
+global options, and proves discard, cherry-pick, and revert preview before `--yes` performs the
+mutation. .config/nextest.toml defines default and ci profiles with `fail-fast = false` and a
 `slow-timeout` with `terminate-after`, matching the [Testing Strategies](./patterns/testing-strategies.md) nextest checklist.
 
 #### Documentation and repository hygiene
@@ -13970,20 +13973,23 @@ a `--selftest` and run in hygiene.yml, and a grep confines `Command::new` to src
 src/cli, and src/main.rs, which is a repo-specific checker in the spirit of [Lints and Static Analysis](./patterns/lints-and-static-analysis.md)
 item 12.
 
-### Part 2: The CLI parity claim, verified
+### Part 2: The scoped CLI parity claim, verified
 
-ARCHITECTURE.md states that an operation reachable on screen and not from the command line
-cannot exist, because the interface's Git worker executes the same `cli::Command` vocabulary
-a subcommand does. The claim was checked in both directions against the code.
+ARCHITECTURE.md scopes parity to user-visible repository and GitHub operations. The terminal's
+focus, selection, scrolling, folding, filtering, cache indicators, and mouse capture are
+presentation state, not operations that need verbs. Repository and GitHub data work goes
+through the same `cli::Command` vocabulary and `cli::Session` as the command line. Browser
+opening uses the shared `cli::open_url` helper after both faces resolve the same pull request
+or check.
 
-Mutating operations: `GitOperation` in src/git/mod.rs has 23 variants, and src/app.rs
-constructs every one of them from the interface. Each maps to a verb in src/cli/mod.rs:
+Mutating operations: every `GitOperation` variant maps to a verb in src/cli/mod.rs:
 `Stage`/`StageAll` to `stage`, `Unstage`/`UnstageAll` to `unstage`, `Discard` to `discard`,
 `Commit` to `commit` with `--amend`, `Fetch`/`Pull`/`Push`/`Sync` to their verbs, `Checkout`
 to `branch switch`, `CreateBranch` to `branch create`, `RenameBranch` to `branch rename`,
 `DeleteBranch` to `branch delete`, the five stash variants to `stash push`, `apply`, `pop`,
 `drop`, and `clear`, `ResolveConflict` to `resolve --ours|--theirs` (with `--stage` mapping
-to `Stage`), `CherryPick` to `cherry-pick`, and `Revert` to `revert`.
+to `Stage`), `CherryPick` to `cherry-pick`, and `Revert` to `revert`. Pressing `x` on a
+conflict opens the resolution path; conflict discard is deliberately not a `GitOperation`.
 
 Read operations: every query the worker issues in src/git/worker.rs has a verb. `Refresh`
 is `status`, `LoadHistory` is `log`, `LoadBranches` is `branch list`, `LoadHistoryBranches`
@@ -13992,71 +13998,56 @@ is `branch list --all`, `LoadStashes` is `stash list`, `PrepareLocalDiff` and
 `LoadGitHubRepositories` is `repos`, `LookupPullRequest` is `pr view`, `PreparePullRequest`
 and `LoadPullRequestFile` back `pr files` and `pr diff`, `LoadPullRequestChecks` is
 `pr checks`, `LoadPullRequestConversation` is `pr conversation`, and `LoadCheckRunLog` is
-`pr logs`. Opening a pull request in a browser exists on both sides: `AppEffect::OpenUrl` in
-src/main.rs and `pr open` in src/cli/mod.rs, sharing `cli::open_url`.
+`pr logs`. Opening a pull request or selected check in a browser exists on both sides:
+`AppEffect::OpenUrl` in src/main.rs and `pr open [--check <name>]` in src/cli/mod.rs share
+`cli::open_url`.
 
-The only `Command` variants in src/cli/command.rs without a dedicated verb are
-`WarmCheckRunLogs`, which prefetches logs and changes nothing observable, and
-`PullRequestFileBatch`, an internal batching form of what `pr diff` already exposes. Neither
-is an operation visible on screen. In the other direction, every verb's behavior is reachable
-in the interface. Conclusion: the claim holds, and there is no P0 parity gap to report. What
-is missing is a machine check that keeps it true, which Part 3 files as gap QJ-05.
+Several `Command` variants are internal stages of an observable read rather than separate
+operations. `PrepareLocalDiff` and `LocalDiffFile` compose local diff verbs,
+`PreparePullRequest`, `PullRequestFile`, and `PullRequestFileBatch` compose `pr files` and
+`pr diff`, and `WarmCheckRunLogs` prefetches the same logs exposed by `pr logs`. Metadata
+verbs such as `completions` and `man`, and script-oriented output modes such as `--json`, are
+intentionally command-line-only. The scoped parity claim holds.
 
-### Part 3: Gaps, ordered by priority
+### Part 3: Gap status, ordered by original priority
 
-#### P0-1 (QJ-01): No panic hook restores the terminal
+#### Resolved P0-1 (QJ-01): Terminal restoration across setup and panic paths
 
-Cargo.toml sets `panic = "abort"` in `[profile.release]`, and src/main.rs installs no panic
-hook. `TerminalGuard::drop` in src/main.rs restores raw mode, the alternate screen, mouse
-capture, and keyboard enhancement flags, but with abort semantics destructors never run on
-panic, so any panic in a dependency (ratatui, crossterm, syntect, std) leaves the user's
-shell in raw mode on the alternate screen with no visible error. The lint wall prevents
-first-party panics but cannot prevent third-party ones. The [nushell study](./studies/nushell.md) calls this the single
-highest-value item for a ratatui binary. Evidence: extras/nushell/src/main.rs registers
-`std::panic::set_hook` that disables raw mode before reporting;
-extras/gitui/src/main.rs `set_panic_handler` restores the terminal and prints the backtrace;
-extras/meilisearch/crates/meilisearch/src/main.rs logs panics through a hook. Fix: in
-src/main.rs, before `TerminalGuard::enter`, install a hook that calls
-`crossterm::terminal::disable_raw_mode`, executes `LeaveAlternateScreen` and
-`DisableMouseCapture` on a fresh `io::stdout()`, then writes the panic payload and location
-with `writeln!` to stderr. The hook runs before the abort, so `panic = "abort"` can stay.
+The original evidence came from the nushell, gitui, and meilisearch panic hooks. src/main.rs
+now installs a hook before terminal entry and marks the terminal entered immediately after
+raw mode succeeds. A rollback guard restores from that first successful mutation if any later
+setup step fails. In release abort mode the hook restores from any thread because destructors
+will not run. In unwind mode it restores only for a panic on the terminal-owning thread, so a
+worker panic cannot tear down a terminal whose event loop is still running. Restoration is
+idempotent across the rollback guard, terminal guard, and panic hook.
 
-#### P0-2 (QJ-02): No shell completions and no man page
+#### Resolved P0-2 (QJ-02): On-demand completions and man pages
 
-Nothing in Cargo.toml or src/ references clap_complete or clap_mangen, and docs/cli has no
-completions page. This is the most uniform consensus in the corpus: tauri ships a
+This was the most uniform consensus in the corpus: tauri ships a
 completions subcommand (extras/tauri/crates/tauri-cli/src/completions.rs), zed covers six
 shells (extras/zed/crates/cli/src/completions.rs), fd generates completions and a man page
 and installs them from its Makefile (extras/fd/src/cli.rs, extras/fd/Makefile), ripgrep
 generates both from the binary, alacritty tests generated completions against checked-in
 files (extras/alacritty/alacritty/src/cli.rs), starship, ruff, deno, and bat all ship
 completions, and clap documents the mechanism itself (extras/clap/clap_mangen/Cargo.toml).
-For a keyboard-first Git tool whose whole surface is subcommands, tab completion is not
-polish, it is the product. Fix: add `clap_complete` (plus `clap_complete_nushell`) and
-`clap_mangen` as dependencies, add a `quinjet completions <shell>` verb and a hidden
-`quinjet man` verb to `Verb` in src/cli/mod.rs writing to the locked stdout, package the
-generated files into the release artifacts in .github/workflows/release.yml, and smoke-test
-`eval "$(quinjet completions bash)"` in ci.yml the way
-extras/uv/.github/workflows/test-smoke.yml does.
+Quinjet now generates bash, zsh, fish, elvish, and PowerShell completions on demand. `man`
+fully builds one clap tree and renders the root plus every nested command from it, preserving
+full nested command paths and global options. Both verbs run outside a repository and install
+nothing automatically. Process tests exercise all five generators, syntax-check bash with
+`bash -n`, and verify nested manual output.
 
-#### P0-3 (QJ-03): No black-box tests run the shipped binary
+#### Resolved P0-3 (QJ-03): Black-box tests run the shipped binary
 
-tests/ contains only install.sh and install.ps1, which test the installers, not the program.
-Every Rust test constructs a `Session` or an `App` in process; nothing executes the compiled
-`quinjet` binary with real argv and asserts stdout, stderr, and the exit code as a child
-process, so `main`'s dispatch, clap parsing of actual argument vectors, the broken-pipe exit
-path, and the `--json` document shape have no end-to-end coverage. [Testing Strategies](./patterns/testing-strategies.md) calls the
+The original [Testing Strategies](./patterns/testing-strategies.md) evidence calls the
 real-binary harness the backbone of CLI testing: extras/ripgrep/tests/util.rs drives the
 compiled binary in scratch directories, extras/fd/tests/testenv/mod.rs locates it with
 `env!("CARGO_BIN_EXE_fd")` and isolates the environment,
 extras/bat/tests/utils/command.rs scrubs every relevant variable, and
 extras/uv/crates/uv-test/src/lib.rs wraps insta so exit code, stdout, and stderr are pinned
-together. Fix: add a `tests/cli.rs` integration target using `assert_cmd`, `predicates`, and
-`tempfile`, with a fixture that runs `git init` plus seeded commits, `env_remove`s
-`GIT_DIR`, `GIT_CONFIG_*`, and `HOME`-scoped config, and covers each verb's text output,
-`--json` output parsed with `serde_json`, the `--yes` gates, and the documented exit codes
-3 and 4. Registering it with `autotests = false` and one `[[test]]` keeps link time flat as
-the suite grows, per extras/ripgrep/Cargo.toml.
+together. tests/cli.rs now runs the shipped binary in scratch directories, isolates
+repository-affecting Git environment and configuration, parses JSON output, tests destructive
+previews and confirmations, covers all completion generators, validates bash syntax, and
+checks root and nested manual pages.
 
 #### P1-1 (QJ-04): Help text and the hand-written CLI reference can drift
 
@@ -14073,18 +14064,14 @@ every verb, and add one `#[test]` that walks `Cli::command().get_subcommands()` 
 and asserts a matching page exists under docs/cli, so a new verb without documentation fails
 the build.
 
-#### P1-2 (QJ-05): The CLI-TUI parity invariant is not machine-checked
+#### Resolved P1-2 (QJ-05): Mutation route parity is machine-checked
 
-Part 2 verified parity by hand; no test enforces it. The realistic drift is a new
-`GitOperation` variant wired into src/app.rs whose verb is forgotten in src/cli/mod.rs,
-which no compiler error catches because `run` matches on `Verb`, not on `GitOperation`.
 Evidence: extras/rustdesk/src/core_main.rs keeps a test that the IPC-scoped CLI command set
 matches the management commands exactly, and extras/ripgrep/crates/core/flags/defs.rs tests
-the flag inventory exhaustively. Fix: add a `#[test]` in src/cli/mod.rs with an exhaustive
-`match` over a sample of every `GitOperation` variant that returns the argv which produces
-it, then round-trips each through `Cli::try_parse_from` and asserts the parsed verb rebuilds
-the same variant. Exhaustive matching makes adding a variant a compile error until the test
-names its argv.
+the flag inventory exhaustively. src/cli/mod.rs now has one `operation_routes!` declaration
+that generates both the exhaustive match and the route fixtures. Every `GitOperation` variant
+has exactly one fixture, and every named route is resolved against the real clap tree. Adding
+a variant without a route fails to compile; duplicating a variant fixture fails the test.
 
 #### P1-3 (QJ-06): No changelog, and no mechanical release-notes discipline
 
@@ -14100,17 +14087,14 @@ with a committed cliff.toml, generate the release body from the tag range in rel
 place of `generate_release_notes`, and commit a generated CHANGELOG.md refreshed by the
 release job.
 
-#### P1-4 (QJ-07): `cargo binstall quinjet` does not work
+#### Resolved P1-4 (QJ-07): cargo-binstall maps released targets
 
-Cargo.toml has no `[package.metadata.binstall]`, and the release artifacts
-(quinjet-linux-x86_64 and friends, from .github/workflows/release.yml) are bare binaries
-whose naming binstall cannot guess. Evidence: extras/fd/Cargo.toml ships binstall metadata
+The original evidence was that extras/fd/Cargo.toml ships binstall metadata
 with per-target overrides, extras/nushell/Cargo.toml and
 extras/tauri/crates/tauri-cli/Cargo.toml do the same, and the same checklist calls for
-it on day one. Fix: add `[package.metadata.binstall]` with
-`pkg-url = "{ repo }/releases/download/v{ version }/quinjet-{ target-family }-{ target-arch }"`
-adjusted to the existing artifact names, `pkg-fmt = "bin"`, and a Windows override for the
-`.exe` suffix, then verify once with `cargo binstall --dry-run quinjet`.
+it on day one. Cargo.toml now maps every currently released supported target to the existing
+artifact names: x86-64 and AArch64 Linux GNU and musl triples, x86-64 and Apple Silicon macOS,
+and x86-64 Windows with its `.exe` suffix.
 
 #### P1-5 (QJ-08): The parsers of untrusted Git output have no property tests or fuzzing
 
@@ -14240,14 +14224,14 @@ commit in .git-blame-ignore-revs (QJ-11).
 
 ### Summary
 
-| Priority | Count | Gaps |
+| Priority | Resolved | Remaining |
 | --- | --- | --- |
-| P0 | 3 | terminal-restoring panic hook; completions and man page; black-box binary tests |
-| P1 | 5 | help and docs drift gate; parity inventory test; changelog discipline; binstall metadata; parser property tests and fuzzing |
-| P2 | 12 | subprocess time limits; .gitattributes; .git-blame-ignore-revs; issue config.yml; job timeouts; dependabot cooldown; version build metadata; bug-report verb; disallowed-methods consolidation; benchmarks; cargo-vet; module splits |
+| P0 | terminal restoration; completions and man pages; black-box binary tests | none |
+| P1 | mutation route parity; binstall metadata | help and docs drift gate; changelog discipline; parser property tests and fuzzing |
+| P2 | none in this update | subprocess time limits; .gitattributes; .git-blame-ignore-revs; issue config.yml; job timeouts; dependabot cooldown; version build metadata; bug-report verb; disallowed-methods consolidation; benchmarks; cargo-vet; module splits |
 
 The pattern across the corpus is clear: quinjet's static-analysis, CI, security, and release
-machinery already exceed the eighteen reference repositories, often substantially. The gaps
-cluster in exactly two places the wall cannot reach: what happens at the process boundary
-(a panic mid-draw, a piped subcommand, a completion script, a hung child process) and what
-keeps the two command surfaces and their documentation from drifting as the tool grows.
+machinery already exceed the eighteen reference repositories, often substantially. The
+highest-risk process-boundary gaps from the original audit are now covered. Remaining work is
+concentrated in documentation drift, release-note discipline, parser hardening, subprocess
+timeouts, and optional repository polish.

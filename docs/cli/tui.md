@@ -25,7 +25,7 @@ Options:
 | `-C, --path <DIR>` | path | `.` | Global. It selects the repository for a verb, and the interface does not read it: the positional `PATH` is what opens. |
 | `--json` | flag | off | Global. Parsed and ignored here, because the interface writes to a screen rather than to stdout. |
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |
-| `-V, --version` | flag | off | Root only. `quinjet --version` prints `quinjet 0.0.6`; `quinjet tui --version` is a usage error. |
+| `-V, --version` | flag | off | Root only. `quinjet --version` prints the installed version; `quinjet tui --version` is a usage error. |
 
 ## The two spellings
 
@@ -79,8 +79,12 @@ contacts GitHub.
 
 The terminal is put into raw mode with the alternate screen, bracketed paste
 and, where the terminal supports them, the keyboard enhancement flags that let
-Quinjet tell `Esc` apart from an escape sequence. All of it is undone on exit,
-including after a panic, because the restore runs in a guard's `Drop`.
+Quinjet tell `Esc` apart from an escape sequence. Setup arms rollback as soon
+as raw mode succeeds, so failure in any later setup step restores from the
+first successful terminal mutation. Normal exit restores through the terminal
+guard. In release builds, which abort on panic, the panic hook restores from
+any thread before aborting. In unwind builds, a panic on the terminal thread
+restores, while a worker panic leaves a still-running terminal intact.
 
 ## `--no-mouse`, and why releasing the mouse matters
 
@@ -228,7 +232,8 @@ The verbs in the right-hand column are documented in their groups:
 | `[+]` / `[−]` click on a group header | `quinjet stage --all` / `quinjet unstage --all`, scoped to that group |
 | `a` | `quinjet stage --all` |
 | `U` | `quinjet unstage --all` |
-| `x`, then `y` or Enter | `quinjet discard <path> --yes` |
+| `x` on a normal change, then `y` or Enter | `quinjet discard <path> --yes` |
+| `x` on a conflict | opens the conflict resolution modal, matching `quinjet resolve <path> --ours`, `--theirs`, or `--stage`; conflict discard is not an operation |
 | `c`, then `Ctrl+Enter` | `quinjet commit -m "<message>"` |
 | Amend in the command palette | `quinjet commit -m "<message>" --amend` |
 | `o` in the conflict modal | `quinjet resolve <path> --ours` |
@@ -246,8 +251,8 @@ The verbs in the right-hand column are documented in their groups:
 | `Delete` in the branch picker, then confirm | `quinjet branch delete <name> --yes` |
 | `b` in History | `quinjet branch list --all`, then `quinjet log <ref>` for the branch chosen |
 | selecting a commit in History | `quinjet show <commit>` |
-| `C` in History | `quinjet cherry-pick <commit>` |
-| `R` in History | `quinjet revert <commit>` |
+| `C` in History, then confirm | `quinjet cherry-pick <commit> --yes` |
+| `R` in History, then confirm | `quinjet revert <commit> --yes` |
 | `n` in History | `quinjet branch create <name> <commit>` |
 | `S` in Changes | `quinjet stash list` |
 | Enter in the stash manager | `quinjet stash show <ref>` |
@@ -266,7 +271,7 @@ The verbs in the right-hand column are documented in their groups:
 | selecting a check | `quinjet pr logs <n> "<check>"` |
 | selecting a check that is still running | `quinjet pr logs <n> "<check>" --watch` |
 | the pull-request poll itself | `quinjet pr checks <n> --watch` |
-| `Shift+O` | `quinjet pr open <n>`, except that a selected check opens that run rather than the pull request |
+| `Shift+O` | `quinjet pr open <n>`, or `quinjet pr open <n> --check <name>` when a check is selected |
 | `t` or `T` | `--expanded`, on `diff`, `show`, `branch compare` and `stash show`. `pr diff` has no `--expanded`: a pull-request patch is cached per file by its merge-base and head commits at three lines of context, and a second context width would need a second cache key |
 | `v` | no verb. The command line prints unified patches only |
 | `e` / `E` on a diff | no verb. A verb prints every file it was asked for |
@@ -290,9 +295,6 @@ The interface can do these, and no verb can:
   folding one step of a check log. A verb prints the whole thing, unified.
 - Filtering a list in place (`/`), the command palette, and the shortcut help.
 - Releasing the mouse (`m`) so the terminal can select text.
-- Opening the selected check run in a browser (`Shift+O`). `quinjet pr open`
-  opens the pull request. The run's URL is the `link` field of
-  `quinjet pr checks --json`, so a script can still reach it.
 - Showing that an answer came from the cache, and showing which reads are in
   flight.
 
@@ -310,7 +312,9 @@ The command line can do these, and no key can:
 - `quinjet log --skip` and `-n`, and `quinjet show <revision>` for any
   revision. History paginates 300 commits at a time from the branch on screen.
 - `quinjet cherry-pick` and `quinjet revert` for a commit the History view is
-  not listing.
+  not listing. Both preview until `--yes` is passed.
+- `quinjet update`, which replaces the running executable rather than changing
+  a repository or terminal view.
 - `-C`, and running at all without a terminal.
 
 ## Notes and gotchas

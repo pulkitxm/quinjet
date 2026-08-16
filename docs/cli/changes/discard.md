@@ -27,9 +27,10 @@ Options:
 | `--json` | flag | off | Prints one JSON document on stdout instead of the sentence. |
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |
 
-`discard` is the only verb in Quinjet whose work cannot be undone, so it is the
-only one that is gated. Without `--yes` it names what it would touch and exits 0
-having changed nothing:
+`discard` is the only verb in Quinjet whose work cannot be recovered through
+Git. It is therefore preview-first, as are other consequential operations such
+as branch and stash deletion, cherry-pick, and revert. Without `--yes` it names
+what it would touch and exits 0 having changed nothing:
 
 ```console
 $ quinjet discard src/main.rs

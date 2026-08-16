@@ -5,11 +5,11 @@ terminal interface: the Changes tab, the commit history, the pull-request pane
 with its live checks and foldable Actions logs. Run it with a verb and it does
 exactly one of those things and exits, on stdout, with no terminal to hold.
 
-The two are not two implementations. Every operation the interface performs is
-a `quinjet::cli::Command`, and the interface's Git worker executes those
-commands through the same session a verb does. So an action that exists on
-screen and not on the command line cannot be written: there is one vocabulary,
-and both callers speak it.
+The two are not two implementations. Repository and GitHub data operations use
+`cli::Command`, and the interface's Git worker executes those commands through
+the same session a verb does. Browser opening uses one shared helper.
+Presentation state such as focus, scrolling, folding, filtering, and mouse
+capture remains specific to the terminal interface.
 
 ```bash
 quinjet                          open the terminal interface here
@@ -18,6 +18,9 @@ quinjet status                   what the Changes tab shows
 quinjet diff --staged            what its diff pane shows for the index
 quinjet pr checks 12 --watch     what the pull-request pane polls for
 quinjet pr logs 12 clippy        one check run's steps and its log
+quinjet completions bash         generate metadata without a repository
+quinjet man --dir ./man1         generate all manual pages on demand
+quinjet update --check           check the latest stable release
 ```
 
 ## Start here
@@ -49,6 +52,13 @@ quinjet pr logs 12 clippy        one check run's steps and its log
 | --- | --- |
 | [`quinjet pr`](./pull-request/README.md) | Metadata, changed files, patches, the conversation, checks, run logs, and `--watch` |
 
+## About Quinjet itself
+
+| Page | What it covers |
+| --- | --- |
+| [`quinjet completions`, `man`](./generated/README.md) | Shell completion scripts and manual pages, generated from the command tree |
+| [`quinjet update`](./update.md) | Checking releases and replacing the running executable after checksum verification |
+
 ## Guides
 
 | Page | What it covers |
@@ -64,8 +74,11 @@ quinjet log -n 10                     the ten most recent commits
 quinjet branch list --all             local and remote-tracking branches
 quinjet stash list                    what is stashed
 quinjet pr view 12                    a pull request's metadata
+quinjet pr view 12 --watch            refresh the metadata until stopped
+quinjet pr conversation 12 --watch    follow the conversation until stopped
 quinjet pr checks 12 --watch          block until CI settles, exit non-zero if it did not go green
 quinjet pr logs 12 clippy --watch     tail a running job's log
+quinjet update --check                check whether a newer stable release exists
 ```
 
 Every read takes `--json` and prints one document on stdout, except while

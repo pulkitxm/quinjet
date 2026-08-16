@@ -37,8 +37,8 @@ commit ids, `HEAD` and `main~2` all fail, because none of them is a row in that
 listing. A miss exits **3** and says what to run instead:
 
 ```console
-$ quinjet branch compare v0.0.6
-error: `v0.0.6` does not name a branch in this repository
+$ quinjet branch compare vX.Y.Z
+error: `vX.Y.Z` does not name a branch in this repository
 hint: run `quinjet branch list --all` for the branches that exist
 ```
 

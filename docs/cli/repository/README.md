@@ -130,13 +130,17 @@ log, which is a pull-request concern.
   --symbolic-full-name --verify --quiet <rev>` and keeps the answer only if it
   is under `refs/heads/`, `refs/remotes/` or `refs/tags/`, then falls back to
   `git rev-parse --verify --quiet <rev>^{commit}`. `HEAD` is answered without
-  running Git at all. So `HEAD`, `main`, `origin/main`, `v0.0.6`, `e2d95c2` and
+  running Git at all. So `HEAD`, `main`, `origin/main`, `vX.Y.Z`, `e2d95c2` and
   `HEAD~3` all work. `main` becomes `refs/heads/main`, `origin/main` becomes
-  `refs/remotes/origin/main` and `v0.0.6` becomes `refs/tags/v0.0.6`, because a
+  `refs/remotes/origin/main` and `vX.Y.Z` becomes `refs/tags/vX.Y.Z`, because a
   ref keeps its full name; only a short id or a `~`/`^` expression is
   normalized to a full 40 character object id. Whatever fails to resolve exits
   3, not 1, with the hint `` run `quinjet log` or `quinjet branch list --all`
   for what this repository holds ``.
+- `cherry-pick` and `revert` are preview-first revision mutations. After
+  resolving the revision, each reports what it would do and exits 0 without
+  changing `HEAD` unless `--yes` is present. Their process tests compare the
+  revision before and after both the preview and confirmed forms.
 - `history` then applies its own whitelist and refuses anything that is not
   `HEAD`, a `refs/heads/`, `refs/remotes/` or `refs/tags/` ref, or a full object
   id of 40 or 64 hex characters. Because resolution only ever produces one of

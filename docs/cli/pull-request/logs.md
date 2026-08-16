@@ -151,10 +151,9 @@ The exit contract for `--watch`:
 - It stops as soon as the check is no longer `pending`.
 - It exits 1 when the run's final status is `failed`, and 0 for every other
   settled status, including `skipped`, `cancelled` and `unknown`.
-- It never exits 4. `unavailable` under `--watch` is rendered as text and the
-  loop keeps going until the run settles, so a merge-queue check watched by
-  mistake will print its reason and exit 0 rather than telling you it cannot be
-  read.
+- It exits 4 as soon as a reading reports `unavailable`, using the same check as
+  one-shot mode. This covers a run with no GitHub Actions log and a run for
+  which GitHub has published neither steps nor an archive.
 - It cannot become ambiguous after the first pass, because the name it tracks is
   the resolved full name rather than the substring you typed. It can still exit
   3: every round re-selects the run out of a freshly refreshed check list, so a
@@ -201,7 +200,7 @@ above:
       "lines": [
         {
           "timestamp": "2026-08-15T12:25:03.0114455Z",
-          "text": "rustc 1.85.1 (4eb161250 2025-03-15)",
+          "text": "rustc 1.88.0",
           "severity": "normal"
         },
         {
@@ -253,7 +252,7 @@ https://github.com/pulkitxm/quinjet/actions/runs/31884531392/job/95011787569
 
 +  5. Run cargo check --all-features --locked  1s
       Updating crates.io index
-      Checking quinjet v0.0.5 (/home/runner/work/quinjet/quinjet)
+      Checking quinjet v<version> (/home/runner/work/quinjet/quinjet)
 
 +  9. Post Run Swatinem/rust-cache@v2  0s
 

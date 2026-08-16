@@ -3568,6 +3568,10 @@ impl App {
         let Some(change) = self.selected_change().cloned() else {
             return;
         };
+        if change.area == ChangeArea::Conflict {
+            self.modal = Some(Modal::Conflict { change });
+            return;
+        }
         self.modal = Some(Modal::Confirm {
             title: "Discard Change?".to_owned(),
             message: format!(
@@ -5053,6 +5057,21 @@ mod tests {
             app.selected_change().unwrap().path,
             PathBuf::from("README.md")
         );
+    }
+
+    #[test]
+    fn discard_on_a_conflict_opens_resolution_instead() {
+        let mut app = app_with_changes();
+        app.status.changes[0].area = ChangeArea::Conflict;
+        app.status.changes[0].status = ChangeStatus::Conflicted;
+
+        let effects = app.handle_key(
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+            Instant::now(),
+        );
+
+        assert!(effects.is_empty());
+        assert!(matches!(app.modal, Some(Modal::Conflict { .. })));
     }
 
     #[test]

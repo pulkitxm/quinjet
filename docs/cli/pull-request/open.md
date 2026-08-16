@@ -1,11 +1,11 @@
 # `quinjet pr open`
 
-Hands a pull request's URL to the desktop browser.
+Hands a pull request's URL, or one selected check URL, to the desktop browser.
 
 Usage:
 
 ```bash
-quinjet pr open <number> [--repo <owner/name>] [--refresh] [-C <DIR>] [--json]
+quinjet pr open <number> [--repo <owner/name>] [--refresh] [--check <name>] [-C <DIR>] [--json]
 ```
 
 Arguments:
@@ -20,6 +20,7 @@ Options:
 | --- | --- | --- | --- |
 | `--repo <OWNER/NAME>` | string | unset | Chooses which discovered repository the number belongs to. |
 | `--refresh` | flag | off | Asks GitHub again for the metadata rather than using the five-minute cache. |
+| `--check <NAME>` | string | unset | Opens a matching check run instead of the pull request. Exact name wins; otherwise a unique case-insensitive substring is accepted. |
 | `-C, --path <DIR>` | path | `.` | The repository to run against. Global. |
 | `--json` | flag | off | Prints `{"message": "Opened <url>"}` instead of the sentence. Global. |
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |
@@ -45,20 +46,23 @@ the browser or the opener writes can reach your terminal or your pipe, so the
 sentence on stdout stays the only thing there. And the exit code only reports
 whether the opener could be started: a browser that launches and then fails to
 load the page, or an `xdg-open` that exits non-zero a moment later, is invisible
-here. The only failure this verb can report is a missing or unexecutable opener:
+here. After a URL has been selected, the only failure this verb can report is a
+missing or unexecutable opener:
 
 ```console
 $ quinjet pr open 8
 error: failed to hand https://github.com/pulkitxm/quinjet/pull/8 to xdg-open: No such file or directory (os error 2)
 ```
 
-That exits 1. Everything else that can go wrong belongs to the lookup and is
-described in [the group page](./README.md): exit 3 for a `--repo` that matches
-nothing, exit 1 for a number GitHub cannot resolve.
+That exits 1. Everything else belongs to pull-request lookup or, with
+`--check`, check selection. The [group page](./README.md) covers those exit
+codes.
 
-The URL comes from GitHub rather than being constructed from the number, so it
-is always the canonical one, including on a GitHub Enterprise host and for a
-pull request that has since been transferred.
+Without `--check`, the URL comes from GitHub rather than being constructed from
+the number, so it is always canonical. With `--check`, Quinjet reads the check
+list and applies the same exact-then-unique-substring selection as `pr logs`.
+It opens the selected check's `link`. No match or an ambiguous match exits 3
+with valid names in the hint; a selected check with no browser URL exits 4.
 
 `--json` shape, one object with a single key. This is the standard shape for a
 verb that acts rather than reads, described in
@@ -78,6 +82,7 @@ Examples:
 ```bash
 quinjet pr open 8
 quinjet pr open 8 --repo pulkitxm/quinjet
+quinjet pr open 8 --check "Minimum supported Rust"
 quinjet pr open 8 --json
 quinjet pr open 8 -C ~/code/quinjet
 ```
@@ -97,5 +102,6 @@ quinjet pr view 8 --json | jq -r .url
 ## Where to go next
 
 - [`quinjet pr view`](./view.md) for the metadata this verb takes the URL from
+- [`quinjet pr checks`](./checks.md) for the list `--check` selects from
 - [`quinjet pr`](./README.md), the rest of this group
 - [All `quinjet` commands](../README.md)

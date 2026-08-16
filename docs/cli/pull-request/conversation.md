@@ -7,7 +7,7 @@ between them.
 Usage:
 
 ```bash
-quinjet pr conversation <number> [--repo <owner/name>] [--refresh] [-C <DIR>] [--json]
+quinjet pr conversation <number> [--repo <owner/name>] [--refresh] [--watch] [--interval <seconds>] [-C <DIR>] [--json]
 ```
 
 Arguments:
@@ -22,6 +22,8 @@ Options:
 | --- | --- | --- | --- |
 | `--repo <OWNER/NAME>` | string | unset | Chooses which discovered repository the number belongs to. |
 | `--refresh` | flag | off | Asks GitHub again for the metadata. The conversation itself is keyed by `updatedAt` and can never be stale, so this only helps when the metadata cache is holding an old stamp. |
+| `--watch` | flag | off | Keeps refreshing the metadata stamp and conversation until stopped. |
+| `--interval <SECONDS>` | unsigned integer | `5` | Seconds between reads while watching. Values below 2 are raised to 2. |
 | `-C, --path <DIR>` | path | `.` | The repository to run against. Global. |
 | `--json` | flag | off | Prints one JSON object on stdout. Global. |
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |
@@ -153,6 +155,7 @@ Examples:
 ```bash
 quinjet pr conversation 8
 quinjet pr conversation 8 --json
+quinjet pr conversation 8 --watch --interval 10
 quinjet pr conversation 8 --json | jq -r '.entries[] | select(.kind == "comment") | .actor'
 quinjet pr conversation 8 --repo pulkitxm/quinjet
 ```
@@ -188,6 +191,11 @@ Git author name from the commit, not a GitHub login, so `@Pulkit` and
 A body is printed indented by two spaces with its own line breaks preserved, and
 a quoted hunk is printed above it prefixed with two spaces, a pipe and a space, so a review comment
 shows the code it is about before the comment itself.
+
+Under `--watch`, each reading forces fresh pull-request metadata, then loads the
+conversation for the resulting `updatedAt` stamp. Text repaints on a terminal
+and appends when redirected; JSON is one compact conversation object per
+reading. The watch has no settled state and runs until stopped.
 
 ## Where to go next
 

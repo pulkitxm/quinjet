@@ -10,7 +10,7 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 
 ## Features
 
-- One command layer behind both faces: every operation is a subcommand, and the terminal interface runs those same subcommands
+- One command layer behind user-visible Git and GitHub operations in both faces, excluding terminal-only presentation state
 - Non-interactive `--json` output and a `--watch` flag that streams one document per read
 - Live working-tree, index, conflict, branch, and ahead/behind refresh
 - Scrollable staged, unstaged, untracked, renamed, deleted, and conflict groups
@@ -20,15 +20,16 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 - Index-first, lazy per-file patches for changes, commits, branch comparisons, stashes, and PRs
 - Compact change hunks by default; `t` expands the selected file to full context
 - Paginated, branch-scoped commit history with a view-only local/remote branch picker that never checks out
-- On-demand pull-request lookup by number—no startup prefetch and no repository-wide PR listing
+- On-demand pull-request lookup by number, with no startup prefetch and no repository-wide PR listing
 - PR title, source/destination branches, state, totals, description, and the whole conversation: comments, reviews and their inline replies, pushed commits, force pushes, and every lifecycle event
 - Foldable GitHub Actions logs per check run, with each step's output attached to the step that produced it, tailing while the job is still running
 - Adaptive live refresh that watches a running pull request closely and a settled one loosely, plus optional instant refresh from forwarded webhooks
 - Exact per-file line counts the moment a diff is indexed, and a virtualized changed-file tree with batched background patches
-- Reused local PR workspaces across multiple fetch/push remotes and forks—no checkout or persistent source refs
+- Reused local PR workspaces across multiple fetch/push remotes and forks, with no checkout or persistent source refs
 - Current-branch comparison with any local or remote-tracking branch, without checkout
 - Named, staged-only, untracked-inclusive, preview, apply, pop, drop, and clear stash workflows
 - Commit, amend, fetch, pull, push, sync, cherry-pick, and revert
+- Preview-first cherry-pick and revert, with `--yes` required before either mutates
 - Local branch switching, creation, rename, deletion, and creation at a selected commit
 - Natural mouse scrolling, clickable rows, and draggable pane dividers
 - Keyboard-first filtering, command palette, modal text editing, and accessibility help
@@ -56,10 +57,23 @@ The installer detects the operating system and CPU architecture, downloads the m
 Pass `--version` or `--bin-dir` to the shell installer to select a release or installation directory:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://quinjet.pulkit.page/install.sh | sh -s -- --version v0.0.1
+curl --proto '=https' --tlsv1.2 -LsSf https://quinjet.pulkit.page/install.sh | sh -s -- --version vX.Y.Z
 ```
 
 The equivalent PowerShell environment variables are `QUINJET_VERSION` and `QUINJET_INSTALL_DIR`.
+
+Whichever installation path you chose, Quinjet can check for and install the
+latest stable release itself:
+
+```bash
+quinjet update --check
+quinjet update
+```
+
+The updater replaces the executable that is actually running, so it works for
+script, Cargo, cargo-binstall, and custom-directory installations without
+guessing where the binary lives. It pins the download to one release and
+verifies the published SHA-256 checksum before replacing anything.
 
 ### Cargo
 
@@ -67,6 +81,14 @@ From crates.io:
 
 ```bash
 cargo install quinjet
+```
+
+With [cargo-binstall](https://github.com/cargo-bins/cargo-binstall), the package
+metadata maps every currently released Linux, macOS, and Windows target to its
+published binary:
+
+```bash
+cargo binstall quinjet
 ```
 
 From the latest source:
@@ -108,7 +130,7 @@ Only loopback connections are accepted, and a delivery is treated purely as a si
 
 ### Command line
 
-Every operation the interface performs is also a subcommand, and the interface executes those subcommands rather than reaching Git itself, so the two can never drift:
+Every user-visible Git and GitHub operation the interface performs is also reachable through a subcommand, and repository data operations execute the same command layer rather than reaching Git itself. Browser opening uses the same helper on both faces. Presentation state such as focus, scrolling, folding, and filtering remains terminal-only:
 
 ```bash
 quinjet status                        # the Changes view, as text
@@ -117,8 +139,12 @@ quinjet log -n 10                     # the History view
 quinjet branch list --all             # local and remote-tracking branches
 quinjet stash show 'stash@{0}'        # a stash as a patch
 quinjet pr view 12                    # a pull request's metadata
+quinjet pr view 12 --watch            # keep its metadata current
+quinjet pr conversation 12 --watch    # follow conversation updates
 quinjet pr checks 12 --watch          # block until CI settles
 quinjet pr logs 12 clippy --watch     # tail a running job's log
+quinjet pr open 12 --check clippy      # open one check run in a browser
+quinjet update --check                 # report whether a stable update exists
 ```
 
 `quinjet --help` lists the whole tree. Subcommands are dispatched before the terminal is claimed, so a piped run never meets the interactive-terminal refusal. `-C <dir>` chooses the repository, `--json` prints one document on stdout, and `--watch` prints one compact document per read. Destructive subcommands report what they would do and change nothing until `--yes`.
@@ -185,7 +211,7 @@ The UI intentionally stays uncluttered; press `?` for the complete shortcut refe
 | `d` in Changes | Compare current branch with another branch |
 | `t` | Toggle compact hunks/full-file context |
 | `v` | Toggle unified/side-by-side diff |
-| `x` | Discard selected change after confirmation |
+| `x` | Discard a normal change after confirmation; open resolution for a conflict |
 | `b` in History | View another local/remote branch without checkout |
 | `b` elsewhere / `B` | Checkout branch picker; `F2`/`Ctrl+R` renames a local branch |
 | `o` in Pull Requests | Discover/select a repository and reopen the entered PR |
@@ -211,7 +237,7 @@ Text fields support Unicode-safe editing plus familiar terminal and macOS motion
 - Filesystem event storms collapse into authoritative status snapshots.
 - Preview requests carry generations so stale replies are ignored.
 - Working-tree groups, commits, branch comparisons, and stashes first use bounded path indexes; only selected files produce patches, through capped subprocess pipes.
-- Syntax grammar work is bounded to 512 KiB per patch and 32 KiB per row. Larger generated patches retain diff coloring but use plain source spans, preventing highlighting—not Git—from dominating load time; collapsed cached files also keep only their headers in the combined document.
+- Syntax grammar work is bounded to 512 KiB per patch and 32 KiB per row. Larger generated patches retain diff coloring but use plain source spans, preventing highlighting, rather than Git, from dominating load time; collapsed cached files also keep only their headers in the combined document.
 - History is paginated for one explicit branch revision; choosing another branch is read-only.
 - No pull-request command is queued at startup or when the PR tab opens. Only an explicit positive-number lookup contacts GitHub, and refreshing refetches only that PR.
 - Once a pull request is open it refreshes on an adaptive schedule: check state every 5 seconds while a run is in progress, every 20 seconds once it settles, and every 2 minutes from another view. Metadata and the conversation hold a 20-second floor and a growing log an 8-second floor regardless of the tick, so a fast cadence costs one extra request rather than five. A finished run's log is never re-read, each read is independent so one failing endpoint never stalls the others, and a moved head reindexes only the diff. A forwarded webhook bypasses every floor.

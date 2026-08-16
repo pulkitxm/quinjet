@@ -19,7 +19,7 @@ argv
   │                     ▼                   │
   │                Git worker ──────────────┘
   │                     │
-  └── a verb ───────────┤
+  └── repository verb ──┤
                         ▼
                   cli::Command
                         │
@@ -31,11 +31,14 @@ argv
                         ▲
                         │
       filesystem watcher, webhook listener
+
+metadata verb ──► generated references / verified updater ──► text or JSON
 ```
 
 - `src/cli/command.rs`: the one command vocabulary. `Command` names every operation, `Outcome` names every answer, and `Session` owns the repository plus the two reusable diff workspaces.
 - `src/cli/mod.rs`: the subcommand tree, its dispatch ahead of terminal setup, the exit-code taxonomy, and the `--json` emitter.
 - `src/cli/render.rs`: plain-text renderings of every outcome, with no terminal, no color, and no width assumption.
+- `src/cli/update.rs`: latest-release lookup, target selection, checksum verification, and replacement of the running executable.
 - `src/cli/watch.rs`: the non-interactive refresh loop, repainting for a terminal and streaming compact JSON for a pipe.
 - `src/app.rs`: focus, selection, modal, command, lazy-file, live-check, progress, and generation state.
 - `src/git/mod.rs`: safe argv construction, reusable index-first local diff workspaces, branch/stash workflows, branch-scoped history reads, and user-facing Git operations.
@@ -53,7 +56,7 @@ argv
 ## Responsiveness Invariants
 
 1. The UI thread mutates only in-memory state and renders visible rows.
-1a. There is one command vocabulary. Every terminal operation and every subcommand is a `cli::Command` executed by `cli::Session`, so an operation reachable on screen and not from the command line cannot exist. The worker adds only a generation tag and a lane; it constructs no argument list. Subcommand dispatch happens before the interactive-terminal check and before any terminal mode is entered, so a piped invocation never claims stdout.
+1a. There is one command vocabulary for user-visible repository and GitHub operations. The terminal and subcommands execute `cli::Command` through `cli::Session`; presentation state such as focus, scrolling, folding, filtering, and mouse capture stays in the app. The worker adds only a generation tag and a lane; it constructs no argument list. One macro declaration generates the exhaustive route match and one fixture per `GitOperation` variant. Subcommand dispatch happens before the interactive-terminal check and before any terminal mode is entered, so metadata verbs such as `completions`, `man`, and `update` run without repository discovery and a piped invocation never claims the terminal.
 2. Every preview, status, history, branch, and pull-request request carries a generation; stale replies are ignored.
 3. Fixed coalescing mailboxes isolate status/history, GitHub metadata (lookup, checks, conversation, check logs), local change/commit/branch/stash previews, and potentially network-bound PR previews. Background diff prefetch occupies its own mailbox slot behind the preview slot, so a queued batch can never displace the preview a reader is waiting for. Key repeat remains constant-space, slow GitHub work cannot block tab switches, and ordered user mutations are serialized by app state. No GitHub command is queued at startup or merely by opening the PR tab.
 4. Watcher signals are lossy by design: one full status snapshot subsumes all preceding file events.
@@ -74,6 +77,9 @@ argv
 13. Read operations set `GIT_OPTIONAL_LOCKS=0`; `gh` runs with prompts, paging, color, and update checks disabled on the worker thread.
 14. A session owns the prepared workspaces, which is what makes one layer serve both faces. The terminal keeps a session per worker lane and pays for a prepared pull request once; a subcommand builds a session, prepares, reads, and drops it, so a repeated invocation pays the fetch again and relies on the immutable per-file caches instead. Mutations are serialized by app state inside the terminal only; two concurrent processes can race on the index exactly as two `git` invocations would.
 15. The command line never repaints or streams progress into a pipe. Human output is written once per invocation, `--json` is one document, and `--watch` is the single deliberate exception: one compact document per read under `--json`, a repainted screen on a terminal, and appended frames when redirected.
+16. Terminal setup becomes recoverable immediately after raw mode is enabled. If any later setup step fails, a rollback guard restores from that first successful mutation. In abort builds the panic hook restores from any thread because destructors do not run. In unwind builds it restores only for a panic on the terminal-owning thread, so a worker panic cannot tear down a terminal whose event loop is still running.
+17. Completion scripts and manual pages are metadata reads built directly from clap before repository discovery. Completions support bash, zsh, fish, elvish, and PowerShell. Manual generation fully builds one clap tree, then renders the root and nested commands from it so nested pages retain their full command path and inherited global options.
+18. Self-update resolves one stable GitHub release before downloading anything else, pins its checksum and target binary to that tag, verifies SHA-256 before staging beside the running executable, and delegates cross-platform replacement to `self-replace`. An older or equal release never replaces the binary, and any network, checksum, staging, or replacement failure leaves the running path intact.
 
 ## VS Code Research
 
