@@ -293,7 +293,7 @@ Quinjet works in a workflow as long as `gh` is authenticated and the repository
 is checked out. The pull-request number is in the event payload:
 
 ```yaml
-- uses: actions/checkout@v5
+- uses: actions/checkout@v7
 - name: Wait for the other checks
   env:
     GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
