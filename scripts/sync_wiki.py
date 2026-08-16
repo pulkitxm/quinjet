@@ -41,6 +41,7 @@ class Section:
 SECTIONS = (
     Section("docs/cli", "CLI", "CLI reference"),
     Section("docs/guides", "Guides", "Guides", files_only=True),
+    Section("docs/practices", "Practices", "Rust practices"),
 )
 
 READING_ORDER = (
@@ -53,6 +54,9 @@ READING_ORDER = (
     "branch",
     "stash",
     "pull-request",
+    "studies",
+    "patterns",
+    "gap-analysis",
 )
 
 SMALL_WORDS = frozenset({"a", "an", "the", "of", "to", "and", "in", "on", "for", "with", "vs"})
