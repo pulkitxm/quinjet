@@ -96,9 +96,10 @@ and never downgrades. For a newer release it selects the same platform artifact
 as the installers, downloads `SHA256SUMS` and the binary from URLs pinned to the
 resolved tag, verifies the exact SHA-256 entry, stages the verified bytes beside
 the running executable, and replaces it while preserving its permissions. It
-does not need `git`, `gh`, Cargo, `curl`, PowerShell, or an external checksum
-tool. `--check` stops after version and target selection and never downloads or
-replaces a binary. See [`quinjet update`](./update.md) for its complete contract.
+does not need `git`, `gh`, Cargo, or an external checksum tool. `--check` stops
+after version and target selection and never downloads or replaces a binary. It
+uses `curl` or `wget` on Linux and macOS and PowerShell on Windows. See
+[`quinjet update`](./update.md) for its complete contract.
 
 ### What the installers check, and what they do not
 

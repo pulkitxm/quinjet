@@ -1,6 +1,7 @@
+use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::path::Path;
+use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail, ensure};
 use semver::Version;
@@ -14,30 +15,25 @@ const RELEASES_URL: &str = "https://github.com/pulkitxm/quinjet/releases";
 const API_LIMIT: usize = 1024 * 1024;
 const CHECKSUM_LIMIT: usize = 64 * 1024;
 const BINARY_LIMIT: usize = 32 * 1024 * 1024;
-const NETWORK_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(not(windows))]
+const NETWORK_TIMEOUT_SECONDS: &str = "30";
 const USER_AGENT: &str = concat!("quinjet/", env!("CARGO_PKG_VERSION"));
 
 pub(super) fn run(out: &Emitter, check_only: bool) -> Result<u8> {
-    let executable = std::env::current_exe().context("failed to locate the running executable")?;
     let context = UpdateContext {
         current_version: env!("CARGO_PKG_VERSION"),
-        executable: &executable,
         os: std::env::consts::OS,
         arch: std::env::consts::ARCH,
         translated: rosetta_translated(),
         api_url: API_URL,
         releases_url: RELEASES_URL,
     };
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(NETWORK_TIMEOUT))
-        .https_only(true)
-        .build()
-        .into();
+    let downloader = Downloader::detect()?;
     let result = perform_update(
         &context,
         check_only,
-        |url, limit| fetch(&agent, url, limit),
-        |staged, _executable| {
+        |url, limit| downloader.fetch(url, limit),
+        |staged| {
             self_replace::self_replace(staged).context("failed to replace the running executable")
         },
     )?;
@@ -47,7 +43,6 @@ pub(super) fn run(out: &Emitter, check_only: bool) -> Result<u8> {
 
 struct UpdateContext<'a> {
     current_version: &'a str,
-    executable: &'a Path,
     os: &'a str,
     arch: &'a str,
     translated: bool,
@@ -70,7 +65,6 @@ struct UpdateResult {
     current_version: String,
     latest_version: String,
     asset: Option<String>,
-    path: Option<PathBuf>,
 }
 
 impl UpdateResult {
@@ -84,13 +78,8 @@ impl UpdateResult {
                 self.latest_version, self.current_version
             ),
             UpdateStatus::Updated => format!(
-                "Updated Quinjet from {} to {} at {}\n",
-                self.current_version,
-                self.latest_version,
-                self.path.as_deref().map_or_else(
-                    || "the running executable".to_owned(),
-                    |path| path.display().to_string()
-                )
+                "Updated Quinjet from {} to {}\n",
+                self.current_version, self.latest_version
             ),
         }
     }
@@ -110,7 +99,7 @@ fn perform_update(
     context: &UpdateContext<'_>,
     check_only: bool,
     mut fetcher: impl FnMut(&str, usize) -> Result<Vec<u8>>,
-    replacer: impl FnOnce(&Path, &Path) -> Result<()>,
+    replacer: impl FnOnce(&Path) -> Result<()>,
 ) -> Result<UpdateResult> {
     let current = Version::parse(context.current_version).with_context(|| {
         format!(
@@ -125,7 +114,6 @@ fn perform_update(
             current_version: current.to_string(),
             latest_version: release.version.to_string(),
             asset: None,
-            path: None,
         });
     }
     let asset = asset_for(context.os, context.arch, context.translated)?;
@@ -135,7 +123,6 @@ fn perform_update(
             current_version: current.to_string(),
             latest_version: release.version.to_string(),
             asset: Some(asset.to_owned()),
-            path: Some(context.executable.to_path_buf()),
         });
     }
     let release_url = format!("{}/download/{}", context.releases_url, release.tag);
@@ -151,13 +138,7 @@ fn perform_update(
         actual_checksum == expected_checksum,
         "checksum verification failed for {asset}"
     );
-    let directory = context
-        .executable
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-        .context("the running executable has no parent directory")?;
-    let mut staged = tempfile::NamedTempFile::new_in(directory)
-        .with_context(|| format!("failed to stage the update in {}", directory.display()))?;
+    let mut staged = tempfile::NamedTempFile::new().context("failed to stage the update")?;
     staged
         .write_all(&binary)
         .context("failed to write the staged update")?;
@@ -165,37 +146,127 @@ fn perform_update(
         .flush()
         .context("failed to flush the staged update")?;
     let staged = staged.into_temp_path();
-    replacer(staged.as_ref(), context.executable)?;
+    replacer(staged.as_ref())?;
     Ok(UpdateResult {
         status: UpdateStatus::Updated,
         current_version: current.to_string(),
         latest_version: release.version.to_string(),
         asset: Some(asset.to_owned()),
-        path: Some(context.executable.to_path_buf()),
     })
 }
 
-fn fetch(agent: &ureq::Agent, url: &str, limit: usize) -> Result<Vec<u8>> {
-    let read_limit = u64::try_from(limit)
-        .context("the download limit does not fit in 64 bits")?
-        .saturating_add(1);
-    let mut response = agent
-        .get(url)
-        .header("User-Agent", USER_AGENT)
-        .header("Accept", "application/vnd.github+json")
-        .call()
-        .with_context(|| format!("failed to download {url}"))?;
-    let bytes = response
-        .body_mut()
-        .with_config()
-        .limit(read_limit)
-        .read_to_vec()
-        .with_context(|| format!("failed to read {url}"))?;
-    ensure!(
-        bytes.len() <= limit,
-        "download from {url} exceeded {limit} bytes"
-    );
-    Ok(bytes)
+#[derive(Clone, Copy)]
+enum Downloader {
+    #[cfg(not(windows))]
+    Curl,
+    #[cfg(not(windows))]
+    Wget,
+    #[cfg(windows)]
+    PowerShell,
+}
+
+impl Downloader {
+    fn detect() -> Result<Self> {
+        #[cfg(windows)]
+        {
+            if command_available("powershell", &["-NoProfile", "-Command", "exit 0"]) {
+                return Ok(Self::PowerShell);
+            }
+            bail!("PowerShell is required to download a Quinjet update")
+        }
+        #[cfg(not(windows))]
+        {
+            if command_available("curl", &["--version"]) {
+                return Ok(Self::Curl);
+            }
+            if command_available("wget", &["--version"]) {
+                return Ok(Self::Wget);
+            }
+            bail!("curl or wget is required to download a Quinjet update")
+        }
+    }
+
+    fn fetch(self, url: &str, limit: usize) -> Result<Vec<u8>> {
+        let destination = tempfile::NamedTempFile::new()
+            .context("failed to create a temporary download")?
+            .into_temp_path();
+        let output = match self {
+            #[cfg(not(windows))]
+            Self::Curl => Command::new("curl")
+                .args([
+                    "--proto",
+                    "=https",
+                    "--tlsv1.2",
+                    "--fail",
+                    "--silent",
+                    "--show-error",
+                    "--location",
+                    "--max-time",
+                    NETWORK_TIMEOUT_SECONDS,
+                    "--max-filesize",
+                    &limit.to_string(),
+                    "--user-agent",
+                    USER_AGENT,
+                    "--output",
+                ])
+                .arg(destination.as_os_str())
+                .arg(url)
+                .output(),
+            #[cfg(not(windows))]
+            Self::Wget => Command::new("wget")
+                .args([
+                    "--quiet",
+                    "--https-only",
+                    "--timeout",
+                    NETWORK_TIMEOUT_SECONDS,
+                    "--tries",
+                    "1",
+                    "--user-agent",
+                    USER_AGENT,
+                    "--output-document",
+                ])
+                .arg(destination.as_os_str())
+                .arg(url)
+                .output(),
+            #[cfg(windows)]
+            Self::PowerShell => Command::new("powershell")
+                .args([
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; Invoke-WebRequest -UseBasicParsing -Uri $args[0] -OutFile $args[1] -TimeoutSec 30 -Headers @{'User-Agent'=$args[2]}",
+                ])
+                .arg(url)
+                .arg(destination.as_os_str())
+                .arg(USER_AGENT)
+                .output(),
+        }
+        .with_context(|| format!("failed to start a downloader for {url}"))?;
+        ensure!(
+            output.status.success(),
+            "failed to download {url}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        let length = fs::metadata(&destination)
+            .with_context(|| format!("failed to inspect the download from {url}"))?
+            .len();
+        ensure!(
+            length <= u64::try_from(limit).context("the download limit does not fit in 64 bits")?,
+            "download from {url} exceeded {limit} bytes"
+        );
+        fs::read(&destination).with_context(|| format!("failed to read the download from {url}"))
+    }
+}
+
+fn command_available(program: &str, args: &[&str]) -> bool {
+    Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 fn parse_release(document: &[u8]) -> Result<Release> {
@@ -259,7 +330,7 @@ fn sha256(bytes: &[u8]) -> String {
 
 #[cfg(target_os = "macos")]
 fn rosetta_translated() -> bool {
-    std::process::Command::new("sysctl")
+    Command::new("sysctl")
         .args(["-in", "sysctl.proc_translated"])
         .output()
         .is_ok_and(|output| output.status.success() && output.stdout == b"1\n")
@@ -274,6 +345,7 @@ const fn rosetta_translated() -> bool {
 mod tests {
     use std::cell::{Cell, RefCell};
     use std::fs;
+    use std::path::PathBuf;
 
     use anyhow::{Result, ensure};
 
@@ -324,10 +396,7 @@ mod tests {
     #[test]
     fn equal_or_older_release_does_not_download_or_replace() -> Result<()> {
         for tag in ["v1.2.3", "v1.2.2"] {
-            let scratch = tempfile::tempdir()?;
-            let executable = scratch.path().join("quinjet");
-            fs::write(&executable, b"old")?;
-            let context = context(&executable, "1.2.3");
+            let context = context("1.2.3");
             let requests = RefCell::new(Vec::new());
             let replaced = Cell::new(false);
             let result = perform_update(
@@ -337,7 +406,7 @@ mod tests {
                     requests.borrow_mut().push(url.to_owned());
                     Ok(format!(r#"{{"tag_name":"{tag}"}}"#).into_bytes())
                 },
-                |_staged, _destination| {
+                |_staged| {
                     replaced.set(true);
                     Ok(())
                 },
@@ -351,9 +420,7 @@ mod tests {
 
     #[test]
     fn check_reports_available_release_without_downloading_it() -> Result<()> {
-        let scratch = tempfile::tempdir()?;
-        let executable = scratch.path().join("quinjet");
-        let context = context(&executable, "1.2.3");
+        let context = context("1.2.3");
         let requests = RefCell::new(Vec::new());
         let result = perform_update(
             &context,
@@ -362,7 +429,7 @@ mod tests {
                 requests.borrow_mut().push(url.to_owned());
                 Ok(br#"{"tag_name":"v1.3.0"}"#.to_vec())
             },
-            |_staged, _destination| bail!("check-only mode tried to replace the executable"),
+            |_staged| bail!("check-only mode tried to replace the executable"),
         )?;
         ensure!(result.status == UpdateStatus::Available);
         ensure!(requests.borrow().as_slice() == [context.api_url]);
@@ -370,16 +437,8 @@ mod tests {
     }
 
     #[test]
-    fn update_pins_downloads_verifies_bytes_and_targets_the_running_path() -> Result<()> {
-        let scratch = tempfile::tempdir()?;
-        let executable = scratch.path().join("custom-bin").join("quinjet");
-        fs::create_dir_all(
-            executable
-                .parent()
-                .context("test executable has no parent")?,
-        )?;
-        fs::write(&executable, b"old")?;
-        let context = context(&executable, "1.2.3");
+    fn update_pins_downloads_and_verifies_the_staged_bytes() -> Result<()> {
+        let context = context("1.2.3");
         let binary = b"new release binary";
         let checksum = sha256(binary);
         let requests = RefCell::new(Vec::new());
@@ -397,8 +456,7 @@ mod tests {
                     Ok(binary.to_vec())
                 }
             },
-            |staged, destination| {
-                ensure!(destination == executable);
+            |staged| {
                 ensure!(fs::read(staged)? == binary);
                 replaced.set(true);
                 Ok(())
@@ -419,11 +477,8 @@ mod tests {
     }
 
     #[test]
-    fn checksum_failure_preserves_the_running_executable() -> Result<()> {
-        let scratch = tempfile::tempdir()?;
-        let executable = scratch.path().join("quinjet");
-        fs::write(&executable, b"old")?;
-        let context = context(&executable, "1.2.3");
+    fn checksum_failure_never_invokes_the_replacer() -> Result<()> {
+        let context = context("1.2.3");
         let replaced = Cell::new(false);
         let result = perform_update(
             &context,
@@ -437,23 +492,19 @@ mod tests {
                     Ok(b"wrong bytes".to_vec())
                 }
             },
-            |_staged, _destination| {
+            |_staged| {
                 replaced.set(true);
                 Ok(())
             },
         );
         ensure!(result.is_err());
         ensure!(!replaced.get());
-        ensure!(fs::read(executable)? == b"old");
         Ok(())
     }
 
     #[test]
-    fn replacement_failure_preserves_the_executable_and_removes_the_stage() -> Result<()> {
-        let scratch = tempfile::tempdir()?;
-        let executable = scratch.path().join("quinjet");
-        fs::write(&executable, b"old")?;
-        let context = context(&executable, "1.2.3");
+    fn replacement_failure_removes_the_stage() -> Result<()> {
+        let context = context("1.2.3");
         let binary = b"new release binary";
         let checksum = sha256(binary);
         let staged_path = RefCell::new(None::<PathBuf>);
@@ -469,13 +520,12 @@ mod tests {
                     Ok(binary.to_vec())
                 }
             },
-            |staged, _destination| {
+            |staged| {
                 drop(staged_path.replace(Some(staged.to_path_buf())));
                 bail!("simulated replacement failure")
             },
         );
         ensure!(result.is_err());
-        ensure!(fs::read(&executable)? == b"old");
         let staged_path = staged_path
             .borrow()
             .clone()
@@ -484,10 +534,9 @@ mod tests {
         Ok(())
     }
 
-    fn context<'a>(executable: &'a Path, current_version: &'a str) -> UpdateContext<'a> {
+    fn context(current_version: &str) -> UpdateContext<'_> {
         UpdateContext {
             current_version,
-            executable,
             os: "linux",
             arch: "x86_64",
             translated: false,

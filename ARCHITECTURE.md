@@ -27,10 +27,10 @@ argv
               cli::Session::execute ──► Outcome
                         │                 │
                         ▼                 ▼
-           Git CLI / GitHub CLI      text or JSON on stdout
+          Git CLI / GitHub CLI      text or JSON on stdout
                         ▲
                         │
-       filesystem watcher, webhook listener
+      filesystem watcher, webhook listener
 
 metadata verb ──► generated references / verified updater ──► text or JSON
 ```

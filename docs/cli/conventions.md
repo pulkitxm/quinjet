@@ -213,7 +213,7 @@ nothing else. The metadata verbs run without a repository.
 | Verb | Also needs |
 | --- | --- |
 | `completions`, `man` | nothing, including no repository and no `git` |
-| `update` | network access to GitHub Releases and permission to replace the running executable; no `git`, `gh`, Cargo, shell, or external downloader |
+| `update` | network access to GitHub Releases, permission to replace the running executable, and `curl`/`wget` on Unix or PowerShell on Windows; no `git`, `gh`, or Cargo |
 | `status`, `diff`, `log`, `show`, `stage`, `unstage`, `discard`, `commit`, `resolve`, `branch`, `stash`, `cherry-pick`, `revert` | nothing |
 | `fetch`, `pull`, `push`, `sync` | network and whatever credentials Git is configured with |
 | `repos` | `gh`, but only for a host Quinjet cannot recognize locally |

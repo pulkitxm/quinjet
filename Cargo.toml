@@ -56,7 +56,6 @@ syntect = { version = "5.3", default-features = false, features = ["default-fanc
 tempfile = "3.20"
 two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
 unicode-width = "0.2"
-ureq = { version = "3.4", default-features = false, features = ["rustls"] }
 
 [lints.rust]
 unsafe_code = "forbid"

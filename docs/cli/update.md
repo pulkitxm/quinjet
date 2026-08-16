@@ -33,12 +33,14 @@ The update sequence is fixed:
 4. Build checksum and binary URLs from the resolved tag, never from a moving `latest/download` URL.
 5. Download the release's `SHA256SUMS`, require one exact valid entry for the selected asset, and download the binary with a 32 MiB ceiling.
 6. Verify SHA-256 before creating any staged executable.
-7. Stage beside the running binary and replace it through the cross-platform `self-replace` implementation, preserving the original permissions.
+7. Replace the running binary through the cross-platform `self-replace` implementation, which stages beside the destination and preserves the original permissions.
 
-Every network request has a 30 second global timeout. Release metadata is
-limited to 1 MiB and the checksum document to 64 KiB. Redirects remain HTTPS.
-No `gh` authentication is used or required; the request is subject to GitHub's
-normal unauthenticated release API limits.
+Every network request has a 30 second timeout. Release metadata is limited to
+1 MiB and the checksum document to 64 KiB. On Linux and macOS the updater uses
+`curl`, falling back to `wget`; on Windows it uses PowerShell. The downloader is
+given argument arrays rather than a shell-built command. No `gh` authentication
+is used or required, so the request is subject to GitHub's normal unauthenticated
+release API limits.
 
 ## Supported releases
 
@@ -75,19 +77,18 @@ A completed update:
 
 ```console
 $ quinjet update
-Updated Quinjet from 1.2.3 to 1.3.0 at /home/me/.local/bin/quinjet
+Updated Quinjet from 1.2.3 to 1.3.0
 ```
 
-The JSON form has one stable object. `asset` and `path` are `null` when no
-newer release exists; `status` is `up_to_date`, `available`, or `updated`:
+The JSON form has one stable object. `asset` is `null` when no newer release
+exists; `status` is `up_to_date`, `available`, or `updated`:
 
 ```json
 {
   "status": "available",
   "currentVersion": "1.2.3",
   "latestVersion": "1.3.0",
-  "asset": "quinjet-linux-x86_64",
-  "path": "/home/me/.local/bin/quinjet"
+  "asset": "quinjet-linux-x86_64"
 }
 ```
 
