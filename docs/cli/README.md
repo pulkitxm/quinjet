@@ -13,13 +13,14 @@ capture remains specific to the terminal interface.
 
 ```bash
 quinjet                          open the terminal interface here
-quinjet ~/code/project           open it somewhere else
+quinjet tui ~/code/project       open it somewhere else
 quinjet status                   what the Changes tab shows
 quinjet diff --staged            what its diff pane shows for the index
 quinjet pr checks 12 --watch     what the pull-request pane polls for
 quinjet pr logs 12 clippy        one check run's steps and its log
 quinjet completions bash         generate metadata without a repository
 quinjet man --dir ./man1         generate all manual pages on demand
+quinjet capabilities --json      inspect the installed command surface
 quinjet update --check           check the latest stable release
 ```
 
@@ -43,7 +44,7 @@ quinjet update --check           check the latest stable release
 
 | Page | What it covers |
 | --- | --- |
-| [`quinjet stage`, `unstage`, `discard`, `commit`, `resolve`](./changes/README.md) | Everything that moves the index or the working tree |
+| [`quinjet stage`, `unstage`, `discard`, `commit`, `resolve`, `cherry-pick`, `revert`](./changes/README.md) | Top-level verbs that move the index, working tree, or `HEAD` |
 | [`quinjet fetch`, `pull`, `push`, `sync`, `repos`](./remotes/README.md) | Talking to remotes, and which GitHub repositories this checkout points at |
 
 ## Pull requests
@@ -57,6 +58,7 @@ quinjet update --check           check the latest stable release
 | Page | What it covers |
 | --- | --- |
 | [`quinjet completions`, `man`](./generated/README.md) | Shell completion scripts and manual pages, generated from the command tree |
+| [`quinjet capabilities`](./generated/capabilities.md) | Machine-readable discovery of commands, arguments, values, and output modes |
 | [`quinjet update`](./update.md) | Checking releases and replacing the running executable after checksum verification |
 
 ## Guides
@@ -64,6 +66,7 @@ quinjet update --check           check the latest stable release
 | Page | What it covers |
 | --- | --- |
 | [Watching CI from a script](../guides/watching-ci.md) | Blocking on checks, reading the verdict from an exit code, and pulling a failing job's log out with `jq` |
+| [Automating Quinjet](../guides/automation.md) | Capability discovery, JSON contracts, non-interactive behavior, and completion setup |
 
 ## The short version
 

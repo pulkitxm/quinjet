@@ -18,6 +18,52 @@ use anyhow::{Context, Result, ensure};
 
 static SCRATCH_ID: AtomicUsize = AtomicUsize::new(0);
 const GIT_NULL_DEVICE: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
+const COMMAND_PATHS: &[&[&str]] = &[
+    &["tui"],
+    &["status"],
+    &["diff"],
+    &["stage"],
+    &["unstage"],
+    &["discard"],
+    &["commit"],
+    &["fetch"],
+    &["pull"],
+    &["push"],
+    &["sync"],
+    &["log"],
+    &["show"],
+    &["branch"],
+    &["branch", "list"],
+    &["branch", "switch"],
+    &["branch", "create"],
+    &["branch", "rename"],
+    &["branch", "delete"],
+    &["branch", "compare"],
+    &["stash"],
+    &["stash", "list"],
+    &["stash", "push"],
+    &["stash", "apply"],
+    &["stash", "pop"],
+    &["stash", "drop"],
+    &["stash", "clear"],
+    &["stash", "show"],
+    &["cherry-pick"],
+    &["revert"],
+    &["resolve"],
+    &["repos"],
+    &["pr"],
+    &["pr", "view"],
+    &["pr", "files"],
+    &["pr", "diff"],
+    &["pr", "conversation"],
+    &["pr", "checks"],
+    &["pr", "logs"],
+    &["pr", "open"],
+    &["completions"],
+    &["man"],
+    &["capabilities"],
+    &["update"],
+];
 
 fn isolate_git(command: &mut ProcessCommand) {
     for variable in [
@@ -182,6 +228,7 @@ fn help_lists_every_group_verb() -> Result<()> {
         "pr",
         "completions",
         "man",
+        "capabilities",
         "update",
     ] {
         ensure!(run.stdout.contains(verb), "--help does not mention {verb}");
@@ -191,20 +238,51 @@ fn help_lists_every_group_verb() -> Result<()> {
 
 #[test]
 fn every_subcommand_answers_help() -> Result<()> {
-    for path in [
-        vec!["status"],
-        vec!["diff"],
-        vec!["branch", "compare"],
-        vec!["stash", "show"],
-        vec!["pr", "logs"],
-        vec!["completions"],
-        vec!["man"],
-        vec!["update"],
-    ] {
-        let mut args = path.clone();
+    for path in COMMAND_PATHS {
+        let mut args = path.to_vec();
         args.push("--help");
         let run = run_in(None, &args)?;
         ensure!(run.code == 0, "{path:?} --help exited {}", run.code);
+    }
+    Ok(())
+}
+
+#[test]
+fn root_help_leads_with_examples_and_documentation() -> Result<()> {
+    let run = run_in(None, &["--help"])?.success()?;
+    ensure!(run.stdout.contains("Examples:"));
+    ensure!(run.stdout.contains("quinjet status --json"));
+    ensure!(run.stdout.contains("Documentation:"));
+    Ok(())
+}
+
+#[test]
+fn unknown_verbs_and_implicit_paths_are_usage_errors() -> Result<()> {
+    for value in ["statsu", "/tmp/somewhere"] {
+        let run = run_in(None, &[value])?;
+        ensure!(run.code == 2, "{value} exited {}", run.code);
+        ensure!(
+            run.stderr.contains("unrecognized subcommand"),
+            "unexpected error for {value}: {}",
+            run.stderr
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn clap_rejects_incomplete_and_inert_arguments() -> Result<()> {
+    for args in [
+        &["stage"][..],
+        &["unstage"][..],
+        &["discard"][..],
+        &["resolve", "README.md"][..],
+        &["status", "--interval", "0"][..],
+        &["pr", "checks", "1", "--watch", "--exit-code"][..],
+    ] {
+        let run = run_in(None, args)?;
+        ensure!(run.code == 2, "{args:?} exited {}", run.code);
+        ensure!(!run.stderr.is_empty(), "{args:?} produced no usage error");
     }
     Ok(())
 }
@@ -248,6 +326,20 @@ fn status_reports_the_branch_in_both_faces() -> Result<()> {
         document["branch"]["head"] == "main",
         "unexpected JSON branch: {document}"
     );
+    Ok(())
+}
+
+#[test]
+fn captured_and_json_output_never_include_progress() -> Result<()> {
+    let scratch = Scratch::repository()?;
+    for args in [vec!["status"], vec!["status", "--json"]] {
+        let run = scratch.quinjet(&args)?.success()?;
+        ensure!(
+            run.stderr.is_empty(),
+            "{args:?} wrote progress to captured stderr: {}",
+            run.stderr
+        );
+    }
     Ok(())
 }
 
@@ -452,6 +544,80 @@ fn completions_cover_every_supported_shell() -> Result<()> {
         document["shell"] == "bash",
         "unexpected completions JSON: {document}"
     );
+    let alias = scratch.quinjet(&["completion", "bash"])?.success()?;
+    ensure!(alias.stdout.contains("quinjet"));
+    Ok(())
+}
+
+#[test]
+fn capabilities_describe_the_installed_command_tree() -> Result<()> {
+    let run = run_in(None, &["capabilities", "--json"])?.success()?;
+    let document = run.json()?;
+    ensure!(document["schemaVersion"] == 1);
+    ensure!(document["version"] == env!("CARGO_PKG_VERSION"));
+    let commands = document["commands"]
+        .as_array()
+        .context("capabilities commands were not an array")?;
+    for path in [
+        "quinjet status",
+        "quinjet branch create",
+        "quinjet pr checks",
+        "quinjet capabilities",
+    ] {
+        ensure!(
+            commands.iter().any(|command| command["path"] == path),
+            "capabilities omitted {path}"
+        );
+    }
+    let completion = commands
+        .iter()
+        .find(|command| command["path"] == "quinjet completions")
+        .context("capabilities omitted completions")?;
+    ensure!(
+        completion["arguments"][0]["possibleValues"]
+            == serde_json::json!(["bash", "elvish", "fish", "powershell", "zsh"])
+    );
+    let stage = commands
+        .iter()
+        .find(|command| command["path"] == "quinjet stage")
+        .context("capabilities omitted stage")?;
+    ensure!(
+        stage["usage"]
+            .as_str()
+            .is_some_and(|usage| usage.contains("<PATH|--all>"))
+    );
+    let all = stage["arguments"]
+        .as_array()
+        .and_then(|arguments| arguments.iter().find(|argument| argument["id"] == "all"))
+        .context("stage capabilities omitted --all")?;
+    ensure!(all["action"] == "set_true");
+    ensure!(all["minValues"] == 0 && all["maxValues"] == 0);
+    ensure!(all["possibleValues"] == serde_json::json!([]));
+    let selection = stage["groups"]
+        .as_array()
+        .and_then(|groups| {
+            groups
+                .iter()
+                .find(|group| group["arguments"] == serde_json::json!(["paths", "all"]))
+        })
+        .context("stage capabilities omitted its required selection group")?;
+    ensure!(selection["required"] == true);
+    ensure!(selection["multiple"] == false);
+
+    let status = commands
+        .iter()
+        .find(|command| command["path"] == "quinjet status")
+        .context("capabilities omitted status")?;
+    let interval = status["arguments"]
+        .as_array()
+        .and_then(|arguments| {
+            arguments
+                .iter()
+                .find(|argument| argument["id"] == "interval")
+        })
+        .context("status capabilities omitted --interval")?;
+    ensure!(interval["action"] == "set");
+    ensure!(interval["defaultValues"] == serde_json::json!(["2"]));
     Ok(())
 }
 

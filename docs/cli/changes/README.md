@@ -1,10 +1,8 @@
-# `quinjet stage`, `unstage`, `discard`, `commit`, `resolve`
+# Changing a repository
 
-These five verbs are the only ones that change a repository without touching a
-remote. Everything else in Quinjet either reads (`status`, `diff`, `log`,
-`show`, every `pr` verb) or talks to a remote (`fetch`, `pull`, `push`, `sync`).
-This group moves the index, the working tree and `HEAD`, and it does so with no
-network, no `gh`, and no cache. If `git` is on `PATH` and the directory is a
+This section documents seven top-level verbs that move the index, the working
+tree, or `HEAD`. They use no network, `gh`, or cache. Branch and stash mutations
+have their own command groups. If `git` is on `PATH` and the directory is a
 repository, these work.
 
 Reach for them when there is no terminal to hold: a script that stages a
@@ -57,6 +55,8 @@ an error. Nothing else here has a confirmation gate: `stage`, `unstage`,
 | `quinjet discard` | Throws away changes to paths, permanently, behind `--yes`. |
 | `quinjet commit` | Records what is staged, or replaces the previous commit. |
 | `quinjet resolve` | Takes one side of a merge conflict, or marks a path resolved. |
+| `quinjet cherry-pick` | Applies an existing commit, behind a preview and `--yes`. |
+| `quinjet revert` | Records the inverse of an existing commit, behind a preview and `--yes`. |
 
 ## Commands
 
@@ -65,21 +65,24 @@ an error. Nothing else here has a confirmation gate: `stage`, `unstage`,
 - [`quinjet discard`](./discard.md)
 - [`quinjet commit`](./commit.md)
 - [`quinjet resolve`](./resolve.md)
+- [`quinjet cherry-pick`](./cherry-pick.md)
+- [`quinjet revert`](./revert.md)
 
 ## Exit codes
 
 | Code | When this group produces it |
 | --- | --- |
-| 0 | The operation finished and its sentence printed. Also `discard` without `--yes`, which reports and changes nothing, and `discard` whose paths match no change, which prints `No changes match`. Also `--help` on any of the five. |
-| 1 | Git refused: nothing staged for `commit`, a pathspec that matches no file for `stage` or `unstage`, an ignored path for `stage`, a path with no such side for `resolve`, `--amend` with no commit to amend. Also the three in-process refusals: `stage`/`unstage`/`discard` with neither paths nor `--all`, `commit` with a blank message, and `resolve` with none of `--ours`, `--theirs` or `--stage`. |
-| 2 | clap rejected the command line: `commit` without `--message`, `--all` together with paths, two of `--ours`, `--theirs` and `--stage`, a flag given twice, an unknown flag. |
+| 0 | The operation finished and its sentence printed. Also `discard` without `--yes`, which reports and changes nothing, and `discard` whose paths match no change, which prints `No changes match`. Also `--help` on any of the seven. |
+| 1 | Git refused: nothing staged for `commit`, a pathspec that matches no file for `stage` or `unstage`, an ignored path for `stage`, a path with no such side for `resolve`, or `--amend` with no commit to amend. A blank commit message is also refused before Git runs. |
+| 2 | clap rejected the command line: missing paths and `--all`, `commit` without `--message`, `resolve` without a side, a revision verb without a revision, `--all` together with paths, two conflict sides, a flag given twice, or an unknown flag. |
+| 3 | `cherry-pick` or `revert` could not resolve the named revision. |
 
-Codes **3** and **4** never come from this group. Nothing here names a thing
-that has to be looked up, and nothing here reads from GitHub.
+Code **4** never comes from this group because nothing here reads content that
+can exist but be unavailable.
 
 ## Notes and gotchas
 
-- There is no `quinjet changes` command. The five are top-level verbs, so there
+- There is no `quinjet changes` command. The seven are top-level verbs, so there
   is no group `--help` to run; `quinjet --help` lists them among the rest, and
   `quinjet stage --help` and friends work as usual.
 - Paths are interpreted from the repository root, always. Running
@@ -177,15 +180,14 @@ that has to be looked up, and nothing here reads from GitHub.
   worktree recursively and refreshes when anything that is not `.git/objects`,
   `index.lock` or a Watchman cookie changes, so a `quinjet commit` in another
   window repaints the Changes tab within a redraw.
-- On a detached `HEAD` all five work, and `commit` makes a commit that only
+- On a detached `HEAD` all seven work, and `commit` makes a commit that only
   `HEAD` points at. Note the id with `quinjet log -n 1` before switching away,
   or it is reachable only through the reflog.
 - None of these verbs takes `--watch`, `--expanded` or `--refresh`. They finish.
 - Under `--json` each prints one object with a single `message` key, holding the
   same sentence the human form prints. On a non-zero exit stdout is empty.
-- `quinjet cherry-pick` and `quinjet revert` also change the repository, but
-  they act on commits rather than on the index, so they are not part of this
-  group. Both preview by default and require `--yes` to mutate.
+- `quinjet cherry-pick` and `quinjet revert` act on commits rather than paths.
+  Both resolve the revision, preview by default, and require `--yes` to mutate.
 - Removal behavior follows the platform. `discard` unlinks a symlink rather
   than following it, because it reads the entry with `symlink_metadata`. On
   Windows a file another process holds open, or one marked read-only, cannot be

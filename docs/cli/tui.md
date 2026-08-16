@@ -6,7 +6,7 @@ no verb does.
 Usage:
 
 ```bash
-quinjet [PATH] [--no-mouse] [--webhook-listen <ADDRESS>]
+quinjet
 quinjet tui [PATH] [--no-mouse] [--webhook-listen <ADDRESS>]
 ```
 
@@ -22,27 +22,21 @@ Options:
 | --- | --- | --- | --- |
 | `--no-mouse` | flag | off | Starts with the mouse released, so the terminal keeps its own selection and copy behavior. Every feature stays reachable from the keyboard. |
 | `--webhook-listen <ADDRESS>` | port, or `host:port` | not listening | Binds a loopback HTTP listener. A forwarded GitHub delivery refreshes the open pull request immediately instead of waiting for the next poll. |
-| `-C, --path <DIR>` | path | `.` | Global. It selects the repository for a verb, and the interface does not read it: the positional `PATH` is what opens. |
+| `-C, --path <DIR>` | path | `.` | Global and unused here. The positional `PATH` is what the interface opens. |
 | `--json` | flag | off | Global. Parsed and ignored here, because the interface writes to a screen rather than to stdout. |
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |
-| `-V, --version` | flag | off | Root only. `quinjet --version` prints the installed version; `quinjet tui --version` is a usage error. |
+| `-V, --version` | flag | off | Prints the installed version and exits 0. |
 
 ## The two spellings
 
-`quinjet` and `quinjet tui` reach the same code. `dispatch` returns
+`quinjet` and `quinjet tui .` reach the same code. `dispatch` returns
 `Launch::Terminal` for both, before any session is built, so no verb machinery
 runs and nothing is ever printed on stdout.
 
-The bare positional path exists so that `quinjet ~/code/project` is short. A
-verb always wins over a directory of the same name: `quinjet status` runs the
-status verb even in a repository containing a directory called `status`. Write
-`quinjet ./status` to open that directory instead. The positional path also
-stops mattering the moment a verb follows it: in `quinjet ~/code/project status`
-the verb takes over and reads `-C`, which is still `.`, so pass
-`quinjet -C ~/code/project status` when a verb should run somewhere else.
-
-`quinjet tui` is the form to use in a script, an alias or a shell function,
-because it says what it opens and cannot be misread as a path.
+The no-argument form always opens the current directory. A path belongs to the
+explicit verb, as in `quinjet tui ~/code/project`. This keeps the root command
+unambiguous: `quinjet statsu` is an unknown verb with exit 2 rather than a request
+to open a directory named `statsu`.
 
 ## What it refuses
 
@@ -110,7 +104,7 @@ react the instant GitHub says something happened, by pairing with the GitHub
 CLI's forwarder:
 
 ```bash
-quinjet --webhook-listen 8787
+quinjet tui --webhook-listen 8787
 gh webhook forward --repo owner/name --events '*' --url http://127.0.0.1:8787
 ```
 
@@ -181,7 +175,7 @@ Examples:
 
 ```text
 quinjet
-quinjet ~/code/project
+quinjet tui ~/code/project
 quinjet tui --no-mouse
 quinjet tui ~/code/project --webhook-listen 8787
 quinjet tui --help
@@ -323,7 +317,7 @@ The command line can do these, and no key can:
   that is not a repository, a `--webhook-listen` address that will not parse or
   will not bind, or a draw that fails.
 - `--json` and `-C` are accepted here because clap declares them globally.
-  Neither does anything. `-V` is declared on the root only.
+  Neither does anything. `-V` prints the propagated binary version and exits.
 - On an unborn branch the branch line reads the branch name with no object id,
   History is empty, and every change is untracked. Staging and committing work;
   the first commit creates the branch.

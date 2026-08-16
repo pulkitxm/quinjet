@@ -187,7 +187,7 @@ log, which is a pull-request concern.
   document, not a truncation marker.
 - `status --watch` never finishes on its own. Its frames are always marked
   unfinished, so it runs until Ctrl+C. `--interval` has a floor of 1 second; a
-  smaller value, including `0`, is silently raised to 1. The other `--watch`
+  smaller value, including `0`, is a usage error. The other `--watch`
   flags in Quinjet, on `pr checks` and `pr logs`, have floors of 2 and 3 seconds
   and do stop.
 - Watching repaints only when stdout is a terminal and `--json` is off. On a
