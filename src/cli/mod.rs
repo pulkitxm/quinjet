@@ -1684,4 +1684,135 @@ mod tests {
             "a discard without --yes must leave the working tree alone"
         );
     }
+
+    /// Name the verb that performs one operation from the command line.
+    ///
+    /// The match is exhaustive on purpose. An operation added to the terminal
+    /// interface without a way to reach it from the command line stops
+    /// compiling here, which is what keeps the two faces one surface.
+    const fn verb_for(operation: &GitOperation) -> &'static [&'static str] {
+        match *operation {
+            GitOperation::Stage(_) | GitOperation::StageAll => &["stage"],
+            GitOperation::Unstage(_) | GitOperation::UnstageAll => &["unstage"],
+            GitOperation::Discard(_) => &["discard"],
+            GitOperation::Commit { .. } => &["commit"],
+            GitOperation::Fetch => &["fetch"],
+            GitOperation::Pull => &["pull"],
+            GitOperation::Push => &["push"],
+            GitOperation::Sync => &["sync"],
+            GitOperation::Checkout(_) => &["branch", "switch"],
+            GitOperation::CreateBranch { .. } => &["branch", "create"],
+            GitOperation::RenameBranch { .. } => &["branch", "rename"],
+            GitOperation::DeleteBranch(_) => &["branch", "delete"],
+            GitOperation::StashPush { .. } => &["stash", "push"],
+            GitOperation::StashApply(_) => &["stash", "apply"],
+            GitOperation::StashPop(_) => &["stash", "pop"],
+            GitOperation::StashDrop(_) => &["stash", "drop"],
+            GitOperation::StashClear => &["stash", "clear"],
+            GitOperation::ResolveConflict { .. } => &["resolve"],
+            GitOperation::CherryPick(_) => &["cherry-pick"],
+            GitOperation::Revert(_) => &["revert"],
+        }
+    }
+
+    fn resolves(path: &[&str]) -> bool {
+        let root = Cli::command();
+        let mut command = &root;
+        let mut found = Vec::new();
+        for name in path {
+            let Some(child) = command.find_subcommand(name) else {
+                return false;
+            };
+            found.push(child);
+            command = found.last().unwrap();
+        }
+        true
+    }
+
+    #[test]
+    fn every_operation_the_interface_performs_has_a_verb() {
+        let operations = [
+            GitOperation::Stage(Vec::new()),
+            GitOperation::StageAll,
+            GitOperation::Unstage(Vec::new()),
+            GitOperation::UnstageAll,
+            GitOperation::Discard(Vec::new()),
+            GitOperation::Commit {
+                message: String::new(),
+                amend: false,
+            },
+            GitOperation::Fetch,
+            GitOperation::Pull,
+            GitOperation::Push,
+            GitOperation::Sync,
+            GitOperation::Checkout(String::new()),
+            GitOperation::CreateBranch {
+                name: String::new(),
+                start: None,
+            },
+            GitOperation::RenameBranch {
+                old: String::new(),
+                new: String::new(),
+            },
+            GitOperation::DeleteBranch(String::new()),
+            GitOperation::StashPush {
+                message: String::new(),
+                include_untracked: false,
+                staged: false,
+            },
+            GitOperation::StashApply(String::new()),
+            GitOperation::StashPop(None),
+            GitOperation::StashDrop(String::new()),
+            GitOperation::StashClear,
+            GitOperation::ResolveConflict {
+                path: PathBuf::new(),
+                choice: ConflictChoice::Ours,
+            },
+            GitOperation::CherryPick(String::new()),
+            GitOperation::Revert(String::new()),
+        ];
+
+        for operation in &operations {
+            let path = verb_for(operation);
+            assert!(
+                resolves(path),
+                "{operation:?} names the verb {path:?}, which the command tree does not have"
+            );
+        }
+
+        let mut kinds: Vec<_> = operations.iter().map(std::mem::discriminant).collect();
+        kinds.dedup();
+        assert_eq!(
+            kinds.len(),
+            operations.len(),
+            "each operation should appear once, so every verb mapping is exercised"
+        );
+    }
+
+    #[test]
+    fn the_read_only_views_have_verbs_too() {
+        for path in [
+            ["status"].as_slice(),
+            ["diff"].as_slice(),
+            ["log"].as_slice(),
+            ["show"].as_slice(),
+            ["branch", "list"].as_slice(),
+            ["branch", "compare"].as_slice(),
+            ["stash", "list"].as_slice(),
+            ["stash", "show"].as_slice(),
+            ["repos"].as_slice(),
+            ["pr", "view"].as_slice(),
+            ["pr", "files"].as_slice(),
+            ["pr", "diff"].as_slice(),
+            ["pr", "checks"].as_slice(),
+            ["pr", "conversation"].as_slice(),
+            ["pr", "logs"].as_slice(),
+            ["pr", "open"].as_slice(),
+            ["tui"].as_slice(),
+            ["completions"].as_slice(),
+            ["man"].as_slice(),
+        ] {
+            assert!(resolves(path), "the command tree is missing {path:?}");
+        }
+    }
 }
