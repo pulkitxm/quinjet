@@ -18,7 +18,8 @@ use serde::Serialize;
 
 use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
-    GitHubRepository, PullRequest, PullRequestCheck, PullRequestCheckStatus, PullRequestDiffIndex,
+    CheckRunLog, GitHubRepository, PullRequest, PullRequestCheck, PullRequestCheckStatus,
+    PullRequestDiffIndex, PullRequestSnapshot,
 };
 use crate::git::status::{Change, ChangeArea};
 use crate::git::{ConflictChoice, GitOperation, LocalDiffRequest, Repository};
@@ -27,8 +28,6 @@ pub(crate) const EXIT_FAILURE: u8 = 1;
 pub(crate) const EXIT_NOT_FOUND: u8 = 3;
 pub(crate) const EXIT_UNAVAILABLE: u8 = 4;
 
-/// The name the binary is invoked by, and the name its generated shell
-/// completions and manual pages are written under.
 const PROGRAM: &str = "quinjet";
 
 const CHECK_WATCH_INTERVAL: u64 = 5;
@@ -283,8 +282,11 @@ struct ShowArgs {
 
 #[derive(Debug, Args)]
 struct RevisionArgs {
-    /// Commit to apply
+    /// Commit to act on
     revision: String,
+    /// Confirm; without it the command reports what it would do
+    #[arg(long)]
+    yes: bool,
 }
 
 #[derive(Debug, Args)]
@@ -391,22 +393,22 @@ enum StashVerb {
 #[derive(Debug, Subcommand)]
 enum PrVerb {
     /// Print a pull request's metadata and description
-    View(PrArgs),
+    View(PrWatchArgs),
     /// List the files a pull request changes
     Files(PrArgs),
     /// Print a pull request's patch
     Diff(PrDiffArgs),
     /// Print a pull request's timeline and review comments
-    Conversation(PrArgs),
+    Conversation(PrWatchArgs),
     /// List a pull request's checks
     Checks(PrChecksArgs),
     /// Print one check run's steps and log
     Logs(PrLogsArgs),
     /// Open a pull request in a browser
-    Open(PrArgs),
+    Open(PrOpenArgs),
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct PrArgs {
     /// Pull-request number
     number: u64,
@@ -416,6 +418,27 @@ struct PrArgs {
     /// Ask GitHub again instead of answering from the cache
     #[arg(long)]
     refresh: bool,
+}
+
+#[derive(Debug, Args)]
+struct PrWatchArgs {
+    #[command(flatten)]
+    pull_request: PrArgs,
+    /// Keep the reading on screen and refresh it
+    #[arg(long)]
+    watch: bool,
+    /// Seconds between refreshes
+    #[arg(long, value_name = "SECONDS", default_value_t = CHECK_WATCH_INTERVAL)]
+    interval: u64,
+}
+
+#[derive(Debug, Args)]
+struct PrOpenArgs {
+    #[command(flatten)]
+    pull_request: PrArgs,
+    /// Open a matching check run instead of the pull request
+    #[arg(long, value_name = "NAME")]
+    check: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -484,10 +507,6 @@ pub(crate) fn dispatch() -> Result<Launch> {
     run(&mut session, &out, verb).map(Launch::Finished)
 }
 
-/// Write the completion script for one shell.
-///
-/// Generated rather than committed, so a verb or flag added to `Verb` is
-/// offered by the shell the moment it exists.
 fn completions(out: &Emitter, args: &CompletionsArgs) -> Result<u8> {
     let mut command = Cli::command();
     let mut script = Vec::new();
@@ -503,9 +522,9 @@ fn completions(out: &Emitter, args: &CompletionsArgs) -> Result<u8> {
     Ok(0)
 }
 
-/// Write the manual, either as one page or as a directory of them.
 fn manual(out: &Emitter, args: &ManArgs) -> Result<u8> {
-    let command = Cli::command();
+    let mut command = Cli::command();
+    command.build();
     let Some(directory) = args.dir.as_deref() else {
         let page = render_page(&command, PROGRAM)?;
         let text = String::from_utf8(page).context("the manual page was not valid UTF-8")?;
@@ -529,7 +548,6 @@ fn manual(out: &Emitter, args: &ManArgs) -> Result<u8> {
     Ok(0)
 }
 
-/// Render one command's manual page under the name it is invoked by.
 fn render_page(command: &clap::Command, name: &str) -> Result<Vec<u8>> {
     let mut page = Vec::new();
     Man::new(command.clone().display_name(name.to_owned()))
@@ -539,10 +557,6 @@ fn render_page(command: &clap::Command, name: &str) -> Result<Vec<u8>> {
     Ok(page)
 }
 
-/// Write a page for this command and for every command under it.
-///
-/// Subcommand pages are named the way `man` expects to find them, so
-/// `quinjet branch create` is `quinjet-branch-create.1`.
 fn write_pages(
     command: &clap::Command,
     name: &str,
@@ -654,12 +668,10 @@ fn run(session: &mut Session, out: &Emitter, verb: Verb) -> Result<u8> {
         Verb::Branch { command } => branch(session, out, command),
         Verb::Stash { command } => stash(session, out, command),
         Verb::CherryPick(args) => {
-            let revision = revision(session, &args.revision)?;
-            operate(session, out, GitOperation::CherryPick(revision))
+            revision_operation(session, out, &args, "cherry-pick", GitOperation::CherryPick)
         }
         Verb::Revert(args) => {
-            let revision = revision(session, &args.revision)?;
-            operate(session, out, GitOperation::Revert(revision))
+            revision_operation(session, out, &args, "revert", GitOperation::Revert)
         }
         Verb::Resolve(args) => resolve(session, out, args),
         Verb::Repos(args) => repositories(session, out, &args),
@@ -998,8 +1010,12 @@ struct RepositoryListing<'a> {
 fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb) -> Result<u8> {
     match command {
         PrVerb::View(args) => {
-            let request = lookup(session, &args)?;
-            out.emit(&request, || render::pull_request(&request))?;
+            if args.watch {
+                return watch_pull_request(session, out, &args);
+            }
+            let snapshot = lookup_snapshot(session, &args.pull_request)?;
+            report_warnings(&snapshot);
+            out.emit(&snapshot, || render::pull_request(&snapshot.pull_request))?;
             Ok(0)
         }
         PrVerb::Files(args) => {
@@ -1015,7 +1031,10 @@ fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb) -> Result
             Ok(0)
         }
         PrVerb::Conversation(args) => {
-            let request = lookup(session, &args)?;
+            if args.watch {
+                return watch_conversation(session, out, &args);
+            }
+            let request = lookup(session, &args.pull_request)?;
             let conversation = session
                 .execute(Command::PullRequestConversation {
                     pull_request: Box::new(request),
@@ -1027,12 +1046,65 @@ fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb) -> Result
         PrVerb::Checks(args) => checks(session, out, &args),
         PrVerb::Logs(args) => logs(session, out, &args),
         PrVerb::Open(args) => {
-            let request = lookup(session, &args)?;
-            open_url(&request.url)?;
-            out.message(&format!("Opened {}", request.url))?;
+            let request = lookup(session, &args.pull_request)?;
+            let url = match args.check {
+                None => request.url,
+                Some(name) => {
+                    let listing = session
+                        .execute(Command::PullRequestChecks {
+                            pull_request: Box::new(request),
+                            refresh: args.pull_request.refresh,
+                        })?
+                        .checks()?;
+                    let check = select_check(&listing.checks, &name)?;
+                    if check.link.is_empty() {
+                        return Err(Failure::new(
+                            EXIT_UNAVAILABLE,
+                            format!("the `{}` check has no browser URL", check.name),
+                        )
+                        .into());
+                    }
+                    check.link
+                }
+            };
+            open_url(&url)?;
+            out.message(&format!("Opened {url}"))?;
             Ok(0)
         }
     }
+}
+
+fn watch_pull_request(session: &mut Session, out: &Emitter, args: &PrWatchArgs) -> Result<u8> {
+    watch::run(interval(args.interval, CHECK_WATCH_FLOOR), out.json, || {
+        let mut request = args.pull_request.clone();
+        request.refresh = true;
+        let snapshot = lookup_snapshot(session, &request)?;
+        Ok(watch::Frame {
+            text: render::pull_request(&snapshot.pull_request),
+            value: snapshot,
+            finished: false,
+            code: 0,
+        })
+    })
+}
+
+fn watch_conversation(session: &mut Session, out: &Emitter, args: &PrWatchArgs) -> Result<u8> {
+    watch::run(interval(args.interval, CHECK_WATCH_FLOOR), out.json, || {
+        let mut lookup_args = args.pull_request.clone();
+        lookup_args.refresh = true;
+        let request = lookup_snapshot(session, &lookup_args)?.pull_request;
+        let conversation = session
+            .execute(Command::PullRequestConversation {
+                pull_request: Box::new(request),
+            })?
+            .conversation()?;
+        Ok(watch::Frame {
+            text: render::conversation(&conversation),
+            value: conversation,
+            finished: false,
+            code: 0,
+        })
+    })
 }
 
 fn checks(session: &mut Session, out: &Emitter, args: &PrChecksArgs) -> Result<u8> {
@@ -1093,6 +1165,7 @@ fn logs(session: &mut Session, out: &Emitter, args: &PrLogsArgs) -> Result<u8> {
                     check: Box::new(check.clone()),
                 })?
                 .check_log()?;
+            ensure_log_available(&log)?;
             Ok(watch::Frame {
                 text: render::check_log(&check, &log),
                 finished: !check.status.is_running(),
@@ -1107,11 +1180,16 @@ fn logs(session: &mut Session, out: &Emitter, args: &PrLogsArgs) -> Result<u8> {
             check: Box::new(check.clone()),
         })?
         .check_log()?;
-    if let Some(reason) = &log.unavailable {
-        return Err(Failure::new(EXIT_UNAVAILABLE, reason.clone()).into());
-    }
+    ensure_log_available(&log)?;
     out.emit(&log, || render::check_log(&check, &log))?;
     Ok(0)
+}
+
+fn ensure_log_available(log: &CheckRunLog) -> Result<()> {
+    log.unavailable.as_ref().map_or_else(
+        || Ok(()),
+        |reason| Err(Failure::new(EXIT_UNAVAILABLE, reason.clone()).into()),
+    )
 }
 
 fn select_check(checks: &[PullRequestCheck], wanted: &str) -> Result<PullRequestCheck> {
@@ -1166,6 +1244,12 @@ fn exit_for(checks: &[PullRequestCheck]) -> u8 {
 }
 
 fn lookup(session: &mut Session, args: &PrArgs) -> Result<PullRequest> {
+    let snapshot = lookup_snapshot(session, args)?;
+    report_warnings(&snapshot);
+    Ok(snapshot.pull_request)
+}
+
+fn lookup_snapshot(session: &mut Session, args: &PrArgs) -> Result<PullRequestSnapshot> {
     let repositories = match &args.repo {
         None => Vec::new(),
         Some(_) => {
@@ -1198,18 +1282,20 @@ fn lookup(session: &mut Session, args: &PrArgs) -> Result<PullRequest> {
             }
         }
     };
-    let snapshot = session
+    session
         .execute(Command::PullRequestLookup {
             repositories,
             repository: selected,
             number: args.number,
             refresh: args.refresh,
         })?
-        .pull_request()?;
+        .pull_request()
+}
+
+fn report_warnings(snapshot: &PullRequestSnapshot) {
     for warning in &snapshot.warnings {
         note(&format!("warning: {warning}"));
     }
-    Ok(snapshot.pull_request)
 }
 
 fn prepare(session: &mut Session, request: &PullRequest) -> Result<PullRequestDiffIndex> {
@@ -1294,6 +1380,23 @@ fn operate(session: &mut Session, out: &Emitter, operation: GitOperation) -> Res
     Ok(0)
 }
 
+fn revision_operation(
+    session: &mut Session,
+    out: &Emitter,
+    args: &RevisionArgs,
+    action: &str,
+    operation: impl FnOnce(String) -> GitOperation,
+) -> Result<u8> {
+    let revision = revision(session, &args.revision)?;
+    if !args.yes {
+        out.message(&format!(
+            "Would {action} `{revision}`. Pass --yes to {action} it."
+        ))?;
+        return Ok(0);
+    }
+    operate(session, out, operation(revision))
+}
+
 fn revision(session: &Session, value: &str) -> Result<String> {
     session.repository_revision(value).map_err(|error| {
         Failure::new(EXIT_NOT_FOUND, format!("{error:#}"))
@@ -1369,6 +1472,7 @@ pub(crate) fn stdout_is_terminal() -> bool {
     reason = "test helpers return values the assertions do not use"
 )]
 mod tests {
+    use std::collections::HashSet;
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1479,6 +1583,35 @@ mod tests {
             assert!(cli.json, "{argv:?} must be readable as JSON");
             assert_eq!(cli.repository, PathBuf::from("/tmp/elsewhere"), "{argv:?}");
         }
+    }
+
+    #[test]
+    fn pull_request_live_and_browser_options_parse_at_their_leaf() {
+        let view =
+            Cli::try_parse_from(["quinjet", "pr", "view", "24", "--watch", "--interval", "9"])
+                .unwrap();
+        assert!(matches!(
+            view.command,
+            Some(Verb::Pr {
+                command: PrVerb::View(PrWatchArgs {
+                    watch: true,
+                    interval: 9,
+                    ..
+                })
+            })
+        ));
+
+        let open =
+            Cli::try_parse_from(["quinjet", "pr", "open", "24", "--check", "Clippy"]).unwrap();
+        assert!(matches!(
+            open.command,
+            Some(Verb::Pr {
+                command: PrVerb::Open(PrOpenArgs {
+                    check: Some(name),
+                    ..
+                })
+            }) if name == "Clippy"
+        ));
     }
 
     #[test]
@@ -1661,6 +1794,20 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_logs_use_the_same_exit_in_watch_and_one_shot_modes() {
+        let log = CheckRunLog {
+            unavailable: Some("no Actions job".to_owned()),
+            ..CheckRunLog::default()
+        };
+        let error = ensure_log_available(&log).unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<Failure>().unwrap().code,
+            EXIT_UNAVAILABLE
+        );
+        ensure_log_available(&CheckRunLog::default()).unwrap();
+    }
+
+    #[test]
     fn a_destructive_verb_changes_nothing_until_it_is_confirmed() {
         let repository = TestRepository::new();
         fs::write(repository.path.join("README.md"), "changed\n").unwrap();
@@ -1685,36 +1832,6 @@ mod tests {
         );
     }
 
-    /// Name the verb that performs one operation from the command line.
-    ///
-    /// The match is exhaustive on purpose. An operation added to the terminal
-    /// interface without a way to reach it from the command line stops
-    /// compiling here, which is what keeps the two faces one surface.
-    const fn verb_for(operation: &GitOperation) -> &'static [&'static str] {
-        match *operation {
-            GitOperation::Stage(_) | GitOperation::StageAll => &["stage"],
-            GitOperation::Unstage(_) | GitOperation::UnstageAll => &["unstage"],
-            GitOperation::Discard(_) => &["discard"],
-            GitOperation::Commit { .. } => &["commit"],
-            GitOperation::Fetch => &["fetch"],
-            GitOperation::Pull => &["pull"],
-            GitOperation::Push => &["push"],
-            GitOperation::Sync => &["sync"],
-            GitOperation::Checkout(_) => &["branch", "switch"],
-            GitOperation::CreateBranch { .. } => &["branch", "create"],
-            GitOperation::RenameBranch { .. } => &["branch", "rename"],
-            GitOperation::DeleteBranch(_) => &["branch", "delete"],
-            GitOperation::StashPush { .. } => &["stash", "push"],
-            GitOperation::StashApply(_) => &["stash", "apply"],
-            GitOperation::StashPop(_) => &["stash", "pop"],
-            GitOperation::StashDrop(_) => &["stash", "drop"],
-            GitOperation::StashClear => &["stash", "clear"],
-            GitOperation::ResolveConflict { .. } => &["resolve"],
-            GitOperation::CherryPick(_) => &["cherry-pick"],
-            GitOperation::Revert(_) => &["revert"],
-        }
-    }
-
     fn resolves(path: &[&str]) -> bool {
         let root = Cli::command();
         let mut command = &root;
@@ -1729,64 +1846,57 @@ mod tests {
         true
     }
 
-    #[test]
-    fn every_operation_the_interface_performs_has_a_verb() {
-        let operations = [
-            GitOperation::Stage(Vec::new()),
-            GitOperation::StageAll,
-            GitOperation::Unstage(Vec::new()),
-            GitOperation::UnstageAll,
-            GitOperation::Discard(Vec::new()),
-            GitOperation::Commit {
-                message: String::new(),
-                amend: false,
-            },
-            GitOperation::Fetch,
-            GitOperation::Pull,
-            GitOperation::Push,
-            GitOperation::Sync,
-            GitOperation::Checkout(String::new()),
-            GitOperation::CreateBranch {
-                name: String::new(),
-                start: None,
-            },
-            GitOperation::RenameBranch {
-                old: String::new(),
-                new: String::new(),
-            },
-            GitOperation::DeleteBranch(String::new()),
-            GitOperation::StashPush {
-                message: String::new(),
-                include_untracked: false,
-                staged: false,
-            },
-            GitOperation::StashApply(String::new()),
-            GitOperation::StashPop(None),
-            GitOperation::StashDrop(String::new()),
-            GitOperation::StashClear,
-            GitOperation::ResolveConflict {
-                path: PathBuf::new(),
-                choice: ConflictChoice::Ours,
-            },
-            GitOperation::CherryPick(String::new()),
-            GitOperation::Revert(String::new()),
-        ];
+    macro_rules! operation_routes {
+        ($($pattern:pat => $sample:expr => [$($path:literal),+];)+) => {
+            const fn verb_for(operation: &GitOperation) -> &'static [&'static str] {
+                match operation {
+                    $($pattern => &[$($path),+],)+
+                }
+            }
 
-        for operation in &operations {
-            let path = verb_for(operation);
-            assert!(
-                resolves(path),
-                "{operation:?} names the verb {path:?}, which the command tree does not have"
-            );
-        }
+            #[test]
+            fn every_operation_the_interface_performs_has_a_verb() {
+                let operations = [$($sample),+];
+                for operation in &operations {
+                    let path = verb_for(operation);
+                    assert!(
+                        resolves(path),
+                        "{operation:?} names the verb {path:?}, which the command tree does not have"
+                    );
+                }
+                let kinds: HashSet<_> = operations.iter().map(std::mem::discriminant).collect();
+                assert_eq!(
+                    kinds.len(),
+                    operations.len(),
+                    "every operation variant must have one route fixture"
+                );
+            }
+        };
+    }
 
-        let mut kinds: Vec<_> = operations.iter().map(std::mem::discriminant).collect();
-        kinds.dedup();
-        assert_eq!(
-            kinds.len(),
-            operations.len(),
-            "each operation should appear once, so every verb mapping is exercised"
-        );
+    operation_routes! {
+        GitOperation::Stage(_) => GitOperation::Stage(Vec::new()) => ["stage"];
+        GitOperation::StageAll => GitOperation::StageAll => ["stage"];
+        GitOperation::Unstage(_) => GitOperation::Unstage(Vec::new()) => ["unstage"];
+        GitOperation::UnstageAll => GitOperation::UnstageAll => ["unstage"];
+        GitOperation::Discard(_) => GitOperation::Discard(Vec::new()) => ["discard"];
+        GitOperation::Commit { .. } => GitOperation::Commit { message: String::new(), amend: false } => ["commit"];
+        GitOperation::Fetch => GitOperation::Fetch => ["fetch"];
+        GitOperation::Pull => GitOperation::Pull => ["pull"];
+        GitOperation::Push => GitOperation::Push => ["push"];
+        GitOperation::Sync => GitOperation::Sync => ["sync"];
+        GitOperation::Checkout(_) => GitOperation::Checkout(String::new()) => ["branch", "switch"];
+        GitOperation::CreateBranch { .. } => GitOperation::CreateBranch { name: String::new(), start: None } => ["branch", "create"];
+        GitOperation::RenameBranch { .. } => GitOperation::RenameBranch { old: String::new(), new: String::new() } => ["branch", "rename"];
+        GitOperation::DeleteBranch(_) => GitOperation::DeleteBranch(String::new()) => ["branch", "delete"];
+        GitOperation::StashPush { .. } => GitOperation::StashPush { message: String::new(), include_untracked: false, staged: false } => ["stash", "push"];
+        GitOperation::StashApply(_) => GitOperation::StashApply(String::new()) => ["stash", "apply"];
+        GitOperation::StashPop(_) => GitOperation::StashPop(None) => ["stash", "pop"];
+        GitOperation::StashDrop(_) => GitOperation::StashDrop(String::new()) => ["stash", "drop"];
+        GitOperation::StashClear => GitOperation::StashClear => ["stash", "clear"];
+        GitOperation::ResolveConflict { .. } => GitOperation::ResolveConflict { path: PathBuf::new(), choice: ConflictChoice::Ours } => ["resolve"];
+        GitOperation::CherryPick(_) => GitOperation::CherryPick(String::new()) => ["cherry-pick"];
+        GitOperation::Revert(_) => GitOperation::Revert(String::new()) => ["revert"];
     }
 
     #[test]

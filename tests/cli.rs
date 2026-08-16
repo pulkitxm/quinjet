@@ -11,12 +11,36 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Output;
+use std::process::{Command as ProcessCommand, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, Result, ensure};
 
 static SCRATCH_ID: AtomicUsize = AtomicUsize::new(0);
+const GIT_NULL_DEVICE: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
+
+fn isolate_git(command: &mut ProcessCommand) {
+    for variable in [
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_CONFIG",
+        "GIT_CONFIG_COUNT",
+        "GIT_DIR",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+        "GIT_EXEC_PATH",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_TEMPLATE_DIR",
+        "GIT_WORK_TREE",
+    ] {
+        command.env_remove(variable);
+    }
+    command
+        .env("LC_ALL", "C")
+        .env("GIT_CONFIG_GLOBAL", GIT_NULL_DEVICE)
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+}
 
 struct Scratch {
     path: PathBuf,
@@ -50,13 +74,10 @@ impl Scratch {
     }
 
     fn git(&self, args: &[&str]) -> Result<String> {
-        let output = std::process::Command::new("git")
-            .arg("-C")
-            .arg(&self.path)
-            .args(args)
-            .env("LC_ALL", "C")
-            .output()
-            .context("failed to run git")?;
+        let mut command = ProcessCommand::new("git");
+        command.arg("-C").arg(&self.path).args(args);
+        isolate_git(&mut command);
+        let output = command.output().context("failed to run git")?;
         ensure!(
             output.status.success(),
             "git {args:?} failed: {}",
@@ -111,15 +132,14 @@ impl Run {
 }
 
 fn run_in(directory: Option<&Path>, args: &[&str]) -> Result<Run> {
-    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_quinjet"));
+    let mut command = ProcessCommand::new(env!("CARGO_BIN_EXE_quinjet"));
     if let Some(directory) = directory {
+        command.current_dir(directory);
         command.arg("-C").arg(directory);
     }
+    command.args(args);
+    isolate_git(&mut command);
     let output = command
-        .args(args)
-        .env("LC_ALL", "C")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .output()
         .context("failed to run the quinjet binary")?;
     Run::from(output)
@@ -278,7 +298,17 @@ fn diff_shows_changes_and_stage_all_clears_them() -> Result<()> {
 fn discard_previews_without_yes_and_acts_with_it() -> Result<()> {
     let scratch = Scratch::repository()?;
     scratch.write("README.md", "one\nchanged\n")?;
-    drop(scratch.quinjet(&["discard", "README.md"])?);
+    let preview = scratch.quinjet(&["discard", "README.md"])?.success()?;
+    ensure!(
+        preview.stderr.is_empty(),
+        "preview wrote: {}",
+        preview.stderr
+    );
+    ensure!(
+        preview.stdout.contains("Pass --yes"),
+        "preview did not explain confirmation: {}",
+        preview.stdout
+    );
     let preserved = fs::read_to_string(scratch.path.join("README.md"))?;
     ensure!(
         preserved.contains("changed"),
@@ -291,6 +321,38 @@ fn discard_previews_without_yes_and_acts_with_it() -> Result<()> {
     );
     let restored = fs::read_to_string(scratch.path.join("README.md"))?;
     ensure!(restored == "one\n", "discard left: {restored}");
+    Ok(())
+}
+
+#[test]
+fn revision_mutations_preview_until_confirmed() -> Result<()> {
+    let scratch = Scratch::repository()?;
+    scratch.git(&["switch", "--create", "feature"])?;
+    scratch.write("feature.txt", "feature\n")?;
+    scratch.git(&["add", "feature.txt"])?;
+    scratch.git(&["commit", "--message=feature"])?;
+    let feature = scratch.git(&["rev-parse", "HEAD"])?;
+    scratch.git(&["switch", "main"])?;
+
+    let before = scratch.git(&["rev-parse", "HEAD"])?;
+    let preview = scratch.quinjet(&["cherry-pick", &feature])?.success()?;
+    ensure!(preview.stdout.contains("Pass --yes"));
+    ensure!(scratch.git(&["rev-parse", "HEAD"])? == before);
+
+    drop(
+        scratch
+            .quinjet(&["cherry-pick", &feature, "--yes"])?
+            .success()?,
+    );
+    let applied = scratch.git(&["rev-parse", "HEAD"])?;
+    ensure!(applied != before);
+
+    let preview = scratch.quinjet(&["revert", &applied])?.success()?;
+    ensure!(preview.stdout.contains("Pass --yes"));
+    ensure!(scratch.git(&["rev-parse", "HEAD"])? == applied);
+
+    drop(scratch.quinjet(&["revert", &applied, "--yes"])?.success()?);
+    ensure!(scratch.git(&["rev-parse", "HEAD"])? != applied);
     Ok(())
 }
 
@@ -372,14 +434,17 @@ fn json_output_is_one_document_per_invocation() -> Result<()> {
 
 #[test]
 fn completions_cover_every_supported_shell() -> Result<()> {
+    let scratch = Scratch::directory()?;
     for shell in ["bash", "zsh", "fish", "elvish", "powershell"] {
-        let run = run_in(None, &["completions", shell])?.success()?;
+        let run = scratch.quinjet(&["completions", shell])?.success()?;
         ensure!(
             run.stdout.contains("quinjet"),
             "{shell} completions never mention the binary"
         );
     }
-    let json = run_in(None, &["completions", "bash", "--json"])?.success()?;
+    let json = scratch
+        .quinjet(&["completions", "bash", "--json"])?
+        .success()?;
     let document = json.json()?;
     ensure!(
         document["shell"] == "bash",
@@ -388,17 +453,41 @@ fn completions_cover_every_supported_shell() -> Result<()> {
     Ok(())
 }
 
+#[cfg(not(windows))]
+#[test]
+fn bash_accepts_the_generated_completion_script() -> Result<()> {
+    let scratch = Scratch::directory()?;
+    let run = scratch.quinjet(&["completions", "bash"])?.success()?;
+    scratch.write("quinjet.bash", &run.stdout)?;
+    let mut command = ProcessCommand::new("bash");
+    command.arg("-n").arg(scratch.path.join("quinjet.bash"));
+    isolate_git(&mut command);
+    let output = command
+        .output()
+        .context("failed to validate bash completions")?;
+    ensure!(
+        output.status.success(),
+        "bash rejected completions: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
+}
+
 #[test]
 fn man_prints_one_page_and_writes_one_per_command() -> Result<()> {
-    let page = run_in(None, &["man"])?.success()?;
+    let scratch = Scratch::directory()?;
+    let page = scratch.quinjet(&["man"])?.success()?;
     ensure!(
         page.stdout.contains(".TH QUINJET"),
         "man page misses its title header"
     );
-    let scratch = Scratch::directory()?;
     let target = scratch.path.join("man");
     let target_argument = target.display().to_string();
-    drop(run_in(None, &["man", "--dir", &target_argument])?.success()?);
+    drop(
+        scratch
+            .quinjet(&["man", "--dir", &target_argument])?
+            .success()?,
+    );
     ensure!(
         target.join("quinjet.1").is_file(),
         "the top page was not written"
@@ -406,6 +495,15 @@ fn man_prints_one_page_and_writes_one_per_command() -> Result<()> {
     ensure!(
         target.join("quinjet-branch-create.1").is_file(),
         "the nested page was not written"
+    );
+    let nested = fs::read_to_string(target.join("quinjet-branch-create.1"))?;
+    ensure!(
+        nested.contains("quinjet branch create"),
+        "nested synopsis lost its command path: {nested}"
+    );
+    ensure!(
+        nested.contains("\\-\\-json") && nested.contains("\\-C"),
+        "nested page lost global options: {nested}"
     );
     Ok(())
 }
