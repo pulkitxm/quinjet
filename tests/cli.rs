@@ -182,6 +182,7 @@ fn help_lists_every_group_verb() -> Result<()> {
         "pr",
         "completions",
         "man",
+        "update",
     ] {
         ensure!(run.stdout.contains(verb), "--help does not mention {verb}");
     }
@@ -198,6 +199,7 @@ fn every_subcommand_answers_help() -> Result<()> {
         vec!["pr", "logs"],
         vec!["completions"],
         vec!["man"],
+        vec!["update"],
     ] {
         let mut args = path.clone();
         args.push("--help");

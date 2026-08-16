@@ -1,5 +1,6 @@
 pub(crate) mod command;
 mod render;
+mod update;
 mod watch;
 
 use std::collections::HashMap;
@@ -172,6 +173,8 @@ enum Verb {
     Completions(CompletionsArgs),
     /// Print the manual page, or write one page per command
     Man(ManArgs),
+    /// Update this executable to the latest stable release
+    Update(UpdateArgs),
 }
 
 #[derive(Debug, Args)]
@@ -186,6 +189,13 @@ struct ManArgs {
     /// Write one page per command into this directory instead of printing one
     #[arg(long, value_name = "DIR")]
     dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct UpdateArgs {
+    /// Check for a newer release without installing it
+    #[arg(long)]
+    check: bool,
 }
 
 #[derive(Debug, Args)]
@@ -500,6 +510,9 @@ pub(crate) fn dispatch() -> Result<Launch> {
             return completions(&out, &args).map(Launch::Finished);
         }
         Some(Verb::Man(args)) => return manual(&out, &args).map(Launch::Finished),
+        Some(Verb::Update(args)) => {
+            return update::run(&out, args.check).map(Launch::Finished);
+        }
         Some(other) => other,
     };
     let repository = Repository::discover(&cli.repository)?;
@@ -627,9 +640,9 @@ fn run(session: &mut Session, out: &Emitter, verb: Verb) -> Result<u8> {
             "the terminal interface is launched before any verb runs",
         )
         .into()),
-        Verb::Completions(_) | Verb::Man(_) => Err(Failure::new(
+        Verb::Completions(_) | Verb::Man(_) | Verb::Update(_) => Err(Failure::new(
             EXIT_FAILURE,
-            "the generated references are written before a repository is opened",
+            "metadata commands run before a repository is opened",
         )
         .into()),
         Verb::Status(args) => status(session, out, &args),
