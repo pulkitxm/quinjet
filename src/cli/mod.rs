@@ -1254,9 +1254,9 @@ mod tests {
     impl TestRepository {
         fn new() -> Self {
             let id = TEST_REPOSITORY_ID.fetch_add(1, Ordering::Relaxed);
+            let name = format!("quinjet-cli-test-{}-{id}", std::process::id());
             // nosemgrep: rust.lang.security.temp-dir.temp-dir
-            let path =
-                std::env::temp_dir().join(format!("quinjet-cli-test-{}-{id}", std::process::id()));
+            let path = std::env::temp_dir().join(name);
             drop(fs::remove_dir_all(&path));
             fs::create_dir_all(&path).unwrap();
             let repository = Self { path };
