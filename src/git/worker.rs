@@ -40,6 +40,7 @@ pub(crate) enum WorkerCommand {
         generation: u64,
         refresh: bool,
     },
+    LoadLocalGitHubRepository,
     LookupPullRequest {
         generation: u64,
         repositories: Vec<super::github::GitHubRepository>,
@@ -113,6 +114,7 @@ pub(crate) enum WorkerEvent {
     },
     LocalDiffFile {
         generation: u64,
+        workspace_generation: u64,
         path: PathBuf,
         result: Result<DiffDocument, String>,
     },
@@ -124,6 +126,9 @@ pub(crate) enum WorkerEvent {
     GitHubRepositories {
         generation: u64,
         result: Result<(Vec<super::github::GitHubRepository>, Vec<String>), String>,
+    },
+    LocalGitHubRepository {
+        result: Result<Option<super::github::GitHubRepository>, String>,
     },
     PullRequestLookup {
         generation: u64,
@@ -213,7 +218,8 @@ impl Mailbox {
                 self.prefetch = Some(command);
             }
             command @ WorkerCommand::LoadHistory { .. } => self.history = Some(command),
-            command @ WorkerCommand::LoadGitHubRepositories { .. } => {
+            command @ (WorkerCommand::LoadGitHubRepositories { .. }
+            | WorkerCommand::LoadLocalGitHubRepository) => {
                 self.repositories = Some(command);
             }
             command @ WorkerCommand::LookupPullRequest { .. } => {
@@ -521,6 +527,7 @@ fn run_worker(repository: &Repository, mailbox: &Arc<SharedMailbox>, events: &Se
                 path,
             } => WorkerEvent::LocalDiffFile {
                 generation,
+                workspace_generation,
                 path: path.clone(),
                 result: answer(
                     session
@@ -559,6 +566,13 @@ fn run_worker(repository: &Repository, mailbox: &Arc<SharedMailbox>, events: &Se
                     session
                         .execute(Command::GitHubRepositories { refresh })
                         .and_then(Outcome::github_repositories),
+                ),
+            },
+            WorkerCommand::LoadLocalGitHubRepository => WorkerEvent::LocalGitHubRepository {
+                result: answer(
+                    session
+                        .execute(Command::LocalGitHubRepository)
+                        .and_then(Outcome::local_github_repository),
                 ),
             },
             WorkerCommand::LookupPullRequest {

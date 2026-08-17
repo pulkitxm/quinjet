@@ -65,11 +65,11 @@ window grows.
 
 Opening the interface starts a Git worker thread, a recursive filesystem
 watcher on the worktree root, and, when asked for, the webhook listener. The
-first frame asks for three things and nothing else: the working-tree status,
-the current branch's history, and the list of local and remote-tracking
-branches. No GitHub request is made at startup, when the Pull Requests tab is
-opened, or when a tab is switched. Only typing a number and pressing Enter
-contacts GitHub.
+first frame asks for the working-tree status, the current branch's history, the
+list of local and remote-tracking branches, and a repository link derived only
+from configured Git remotes. No GitHub request is made at startup, when the Pull
+Requests tab is opened, or when a tab is switched. Only typing a number and
+pressing Enter contacts GitHub.
 
 The terminal is put into raw mode with the alternate screen, bracketed paste
 and, where the terminal supports them, the keyboard enhancement flags that let
@@ -96,6 +96,18 @@ selects text without activating a control.
 Releasing the mouse costs nothing else. Clickable rows, group actions and
 divider dragging are the only things that stop working, and every one of them
 has a key.
+
+Repository names, branches, commit IDs and pull-request numbers are underlined
+when Quinjet can resolve their GitHub destination. Clicking the underlined text
+opens it in the default browser. Clicking the worktree path opens it in the
+platform's default file viewer. The rest of a commit row keeps selecting that
+commit, so opening and selecting remain distinct targets.
+
+Changes are divided into merge, staged, tracked and untracked sections. Click a
+section header, press `Enter` or press `Space` to collapse or expand it. Left and
+right arrows move between a section and its files. Pull-request file trees also
+compact directory chains with only one child, matching `apps/web/src/` rather
+than spending one row on each component.
 
 ## `--webhook-listen`
 
