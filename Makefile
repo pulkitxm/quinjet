@@ -48,7 +48,8 @@ install-check: build
 		PATH=/tmp/quinjet-install/bin:$$PATH /tmp/quinjet-install/bin/quinjet --version
 	test -s /tmp/quinjet-install/data/bash-completion/completions/quinjet
 	test -L /tmp/quinjet-install/bin/q
-	PATH=/tmp/quinjet-install/bin:$$PATH q --version
+	HOME=/tmp/quinjet-install/home XDG_DATA_HOME=/tmp/quinjet-install/data SHELL=/bin/bash \
+		PATH=/tmp/quinjet-install/bin:$$PATH q --version
 	test -s /tmp/quinjet-install/home/.local/state/quinjet/bash-installed
 	test -s /tmp/quinjet-install/home/.local/state/quinjet/shortcut-installed
 	HOME=/tmp/quinjet-install/home XDG_DATA_HOME=/tmp/quinjet-install/data SHELL=/bin/bash \

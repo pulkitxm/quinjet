@@ -132,13 +132,15 @@ pub(super) fn auto_install() {
     }
 }
 
-pub(super) fn refresh_replaced_executable() -> Result<()> {
+pub(super) fn refresh_replaced_executable(executable: &Path) -> Result<()> {
     let Some(shell) = detected_shell() else {
         return Ok(());
     };
-    // nosemgrep: rust.lang.security.current-exe.current-exe
-    let executable = env::current_exe().context("failed to locate the updated executable")?;
-    let output = ProcessCommand::new(&executable)
+    refresh_with(executable, shell)
+}
+
+fn refresh_with(executable: &Path, shell: Shell) -> Result<()> {
+    let output = ProcessCommand::new(executable)
         .args([
             "completions",
             &shell.to_string(),
@@ -725,6 +727,27 @@ mod tests {
         let fallback = directory.path().join("bin/q");
         create_shortcut(&executable, &fallback)?;
         ensure!(fs::canonicalize(&fallback)? == fs::canonicalize(&executable)?);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replaced_executable_refresh_uses_its_pre_replacement_path() -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir()?;
+        let executable = directory.path().join("quinjet");
+        let invocation = directory.path().join("invocation");
+        let escaped = single_quote(&invocation.to_string_lossy());
+        fs::write(
+            &executable,
+            format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >'{escaped}'\n"),
+        )?;
+        let mut permissions = fs::metadata(&executable)?.permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&executable, permissions)?;
+        refresh_with(&executable, Shell::Bash)?;
+        ensure!(fs::read_to_string(invocation)? == "completions bash --install --automatic\n");
         Ok(())
     }
 
