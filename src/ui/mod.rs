@@ -5279,7 +5279,30 @@ mod tests {
             "the pull-request body is part of the default view"
         );
 
-        app.pull_request_conversation_loading = true;
+        let refresh_area = app
+            .geometry
+            .sidebar_hits
+            .iter()
+            .find(|hit| matches!(hit.target, SidebarHit::PullRequestConversationRefresh))
+            .expect("the conversation refresh control has a hit area")
+            .area;
+        let effects = app.handle_mouse(
+            crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                column: refresh_area.x,
+                row: refresh_area.y,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+            std::time::Instant::now(),
+        );
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            crate::app::AppEffect::Git(command)
+                if matches!(
+                    command.as_ref(),
+                    crate::git::worker::WorkerCommand::LoadPullRequestConversation { .. }
+                )
+        )));
         terminal.draw(|frame| draw(frame, &mut app)).unwrap();
         let rendered: String = terminal
             .backend()

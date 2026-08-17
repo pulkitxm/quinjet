@@ -625,8 +625,6 @@ pub(crate) struct App {
     pub pull_request_checks_loading: bool,
     pub pull_request_checks_error: Option<String>,
     pub pull_request_checks_from_cache: bool,
-    /// How many settled runs the background warm has already covered, so a
-    /// poll that reports the same set does not queue the work again.
     pub pull_request_prefetched_logs: HashSet<String>,
     pub pull_request_conversation: PullRequestConversation,
     pub pull_request_conversation_loading: bool,
@@ -704,8 +702,6 @@ pub(crate) struct App {
     pub pull_request_checks_generation: u64,
     pub pull_request_conversation_generation: u64,
     pub pull_request_check_log_generation: u64,
-    /// Workflow and name of the check the loaded log belongs to, so a live
-    /// refresh can tell a new selection from an update of the same run.
     pub pull_request_check_log_target: Option<String>,
     pub local_diff_request: Option<LocalDiffRequest>,
     pub local_diff_workspace_generation: Option<u64>,

@@ -215,13 +215,7 @@ impl Repository {
                 from_cache: true,
             });
         }
-        let single_page = args
-            .iter()
-            .filter(|arg| {
-                arg.as_encoded_bytes() != b"api" && arg.as_encoded_bytes() != b"--paginate"
-            })
-            .cloned()
-            .collect();
+        let single_page = validator_args(&args);
         if let Ok(read) = self.validated_gh(validator_key, single_page)
             && read.complete
         {
@@ -253,6 +247,13 @@ impl Repository {
             from_cache: false,
         })
     }
+}
+
+fn validator_args(args: &[OsString]) -> Vec<OsString> {
+    args.iter()
+        .filter(|arg| arg.as_encoded_bytes() != b"api" && arg.as_encoded_bytes() != b"--paginate")
+        .cloned()
+        .collect()
 }
 
 fn opened_entry(pull_request: &PullRequest) -> ConversationEntry {
@@ -452,5 +453,12 @@ weird_new_event\tsomebody\t2026-08-01T15:00:00Z\t\t\t\t\t\n";
         assert!(timeline[4].contains("head_ref_force_pushed"));
         assert!(timeline[4].contains("line-commented"));
         assert!(comments[4].contains("diff_hunk"));
+        assert_eq!(
+            validator_args(&timeline_args(&request))
+                .iter()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            timeline[2..]
+        );
     }
 }
