@@ -1,6 +1,5 @@
 mod theme;
 
-use std::collections::HashMap;
 use std::ops::Range;
 
 use ratatui::Frame;
@@ -12,11 +11,13 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use self::theme::Theme;
 use crate::app::{
-    App, ContentFileHit, ContentStepHit, DiffLayout, Focus, Modal, PaletteCommand,
-    PullRequestContentRow, PullRequestSection, PullRequestTreeEntry, ScmAction, ScmActionHit,
-    SidebarHit, SidebarHitArea, ToastLevel, UiGeometry, View,
+    App, ChangeRow, ChangeSection, ContentFileHit, ContentStepHit, DiffLayout, Focus, LinkHit,
+    Modal, OpenTarget, PaletteCommand, PullRequestContentRow, PullRequestSection,
+    PullRequestTreeEntry, ScmAction, ScmActionHit, SidebarHit, SidebarHitArea, ToastLevel,
+    UiGeometry, View,
 };
 use crate::convert::cells;
+use crate::date_time::format_local_timestamp;
 use crate::git::diff::{DiffDocument, DiffLine, DiffLineKind, HighlightSpan, PullRequestDetails};
 use crate::git::github::{
     CheckLogLine, CheckLogSeverity, CheckStep, ConversationEntry, ConversationKind,
@@ -133,18 +134,19 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
         .areas(main)
     };
 
-    let (changes_tab, history_tab, pull_requests_tab) = draw_tabs(frame, tabs, app, &theme);
+    let (changes_tab, history_tab, pull_requests_tab, mut link_hits) =
+        draw_tabs(frame, tabs, app, &theme);
     let (sidebar_hits, scm_action_hits) = if app.sidebar_hidden {
         (Vec::new(), Vec::new())
     } else {
-        draw_sidebar(frame, sidebar_area, app, &theme)
+        draw_sidebar(frame, sidebar_area, app, &theme, &mut link_hits)
     };
     if !app.sidebar_hidden {
         draw_main_divider(frame, sidebar_divider, app.resize_target.is_some(), &theme);
     }
     let (diff_divider, content_file_hits, content_step_hits) =
-        draw_content(frame, content_area, app, &theme);
-    draw_footer(frame, footer, app, &theme);
+        draw_content(frame, content_area, app, &theme, &mut link_hits);
+    draw_footer(frame, footer, app, &theme, &mut link_hits);
 
     app.geometry = UiGeometry {
         changes_tab,
@@ -159,6 +161,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
         scm_action_hits,
         content_file_hits,
         content_step_hits,
+        link_hits,
     };
 
     if let Some(modal) = app.modal.as_ref() {
@@ -211,12 +214,19 @@ fn draw_too_small(frame: &mut Frame<'_>, theme: &Theme) {
     );
 }
 
-fn draw_tabs(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) -> (Rect, Rect, Rect) {
-    let repository = if app.repository_root.to_string_lossy() == app.repository_name {
-        app.repository_name.clone()
-    } else {
-        format!("{}  {}", app.repository_name, app.repository_root.display())
-    };
+#[expect(
+    clippy::too_many_lines,
+    reason = "the header renders its linked regions in one coordinate space"
+)]
+fn draw_tabs(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &App,
+    theme: &Theme,
+) -> (Rect, Rect, Rect, Vec<LinkHit>) {
+    let mut link_hits = Vec::new();
+    let path = app.repository_root.display().to_string();
+    let show_path = path != app.repository_name;
     let branch = if app.status.branch.head.is_empty() {
         "detecting branch…".to_owned()
     } else {
@@ -267,17 +277,49 @@ fn draw_tabs(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) -> (Re
         app.view == View::PullRequests,
         theme,
     );
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                " QUINJET ",
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD),
+    let prefix = " QUINJET ";
+    let repository_x = title_area.x.saturating_add(cells(prefix.width()));
+    let repository_area = clipped_link_area(
+        repository_x,
+        title_area.y.saturating_add(1),
+        app.repository_name.width(),
+        title_area,
+    );
+    let mut title = vec![
+        Span::styled(
+            prefix,
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ),
+        interactive_span(
+            app.repository_name.clone(),
+            app.repository_open_target(),
+            repository_area,
+            theme,
+            &mut link_hits,
+        ),
+    ];
+    if show_path {
+        let path_x = repository_x
+            .saturating_add(cells(app.repository_name.width()))
+            .saturating_add(2);
+        title.push(Span::raw("  "));
+        title.push(interactive_span(
+            path.clone(),
+            Some(app.workspace_open_target()),
+            clipped_link_area(
+                path_x,
+                title_area.y.saturating_add(1),
+                path.width(),
+                title_area,
             ),
-            Span::styled(repository, Style::default().fg(theme.text)),
-        ]))
-        .block(
+            theme,
+            &mut link_hits,
+        ));
+    }
+    frame.render_widget(
+        Paragraph::new(Line::from(title)).block(
             Block::default()
                 .borders(Borders::TOP | Borders::BOTTOM)
                 .border_style(Style::default().fg(theme.border))
@@ -285,8 +327,47 @@ fn draw_tabs(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) -> (Re
         ),
         title_area,
     );
+    let branch_line = if app.status.branch.head.is_empty() {
+        Line::from(branch)
+    } else {
+        let branch_start = branch_area
+            .right()
+            .saturating_sub(1)
+            .saturating_sub(cells(branch.width()));
+        let branch_name_x = branch_start.saturating_add(cells(" ".width()));
+        let branch_target = if app.status.branch.detached {
+            app.status
+                .branch
+                .oid
+                .as_deref()
+                .and_then(|oid| app.commit_open_target(oid))
+        } else {
+            app.branch_open_target(&app.status.branch.head)
+        };
+        let branch_name = app.status.branch.head.clone();
+        let branch_suffix = branch
+            .strip_prefix(&format!(" {branch_name}"))
+            .unwrap_or_default()
+            .to_owned();
+        Line::from(vec![
+            Span::raw(" "),
+            interactive_span(
+                branch_name.clone(),
+                branch_target,
+                clipped_link_area(
+                    branch_name_x,
+                    branch_area.y.saturating_add(1),
+                    branch_name.width(),
+                    branch_area,
+                ),
+                theme,
+                &mut link_hits,
+            ),
+            Span::raw(branch_suffix),
+        ])
+    };
     frame.render_widget(
-        Paragraph::new(branch)
+        Paragraph::new(branch_line)
             .alignment(Alignment::Right)
             .style(Style::default().fg(theme.accent).bg(theme.panel))
             .block(
@@ -296,7 +377,7 @@ fn draw_tabs(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) -> (Re
             ),
         branch_area,
     );
-    (changes_tab, history_tab, pull_requests_tab)
+    (changes_tab, history_tab, pull_requests_tab, link_hits)
 }
 
 fn draw_tab(frame: &mut Frame<'_>, area: Rect, label: &str, active: bool, theme: &Theme) {
@@ -330,10 +411,14 @@ fn draw_sidebar(
     area: Rect,
     app: &mut App,
     theme: &Theme,
+    link_hits: &mut Vec<LinkHit>,
 ) -> (Vec<SidebarHitArea>, Vec<ScmActionHit>) {
     match app.view {
         View::Changes => draw_changes_sidebar(frame, area, app, theme),
-        View::History => (draw_history_sidebar(frame, area, app, theme), Vec::new()),
+        View::History => (
+            draw_history_sidebar(frame, area, app, theme, link_hits),
+            Vec::new(),
+        ),
         View::PullRequests => (
             draw_pull_requests_sidebar(frame, area, app, theme),
             Vec::new(),
@@ -374,11 +459,19 @@ fn draw_changes_sidebar(
         inner.height.saturating_sub(controls_height),
     );
     let visible = app.visible_change_indices();
-    let row_count = change_row_count(app, &visible);
+    let rows = app.change_rows();
+    let row_count = rows.len();
     let height = list_area.height as usize;
-    let selected_row = selected_change_row(app, &visible);
+    let selected_row = rows
+        .iter()
+        .position(|row| match row {
+            ChangeRow::Section { section, .. } => app.selected_change_section == Some(*section),
+            ChangeRow::Change { cursor, .. } => {
+                app.selected_change_section.is_none() && *cursor == app.change_cursor
+            }
+        })
+        .unwrap_or_default();
     ensure_offset(&mut app.sidebar_offset, selected_row, height, row_count);
-    let rows = build_change_rows(app, &visible);
     let mut hits = Vec::new();
     let mut action_hits = Vec::new();
     let end = (app.sidebar_offset + height).min(rows.len());
@@ -386,8 +479,12 @@ fn draw_changes_sidebar(
         (list_area.y..list_area.bottom()).zip(rows.iter().take(end).skip(app.sidebar_offset))
     {
         match row {
-            ChangeRow::Header { area: group, count } => {
-                let selected = app.selected_change_group == Some(*group);
+            ChangeRow::Section {
+                section,
+                count,
+                collapsed,
+            } => {
+                let selected = app.selected_change_section == Some(*section);
                 let background = if selected {
                     theme.selected
                 } else {
@@ -395,9 +492,12 @@ fn draw_changes_sidebar(
                 };
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![
-                        Span::styled(" ▾ ", Style::default().fg(theme.muted)),
                         Span::styled(
-                            group.label().to_uppercase(),
+                            if *collapsed { " ▸ " } else { " ▾ " },
+                            Style::default().fg(theme.muted),
+                        ),
+                        Span::styled(
+                            section.label().to_uppercase(),
                             Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
                         ),
                         Span::styled(format!("  {count}"), Style::default().fg(theme.muted)),
@@ -405,11 +505,11 @@ fn draw_changes_sidebar(
                     .style(Style::default().bg(background)),
                     Rect::new(list_area.x, y, list_area.width, 1),
                 );
-                let (label, action) = match group {
-                    ChangeArea::Staged => ("[−]", ScmAction::UnstageGroup(*group)),
-                    ChangeArea::Conflict | ChangeArea::Unstaged => {
-                        ("[+]", ScmAction::StageGroup(*group))
-                    }
+                let (label, action) = match section {
+                    ChangeSection::Staged => ("[−]", ScmAction::UnstageSection(*section)),
+                    ChangeSection::Conflict
+                    | ChangeSection::Unstaged
+                    | ChangeSection::Untracked => ("[+]", ScmAction::StageSection(*section)),
                 };
                 let action_area = Rect::new(list_area.right().saturating_sub(4), y, 4, 1);
                 frame.render_widget(
@@ -424,15 +524,15 @@ fn draw_changes_sidebar(
                 });
                 hits.push(SidebarHitArea {
                     area: Rect::new(list_area.x, y, list_area.width, 1),
-                    target: SidebarHit::ChangeGroup(*group),
+                    target: SidebarHit::ChangeSection(*section),
                 });
             }
-            ChangeRow::Change {
-                index,
-                cursor,
-                change,
-            } => {
-                let selected = app.selected_change_group.is_none() && *cursor == app.change_cursor;
+            ChangeRow::Change { index, cursor, .. } => {
+                let Some(change) = app.status.changes.get(*index) else {
+                    continue;
+                };
+                let selected =
+                    app.selected_change_section.is_none() && *cursor == app.change_cursor;
                 let row_style = if selected {
                     Style::default().bg(theme.selected)
                 } else {
@@ -446,7 +546,7 @@ fn draw_changes_sidebar(
                 );
                 let line = Line::from(vec![
                     Span::styled(
-                        if selected { " › " } else { "   " },
+                        if selected { " • " } else { "   " },
                         Style::default().fg(theme.accent),
                     ),
                     Span::styled(
@@ -597,128 +697,16 @@ fn draw_changes_sidebar(
     (hits, action_hits)
 }
 
-#[derive(Clone)]
-enum ChangeRow<'a> {
-    Header {
-        area: ChangeArea,
-        count: usize,
-    },
-    Change {
-        index: usize,
-        cursor: usize,
-        change: &'a Change,
-    },
-}
-
-fn selected_change_row(app: &App, visible: &[usize]) -> usize {
-    let selected_index = visible.get(app.change_cursor).copied();
-    let selected_area = selected_index
-        .and_then(|index| app.status.changes.get(index))
-        .map(|change| change.area);
-    let mut row = 0;
-    for area in [
-        ChangeArea::Conflict,
-        ChangeArea::Staged,
-        ChangeArea::Unstaged,
-    ] {
-        let group: Vec<_> = visible
-            .iter()
-            .filter(|index| {
-                app.status
-                    .changes
-                    .get(**index)
-                    .is_some_and(|change| change.area == area)
-            })
-            .copied()
-            .collect();
-        if group.is_empty() {
-            continue;
-        }
-        if app.selected_change_group == Some(area) {
-            return row;
-        }
-        row += 1;
-        if selected_area == Some(area) {
-            return row
-                + group
-                    .iter()
-                    .position(|index| Some(*index) == selected_index)
-                    .unwrap_or_default();
-        }
-        row += group.len();
-    }
-    0
-}
-
-fn change_row_count(app: &App, visible: &[usize]) -> usize {
-    let group_count = [
-        ChangeArea::Conflict,
-        ChangeArea::Staged,
-        ChangeArea::Unstaged,
-    ]
-    .into_iter()
-    .filter(|area| {
-        visible.iter().any(|index| {
-            app.status
-                .changes
-                .get(*index)
-                .is_some_and(|change| change.area == *area)
-        })
-    })
-    .count();
-    visible.len() + group_count
-}
-
-fn build_change_rows<'a>(app: &'a App, visible: &[usize]) -> Vec<ChangeRow<'a>> {
-    let mut rows = Vec::new();
-    let mut cursor_map = HashMap::new();
-    for (cursor, index) in visible.iter().enumerate() {
-        let _ = cursor_map.insert(*index, cursor);
-    }
-    for area in [
-        ChangeArea::Conflict,
-        ChangeArea::Staged,
-        ChangeArea::Unstaged,
-    ] {
-        let group: Vec<_> = visible
-            .iter()
-            .filter(|index| {
-                app.status
-                    .changes
-                    .get(**index)
-                    .is_some_and(|change| change.area == area)
-            })
-            .copied()
-            .collect();
-        if group.is_empty() {
-            continue;
-        }
-        rows.push(ChangeRow::Header {
-            area,
-            count: group.len(),
-        });
-        for index in group {
-            let (Some(cursor), Some(change)) = (
-                cursor_map.get(&index).copied(),
-                app.status.changes.get(index),
-            ) else {
-                continue;
-            };
-            rows.push(ChangeRow::Change {
-                index,
-                cursor,
-                change,
-            });
-        }
-    }
-    rows
-}
-
+#[expect(
+    clippy::too_many_lines,
+    reason = "the draw pass reads better as one top-to-bottom pass"
+)]
 fn draw_history_sidebar(
     frame: &mut Frame<'_>,
     area: Rect,
     app: &mut App,
     theme: &Theme,
+    link_hits: &mut Vec<LinkHit>,
 ) -> Vec<SidebarHitArea> {
     let title = if app.filter.is_empty() {
         format!(
@@ -803,14 +791,29 @@ fn draw_history_sidebar(
             Paragraph::new(line).style(row_style),
             Rect::new(inner.x, y, inner.width.saturating_sub(10), 1),
         );
+        let sha_area = Rect::new(
+            inner
+                .right()
+                .saturating_sub(1)
+                .saturating_sub(cells(commit.short_id.width())),
+            y,
+            cells(commit.short_id.width()),
+            1,
+        );
         frame.render_widget(
-            Paragraph::new(commit.short_id.as_str())
-                .alignment(Alignment::Right)
-                .style(Style::default().fg(theme.muted).bg(if selected {
-                    theme.selected
-                } else {
-                    theme.panel
-                })),
+            Paragraph::new(Line::from(interactive_span(
+                commit.short_id.clone(),
+                app.commit_open_target(&commit.id),
+                sha_area,
+                theme,
+                link_hits,
+            )))
+            .alignment(Alignment::Right)
+            .style(Style::default().bg(if selected {
+                theme.selected
+            } else {
+                theme.panel
+            })),
             Rect::new(inner.right().saturating_sub(10), y, 9, 1),
         );
         hits.push(SidebarHitArea {
@@ -1164,16 +1167,13 @@ fn draw_pull_request_file_tree(
             theme.panel
         };
         match row {
-            PullRequestTreeEntry::Directory { path, depth } => {
+            PullRequestTreeEntry::Directory { path, label, depth } => {
                 let background = if selected {
                     theme.selected
                 } else {
                     theme.panel_alt
                 };
                 let indent_width = depth.saturating_mul(2).min(16);
-                let name = path
-                    .file_name()
-                    .map_or_else(|| path.to_string_lossy(), |name| name.to_string_lossy());
                 let available = (area.width as usize)
                     .saturating_sub(indent_width)
                     .saturating_sub(5);
@@ -1186,7 +1186,7 @@ fn draw_pull_request_file_tree(
                     Paragraph::new(format!(
                         " {}{icon} {}/",
                         "  ".repeat((*depth).min(8)),
-                        truncate_end(&name, available),
+                        truncate_end(label, available),
                     ))
                     .style(
                         Style::default()
@@ -1468,6 +1468,7 @@ fn draw_pull_request_overview(
     area: Rect,
     app: &mut App,
     theme: &Theme,
+    link_hits: &mut Vec<LinkHit>,
 ) -> Vec<ContentStepHit> {
     let showing_check = app.pull_request_check_cursor.is_some();
     let focused = app.focus == Focus::Content && app.modal.is_none();
@@ -1563,6 +1564,15 @@ fn draw_pull_request_overview(
                 area: row_area,
                 step,
             });
+        } else if app.content_scroll.saturating_add(offset) == 0
+            && let Some(pull_request) = app.selected_pull_request()
+            && let Some(target) = app.pull_request_open_target(pull_request.number)
+        {
+            let label = format!("#{}", pull_request.number);
+            let area = clipped_link_area(row_area.x, row_area.y, label.width(), row_area);
+            if area.width > 0 {
+                link_hits.push(LinkHit { area, target });
+            }
         }
     }
     draw_scrollbar(frame, inner, app.content_scroll, rows.len(), theme);
@@ -1648,7 +1658,7 @@ fn conversation_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> 
             format!("#{}  ", pull_request.number),
             Style::default()
                 .fg(theme.accent)
-                .add_modifier(Modifier::BOLD),
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
         ),
         Span::styled(
             pull_request.title.clone(),
@@ -1660,8 +1670,8 @@ fn conversation_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> 
         format!(
             "{state}  ·  @{}  ·  opened {}  ·  updated {}",
             pull_request.author,
-            short_timestamp(&pull_request.created_at),
-            short_timestamp(&pull_request.updated_at)
+            format_local_timestamp(&pull_request.created_at),
+            format_local_timestamp(&pull_request.updated_at)
         ),
         theme,
     )));
@@ -1776,7 +1786,7 @@ fn push_conversation_entry(
     theme: &Theme,
 ) {
     let (icon, color, action) = conversation_marker(entry, theme);
-    let stamp = short_timestamp(&entry.timestamp);
+    let stamp = format_local_timestamp(&entry.timestamp);
     let stamp = if stamp.is_empty() {
         String::new()
     } else {
@@ -1975,7 +1985,7 @@ fn check_run_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> {
             "Ran",
             format!(
                 "{}{}",
-                short_timestamp(&check.started_at),
+                format_local_timestamp(&check.started_at),
                 match check.duration_label() {
                     duration if duration.is_empty() => String::new(),
                     duration => format!("  ·  {duration}"),
@@ -2141,17 +2151,6 @@ fn section_rule(label: &str, width: usize, theme: &Theme) -> Line<'static> {
 
 fn short_oid(value: &str) -> String {
     value.chars().take(7).collect()
-}
-
-/// Show the calendar day and clock time from an RFC 3339 stamp without pulling
-/// in a date library; the seconds and zone add nothing at this size.
-fn short_timestamp(value: &str) -> String {
-    let Some((date, rest)) = value.split_once('T') else {
-        return value.to_owned();
-    };
-    let time = rest.split(['Z', '+', '.']).next().unwrap_or_default();
-    let time = time.rsplit_once(':').map_or(time, |(head, _)| head);
-    format!("{date} {time}")
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -2324,14 +2323,19 @@ fn wrap_words(value: &str, width: usize) -> Vec<String> {
     lines
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the draw pass reads better as one top-to-bottom pass"
+)]
 fn draw_content(
     frame: &mut Frame<'_>,
     area: Rect,
     app: &mut App,
     theme: &Theme,
+    link_hits: &mut Vec<LinkHit>,
 ) -> (Option<Rect>, Vec<ContentFileHit>, Vec<ContentStepHit>) {
     if app.view == View::PullRequests && app.pull_request_section == PullRequestSection::Overview {
-        let step_hits = draw_pull_request_overview(frame, area, app, theme);
+        let step_hits = draw_pull_request_overview(frame, area, app, theme, link_hits);
         return (None, Vec::new(), step_hits);
     }
     let file_action = if app.preview_files_collapsible() {
@@ -2411,6 +2415,7 @@ fn draw_content(
                 diff_scroll,
                 details_rows,
                 theme,
+                link_hits,
             );
         } else if let Some(details) = app.document.pull_request_details.as_ref() {
             draw_pull_request_details_scrolled(
@@ -2463,6 +2468,14 @@ fn pull_request_details_row_count(available_height: u16) -> usize {
     12.min(available_height.saturating_sub(3)) as usize
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "rendering and hit registration share the same scrolled coordinate space"
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the details card reads better as one top-to-bottom pass"
+)]
 fn draw_commit_details_scrolled(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -2470,12 +2483,16 @@ fn draw_commit_details_scrolled(
     scroll: usize,
     total_rows: usize,
     theme: &Theme,
+    link_hits: &mut Vec<LinkHit>,
 ) {
     let Some(details) = app.document.commit_details.as_ref() else {
         return;
     };
     let document = &app.document;
     let load_progress = app.local_diff_load_progress();
+    let (additions, deletions) = app
+        .local_diff_line_counts()
+        .unwrap_or_else(|| (document.addition_count(), document.deletion_count()));
     let block = Block::default()
         .title(" Commit details ")
         .borders(Borders::ALL)
@@ -2486,16 +2503,57 @@ fn draw_commit_details_scrolled(
     let inner = block.inner(full_area);
     block.render(full_area, &mut buffer);
     let file_count = document.file_count();
+    let subject = pull_request_reference(&details.subject)
+        .and_then(|(start, end, number)| {
+            Some((
+                details.subject.get(..start)?,
+                details.subject.get(start..end)?,
+                details.subject.get(end..)?,
+                app.pull_request_open_target(number)?,
+            ))
+        })
+        .map_or_else(
+            || {
+                Line::from(Span::styled(
+                    details.subject.as_str(),
+                    Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                ))
+            },
+            |(prefix, reference, suffix, target)| {
+                Line::from(vec![
+                    Span::styled(
+                        prefix,
+                        Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                    ),
+                    interactive_span(
+                        reference.to_owned(),
+                        Some(target),
+                        scrolled_detail_link_area(
+                            area,
+                            scroll,
+                            inner.y,
+                            inner.x.saturating_add(cells(prefix.width())),
+                            reference.width(),
+                        ),
+                        theme,
+                        link_hits,
+                    ),
+                    Span::styled(
+                        suffix,
+                        Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                    ),
+                ])
+            },
+        );
     let lines = vec![
-        Line::from(Span::styled(
-            details.subject.as_str(),
-            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
-        )),
+        subject,
         detail_line(
             "Author",
             format!(
                 "{} <{}>  ·  {}",
-                details.author, details.author_email, details.authored_at
+                details.author,
+                details.author_email,
+                format_local_timestamp(&details.authored_at)
             ),
             theme,
         ),
@@ -2503,11 +2561,31 @@ fn draw_commit_details_scrolled(
             "Committer",
             format!(
                 "{} <{}>  ·  {}",
-                details.committer, details.committer_email, details.committed_at
+                details.committer,
+                details.committer_email,
+                format_local_timestamp(&details.committed_at)
             ),
             theme,
         ),
-        detail_line("Commit", details.id.clone(), theme),
+        Line::from(vec![
+            Span::styled(
+                format!("{:<DETAIL_LABEL_WIDTH$}", "Commit"),
+                Style::default().fg(theme.muted),
+            ),
+            interactive_span(
+                details.id.clone(),
+                app.commit_open_target(&details.id),
+                scrolled_detail_link_area(
+                    area,
+                    scroll,
+                    inner.y.saturating_add(3),
+                    inner.x.saturating_add(cells(DETAIL_LABEL_WIDTH)),
+                    details.id.width(),
+                ),
+                theme,
+                link_hits,
+            ),
+        ]),
         Line::from(vec![
             Span::styled("Changes    ", Style::default().fg(theme.muted)),
             Span::styled(
@@ -2522,14 +2600,14 @@ fn draw_commit_details_scrolled(
                 Style::default().fg(theme.text),
             ),
             Span::styled(
-                format!("+{}", document.addition_count()),
+                format!("+{additions}"),
                 Style::default()
                     .fg(theme.added)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled("  ", Style::default()),
             Span::styled(
-                format!("-{}", document.deletion_count()),
+                format!("-{deletions}"),
                 Style::default()
                     .fg(theme.removed)
                     .add_modifier(Modifier::BOLD),
@@ -2591,7 +2669,8 @@ fn draw_pull_request_details_scrolled(
             "Status",
             format!(
                 "{state}  ·  @{}  ·  updated {}",
-                details.author, details.updated_at
+                details.author,
+                format_local_timestamp(&details.updated_at)
             ),
             theme,
         ),
@@ -2828,6 +2907,72 @@ fn detail_line<'a>(label: &'a str, value: String, theme: &Theme) -> Line<'a> {
         ),
         Span::styled(value, Style::default().fg(theme.text)),
     ])
+}
+
+fn interactive_span(
+    text: String,
+    target: Option<OpenTarget>,
+    area: Rect,
+    theme: &Theme,
+    hits: &mut Vec<LinkHit>,
+) -> Span<'static> {
+    let style = target.map_or_else(
+        || Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+        |target| {
+            if area.width > 0 && area.height > 0 {
+                hits.push(LinkHit { area, target });
+            }
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        },
+    );
+    Span::styled(text, style)
+}
+
+fn clipped_link_area(x: u16, y: u16, width: usize, container: Rect) -> Rect {
+    if y < container.y || y >= container.bottom() || x >= container.right() {
+        return Rect::default();
+    }
+    Rect::new(
+        x.max(container.x),
+        y,
+        cells(width).min(container.right().saturating_sub(x.max(container.x))),
+        1,
+    )
+}
+
+fn scrolled_detail_link_area(
+    area: Rect,
+    scroll: usize,
+    source_y: u16,
+    source_x: u16,
+    width: usize,
+) -> Rect {
+    let scroll = cells(scroll);
+    if source_y < scroll {
+        return Rect::default();
+    }
+    let row = source_y - scroll;
+    clipped_link_area(
+        area.x.saturating_add(source_x),
+        area.y.saturating_add(row),
+        width,
+        area,
+    )
+}
+
+fn pull_request_reference(text: &str) -> Option<(usize, usize, u64)> {
+    text.match_indices('#').find_map(|(start, _)| {
+        let rest = text.get(start.saturating_add(1)..)?;
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        if digits == 0 {
+            return None;
+        }
+        let end = start.saturating_add(1).saturating_add(digits);
+        let number = text.get(start.saturating_add(1)..end)?.parse().ok()?;
+        Some((start, end, number))
+    })
 }
 
 fn unified_row_indices(document: &DiffDocument, app: &App) -> Vec<usize> {
@@ -3668,11 +3813,17 @@ fn draw_scrollbar(frame: &mut Frame<'_>, area: Rect, offset: usize, length: usiz
     clippy::option_if_let_else,
     reason = "the branch is one arm of a longer chain that map_or_else cannot express"
 )]
-fn draw_footer(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) {
+fn draw_footer(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &App,
+    theme: &Theme,
+    link_hits: &mut Vec<LinkHit>,
+) {
     let left = if let Some(busy) = app.busy.as_deref() {
         Line::from(vec![
             Span::styled(
-                " ⟳ ",
+                format!(" {} ", app.operation_spinner()),
                 Style::default()
                     .fg(theme.accent)
                     .add_modifier(Modifier::BOLD),
@@ -3706,15 +3857,24 @@ fn draw_footer(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) {
             Span::styled("Refreshing repository…", Style::default().fg(theme.muted)),
         ])
     } else {
+        let branch = if app.status.branch.head.is_empty() {
+            "—".to_owned()
+        } else {
+            app.status.branch.head.clone()
+        };
         Line::from(vec![
             Span::styled("  ", Style::default().fg(theme.accent)),
-            Span::styled(
-                if app.status.branch.head.is_empty() {
-                    "—"
-                } else {
-                    &app.status.branch.head
-                },
-                Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+            interactive_span(
+                branch.clone(),
+                app.branch_open_target(&app.status.branch.head),
+                clipped_link_area(
+                    area.x.saturating_add(cells("  ".width())),
+                    area.y.saturating_add(1),
+                    branch.width(),
+                    area,
+                ),
+                theme,
+                link_hits,
             ),
             Span::styled(
                 format!(
@@ -4035,7 +4195,11 @@ fn draw_branches(
                         style,
                     ),
                     Span::styled(
-                        format!("  {}  {}", branch.short_id, branch.relative_date),
+                        format!(
+                            "  {}  {}",
+                            branch.short_id,
+                            format_local_timestamp(&branch.relative_date)
+                        ),
                         Style::default()
                             .fg(theme.muted)
                             .bg(style.bg.unwrap_or(theme.panel)),
@@ -4142,7 +4306,7 @@ fn draw_history_branches(
                             "  {}  {}  {}",
                             if branch.remote { "remote" } else { "local" },
                             branch.short_id,
-                            branch.relative_date
+                            format_local_timestamp(&branch.relative_date)
                         ),
                         Style::default().fg(theme.muted).bg(background),
                     ),
@@ -4245,7 +4409,7 @@ fn draw_compare_branches(
                             "  {}  {}  {}",
                             if branch.remote { "remote" } else { "local" },
                             branch.short_id,
-                            branch.relative_date
+                            format_local_timestamp(&branch.relative_date)
                         ),
                         Style::default().fg(theme.muted).bg(background),
                     ),
@@ -4355,7 +4519,11 @@ fn draw_stashes(
                         Style::default().fg(theme.text).bg(background),
                     ),
                     Span::styled(
-                        format!("{branch}  {}  {}", stash.short_id, stash.relative_date),
+                        format!(
+                            "{branch}  {}  {}",
+                            stash.short_id,
+                            format_local_timestamp(&stash.relative_date)
+                        ),
                         Style::default().fg(theme.muted).bg(background),
                     ),
                 ]))
@@ -4839,6 +5007,38 @@ mod tests {
     }
 
     #[test]
+    fn header_registers_repository_branch_and_workspace_links() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = App::new("/tmp/repo", "repo");
+        app.status.branch.head = "feature/link".to_owned();
+        app.local_github_repository = Some(GitHubRepository {
+            name_with_owner: "acme/repo".to_owned(),
+            url: "https://github.com/acme/repo".to_owned(),
+            remotes: vec!["origin".to_owned()],
+        });
+        let backend = TestBackend::new(160, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+
+        assert!(app.geometry.link_hits.iter().any(|hit| matches!(
+            &hit.target,
+            OpenTarget::Browser(url) if url == "https://github.com/acme/repo"
+        )));
+        assert!(app.geometry.link_hits.iter().any(|hit| matches!(
+            &hit.target,
+            OpenTarget::Browser(url)
+                if url == "https://github.com/acme/repo/tree/feature/link"
+        )));
+        assert!(app.geometry.link_hits.iter().any(|hit| matches!(
+            &hit.target,
+            OpenTarget::Path(path) if path == std::path::Path::new("/tmp/repo")
+        )));
+    }
+
+    #[test]
     fn changes_view_exposes_vscode_style_file_group_and_toolbar_actions() {
         use std::path::PathBuf;
 
@@ -4859,6 +5059,12 @@ mod tests {
                 area: ChangeArea::Staged,
                 status: ChangeStatus::Modified,
             },
+            Change {
+                path: PathBuf::from("notes.txt"),
+                original_path: None,
+                area: ChangeArea::Unstaged,
+                status: ChangeStatus::Untracked,
+            },
         ];
         let backend = TestBackend::new(120, 30);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -4877,6 +5083,8 @@ mod tests {
         assert!(rendered.contains("[c] Commit"));
         assert!(rendered.contains("[S] Stashes"));
         assert!(rendered.contains("[d] Compare Branch"));
+        assert!(rendered.contains("UNTRACKED CHANGES"));
+        assert!(!rendered.contains('›'));
         assert!(
             app.geometry
                 .scm_action_hits
@@ -5666,9 +5874,11 @@ terminal rows because that is what real pull-request comments look like in pract
         assert!(scrollable.iter().any(|row| row.contains("cargo test")));
         assert!(scrollable.iter().any(|row| row.contains("  short line")));
         assert!(
-            scrollable
-                .iter()
-                .any(|row| row.contains("State") && row.contains("opened 2026-08-01")),
+            scrollable.iter().any(|row| row.contains("State")
+                && row.contains(&format!(
+                    "opened {}",
+                    format_local_timestamp("2026-08-01T09:00:00Z")
+                ))),
             "a single-line value that outgrows the pane scrolls rather than being clipped"
         );
         let long = rows
@@ -5836,7 +6046,7 @@ terminal rows because that is what real pull-request comments look like in pract
         assert!(rendered.contains("Format, lint, and test"));
         assert!(rendered.contains("#42"));
         assert!(rendered.contains("acme/widget:main"));
-        assert!(rendered.contains("2026-08-01 09:00"));
+        assert!(rendered.contains(&format_local_timestamp("2026-08-01T09:00:00Z")));
         assert!(rendered.contains("Description"));
         assert!(
             rendered.contains("Launch safely"),

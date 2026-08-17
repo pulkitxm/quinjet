@@ -1,6 +1,7 @@
 mod app;
 mod cli;
 mod convert;
+mod date_time;
 mod git;
 mod ui;
 mod watch;
@@ -209,9 +210,8 @@ fn dispatch_effects(
                 running &= worker.send(*command);
             }
             AppEffect::SetMouseCapture(enabled) => terminal.set_mouse_capture(enabled),
-            AppEffect::OpenUrl(url) => {
-                drop(cli::open_url(&url));
-            }
+            AppEffect::Open(app::OpenTarget::Browser(url)) => drop(cli::open_url(&url)),
+            AppEffect::Open(app::OpenTarget::Path(path)) => drop(cli::open_path(&path)),
             AppEffect::Quit => running = false,
         }
     }

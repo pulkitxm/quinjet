@@ -36,6 +36,7 @@ pub(crate) enum Command {
     GitHubRepositories {
         refresh: bool,
     },
+    LocalGitHubRepository,
     PullRequestLookup {
         repositories: Vec<GitHubRepository>,
         repository: Option<Box<GitHubRepository>>,
@@ -82,6 +83,7 @@ impl Command {
             Self::PrepareLocalDiff { .. } => "Preparing local diff",
             Self::LocalDiffFile { .. } => "Loading file patch",
             Self::GitHubRepositories { .. } => "Discovering GitHub repositories",
+            Self::LocalGitHubRepository => "Reading repository link",
             Self::PullRequestLookup { .. } => "Fetching pull-request metadata",
             Self::PreparePullRequest { .. } => "Preparing pull-request diff",
             Self::PullRequestFile { .. } | Self::PullRequestFileBatch { .. } => {
@@ -112,6 +114,7 @@ pub(crate) enum Outcome {
         repositories: Vec<GitHubRepository>,
         warnings: Vec<String>,
     },
+    LocalGitHubRepository(Option<Box<GitHubRepository>>),
     PullRequest(Box<PullRequestSnapshot>),
     PullRequestIndex(Box<PullRequestDiffIndex>),
     PullRequestDiff(Box<DiffDocument>),
@@ -158,6 +161,8 @@ answers! {
     conversation, Conversation -> PullRequestConversation,
         |value: Box<PullRequestConversation>| *value;
     check_log, CheckLog -> CheckRunLog, |value: Box<CheckRunLog>| *value;
+    local_github_repository, LocalGitHubRepository -> Option<GitHubRepository>,
+        |value: Option<Box<GitHubRepository>>| value.map(|repository| *repository);
 }
 
 impl Outcome {
@@ -257,6 +262,9 @@ impl Session {
                     warnings,
                 })
             }
+            Command::LocalGitHubRepository => Ok(Outcome::LocalGitHubRepository(
+                self.repository.local_github_repository()?.map(Box::new),
+            )),
             Command::PullRequestLookup {
                 repositories,
                 repository,

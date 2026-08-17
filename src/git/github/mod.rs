@@ -728,6 +728,24 @@ impl Repository {
         Ok((repositories, warnings))
     }
 
+    pub(crate) fn local_github_repository(&self) -> Result<Option<GitHubRepository>> {
+        let (remote_urls, _) = self.remote_urls()?;
+        let mut repositories = BTreeMap::new();
+        for remote_url in remote_urls {
+            if let Some(repository) = repository_from_remote_url(&remote_url.url) {
+                merge_repository(&mut repositories, repository, Some(&remote_url.remote));
+            }
+        }
+        let mut repositories = repositories.into_values().collect::<Vec<_>>();
+        repositories.sort_by_key(|repository| {
+            (
+                !repository.remotes.iter().any(|remote| remote == "origin"),
+                repository.display_name().to_lowercase(),
+            )
+        });
+        Ok(repositories.into_iter().next())
+    }
+
     fn remote_urls(&self) -> Result<(Vec<RemoteUrl>, Vec<String>)> {
         let output = self.checked([OsString::from("remote")])?;
         let mut urls = BTreeSet::new();

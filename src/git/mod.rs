@@ -759,7 +759,7 @@ impl Repository {
             OsString::from("for-each-ref"),
             OsString::from("--sort=-committerdate"),
             OsString::from(
-                "--format=%(refname:short)%1f%(HEAD)%1f%(upstream:short)%1f%(committerdate:relative)%1f%(objectname:short)%1e",
+                "--format=%(refname:short)%1f%(HEAD)%1f%(upstream:short)%1f%(committerdate:iso-strict)%1f%(objectname:short)%1e",
             ),
             OsString::from("refs/heads"),
         ])?;
@@ -791,7 +791,7 @@ impl Repository {
             OsString::from("for-each-ref"),
             OsString::from("--sort=-committerdate"),
             OsString::from(
-                "--format=%(refname:short)%1f%(refname)%1f%(HEAD)%1f%(committerdate:relative)%1f%(objectname:short)%1f%(symref)%1e",
+                "--format=%(refname:short)%1f%(refname)%1f%(HEAD)%1f%(committerdate:iso-strict)%1f%(objectname:short)%1f%(symref)%1e",
             ),
             OsString::from("refs/heads"),
             OsString::from("refs/remotes"),
@@ -833,7 +833,7 @@ impl Repository {
         let output = self.checked([
             OsString::from("stash"),
             OsString::from("list"),
-            OsString::from("--format=%gd%x1f%gs%x1f%cr%x1f%h%x1e"),
+            OsString::from("--format=%gd%x1f%gs%x1f%cI%x1f%h%x1e"),
         ])?;
         let mut stashes = Vec::new();
         for record in output.split(|byte| *byte == 0x1e) {

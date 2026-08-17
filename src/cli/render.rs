@@ -1,3 +1,4 @@
+use crate::date_time::format_local_timestamp;
 use crate::git::diff::{DiffDocument, DiffLineKind};
 use crate::git::github::{
     CheckRunLog, CheckStep, ConversationKind, GitHubRepository, PullRequest, PullRequestCheck,
@@ -134,7 +135,7 @@ pub(crate) fn history(commits: &[Commit]) -> String {
         out.line(&format!(
             "{}  {}  {:<16}  {}{decorations}",
             commit.short_id,
-            commit.relative_date,
+            format_local_timestamp(&commit.authored_at),
             truncate(&commit.author, 16),
             commit.subject
         ));
@@ -152,7 +153,10 @@ pub(crate) fn commit(commit: &Commit) -> String {
         "Author: {} <{}>",
         commit.author, commit.author_email
     ));
-    out.line(&format!("Date:   {}", commit.authored_at));
+    out.line(&format!(
+        "Date:   {}",
+        format_local_timestamp(&commit.authored_at)
+    ));
     out.line(&format!("\n    {}\n", commit.subject));
     out.finish()
 }
@@ -170,7 +174,7 @@ pub(crate) fn branches(branches: &[Branch]) -> String {
             if branch.current { "*" } else { " " },
             branch.name,
             branch.short_id,
-            branch.relative_date
+            format_local_timestamp(&branch.relative_date)
         ));
     }
     out.finish()
@@ -185,7 +189,7 @@ pub(crate) fn history_branches(branches: &[HistoryBranch]) -> String {
             branch.name,
             if branch.remote { "remote" } else { "local" },
             branch.short_id,
-            branch.relative_date
+            format_local_timestamp(&branch.relative_date)
         ));
     }
     out.finish()
@@ -196,7 +200,11 @@ pub(crate) fn stashes(stashes: &[Stash]) -> String {
     for stash in stashes {
         out.line(&format!(
             "{:<12} {:<10} {:<14} on {}: {}",
-            stash.reference, stash.short_id, stash.relative_date, stash.branch, stash.message
+            stash.reference,
+            stash.short_id,
+            format_local_timestamp(&stash.relative_date),
+            stash.branch,
+            stash.message
         ));
     }
     out.finish()
@@ -233,7 +241,9 @@ pub(crate) fn pull_request(pull_request: &PullRequest) -> String {
     out.line(&format!("#{}  {}", pull_request.number, pull_request.title));
     out.line(&format!(
         "{state} · @{} · opened {} · updated {}",
-        pull_request.author, pull_request.created_at, pull_request.updated_at
+        pull_request.author,
+        format_local_timestamp(&pull_request.created_at),
+        format_local_timestamp(&pull_request.updated_at)
     ));
     out.line(&format!("Source       {}", pull_request.head_label()));
     out.line(&format!("Destination  {}", pull_request.base_label()));
@@ -371,7 +381,7 @@ pub(crate) fn conversation(conversation: &PullRequestConversation) -> String {
             "\n@{} {}{detail}  ({})",
             entry.actor,
             conversation_action(entry.kind),
-            entry.timestamp
+            format_local_timestamp(&entry.timestamp)
         ));
         if !entry.context.is_empty() {
             for line in entry.context.lines() {
