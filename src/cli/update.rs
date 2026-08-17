@@ -20,6 +20,8 @@ const NETWORK_TIMEOUT_SECONDS: &str = "30";
 const USER_AGENT: &str = concat!("quinjet/", env!("CARGO_PKG_VERSION"));
 
 pub(super) fn run(out: &Emitter, check_only: bool) -> Result<u8> {
+    let executable = std::env::current_exe() // nosemgrep: rust.lang.security.current-exe.current-exe
+        .context("failed to locate the running Quinjet executable")?;
     let context = UpdateContext {
         current_version: env!("CARGO_PKG_VERSION"),
         os: std::env::consts::OS,
@@ -49,7 +51,7 @@ pub(super) fn run(out: &Emitter, check_only: bool) -> Result<u8> {
     )?;
     if result.status == UpdateStatus::Updated {
         out.set_progress("Refreshing shell completions");
-        completion::refresh_replaced_executable()?;
+        completion::refresh_replaced_executable(&executable)?;
     }
     out.emit(&result, || result.text())?;
     Ok(0)
