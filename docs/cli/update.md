@@ -34,6 +34,7 @@ The update sequence is fixed:
 5. Download the release's `SHA256SUMS`, require one exact valid entry for the selected asset, and download the binary with a 32 MiB ceiling.
 6. Verify SHA-256 before creating any staged executable.
 7. Replace the running binary through the cross-platform `self-replace` implementation, which stages beside the destination and preserves the original permissions.
+8. Start the newly installed executable in automatic completion-maintenance mode so an active, still-installed shell script receives the new command tree before success is reported.
 
 Every network request has a 30 second timeout. Release metadata is limited to
 1 MiB and the checksum document to 64 KiB. On Linux and macOS the updater uses
@@ -80,6 +81,12 @@ $ quinjet update
 Updated Quinjet from 1.2.3 to 1.3.0
 ```
 
+The completion refresh is silent. On the first installation it writes the
+generated script plus marked completion and `q` profile integrations. On an
+update it rewrites only completion scripts that still exist. The installed-once
+state described by [`quinjet completions`](./generated/completions.md) prevents
+an update from restoring anything the user removed.
+
 The JSON form has one stable object. `asset` is `null` when no newer release
 exists; `status` is `up_to_date`, `available`, or `updated`:
 
@@ -96,13 +103,18 @@ exists; `status` is `up_to_date`, `available`, or `updated`:
 
 Success exits 0. A network timeout or HTTP failure, invalid release metadata,
 unsupported target, oversized response, missing or duplicate checksum,
-checksum mismatch, unwritable installation directory, or replacement failure
-prints an error on stderr and exits 1.
+checksum mismatch, unwritable installation directory, replacement failure, or
+completion refresh failure prints an error on stderr and exits 1. A completion
+failure happens after the verified binary replacement, so the error says that
+the executable was updated and names the completion problem.
 
 The existing executable is not touched until the version is newer, every
 download has completed, and the checksum matches. Staging and replacement
 failures clean up the temporary file and preserve the old executable. The
 explicit `update` command is the confirmation, so there is no `--yes` flag.
+The startup completion check also runs when the current version is already up
+to date. It repairs a stale existing script without another download, but
+leaves a removed script or marked profile block removed.
 
 Cargo's installation tracker is not rewritten. The executable on disk is the
 new release, but Cargo may continue to record the version it originally

@@ -2,13 +2,16 @@
 
 Three verbs generate references rather than reading a repository: shell
 completion scripts, manual pages, and machine-readable capabilities. All are
-generated on demand from the same command definition the parser itself runs. None is installed
-automatically, and none needs a repository or `git`, so all work anywhere.
+generated on demand from the same command definition the parser itself runs.
+Completion scripts and the `q` shortcut for `quinjet` are installed
+automatically; existing completion scripts are refreshed after a binary
+change. Manual pages and capabilities remain output-only. None needs a
+repository or `git`, so all work anywhere.
 
 ## Commands
 
-- [`quinjet completions`](./completions.md): a completion script for bash,
-  zsh, fish, elvish, or PowerShell.
+- [`quinjet completions`](./completions.md): a completion script and `q`
+  shortcut for bash, zsh, fish, elvish, or PowerShell.
 - [`quinjet man`](./man.md): the manual page, or one page per command.
 - [`quinjet capabilities`](./capabilities.md): the installed command and argument schema.
 
@@ -21,13 +24,17 @@ offered by your shell and documented in `man` without anyone remembering to
 update a second file.
 
 ```bash
-quinjet completions zsh > ~/.zfunc/_quinjet
+quinjet completions zsh --install
 quinjet man --dir ~/.local/share/man/man1
 ```
 
 ## Installing the output
 
-None of these verbs installs anything itself: each writes to stdout, or to a
-directory you name, so you decide where it lands and nothing runs as root
-behind your back. The pages linked above give the path for each shell and for
-`man` on Linux and macOS.
+`completions --install` writes to user-owned shell directories and adds marked
+completion and `q` integration blocks where a profile is needed. The release
+scripts invoke its automatic mode directly, and other installation methods
+invoke the same maintenance path on first run. An installed-once state record
+prevents later updates from restoring any script or block the user removed.
+Without `--install`, completion generation still writes to stdout for packagers
+and custom layouts. `man` writes to stdout or to the directory named with
+`--dir`; capabilities writes to stdout.

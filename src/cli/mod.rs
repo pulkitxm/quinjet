@@ -1,4 +1,5 @@
 pub(crate) mod command;
+mod completion;
 mod render;
 mod update;
 mod watch;
@@ -12,7 +13,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueHint};
-use clap_complete::{Shell, generate};
+use clap_complete::Shell;
 use clap_mangen::Man;
 pub(crate) use command::{Command, Outcome, Session};
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
@@ -165,7 +166,7 @@ enum Verb {
         #[command(subcommand)]
         command: PrVerb,
     },
-    /// Print a shell completion script
+    /// Print or install shell completions
     #[command(visible_alias = "completion")]
     Completions(CompletionsArgs),
     /// Print the manual page, or write one page per command
@@ -216,9 +217,14 @@ impl Verb {
 
 #[derive(Debug, Args)]
 struct CompletionsArgs {
-    /// Shell to write a completion script for
-    #[arg(value_enum)]
-    shell: Shell,
+    /// Shell to write or install a completion script for
+    #[arg(value_enum, required_unless_present = "install")]
+    shell: Option<Shell>,
+    /// Install completions and a q shortcut into the user's shell configuration
+    #[arg(long)]
+    install: bool,
+    #[arg(long, hide = true, requires = "install")]
+    automatic: bool,
 }
 
 #[derive(Debug, Args)]
@@ -596,6 +602,7 @@ struct PrLogsArgs {
 }
 
 pub(crate) fn dispatch() -> Result<Launch> {
+    completion::auto_install();
     let cli = Cli::parse();
     let mut out = Emitter::new(cli.json);
     let verb = match cli.command {
@@ -639,13 +646,43 @@ pub(crate) fn dispatch() -> Result<Launch> {
 }
 
 fn completions(out: &Emitter, args: &CompletionsArgs) -> Result<u8> {
-    let mut command = Cli::command();
-    let mut script = Vec::new();
-    generate(args.shell, &mut command, PROGRAM, &mut script);
-    let script = String::from_utf8(script).context("the completion script was not valid UTF-8")?;
+    let shell = args
+        .shell
+        .or_else(completion::detected_shell)
+        .context("could not detect a supported shell; name one explicitly")?;
+    if args.install {
+        let paths = if args.automatic {
+            completion::maintain(shell)?
+        } else {
+            completion::install(shell)?
+        };
+        let paths: Vec<String> = paths
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect();
+        return out
+            .emit(
+                &CompletionInstallation {
+                    shell: shell.to_string(),
+                    shortcut: "q",
+                    paths: &paths,
+                },
+                || {
+                    let mut text = format!("Installed {shell} shell integration\n");
+                    for path in &paths {
+                        text.push_str("  ");
+                        text.push_str(path);
+                        text.push('\n');
+                    }
+                    text
+                },
+            )
+            .map(|()| 0);
+    }
+    let script = completion::script(shell)?;
     out.emit(
         &CompletionScript {
-            shell: args.shell.to_string(),
+            shell: shell.to_string(),
             script: &script,
         },
         || script.clone(),
@@ -703,6 +740,7 @@ fn collect_capabilities(
     path.push(command.get_name().to_owned());
     let arguments = command
         .get_arguments()
+        .filter(|argument| !argument.is_hide_set())
         .filter(|argument| argument.get_id() != "help" && argument.get_id() != "version")
         .map(|argument| {
             let (min_values, max_values) = argument.get_num_args().map_or((0, Some(0)), |range| {
@@ -883,6 +921,13 @@ fn write_pages(
 struct CompletionScript<'a> {
     shell: String,
     script: &'a str,
+}
+
+#[derive(Serialize)]
+struct CompletionInstallation<'a> {
+    shell: String,
+    shortcut: &'static str,
+    paths: &'a [String],
 }
 
 #[derive(Serialize)]

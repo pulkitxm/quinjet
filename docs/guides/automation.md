@@ -98,13 +98,17 @@ and PowerShell. Paths are identified separately from revisions, branch names,
 stash references, check names, and numeric values.
 
 ```bash
-quinjet completions bash > ~/.local/share/bash-completion/completions/quinjet
-quinjet completions zsh > ~/.zfunc/_quinjet
-quinjet completions fish > ~/.config/fish/completions/quinjet.fish
+quinjet completions --install
+quinjet completions zsh --install
 ```
 
-`quinjet completion` is a visible alias for users familiar with tools that use
-the singular spelling.
+Release scripts install them and the `q` shortcut immediately. Cargo,
+cargo-binstall, package-manager, and copied-binary installations do it on first
+invocation, and the marker in each generated script causes a later binary to
+refresh it. Installed-once state ensures that removing a script or marked
+profile block opts out of automatic restoration. Raw generation to stdout
+remains available for a packager's custom destination. `quinjet completion` is
+a visible alias for users familiar with tools that use the singular spelling.
 
 ## Design references
 

@@ -177,6 +177,13 @@ function Install-Quinjet {
         Move-Item -LiteralPath $stagedBinary -Destination $destination -Force
         $stagedBinary = $null
 
+        Write-Info "installing PowerShell completions"
+        & $destination completions powershell --install --automatic | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "could not install PowerShell completions"
+        }
+        Write-Info "start a new PowerShell session to enable completions and q"
+
         Write-Output "`nQuinjet was installed to $destination"
 
         $processPath = [Environment]::GetEnvironmentVariable("Path", "Process")

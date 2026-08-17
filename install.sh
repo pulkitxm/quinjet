@@ -265,6 +265,22 @@ chmod 755 "${STAGED_BINARY}" || fail "could not make the Quinjet binary executab
 mv -f "${STAGED_BINARY}" "${DESTINATION}" || fail "could not install Quinjet to ${DESTINATION}"
 STAGED_BINARY=
 
+install_completions() {
+    configured_shell=${SHELL:-}
+    shell_name=${configured_shell##*/}
+    case "${shell_name}" in
+        bash | elvish | fish | zsh)
+            info "installing ${shell_name} completions"
+            "${DESTINATION}" completions "${shell_name}" --install --automatic >/dev/null ||
+                fail "could not install ${shell_name} completions"
+            info "start a new ${shell_name} session to enable completions and q"
+            ;;
+        *) ;;
+    esac
+}
+
+install_completions
+
 path_contains_bin_dir() {
     case ":${PATH:-}:" in
         *:"${BIN_DIR}":*) return 0 ;;
