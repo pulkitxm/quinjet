@@ -214,6 +214,10 @@ fn draw_too_small(frame: &mut Frame<'_>, theme: &Theme) {
     );
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the header renders its linked regions in one coordinate space"
+)]
 fn draw_tabs(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -324,7 +328,7 @@ fn draw_tabs(
         title_area,
     );
     let branch_line = if app.status.branch.head.is_empty() {
-        Line::from(branch.clone())
+        Line::from(branch)
     } else {
         let branch_start = branch_area
             .right()
@@ -523,11 +527,7 @@ fn draw_changes_sidebar(
                     target: SidebarHit::ChangeSection(*section),
                 });
             }
-            ChangeRow::Change {
-                index,
-                cursor,
-                section: _,
-            } => {
+            ChangeRow::Change { index, cursor, .. } => {
                 let Some(change) = app.status.changes.get(*index) else {
                     continue;
                 };
@@ -697,6 +697,10 @@ fn draw_changes_sidebar(
     (hits, action_hits)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the draw pass reads better as one top-to-bottom pass"
+)]
 fn draw_history_sidebar(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -2319,6 +2323,10 @@ fn wrap_words(value: &str, width: usize) -> Vec<String> {
     lines
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the draw pass reads better as one top-to-bottom pass"
+)]
 fn draw_content(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -2460,6 +2468,14 @@ fn pull_request_details_row_count(available_height: u16) -> usize {
     12.min(available_height.saturating_sub(3)) as usize
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "rendering and hit registration share the same scrolled coordinate space"
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the details card reads better as one top-to-bottom pass"
+)]
 fn draw_commit_details_scrolled(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -2900,16 +2916,17 @@ fn interactive_span(
     theme: &Theme,
     hits: &mut Vec<LinkHit>,
 ) -> Span<'static> {
-    let style = if let Some(target) = target {
-        if area.width > 0 && area.height > 0 {
-            hits.push(LinkHit { area, target });
-        }
-        Style::default()
-            .fg(theme.accent)
-            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
-    } else {
-        Style::default().fg(theme.text).add_modifier(Modifier::BOLD)
-    };
+    let style = target.map_or_else(
+        || Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+        |target| {
+            if area.width > 0 && area.height > 0 {
+                hits.push(LinkHit { area, target });
+            }
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        },
+    );
     Span::styled(text, style)
 }
 

@@ -1769,8 +1769,8 @@ impl App {
                 self.toggle_check_step(self.pull_request_step_cursor);
             }
             KeyCode::Enter if !self.sidebar_hidden => {
-                if !self.toggle_selected_pull_request_directory()
-                    && !(self.view == View::Changes
+                if !(self.toggle_selected_pull_request_directory()
+                    || self.view == View::Changes
                         && self.focus == Focus::Sidebar
                         && self.toggle_selected_change_section())
                 {
