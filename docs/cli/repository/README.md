@@ -175,8 +175,8 @@ log, which is a pull-request concern.
 - Binary files are handled but not rendered: the file's rows become the literal
   `Binary files a/... and b/... differ` or `GIT binary patch` line and every
   line after it in that file is passed through as a `meta` row.
-- Syntax highlighting runs on the command line too, and lands in `--json` as RGB
-  triples on each span. To recover plain text from a JSON line, concatenate
+- Syntax highlighting runs on the command line too, and lands in `--json` as a
+  semantic color name on each span. To recover plain text from a JSON line, concatenate
   `spans[].text`, except on a `file-header` row, where the three spans are
   joined with a single space. Highlighting is skipped for a patch over 512 KiB
   or a line over 32 KiB, which changes the spans but never the text.

@@ -16,7 +16,7 @@ Quinjet requires Rust 1.88 or newer and Git.
 ```bash
 git clone https://github.com/pulkitxm/quinjet.git
 cd quinjet
-cargo run -- /path/to/a/test/repository
+cargo run -- tui /path/to/a/test/repository
 ```
 
 The `extras/` directory is ignored and is only for local reference repositories or experiments.

@@ -19,6 +19,7 @@ use crate::git::history::Commit;
 use crate::git::status::{Change, ChangeArea, ChangeStatus, RepoStatus};
 use crate::git::worker::{WorkerCommand, WorkerEvent};
 use crate::git::{Branch, ConflictChoice, GitOperation, HistoryBranch, LocalDiffRequest, Stash};
+use crate::theme::{Appearance, AppearanceChoice, Theme, ThemeName};
 
 const PREVIEW_DEBOUNCE: Duration = Duration::from_millis(45);
 const RESIZE_DOUBLE_TAP_INTERVAL: Duration = Duration::from_millis(450);
@@ -535,6 +536,12 @@ pub(crate) enum Modal {
         query: TextBuffer,
         selected: usize,
     },
+    Themes {
+        selected: usize,
+    },
+    Appearances {
+        selected: usize,
+    },
     Conflict {
         change: Change,
     },
@@ -564,12 +571,14 @@ pub(crate) enum PaletteCommand {
     ShowChanges,
     ShowHistory,
     ShowPullRequests,
+    ChangeTheme,
+    ChangeAppearance,
     Help,
     Quit,
 }
 
 impl PaletteCommand {
-    pub(crate) const ALL: [Self; 24] = [
+    pub(crate) const ALL: [Self; 26] = [
         Self::Refresh,
         Self::StageAll,
         Self::UnstageAll,
@@ -592,6 +601,8 @@ impl PaletteCommand {
         Self::ShowChanges,
         Self::ShowHistory,
         Self::ShowPullRequests,
+        Self::ChangeTheme,
+        Self::ChangeAppearance,
         Self::Help,
         Self::Quit,
     ];
@@ -620,6 +631,8 @@ impl PaletteCommand {
             Self::ShowChanges => "Show Changes",
             Self::ShowHistory => "Show Commit History",
             Self::ShowPullRequests => "Show Pull Requests",
+            Self::ChangeTheme => "Change Theme…",
+            Self::ChangeAppearance => "Change Appearance…",
             Self::Help => "Keyboard Shortcuts",
             Self::Quit => "Quit Quinjet",
         }
@@ -738,6 +751,10 @@ pub(crate) struct App {
     pub view: View,
     pub focus: Focus,
     pub diff_layout: DiffLayout,
+    pub theme: Theme,
+    pub theme_name: ThemeName,
+    pub appearance_choice: AppearanceChoice,
+    pub appearance: Appearance,
     pub status: RepoStatus,
     pub history: Vec<Commit>,
     pub history_branch: Option<HistoryBranch>,
@@ -849,6 +866,7 @@ pub(crate) struct App {
     /// already have a patch, wherever that patch happens to be held.
     pub pull_request_single_file: Option<PathBuf>,
     pub pull_request_prefetching: bool,
+    pub pull_request_prefetch_retrying: bool,
     pub pull_request_checks_generation: u64,
     pub pull_request_conversation_generation: u64,
     pub pull_request_check_log_generation: u64,
@@ -887,6 +905,10 @@ impl App {
             view: View::Changes,
             focus: Focus::Sidebar,
             diff_layout: DiffLayout::SideBySide,
+            theme: Theme::default(),
+            theme_name: ThemeName::default(),
+            appearance_choice: AppearanceChoice::default(),
+            appearance: Appearance::Dark,
             status: RepoStatus::default(),
             history: Vec::new(),
             history_branch: None,
@@ -981,6 +1003,7 @@ impl App {
             pull_request_loading_path: None,
             pull_request_single_file: None,
             pull_request_prefetching: false,
+            pull_request_prefetch_retrying: false,
             pull_request_checks_generation: 0,
             pull_request_conversation_generation: 0,
             pull_request_check_log_generation: 0,
@@ -1006,6 +1029,14 @@ impl App {
             pending_g: None,
             last_resize_tap: None,
         }
+    }
+
+    pub(crate) fn set_theme_selection(&mut self, name: ThemeName, choice: AppearanceChoice) {
+        let appearance = choice.resolve();
+        self.theme = Theme::new(name, appearance);
+        self.theme_name = name;
+        self.appearance_choice = choice;
+        self.appearance = appearance;
     }
 
     pub(crate) fn initial_effects(&mut self) -> Vec<AppEffect> {
@@ -2526,16 +2557,26 @@ impl App {
                     return effects;
                 }
                 self.pull_request_prefetching = false;
-                if let Ok(documents) = result {
-                    for (path, document) in documents {
-                        if !self.pull_request_documents.contains_key(&path) {
-                            self.cache_pull_request_document(path, document);
+                match result {
+                    Ok(documents) => {
+                        self.pull_request_prefetch_retrying = false;
+                        for (path, document) in documents {
+                            if !self.pull_request_documents.contains_key(&path) {
+                                self.cache_pull_request_document(path, document);
+                            }
                         }
+                        if self.pull_request_file_view == PullRequestFileView::AllFiles {
+                            self.rebuild_pull_request_all_files_document();
+                        }
+                        self.request_pull_request_prefetch(&mut effects);
                     }
-                    if self.pull_request_file_view == PullRequestFileView::AllFiles {
-                        self.rebuild_pull_request_all_files_document();
+                    Err(_) if !self.pull_request_prefetch_retrying => {
+                        self.pull_request_prefetch_retrying = true;
+                        self.request_pull_request_prefetch(&mut effects);
                     }
-                    self.request_pull_request_prefetch(&mut effects);
+                    Err(_) => {
+                        self.pull_request_prefetch_retrying = false;
+                    }
                 }
             }
             WorkerEvent::PullRequestChecks { generation, result } => {
@@ -3366,6 +3407,56 @@ impl App {
                 }
                 self.modal = Some(modal);
             }
+            Modal::Themes { selected } => {
+                match key.code {
+                    KeyCode::Esc => return effects,
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        *selected = selected.saturating_sub(1);
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        *selected = (*selected + 1).min(ThemeName::ALL.len().saturating_sub(1));
+                    }
+                    KeyCode::Enter => {
+                        if let Some(name) = ThemeName::ALL.get(*selected).copied() {
+                            self.theme_name = name;
+                            self.theme = Theme::new(name, self.appearance);
+                            self.show_toast(
+                                format!("Theme changed to {}", name.label()),
+                                ToastLevel::Success,
+                                now,
+                            );
+                        }
+                        return effects;
+                    }
+                    _ => {}
+                }
+                self.modal = Some(modal);
+            }
+            Modal::Appearances { selected } => {
+                match key.code {
+                    KeyCode::Esc => return effects,
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        *selected = selected.saturating_sub(1);
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        *selected =
+                            (*selected + 1).min(AppearanceChoice::ALL.len().saturating_sub(1));
+                    }
+                    KeyCode::Enter => {
+                        if let Some(choice) = AppearanceChoice::ALL.get(*selected).copied() {
+                            self.set_theme_selection(self.theme_name, choice);
+                            self.show_toast(
+                                format!("Appearance changed to {}", choice.label()),
+                                ToastLevel::Success,
+                                now,
+                            );
+                        }
+                        return effects;
+                    }
+                    _ => {}
+                }
+                self.modal = Some(modal);
+            }
         }
         effects
     }
@@ -3420,6 +3511,22 @@ impl App {
             PaletteCommand::ShowChanges => self.switch_view(View::Changes, effects),
             PaletteCommand::ShowHistory => self.switch_view(View::History, effects),
             PaletteCommand::ShowPullRequests => self.switch_view(View::PullRequests, effects),
+            PaletteCommand::ChangeTheme => {
+                self.modal = Some(Modal::Themes {
+                    selected: ThemeName::ALL
+                        .iter()
+                        .position(|name| *name == self.theme_name)
+                        .unwrap_or_default(),
+                });
+            }
+            PaletteCommand::ChangeAppearance => {
+                self.modal = Some(Modal::Appearances {
+                    selected: AppearanceChoice::ALL
+                        .iter()
+                        .position(|choice| *choice == self.appearance_choice)
+                        .unwrap_or_default(),
+                });
+            }
             PaletteCommand::Help => self.modal = Some(Modal::Help { scroll: 0 }),
             PaletteCommand::Quit => effects.push(AppEffect::Quit),
         }
@@ -4212,6 +4319,7 @@ impl App {
         self.pull_request_loading_path = None;
         self.pull_request_single_file = None;
         self.pull_request_prefetching = false;
+        self.pull_request_prefetch_retrying = false;
     }
 
     fn reset_pull_request_runtime(&mut self) {
@@ -4260,6 +4368,7 @@ impl App {
         self.pull_request_loading_path = None;
         self.pull_request_single_file = None;
         self.pull_request_prefetching = false;
+        self.pull_request_prefetch_retrying = false;
         self.pull_request_files = index.files;
         self.pull_request_total_files = index.total_files;
         self.pull_request_files_truncated = index.truncated;
@@ -6056,7 +6165,7 @@ mod tests {
     }
 
     #[test]
-    fn loaded_metadata_immediately_queues_the_file_index_checks_and_conversation() {
+    fn opening_a_pull_request_prefetches_diffs_checks_and_conversation_from_overview() {
         let mut app = App::new("/tmp/repo", "repo");
         app.view = View::PullRequests;
         app.pull_request_generation = 3;
@@ -6113,6 +6222,38 @@ mod tests {
             PullRequestSection::Overview,
             "an opened pull request lands on itself, not on its files"
         );
+        let workspace_generation = app.diff_generation;
+        let effects = app.handle_worker_event(
+            WorkerEvent::PullRequestIndex {
+                generation: workspace_generation,
+                result: Ok(PullRequestDiffIndex {
+                    files: ["src/first.rs", "src/second.rs"]
+                        .into_iter()
+                        .map(|path| PullRequestFile {
+                            path: PathBuf::from(path),
+                            old_path: None,
+                            status: PullRequestFileStatus::Modified,
+                            counts: None,
+                        })
+                        .collect(),
+                    total_files: 2,
+                    truncated: false,
+                }),
+            },
+            Instant::now(),
+        );
+        assert_eq!(app.pull_request_section, PullRequestSection::Overview);
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Git(command)] if matches!(
+                command.as_ref(),
+                WorkerCommand::LoadPullRequestFileBatch {
+                    workspace_generation: generation,
+                    paths,
+                } if *generation == workspace_generation
+                    && paths == &[PathBuf::from("src/first.rs"), PathBuf::from("src/second.rs")]
+            )
+        ));
         assert_eq!(
             app.pull_request.as_ref().unwrap().description,
             "A detailed pull-request description"
@@ -6580,6 +6721,49 @@ mod tests {
         assert_eq!(app.pull_request_file_view, PullRequestFileView::AllFiles);
         assert_eq!(app.document.file_count(), 2);
         assert!(app.preview_files_all_collapsed());
+    }
+
+    #[test]
+    fn pull_request_prefetch_retries_once_after_a_failure() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.pull_request_workspace_generation = Some(10);
+        app.pull_request_files = vec![PullRequestFile {
+            path: PathBuf::from("src/first.rs"),
+            old_path: None,
+            status: PullRequestFileStatus::Modified,
+            counts: None,
+        }];
+        app.pull_request_prefetching = true;
+
+        let effects = app.handle_worker_event(
+            WorkerEvent::PullRequestDiffBatch {
+                workspace_generation: 10,
+                result: Err("transient failure".to_owned()),
+            },
+            Instant::now(),
+        );
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Git(command)] if matches!(
+                command.as_ref(),
+                WorkerCommand::LoadPullRequestFileBatch {
+                    workspace_generation: 10,
+                    paths,
+                } if paths == &[PathBuf::from("src/first.rs")]
+            )
+        ));
+        assert!(app.pull_request_prefetch_retrying);
+
+        let effects = app.handle_worker_event(
+            WorkerEvent::PullRequestDiffBatch {
+                workspace_generation: 10,
+                result: Err("persistent failure".to_owned()),
+            },
+            Instant::now(),
+        );
+        assert!(effects.is_empty());
+        assert!(!app.pull_request_prefetching);
+        assert!(!app.pull_request_prefetch_retrying);
     }
 
     #[test]
@@ -7634,5 +7818,41 @@ mod tests {
         app.execute_palette(PaletteCommand::RenameCurrentBranch, &mut Vec::new(), now);
         assert!(app.modal.is_none());
         assert_eq!(app.toast.as_ref().unwrap().level, ToastLevel::Error);
+    }
+
+    #[test]
+    fn command_palette_switches_theme_and_appearance_in_place() {
+        let mut app = App::new("/tmp/repo", "repo");
+        let now = Instant::now();
+        app.set_theme_selection(ThemeName::Catppuccin, AppearanceChoice::Dark);
+        let original_background = app.theme.background;
+
+        assert_eq!(
+            app.palette_commands("change theme"),
+            vec![PaletteCommand::ChangeTheme]
+        );
+        app.execute_palette(PaletteCommand::ChangeTheme, &mut Vec::new(), now);
+        assert!(matches!(app.modal, Some(Modal::Themes { selected: 1 })));
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), now);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+
+        assert_eq!(app.theme_name, ThemeName::Dracula);
+        assert_eq!(app.appearance_choice, AppearanceChoice::Dark);
+        assert_eq!(app.appearance, Appearance::Dark);
+        assert_ne!(app.theme.background, original_background);
+        assert!(app.modal.is_none());
+
+        app.execute_palette(PaletteCommand::ChangeAppearance, &mut Vec::new(), now);
+        assert!(matches!(
+            app.modal,
+            Some(Modal::Appearances { selected: 2 })
+        ));
+        app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), now);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+
+        assert_eq!(app.theme_name, ThemeName::Dracula);
+        assert_eq!(app.appearance_choice, AppearanceChoice::Light);
+        assert_eq!(app.appearance, Appearance::Light);
+        assert!(app.modal.is_none());
     }
 }

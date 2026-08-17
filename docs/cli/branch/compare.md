@@ -140,13 +140,13 @@ in Quinjet emits:
       "oldLine": null,
       "newLine": 24,
       "spans": [
-        { "text": "serde_json", "foreground": [191, 97, 106], "bold": false, "italic": false },
-        { "text": " ", "foreground": [192, 197, 206], "bold": false, "italic": false },
-        { "text": "=", "foreground": [192, 197, 206], "bold": false, "italic": false },
-        { "text": " ", "foreground": [192, 197, 206], "bold": false, "italic": false },
-        { "text": "\"", "foreground": [192, 197, 206], "bold": false, "italic": false },
-        { "text": "1.0", "foreground": [163, 190, 140], "bold": false, "italic": false },
-        { "text": "\"", "foreground": [192, 197, 206], "bold": false, "italic": false }
+        { "text": "serde_json", "foreground": "red", "bold": false, "italic": false },
+        { "text": " ", "foreground": "text", "bold": false, "italic": false },
+        { "text": "=", "foreground": "text", "bold": false, "italic": false },
+        { "text": " ", "foreground": "text", "bold": false, "italic": false },
+        { "text": "\"", "foreground": "text", "bold": false, "italic": false },
+        { "text": "1.0", "foreground": "green", "bold": false, "italic": false },
+        { "text": "\"", "foreground": "text", "bold": false, "italic": false }
       ]
     }
   ],
@@ -168,9 +168,9 @@ The keys that are not obvious:
   `No file changes to display`.
 - `spans` exist because Quinjet syntax-highlights patches. A line's text is its
   spans concatenated, except a `file-header`, whose spans are joined with a
-  space to make `path  · modified +2 -0`. `foreground` is `[r, g, b]` or `null`.
-  Highlighting is skipped above 512 KiB per patch or 32 KiB per line, and then
-  every span is plain.
+  space to make `path  · modified +2 -0`. `foreground` is a semantic syntax
+  color name or `null`. Highlighting is skipped above 512 KiB per patch or
+  32 KiB per line, and then every span is plain.
 - `oldLine` and `newLine` are the line numbers on each side, `null` where a
   side has none.
 - `commitDetails` and `pullRequestDetails` are always `null` for a branch

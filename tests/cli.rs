@@ -256,6 +256,52 @@ fn help_lists_every_group_verb() -> Result<()> {
 }
 
 #[test]
+fn tui_help_lists_every_theme_and_appearance() -> Result<()> {
+    let run = run_in(None, &["tui", "--help"])?.success()?;
+    ensure!(run.stdout.contains("--theme <THEME>"));
+    ensure!(run.stdout.contains("--appearance <APPEARANCE>"));
+    for theme in [
+        "quinjet",
+        "catppuccin",
+        "dracula",
+        "everforest",
+        "gruvbox",
+        "nord",
+        "one",
+        "rose-pine",
+        "solarized",
+        "tokyo-night",
+        "ayu",
+        "monokai",
+    ] {
+        ensure!(run.stdout.contains(theme), "tui help omitted {theme}");
+    }
+    for appearance in ["system", "light", "dark"] {
+        ensure!(
+            run.stdout.contains(appearance),
+            "tui help omitted {appearance}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn tui_accepts_theme_and_appearance_before_claiming_the_terminal() -> Result<()> {
+    let run = run_in(
+        None,
+        &["tui", "--theme", "catppuccin", "--appearance", "dark"],
+    )?;
+    ensure!(run.code == 1, "non-interactive TUI exited {}", run.code);
+    ensure!(
+        run.stderr.contains("requires an interactive terminal"),
+        "theme arguments did not reach TUI startup: {}",
+        run.stderr
+    );
+    ensure!(!run.stderr.contains("unexpected argument"));
+    Ok(())
+}
+
+#[test]
 fn every_subcommand_answers_help() -> Result<()> {
     for path in COMMAND_PATHS {
         let mut args = path.to_vec();
@@ -546,6 +592,42 @@ fn json_output_is_one_document_per_invocation() -> Result<()> {
 }
 
 #[test]
+fn diff_json_exposes_theme_independent_syntax_roles() -> Result<()> {
+    let scratch = Scratch::repository()?;
+    scratch.write("main.rs", "fn main() {}\n")?;
+    scratch.git(&["add", "main.rs"])?;
+    scratch.git(&["commit", "--message=rust"])?;
+    scratch.write("main.rs", "fn main() { let value = 1; }\n")?;
+    let document = scratch.quinjet(&["diff", "--json"])?.success()?.json()?;
+    let foregrounds: Vec<&str> = document["lines"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|line| line["spans"].as_array())
+        .flatten()
+        .filter_map(|span| span["foreground"].as_str())
+        .collect();
+    ensure!(
+        !foregrounds.is_empty(),
+        "highlighted diff JSON omitted semantic foregrounds"
+    );
+    let roles = [
+        "text", "comment", "red", "orange", "yellow", "green", "cyan", "blue", "purple", "brown",
+    ];
+    for foreground in &foregrounds {
+        ensure!(
+            roles.contains(foreground),
+            "unexpected syntax role: {foreground}"
+        );
+    }
+    ensure!(
+        foregrounds.iter().any(|foreground| *foreground != "text"),
+        "syntax highlighting collapsed to the default text role"
+    );
+    Ok(())
+}
+
+#[test]
 fn completions_cover_every_supported_shell() -> Result<()> {
     let scratch = Scratch::directory()?;
     for shell in ["bash", "zsh", "fish", "elvish", "powershell"] {
@@ -782,6 +864,42 @@ fn capabilities_describe_the_installed_command_tree() -> Result<()> {
         completion["arguments"][0]["possibleValues"]
             == serde_json::json!(["bash", "elvish", "fish", "powershell", "zsh"])
     );
+    let tui = commands
+        .iter()
+        .find(|command| command["path"] == "quinjet tui")
+        .context("capabilities omitted tui")?;
+    let theme = tui["arguments"]
+        .as_array()
+        .and_then(|arguments| arguments.iter().find(|argument| argument["id"] == "theme"))
+        .context("tui capabilities omitted --theme")?;
+    ensure!(theme["defaultValues"] == serde_json::json!(["quinjet"]));
+    ensure!(
+        theme["possibleValues"]
+            == serde_json::json!([
+                "quinjet",
+                "catppuccin",
+                "dracula",
+                "everforest",
+                "gruvbox",
+                "nord",
+                "one",
+                "rose-pine",
+                "solarized",
+                "tokyo-night",
+                "ayu",
+                "monokai"
+            ])
+    );
+    let appearance = tui["arguments"]
+        .as_array()
+        .and_then(|arguments| {
+            arguments
+                .iter()
+                .find(|argument| argument["id"] == "appearance")
+        })
+        .context("tui capabilities omitted --appearance")?;
+    ensure!(appearance["defaultValues"] == serde_json::json!(["system"]));
+    ensure!(appearance["possibleValues"] == serde_json::json!(["system", "light", "dark"]));
     let stage = commands
         .iter()
         .find(|command| command["path"] == "quinjet stage")

@@ -85,8 +85,8 @@ renders. `lines` is the whole patch as typed rows rather than raw text, so a
 consumer never has to re-parse a diff. `kind` is one of `file-header`,
 `file-footer`, `hunk-header`, `context`, `added`, `removed`, `meta`. `oldLine`
 and `newLine` are the line numbers on each side and are `null` on headers.
-`spans` carries the syntax highlighting: `foreground` is an RGB triple or
-`null`, and concatenating every `text` gives the line. `commitDetails` and
+`spans` carries the syntax highlighting: `foreground` is a semantic color name
+or `null`, and concatenating every `text` gives the line. `commitDetails` and
 `pullRequestDetails` are both `null` for this verb, because the aggregated
 document describes a range rather than a single commit:
 
@@ -117,7 +117,7 @@ document describes a range rather than a single commit:
       "oldLine": null,
       "newLine": 21,
       "spans": [
-        { "text": "- Foldable GitHub Actions logs per check run", "foreground": [163, 190, 140], "bold": false, "italic": false }
+        { "text": "- Foldable GitHub Actions logs per check run", "foreground": "green", "bold": false, "italic": false }
       ]
     }
   ],

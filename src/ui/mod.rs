@@ -1,5 +1,3 @@
-mod theme;
-
 use std::ops::Range;
 
 use ratatui::Frame;
@@ -9,7 +7,6 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget, Wrap};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use self::theme::Theme;
 use crate::app::{
     App, ChangeRow, ChangeSection, ContentFileHit, ContentStepHit, DiffLayout, Focus, LinkHit,
     Modal, OpenTarget, PaletteCommand, PullRequestContentRow, PullRequestSection,
@@ -27,6 +24,7 @@ use crate::git::github::{
 use crate::git::github::{PullRequestCheck, PullRequestFile};
 use crate::git::status::{Change, ChangeArea, ChangeStatus};
 use crate::git::{Branch, HistoryBranch, Stash};
+use crate::theme::{AppearanceChoice, Theme, ThemeName};
 
 const DETAIL_LABEL_WIDTH: usize = 12;
 const MAX_INTRALINE_SOURCE_BYTES: usize = 32 * 1024;
@@ -103,15 +101,14 @@ const HELP_LINES: &[(&str, &str)] = &[
     ("q", "Quit"),
 ];
 
-pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
-    let theme = Theme::default();
+pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     frame.render_widget(
         Block::default().style(Style::default().bg(theme.background)),
         frame.area(),
     );
 
     if frame.area().width < 72 || frame.area().height < 18 {
-        draw_too_small(frame, &theme);
+        draw_too_small(frame, theme);
         return;
     }
 
@@ -135,18 +132,18 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
     };
 
     let (changes_tab, history_tab, pull_requests_tab, mut link_hits) =
-        draw_tabs(frame, tabs, app, &theme);
+        draw_tabs(frame, tabs, app, theme);
     let (sidebar_hits, scm_action_hits) = if app.sidebar_hidden {
         (Vec::new(), Vec::new())
     } else {
-        draw_sidebar(frame, sidebar_area, app, &theme, &mut link_hits)
+        draw_sidebar(frame, sidebar_area, app, theme, &mut link_hits)
     };
     if !app.sidebar_hidden {
-        draw_main_divider(frame, sidebar_divider, app.resize_target.is_some(), &theme);
+        draw_main_divider(frame, sidebar_divider, app.resize_target.is_some(), theme);
     }
     let (diff_divider, content_file_hits, content_step_hits) =
-        draw_content(frame, content_area, app, &theme, &mut link_hits);
-    draw_footer(frame, footer, app, &theme, &mut link_hits);
+        draw_content(frame, content_area, app, theme, &mut link_hits);
+    draw_footer(frame, footer, app, theme, &mut link_hits);
 
     app.geometry = UiGeometry {
         changes_tab,
@@ -165,10 +162,10 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
     };
 
     if let Some(modal) = app.modal.as_ref() {
-        draw_modal(frame, modal, app, &theme);
+        draw_modal(frame, modal, app, theme);
     }
     if let Some(toast) = app.toast.as_ref() {
-        draw_toast(frame, toast.message.as_str(), toast.level, &theme);
+        draw_toast(frame, toast.message.as_str(), toast.level, theme);
     }
 }
 
@@ -3646,7 +3643,7 @@ fn highlight_spans<'a>(
         }
         let foreground = span.foreground.map_or_else(
             || line_foreground(kind, theme),
-            |(r, g, b)| Color::Rgb(r, g, b),
+            |syntax| theme.syntax(syntax),
         );
         let mut style = Style::default().fg(foreground);
         if span.bold {
@@ -3937,6 +3934,12 @@ fn draw_modal(frame: &mut Frame<'_>, modal: &Modal, app: &App, theme: &Theme) {
         } => draw_pull_request_repositories(frame, items, *selected, query, *loading, theme),
         Modal::CommandPalette { query, selected } => {
             draw_palette(frame, app, query, *selected, theme);
+        }
+        Modal::Themes { selected } => {
+            draw_theme_picker(frame, *selected, app.theme_name, theme);
+        }
+        Modal::Appearances { selected } => {
+            draw_appearance_picker(frame, *selected, app.appearance_choice, theme);
         }
         Modal::Conflict { change } => draw_conflict(frame, change, theme),
     }
@@ -4748,6 +4751,74 @@ fn palette_line(command: PaletteCommand, selected: bool, theme: &Theme) -> Line<
     ])
 }
 
+fn draw_theme_picker(frame: &mut Frame<'_>, selected: usize, current: ThemeName, theme: &Theme) {
+    let choices = ThemeName::ALL.map(|name| (name.label(), name == current));
+    draw_choice_picker(frame, " Select Theme ", &choices, selected, theme);
+}
+
+fn draw_appearance_picker(
+    frame: &mut Frame<'_>,
+    selected: usize,
+    current: AppearanceChoice,
+    theme: &Theme,
+) {
+    let choices = AppearanceChoice::ALL.map(|choice| (choice.label(), choice == current));
+    draw_choice_picker(frame, " Select Appearance ", &choices, selected, theme);
+}
+
+fn draw_choice_picker(
+    frame: &mut Frame<'_>,
+    title: &str,
+    choices: &[(&'static str, bool)],
+    selected: usize,
+    theme: &Theme,
+) {
+    let height = (cells(choices.len()) + 4)
+        .min(frame.area().height.saturating_sub(6))
+        .max(7);
+    let area = centered_rect(44, height, frame.area());
+    frame.render_widget(Clear, area);
+    let block = modal_block(title, theme);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let lines = choices
+        .iter()
+        .enumerate()
+        .map(|(index, (label, current))| choice_line(label, *current, index == selected, theme))
+        .collect::<Vec<_>>();
+    frame.render_widget(Paragraph::new(lines), inner);
+    draw_modal_hint(frame, area, "Enter apply   Esc close", theme);
+}
+
+fn choice_line(label: &'static str, current: bool, selected: bool, theme: &Theme) -> Line<'static> {
+    let background = if selected {
+        theme.selected
+    } else {
+        theme.panel
+    };
+    Line::from(vec![
+        Span::styled(
+            if selected { " › " } else { "   " },
+            Style::default().fg(theme.accent).bg(background),
+        ),
+        Span::styled(
+            if current { "✓ " } else { "  " },
+            Style::default().fg(theme.success).bg(background),
+        ),
+        Span::styled(
+            label,
+            Style::default()
+                .fg(theme.text)
+                .bg(background)
+                .add_modifier(if selected {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
+        ),
+    ])
+}
+
 #[expect(clippy::integer_division, reason = "layout maths works in whole cells")]
 fn progress_bar(percent: u16, width: usize) -> String {
     let filled = usize::from(percent.min(100)).saturating_mul(width) / 100;
@@ -4998,12 +5069,76 @@ mod tests {
         let backend = TestBackend::new(72, 18);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
 
         assert!(app.geometry.changes_tab.width > 0);
         assert!(app.geometry.history_tab.x > app.geometry.changes_tab.x);
         assert!(app.geometry.pull_requests_tab.x > app.geometry.history_tab.x);
         assert!(app.geometry.pull_requests_tab.right() <= 72);
+    }
+
+    #[test]
+    fn a_light_theme_reaches_the_entire_render_surface() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = App::new("/tmp/repo", "repo");
+        let theme = Theme::new(ThemeName::TokyoNight, crate::theme::Appearance::Light);
+        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &theme))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert_eq!(buffer[(99, 23)].style().bg, Some(theme.panel_alt));
+        assert!(
+            buffer
+                .content()
+                .iter()
+                .any(|cell| cell.style().bg == Some(theme.background))
+        );
+        assert!(
+            buffer
+                .content()
+                .iter()
+                .any(|cell| cell.style().fg == Some(theme.text))
+        );
+        assert!(
+            buffer
+                .content()
+                .iter()
+                .any(|cell| cell.style().fg == Some(theme.accent))
+        );
+    }
+
+    #[test]
+    fn theme_picker_shows_every_family_and_marks_the_current_one() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = App::new("/tmp/repo", "repo");
+        app.set_theme_selection(ThemeName::TokyoNight, AppearanceChoice::Dark);
+        app.modal = Some(Modal::Themes { selected: 9 });
+        let theme = app.theme;
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+
+        terminal
+            .draw(|frame| draw(frame, &mut app, &theme))
+            .unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect();
+
+        assert!(rendered.contains("Select Theme"));
+        assert!(rendered.contains("Catppuccin"));
+        assert!(rendered.contains("✓ Tokyo Night"));
+        assert!(rendered.contains("Enter apply   Esc close"));
     }
 
     #[test]
@@ -5021,7 +5156,9 @@ mod tests {
         let backend = TestBackend::new(160, 24);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
 
         assert!(app.geometry.link_hits.iter().any(|hit| matches!(
             &hit.target,
@@ -5069,7 +5206,9 @@ mod tests {
         let backend = TestBackend::new(120, 30);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
         let rendered: String = terminal
             .backend()
             .buffer()
@@ -5317,7 +5456,9 @@ mod tests {
         };
         let backend = TestBackend::new(140, 32);
         let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
         let rendered: String = terminal
             .backend()
             .buffer()
@@ -5428,7 +5569,9 @@ mod tests {
         let backend = TestBackend::new(160, 34);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
         let rendered: String = terminal
             .backend()
             .buffer()
@@ -5457,7 +5600,9 @@ mod tests {
             started_at: "2026-08-13T12:00:00Z".to_owned(),
             completed_at: "2026-08-13T12:01:00Z".to_owned(),
         }];
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
         let rendered: String = terminal
             .backend()
             .buffer()
@@ -5515,7 +5660,9 @@ mod tests {
                     crate::git::worker::WorkerCommand::LoadPullRequestConversation { .. }
                 )
         )));
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
         let rendered: String = terminal
             .backend()
             .buffer()
@@ -5614,10 +5761,14 @@ terminal rows because that is what real pull-request comments look like in pract
         );
 
         let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
         let cache_key = app.pull_request_content_rows_key;
         let cache_pointer = app.pull_request_content_rows.as_ptr();
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
         assert_eq!(app.pull_request_content_rows_key, cache_key);
         assert_eq!(app.pull_request_content_rows.as_ptr(), cache_pointer);
     }
@@ -5653,11 +5804,15 @@ terminal rows because that is what real pull-request comments look like in pract
         });
         let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
 
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
         assert!(app.pull_request_content_rows.len() > 50_000);
         let cache_pointer = app.pull_request_content_rows.as_ptr();
         app.content_scroll = usize::MAX;
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
         let rendered: String = terminal
             .backend()
             .buffer()
@@ -5703,17 +5858,23 @@ terminal rows because that is what real pull-request comments look like in pract
         app.expanded_check_steps.insert(1);
         app.pull_request_step_cursor = 1;
         let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
 
         app.content_scroll = 120;
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
         assert_eq!(
             app.content_scroll, 120,
             "a redraw must not drag the view back to the selected step"
         );
 
         app.content_scroll = usize::MAX;
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
         let rendered: String = terminal
             .backend()
             .buffer()
@@ -5758,7 +5919,7 @@ terminal rows because that is what real pull-request comments look like in pract
         let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
 
         let highlighted = |app: &mut App, terminal: &mut Terminal<TestBackend>| {
-            terminal.draw(|frame| draw(frame, app)).unwrap();
+            terminal.draw(|frame| draw(frame, app, &theme)).unwrap();
             let buffer = terminal.backend().buffer().clone();
             (0..30)
                 .filter(|y| buffer[(60, *y)].style().bg == Some(theme.selected))
@@ -5919,8 +6080,9 @@ terminal rows because that is what real pull-request comments look like in pract
 
         let mut app = overview_app();
         app.pull_request_exact_number = Some(42);
+        let theme = Theme::default();
         let render = |app: &mut App, terminal: &mut Terminal<TestBackend>| {
-            terminal.draw(|frame| draw(frame, app)).unwrap();
+            terminal.draw(|frame| draw(frame, app, &theme)).unwrap();
             terminal
                 .backend()
                 .buffer()
@@ -5975,7 +6137,9 @@ terminal rows because that is what real pull-request comments look like in pract
             Some("unable to load pull request: GraphQL: Could not resolve to a PullRequest".into());
         let mut terminal = Terminal::new(TestBackend::new(120, 24)).unwrap();
 
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
         let rendered: String = terminal
             .backend()
             .buffer()
@@ -6033,7 +6197,9 @@ terminal rows because that is what real pull-request comments look like in pract
         };
         let mut terminal = Terminal::new(TestBackend::new(150, 40)).unwrap();
 
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
         let rendered: String = terminal
             .backend()
             .buffer()
@@ -6112,7 +6278,9 @@ terminal rows because that is what real pull-request comments look like in pract
         });
         let mut terminal = Terminal::new(TestBackend::new(150, 40)).unwrap();
 
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
         let rendered: String = terminal
             .backend()
             .buffer()
@@ -6168,7 +6336,9 @@ terminal rows because that is what real pull-request comments look like in pract
         let backend = TestBackend::new(120, 30);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
         let buffer = terminal.backend().buffer();
         let rendered: String = buffer
             .content()
