@@ -1177,9 +1177,20 @@ impl App {
             let loaded = if index.files.len() == 1 && self.local_diff_single_loaded {
                 1
             } else {
-                self.local_diff_documents.len()
+                index
+                    .files
+                    .iter()
+                    .filter(|file| self.local_diff_documents.contains_key(&file.path))
+                    .count()
             };
             (loaded, index.files.len())
+        })
+    }
+
+    pub(crate) fn local_diff_line_counts(&self) -> Option<(usize, usize)> {
+        self.local_diff_index.as_ref().map(|index| {
+            let counts = index.line_counts();
+            (counts.additions, counts.deletions)
         })
     }
 
@@ -2294,7 +2305,26 @@ impl App {
                         self.rebuild_local_diff_document();
                         self.content_scroll = 0;
                         self.horizontal_scroll = 0;
-                        if let Some(path) = first_path {
+                        let mut paths = self
+                            .local_diff_index
+                            .as_ref()
+                            .map(|index| {
+                                index
+                                    .files
+                                    .iter()
+                                    .filter(|file| {
+                                        !self.preview_file_collapsed(&file.path.to_string_lossy())
+                                    })
+                                    .map(|file| file.path.clone())
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default();
+                        if let Some(path) = first_path
+                            && !paths.contains(&path)
+                        {
+                            paths.insert(0, path);
+                        }
+                        for path in paths {
                             self.request_local_diff_file(path, &mut effects);
                         }
                     }
@@ -2307,10 +2337,18 @@ impl App {
             }
             WorkerEvent::LocalDiffFile {
                 generation,
+                workspace_generation,
                 path,
                 result,
             } => {
-                if generation != self.diff_generation {
+                if generation != self.diff_generation
+                    || self.local_diff_workspace_generation != Some(workspace_generation)
+                    || self.local_diff_loading_path.as_ref() != Some(&path)
+                    || !self
+                        .local_diff_index
+                        .as_ref()
+                        .is_some_and(|index| index.files.iter().any(|file| file.path == path))
+                {
                     return effects;
                 }
                 self.local_diff_loading_path = None;
@@ -4038,7 +4076,6 @@ impl App {
             self.local_diff_pending_paths.push_back(path);
             return;
         }
-        self.diff_generation = self.diff_generation.wrapping_add(1);
         self.local_diff_loading_path = Some(path.clone());
         effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadLocalDiffFile {
             generation: self.diff_generation,
@@ -4722,13 +4759,11 @@ impl App {
         self.reset_local_diff_runtime();
         self.local_diff_request = Some(request.clone());
         self.document_loading = true;
-        if self.document.file_count() == 0 {
-            self.selected_preview_file = None;
-            self.preview_file_cursor = 0;
-            self.collapsed_preview_files.clear();
-            self.expanded_preview_files.clear();
-            self.document = DiffDocument::empty(title, "Indexing changed files…");
-        }
+        self.selected_preview_file = None;
+        self.preview_file_cursor = 0;
+        self.collapsed_preview_files.clear();
+        self.expanded_preview_files.clear();
+        self.document = DiffDocument::empty(title, "Indexing changed files…");
         effects.push(AppEffect::Git(Box::new(WorkerCommand::PrepareLocalDiff {
             generation,
             request: Box::new(request),
@@ -4853,6 +4888,7 @@ impl App {
     fn schedule_preview(&mut self, now: Instant) {
         self.invalidate_preview();
         if self.view != View::PullRequests {
+            self.reset_local_diff_runtime();
             self.document = self.loading_document_for_view(self.view);
         }
         self.preview_due = Some(now + PREVIEW_DEBOUNCE);
@@ -5806,6 +5842,7 @@ mod tests {
         app.handle_worker_event(
             WorkerEvent::LocalDiffFile {
                 generation: first_generation,
+                workspace_generation: 5,
                 path: PathBuf::from("src/first.rs"),
                 result: Ok(DiffDocument::empty("first", "loaded")),
             },
@@ -5865,6 +5902,7 @@ mod tests {
         let effects = app.handle_worker_event(
             WorkerEvent::LocalDiffFile {
                 generation: app.diff_generation,
+                workspace_generation: 5,
                 path: PathBuf::from("src/first.rs"),
                 result: Ok(indexed_document(&["src/first.rs"])),
             },
@@ -5885,6 +5923,7 @@ mod tests {
         let effects = app.handle_worker_event(
             WorkerEvent::LocalDiffFile {
                 generation: app.diff_generation,
+                workspace_generation: 5,
                 path: PathBuf::from("src/second.rs"),
                 result: Ok(indexed_document(&["src/second.rs"])),
             },
@@ -5902,6 +5941,7 @@ mod tests {
         let effects = app.handle_worker_event(
             WorkerEvent::LocalDiffFile {
                 generation: app.diff_generation,
+                workspace_generation: 5,
                 path: PathBuf::from("src/third.rs"),
                 result: Ok(indexed_document(&["src/third.rs"])),
             },
@@ -5910,6 +5950,90 @@ mod tests {
         assert!(effects.is_empty());
         assert_eq!(app.local_diff_documents.len(), 3);
         assert!(app.local_diff_pending_paths.is_empty());
+    }
+
+    #[test]
+    fn an_existing_expand_all_preference_loads_every_file_in_a_new_index() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.diff_generation = 9;
+        app.files_collapsed = false;
+        app.collapse_preference_set = true;
+
+        let effects = app.handle_worker_event(
+            WorkerEvent::LocalDiffIndex {
+                generation: 9,
+                result: Ok(DiffIndex {
+                    title: "Next commit".to_owned(),
+                    files: ["one.rs", "two.rs", "three.rs"]
+                        .into_iter()
+                        .map(|path| crate::git::diff::DiffFileIndexEntry {
+                            path: PathBuf::from(path),
+                            old_path: None,
+                            status: "modified".to_owned(),
+                            counts: None,
+                        })
+                        .collect(),
+                    truncated: false,
+                    commit_details: None,
+                }),
+            },
+            Instant::now(),
+        );
+
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Git(command)] if matches!(
+                command.as_ref(),
+                WorkerCommand::LoadLocalDiffFile { path, .. } if path == Path::new("one.rs")
+            )
+        ));
+        assert_eq!(
+            app.local_diff_pending_paths,
+            VecDeque::from([PathBuf::from("two.rs"), PathBuf::from("three.rs")])
+        );
+        assert!(
+            app.preview_file_paths()
+                .iter()
+                .all(|path| !app.preview_file_collapsed(&path.to_string_lossy()))
+        );
+    }
+
+    #[test]
+    fn local_diff_file_replies_must_match_the_prepared_workspace() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.diff_generation = 12;
+        app.handle_worker_event(
+            WorkerEvent::LocalDiffIndex {
+                generation: 12,
+                result: Ok(DiffIndex {
+                    title: "Current".to_owned(),
+                    files: vec![crate::git::diff::DiffFileIndexEntry {
+                        path: PathBuf::from("same.rs"),
+                        old_path: None,
+                        status: "modified".to_owned(),
+                        counts: None,
+                    }],
+                    truncated: false,
+                    commit_details: None,
+                }),
+            },
+            Instant::now(),
+        );
+
+        let effects = app.handle_worker_event(
+            WorkerEvent::LocalDiffFile {
+                generation: 12,
+                workspace_generation: 11,
+                path: PathBuf::from("same.rs"),
+                result: Ok(DiffDocument::empty("Old commit", "stale")),
+            },
+            Instant::now(),
+        );
+
+        assert!(effects.is_empty());
+        assert_eq!(app.local_diff_loading_path, Some(PathBuf::from("same.rs")));
+        assert!(!app.local_diff_single_loaded);
+        assert_ne!(app.document.title, "Old commit");
     }
 
     #[test]
@@ -6642,11 +6766,26 @@ mod tests {
         let mut app = App::new("/tmp/repo", "repo");
         app.diff_generation = 7;
         app.document = DiffDocument::empty("Current", "keep me");
+        app.local_diff_workspace_generation = Some(7);
+        app.local_diff_index = Some(DiffIndex {
+            title: "Previous commit".to_owned(),
+            files: vec![crate::git::diff::DiffFileIndexEntry {
+                path: PathBuf::from("stale.rs"),
+                old_path: None,
+                status: "modified".to_owned(),
+                counts: None,
+            }],
+            truncated: false,
+            commit_details: None,
+        });
 
-        app.schedule_preview(Instant::now());
+        let now = Instant::now();
+        app.schedule_preview(now);
+        app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE), now);
         let effects = app.handle_worker_event(
             WorkerEvent::LocalDiffFile {
                 generation: 7,
+                workspace_generation: 7,
                 path: PathBuf::from("stale.rs"),
                 result: Ok(DiffDocument::empty("Stale", "replace me")),
             },
@@ -6655,6 +6794,8 @@ mod tests {
 
         assert!(effects.is_empty());
         assert_eq!(app.diff_generation, 8);
+        assert!(app.local_diff_index.is_none());
+        assert!(app.local_diff_workspace_generation.is_none());
         assert_eq!(app.document.title, "Working Tree");
         assert_eq!(app.document.lines[0].text(), "Loading selected changes…");
     }

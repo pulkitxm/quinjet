@@ -113,6 +113,7 @@ pub(crate) enum WorkerEvent {
     },
     LocalDiffFile {
         generation: u64,
+        workspace_generation: u64,
         path: PathBuf,
         result: Result<DiffDocument, String>,
     },
@@ -500,6 +501,7 @@ fn run_worker(repository: &Repository, mailbox: &Arc<SharedMailbox>, events: &Se
                 path,
             } => WorkerEvent::LocalDiffFile {
                 generation,
+                workspace_generation,
                 path: path.clone(),
                 result: answer(
                     session

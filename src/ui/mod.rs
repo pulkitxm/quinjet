@@ -2339,6 +2339,9 @@ fn draw_commit_details_scrolled(
     };
     let document = &app.document;
     let load_progress = app.local_diff_load_progress();
+    let (additions, deletions) = app
+        .local_diff_line_counts()
+        .unwrap_or_else(|| (document.addition_count(), document.deletion_count()));
     let block = Block::default()
         .title(" Commit details ")
         .borders(Borders::ALL)
@@ -2385,14 +2388,14 @@ fn draw_commit_details_scrolled(
                 Style::default().fg(theme.text),
             ),
             Span::styled(
-                format!("+{}", document.addition_count()),
+                format!("+{additions}"),
                 Style::default()
                     .fg(theme.added)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled("  ", Style::default()),
             Span::styled(
-                format!("-{}", document.deletion_count()),
+                format!("-{deletions}"),
                 Style::default()
                     .fg(theme.removed)
                     .add_modifier(Modifier::BOLD),
