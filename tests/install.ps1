@@ -28,17 +28,14 @@ function Assert-Contains {
     }
 }
 
-function Set-ReleaseFixture {
-    param(
-        [string] $Contents,
-        [switch] $Executable,
-        [switch] $InvalidChecksum
-    )
+function New-ExecutableFixture {
+    param([string] $OutputAssembly)
 
-    $asset = "quinjet-windows-x86_64.exe"
-    $assetPath = Join-Path $Fixtures $asset
-    if ($Executable) {
-        $source = @'
+    $compiler = Join-Path $TestRoot "compile-fixture.ps1"
+    $compilerSource = @'
+param([Parameter(Mandatory)][string] $OutputAssembly)
+
+$source = @"
 using System;
 using System.IO;
 
@@ -51,8 +48,29 @@ public static class QuinjetInstallerFixture
             string.Join(" ", arguments));
     }
 }
+"@
+
+Add-Type -TypeDefinition $source -OutputAssembly $OutputAssembly -OutputType ConsoleApplication
 '@
-        Add-Type -TypeDefinition $source -OutputAssembly $assetPath -OutputType ConsoleApplication
+    [IO.File]::WriteAllText($compiler, $compilerSource)
+    $windowsPowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+    & $windowsPowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $compiler -OutputAssembly $OutputAssembly
+    if ($LASTEXITCODE -ne 0) {
+        throw "failed to compile the installer fixture"
+    }
+}
+
+function Set-ReleaseFixture {
+    param(
+        [string] $Contents,
+        [switch] $Executable,
+        [switch] $InvalidChecksum
+    )
+
+    $asset = "quinjet-windows-x86_64.exe"
+    $assetPath = Join-Path $Fixtures $asset
+    if ($Executable) {
+        New-ExecutableFixture -OutputAssembly $assetPath
     }
     else {
         [IO.File]::WriteAllText($assetPath, $Contents)

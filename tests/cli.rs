@@ -559,7 +559,8 @@ fn shell_integration_updates_existing_completions_without_restoring_removals() -
         .args(["completions", "--install"])
         .env("HOME", &scratch.path)
         .env("XDG_DATA_HOME", &data)
-        .env("SHELL", "/bin/bash");
+        .env("SHELL", "/bin/bash")
+        .env("PSModulePath", "inherited-but-not-active");
     isolate_git(&mut command);
     let run = Run::from(command.output().context("failed to install completions")?)?.success()?;
     let completion = data.join("bash-completion/completions/quinjet");

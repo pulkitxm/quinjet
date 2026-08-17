@@ -4,7 +4,6 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
-use std::time::UNIX_EPOCH;
 
 use anyhow::{Context, Result, bail};
 use clap::CommandFactory;
@@ -53,7 +52,7 @@ pub(super) fn maintain(shell: Shell) -> Result<Vec<PathBuf>> {
 fn install_with_mode(shell: Shell, automatic: bool) -> Result<Vec<PathBuf>> {
     let state = shell_state(shell)?;
     let installed_before = state.exists();
-    let marker = binary_marker()?;
+    let marker = binary_marker();
     let script = script(shell)?;
     let contents = format!("{marker}{script}");
     let targets = targets(shell)?;
@@ -89,13 +88,13 @@ fn install_with_mode(shell: Shell, automatic: bool) -> Result<Vec<PathBuf>> {
 
 pub(super) fn detected_shell() -> Option<Shell> {
     let configured = env::var_os("SHELL").and_then(|shell| shell_from_path(&shell));
-    if cfg!(windows) {
-        return configured.or(Some(Shell::PowerShell));
+    if configured.is_some() {
+        return configured;
     }
-    if env::var_os("PSModulePath").is_some() {
+    if cfg!(windows) || env::var_os("PSModulePath").is_some() {
         return Some(Shell::PowerShell);
     }
-    configured
+    None
 }
 
 fn shell_from_path(shell: &OsStr) -> Option<Shell> {
@@ -131,6 +130,7 @@ pub(super) fn refresh_replaced_executable() -> Result<()> {
     let Some(shell) = detected_shell() else {
         return Ok(());
     };
+    // nosemgrep: rust.lang.security.current-exe.current-exe
     let executable = env::current_exe().context("failed to locate the updated executable")?;
     let output = ProcessCommand::new(&executable)
         .args([
@@ -158,13 +158,8 @@ pub(super) fn refresh_replaced_executable() -> Result<()> {
     )
 }
 
-fn development_binary() -> bool {
+const fn development_binary() -> bool {
     cfg!(debug_assertions)
-        && env::current_exe().is_ok_and(|executable| {
-            executable
-                .ancestors()
-                .any(|path| path.file_name().is_some_and(|name| name == "target"))
-        })
 }
 
 fn shells_to_refresh(active: Option<Shell>) -> Vec<Shell> {
@@ -198,7 +193,7 @@ fn completion_is_current(shell: Shell) -> Result<bool> {
     if !shell_state(shell)?.exists() {
         return Ok(false);
     }
-    let marker = binary_marker()?;
+    let marker = binary_marker();
     let targets = targets(shell)?;
     Ok(!targets.is_empty()
         && targets.iter().all(|target| {
@@ -448,22 +443,8 @@ fn write_file(path: &Path, contents: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn binary_marker() -> Result<String> {
-    let executable = env::current_exe().context("failed to locate the Quinjet executable")?;
-    let metadata = fs::metadata(&executable)
-        .with_context(|| format!("failed to inspect {}", executable.display()))?;
-    let modified = metadata
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .unwrap_or_default();
-    Ok(format!(
-        "# quinjet-completion {} {} {}.{}\n",
-        env!("CARGO_PKG_VERSION"),
-        metadata.len(),
-        modified.as_secs(),
-        modified.subsec_nanos()
-    ))
+fn binary_marker() -> String {
+    format!("# quinjet-completion {}\n", env!("CARGO_PKG_VERSION"))
 }
 
 fn completion_dirs() -> Result<CompletionDirs> {

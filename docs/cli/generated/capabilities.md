@@ -31,7 +31,7 @@ Use --json for arguments, values, and command relationships.
 This command does not discover a repository, run `git` or `gh`, or read the
 network. Like every invocation of an installed release binary, startup may
 perform first-time shell integration or refresh an existing completion script
-when its executable marker is stale. Removed completion or `q` integration is
+when its version marker is stale. Removed completion or `q` integration is
 remembered and stays removed. The global `-C` option is accepted but ignored.
 
 ## JSON contract

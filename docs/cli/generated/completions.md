@@ -82,10 +82,9 @@ marked profile block defines `q` in bash, zsh, fish, elvish, or PowerShell.
 Existing profile text and permissions are preserved, and a marked block is
 never added twice.
 
-Installed scripts start with a marker containing the version and identity of
-the executable that generated them. Normal startup reads only this line. It
-rewrites a script after the executable changes and leaves a current script
-alone. `quinjet update` runs the newly replaced executable to refresh the
+Installed scripts start with a marker containing the Quinjet version that
+generated them. Normal startup reads only this line. It rewrites a script after
+the version changes and leaves a current script alone. `quinjet update` runs the newly replaced executable to refresh the
 active shell immediately.
 
 An installed-once record lives under `$XDG_STATE_HOME/quinjet`, else
