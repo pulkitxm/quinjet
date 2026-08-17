@@ -20,7 +20,7 @@ Options:
 
 | Name | Type / values | Default | What it does |
 | --- | --- | --- | --- |
-| `--install` | flag | off | Writes the generated script and a `q` shortcut for `quinjet` into the current user's shell configuration instead of stdout. This explicit form restores files or blocks removed after an earlier installation. |
+| `--install` | flag | off | Writes the generated script and a `q` launcher on `PATH` instead of writing the script to stdout. This explicit form restores files or launchers removed after an earlier installation. |
 | `--json` | flag | off | Wraps the generated script or installed paths in one JSON object. |
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |
 
@@ -50,10 +50,14 @@ _quinjet() {
 
 The release installers run the automatic form before they finish. A binary
 installed by Cargo, cargo-binstall, a package manager, or a direct copy runs the
-same check on its first invocation. Completion installation also adds `q` as an
-alias for `quinjet`. The current shell is detected from `$SHELL`, from a
-PowerShell environment, or from the Windows platform. Name a shell explicitly
-when detection is not appropriate:
+same check on its first invocation. Completion installation also adds a `q`
+launcher beside the Quinjet executable, or in a user bin directory already on
+`PATH` when the executable directory is not writable. On Unix this is a
+symbolic link; on Windows it is `q.cmd`. The launcher is available to the
+current shell immediately. Quinjet never replaces an unrelated `q` command
+that is already on `PATH`. The current shell is
+detected from `$SHELL`, from a PowerShell environment, or from the Windows
+platform. Name a shell explicitly when detection is not appropriate:
 
 ```bash
 quinjet completions --install
@@ -61,8 +65,8 @@ quinjet completions bash --install
 quinjet completions zsh --install
 ```
 
-Start a new shell session after the first installation so its profile loads the
-completion integration and `q` shortcut.
+Start a new shell session after the first installation so its profile loads any
+completion integration. The `q` launcher does not require a restart.
 
 The generated scripts use user-owned paths:
 
@@ -77,23 +81,24 @@ The generated scripts use user-owned paths:
 For zsh, Quinjet adds one marked block to `.zshrc` that places `.zfunc` on
 `fpath` and initializes completion. For elvish it adds `use quinjet` to
 `rc.elv`. For PowerShell it adds a dot-source line to the profile. Bash and fish
-discover their user completion directories directly. A second, separately
-marked profile block defines `q` in bash, zsh, fish, elvish, or PowerShell.
-Existing profile text and permissions are preserved, and a marked block is
-never added twice.
+discover their user completion directories directly. Existing profile text and
+permissions are preserved, and a marked block is never added twice. Versions
+that installed `q` as a profile alias migrate it to the launcher and remove the
+old marked alias block.
 
 Installed scripts start with a marker containing the Quinjet version that
 generated them. Normal startup reads only this line. It rewrites a script after
 the version changes and leaves a current script alone. `quinjet update` runs the newly replaced executable to refresh the
 active shell immediately.
 
-An installed-once record lives under `$XDG_STATE_HOME/quinjet`, else
+Installed-once records live under `$XDG_STATE_HOME/quinjet`, else
 `~/.local/state/quinjet`, or `%LOCALAPPDATA%\Quinjet\state` on Windows. Once
-that record exists, automatic maintenance treats a missing completion script,
-completion profile block, or `q` block as a user choice. Neither startup nor an
-update recreates it. Running `quinjet completions <SHELL> --install` explicitly
-recreates missing files and blocks. This keeps updates current without fighting
-a user who removes the integration.
+the relevant record exists, automatic maintenance treats a missing completion
+script, completion profile block, or `q` launcher as a user choice. Neither
+startup nor an update recreates it. Running
+`quinjet completions <SHELL> --install` explicitly recreates missing files and
+the launcher. This keeps updates current without fighting a user who removes
+the integration.
 
 Without `--install`, the command still writes the raw generated script to
 stdout for package maintainers and custom layouts:
@@ -119,7 +124,10 @@ one object:
 {
   "shell": "bash",
   "shortcut": "q",
-  "paths": ["/home/you/.local/share/bash-completion/completions/quinjet"]
+  "paths": [
+    "/home/you/.local/share/bash-completion/completions/quinjet",
+    "/home/you/.local/bin/q"
+  ]
 }
 ```
 

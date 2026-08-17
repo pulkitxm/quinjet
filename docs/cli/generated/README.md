@@ -10,8 +10,8 @@ repository or `git`, so all work anywhere.
 
 ## Commands
 
-- [`quinjet completions`](./completions.md): a completion script and `q`
-  shortcut for bash, zsh, fish, elvish, or PowerShell.
+- [`quinjet completions`](./completions.md): a completion script for bash, zsh,
+  fish, elvish, or PowerShell, plus the `q` launcher.
 - [`quinjet man`](./man.md): the manual page, or one page per command.
 - [`quinjet capabilities`](./capabilities.md): the installed command and argument schema.
 
@@ -30,11 +30,12 @@ quinjet man --dir ~/.local/share/man/man1
 
 ## Installing the output
 
-`completions --install` writes to user-owned shell directories and adds marked
-completion and `q` integration blocks where a profile is needed. The release
-scripts invoke its automatic mode directly, and other installation methods
-invoke the same maintenance path on first run. An installed-once state record
-prevents later updates from restoring any script or block the user removed.
+`completions --install` writes to user-owned shell directories, adds a marked
+completion block where a profile is needed, and places the `q` launcher on
+`PATH`. The release scripts invoke its automatic mode directly, and
+other installation methods invoke the same maintenance path on first run.
+Installed-once state prevents later updates from restoring any script, block,
+or launcher the user removed.
 Without `--install`, completion generation still writes to stdout for packagers
 and custom layouts. `man` writes to stdout or to the directory named with
 `--dir`; capabilities writes to stdout.

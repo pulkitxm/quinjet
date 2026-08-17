@@ -551,63 +551,144 @@ fn completions_cover_every_supported_shell() -> Result<()> {
 
 #[cfg(not(windows))]
 #[test]
-fn shell_integration_updates_existing_completions_without_restoring_removals() -> Result<()> {
+fn shell_integration_makes_q_immediate_without_restoring_removals() -> Result<()> {
     let scratch = Scratch::directory()?;
+    let bin = scratch.path.join("bin");
     let data = scratch.path.join("data");
-    let mut command = ProcessCommand::new(env!("CARGO_BIN_EXE_quinjet"));
-    command
-        .args(["completions", "--install"])
-        .env("HOME", &scratch.path)
-        .env("XDG_DATA_HOME", &data)
-        .env("SHELL", "/bin/bash")
-        .env("PSModulePath", "inherited-but-not-active");
-    isolate_git(&mut command);
-    let run = Run::from(command.output().context("failed to install completions")?)?.success()?;
+    let state = scratch.path.join(".local/state/quinjet");
+    let executable = bin.join("quinjet");
+    let shortcut = bin.join("q");
     let completion = data.join("bash-completion/completions/quinjet");
-    let script = fs::read_to_string(&completion)?;
-    ensure!(script.contains("complete -F _quinjet"));
-    ensure!(run.stdout.contains(&completion.display().to_string()));
     let bashrc = scratch.path.join(".bashrc");
-    ensure!(fs::read_to_string(&bashrc)?.contains("alias q='quinjet'"));
-    ensure!(
-        scratch
-            .path
-            .join(".local/state/quinjet/bash-installed")
-            .is_file()
-    );
+    fs::create_dir_all(&bin)?;
+    fs::create_dir_all(&state)?;
+    fs::create_dir_all(completion.parent().context("completion had no parent")?)?;
+    let staged = bin.join("quinjet-stage");
+    fs::copy(env!("CARGO_BIN_EXE_quinjet"), &staged)?;
+    fs::rename(staged, &executable)?;
+    fs::write(state.join("bash-installed"), "installed\n")?;
+    fs::write(&completion, "stale completion\n")?;
+    fs::write(
+        &bashrc,
+        "# >>> quinjet shortcut >>>\nalias q='quinjet'\n# <<< quinjet shortcut <<<\n",
+    )?;
 
     let maintain = || -> Result<Run> {
-        let mut update = ProcessCommand::new(env!("CARGO_BIN_EXE_quinjet"));
+        let mut update = ProcessCommand::new(&executable);
         update
             .args(["completions", "bash", "--install", "--automatic"])
             .env("HOME", &scratch.path)
             .env("XDG_DATA_HOME", &data)
-            .env("SHELL", "/bin/bash");
+            .env("PATH", &bin)
+            .env("SHELL", "/bin/bash")
+            .env("PSModulePath", "inherited-but-not-active");
         isolate_git(&mut update);
         Run::from(update.output().context("failed to refresh completions")?)?.success()
     };
 
-    fs::write(&completion, "stale completion\n")?;
-    fs::remove_file(&bashrc)?;
+    fs::write(&shortcut, "unrelated q command\n")?;
     drop(maintain()?);
+    ensure!(fs::read_to_string(&shortcut)? == "unrelated q command\n");
+    ensure!(fs::read_to_string(&bashrc)?.contains("quinjet shortcut"));
+    fs::remove_file(&shortcut)?;
+    fs::remove_file(state.join("shortcut-installed"))?;
+
+    let run = maintain()?;
     ensure!(fs::read_to_string(&completion)?.contains("complete -F _quinjet"));
-    ensure!(!bashrc.exists());
+    ensure!(
+        run.stdout.contains(&shortcut.display().to_string()),
+        "unexpected installation output: {}",
+        run.stdout
+    );
+    ensure!(shortcut.exists());
+    ensure!(!fs::read_to_string(&bashrc)?.contains("quinjet shortcut"));
+    ensure!(state.join("shortcut-installed").is_file());
+
+    let mut path = vec![bin.clone()];
+    if let Some(existing) = std::env::var_os("PATH") {
+        path.extend(std::env::split_paths(&existing));
+    }
+    let mut invoke_q = ProcessCommand::new("q");
+    invoke_q
+        .arg("--version")
+        .env("PATH", std::env::join_paths(path)?);
+    let q = Run::from(
+        invoke_q
+            .output()
+            .context("q was unavailable in the current shell")?,
+    )?
+    .success()?;
+    ensure!(q.stdout.contains("quinjet"));
+
+    fs::remove_file(&shortcut)?;
+    drop(maintain()?);
+    ensure!(!shortcut.exists());
 
     fs::remove_file(&completion)?;
     drop(maintain()?);
     ensure!(!completion.exists());
-    ensure!(!bashrc.exists());
 
-    let mut restore = ProcessCommand::new(env!("CARGO_BIN_EXE_quinjet"));
+    let mut restore = ProcessCommand::new(&executable);
     restore
         .args(["completions", "bash", "--install"])
         .env("HOME", &scratch.path)
         .env("XDG_DATA_HOME", &data)
+        .env("PATH", &bin)
         .env("SHELL", "/bin/bash");
     isolate_git(&mut restore);
     drop(Run::from(restore.output().context("failed to restore completions")?)?.success()?);
     ensure!(completion.exists());
-    ensure!(fs::read_to_string(&bashrc)?.contains("alias q='quinjet'"));
+    ensure!(shortcut.exists());
+    Ok(())
+}
+
+#[cfg(windows)]
+#[test]
+fn shell_integration_makes_q_immediate_on_windows() -> Result<()> {
+    let scratch = Scratch::directory()?;
+    let bin = scratch.path.join("bin");
+    let data = scratch.path.join("data");
+    let executable = bin.join("quinjet.exe");
+    let shortcut = bin.join("q.cmd");
+    fs::create_dir_all(&bin)?;
+    let staged = bin.join("quinjet-stage.exe");
+    fs::copy(env!("CARGO_BIN_EXE_quinjet"), &staged)?;
+    fs::rename(staged, &executable)?;
+
+    let mut install = ProcessCommand::new(&executable);
+    install
+        .args(["completions", "bash", "--install"])
+        .env("HOME", &scratch.path)
+        .env("USERPROFILE", &scratch.path)
+        .env("LOCALAPPDATA", scratch.path.join("local"))
+        .env("XDG_DATA_HOME", &data)
+        .env("PATH", &bin);
+    isolate_git(&mut install);
+    drop(
+        Run::from(
+            install
+                .output()
+                .context("failed to install shell integration")?,
+        )?
+        .success()?,
+    );
+    ensure!(shortcut.exists());
+
+    let mut path = vec![bin];
+    if let Some(existing) = std::env::var_os("PATH") {
+        path.extend(std::env::split_paths(&existing));
+    }
+    let mut invoke_q = ProcessCommand::new("cmd.exe");
+    invoke_q
+        .args(["/D", "/C", "q --version"])
+        .env("PATH", std::env::join_paths(path)?);
+    let q = Run::from(
+        invoke_q
+            .output()
+            .context("q was unavailable in the current shell")?,
+    )?
+    .success()?;
+    ensure!(q.stdout.contains("quinjet"));
     Ok(())
 }
 
