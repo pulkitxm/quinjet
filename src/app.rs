@@ -1,4 +1,5 @@
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -131,8 +132,15 @@ pub(crate) enum PullRequestFileView {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PullRequestTreeEntry {
-    Directory { path: PathBuf, depth: usize },
-    File { index: usize, depth: usize },
+    Directory {
+        path: PathBuf,
+        label: String,
+        depth: usize,
+    },
+    File {
+        index: usize,
+        depth: usize,
+    },
 }
 
 impl PullRequestTreeEntry {
@@ -140,6 +148,72 @@ impl PullRequestTreeEntry {
         match self {
             Self::Directory { depth, .. } | Self::File { depth, .. } => *depth,
         }
+    }
+}
+
+#[derive(Debug, Default)]
+struct PullRequestTreeNode {
+    path: PathBuf,
+    directories: BTreeMap<OsString, Self>,
+    files: Vec<usize>,
+}
+
+impl PullRequestTreeNode {
+    fn insert(&mut self, path: &Path, index: usize) {
+        let components = path.components().collect::<Vec<_>>();
+        let mut directory = PathBuf::new();
+        let mut node = self;
+        for component in components.iter().take(components.len().saturating_sub(1)) {
+            directory.push(component.as_os_str());
+            node = node
+                .directories
+                .entry(component.as_os_str().to_os_string())
+                .or_insert_with(|| Self {
+                    path: directory.clone(),
+                    ..Self::default()
+                });
+        }
+        node.files.push(index);
+    }
+
+    fn append_entries(
+        &self,
+        depth: usize,
+        collapsed: &HashSet<PathBuf>,
+        entries: &mut Vec<PullRequestTreeEntry>,
+    ) {
+        for directory in self.directories.values() {
+            let mut compacted = directory;
+            let mut label = compacted
+                .path
+                .file_name()
+                .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+            while compacted.files.is_empty() && compacted.directories.len() == 1 {
+                let Some(child) = compacted.directories.values().next() else {
+                    break;
+                };
+                label.push('/');
+                label.push_str(
+                    &child
+                        .path
+                        .file_name()
+                        .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+                );
+                compacted = child;
+            }
+            entries.push(PullRequestTreeEntry::Directory {
+                path: compacted.path.clone(),
+                label,
+                depth,
+            });
+            if !collapsed.contains(&compacted.path) {
+                compacted.append_entries(depth.saturating_add(1), collapsed, entries);
+            }
+        }
+        entries.extend(self.files.iter().map(|index| PullRequestTreeEntry::File {
+            index: *index,
+            depth,
+        }));
     }
 }
 
@@ -955,35 +1029,11 @@ impl App {
 
     pub(crate) fn pull_request_tree_entries(&self) -> Vec<PullRequestTreeEntry> {
         let mut entries = Vec::with_capacity(self.pull_request_files.len().saturating_mul(2));
-        let mut seen_directories = BTreeSet::new();
+        let mut root = PullRequestTreeNode::default();
         for (index, file) in self.pull_request_files.iter().enumerate() {
-            let components = file.path.components().collect::<Vec<_>>();
-            let mut directory = PathBuf::new();
-            let mut hidden = false;
-            for (depth, component) in components
-                .iter()
-                .take(components.len().saturating_sub(1))
-                .enumerate()
-            {
-                directory.push(component.as_os_str());
-                if seen_directories.insert(directory.clone()) {
-                    entries.push(PullRequestTreeEntry::Directory {
-                        path: directory.clone(),
-                        depth,
-                    });
-                }
-                if self.collapsed_pull_request_directories.contains(&directory) {
-                    hidden = true;
-                    break;
-                }
-            }
-            if !hidden {
-                entries.push(PullRequestTreeEntry::File {
-                    index,
-                    depth: components.len().saturating_sub(1),
-                });
-            }
+            root.insert(&file.path, index);
         }
+        root.append_entries(0, &self.collapsed_pull_request_directories, &mut entries);
         entries
     }
 
@@ -1067,7 +1117,7 @@ impl App {
             return;
         };
         match entry {
-            PullRequestTreeEntry::Directory { path, depth } => {
+            PullRequestTreeEntry::Directory { path, depth, .. } => {
                 let collapsed = self.pull_request_directory_collapsed(&path);
                 if (expand && collapsed) || (!expand && !collapsed) {
                     self.toggle_pull_request_directory(path);
@@ -1080,36 +1130,40 @@ impl App {
                         self.select_pull_request_tree_entry(child, now);
                     }
                 } else {
-                    let parent_cursor = path
-                        .parent()
-                        .filter(|parent| !parent.as_os_str().is_empty())
-                        .and_then(|parent| {
-                            entries.iter().position(|entry| {
-                                matches!(
-                                    entry,
-                                    PullRequestTreeEntry::Directory { path, .. }
-                                        if path == parent
-                                )
-                            })
-                        });
+                    let parent_cursor =
+                        entries
+                            .get(..self.pull_request_tree_cursor)
+                            .and_then(|parents| {
+                                parents.iter().rposition(|entry| {
+                                    matches!(
+                                        entry,
+                                        PullRequestTreeEntry::Directory {
+                                            depth: parent_depth,
+                                            ..
+                                        } if *parent_depth < depth
+                                    )
+                                })
+                            });
                     if let Some(cursor) = parent_cursor {
                         self.pull_request_tree_cursor = cursor;
                     }
                 }
             }
-            PullRequestTreeEntry::File { index, .. } if !expand => {
-                let parent_cursor = self
-                    .pull_request_files
-                    .get(index)
-                    .and_then(|file| file.path.parent())
-                    .and_then(|parent| {
-                        entries.iter().position(|entry| {
-                            matches!(
-                                entry,
-                                PullRequestTreeEntry::Directory { path, .. } if path == parent
-                            )
-                        })
-                    });
+            PullRequestTreeEntry::File { depth, .. } if !expand => {
+                let parent_cursor =
+                    entries
+                        .get(..self.pull_request_tree_cursor)
+                        .and_then(|parents| {
+                            parents.iter().rposition(|entry| {
+                                matches!(
+                                    entry,
+                                    PullRequestTreeEntry::Directory {
+                                        depth: parent_depth,
+                                        ..
+                                    } if *parent_depth < depth
+                                )
+                            })
+                        });
                 if let Some(cursor) = parent_cursor {
                     self.pull_request_tree_cursor = cursor;
                 }
@@ -5882,7 +5936,7 @@ mod tests {
         ));
 
         app.handle_key(
-            KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
             Instant::now(),
         );
         assert!(matches!(
@@ -5948,6 +6002,40 @@ mod tests {
                 .iter()
                 .any(|entry| { matches!(entry, PullRequestTreeEntry::File { index: 1, .. }) })
         );
+    }
+
+    #[test]
+    fn pull_request_tree_compacts_single_child_directory_chains() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.pull_request_files = [
+            "apps/web/app/one.txt",
+            "apps/web/modules/marketing/landing/two.txt",
+        ]
+        .into_iter()
+        .map(|path| PullRequestFile {
+            path: PathBuf::from(path),
+            old_path: None,
+            status: PullRequestFileStatus::Modified,
+            counts: None,
+        })
+        .collect();
+
+        let entries = app.pull_request_tree_entries();
+
+        assert!(matches!(
+            entries.first(),
+            Some(PullRequestTreeEntry::Directory { path, label, depth: 0 })
+                if path == Path::new("apps/web") && label == "apps/web"
+        ));
+        assert!(entries.iter().any(|entry| matches!(
+            entry,
+            PullRequestTreeEntry::Directory { path, label, depth: 1 }
+                if path == Path::new("apps/web/modules/marketing/landing")
+                    && label == "modules/marketing/landing"
+        )));
+
+        app.toggle_pull_request_directory(PathBuf::from("apps/web"));
+        assert_eq!(app.pull_request_tree_entries().len(), 1);
     }
 
     #[test]

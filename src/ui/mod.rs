@@ -1054,16 +1054,13 @@ fn draw_pull_request_file_tree(
             theme.panel
         };
         match row {
-            PullRequestTreeEntry::Directory { path, depth } => {
+            PullRequestTreeEntry::Directory { path, label, depth } => {
                 let background = if selected {
                     theme.selected
                 } else {
                     theme.panel_alt
                 };
                 let indent_width = depth.saturating_mul(2).min(16);
-                let name = path
-                    .file_name()
-                    .map_or_else(|| path.to_string_lossy(), |name| name.to_string_lossy());
                 let available = (area.width as usize)
                     .saturating_sub(indent_width)
                     .saturating_sub(5);
@@ -1076,7 +1073,7 @@ fn draw_pull_request_file_tree(
                     Paragraph::new(format!(
                         " {}{icon} {}/",
                         "  ".repeat((*depth).min(8)),
-                        truncate_end(&name, available),
+                        truncate_end(label, available),
                     ))
                     .style(
                         Style::default()
