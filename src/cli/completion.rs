@@ -13,13 +13,12 @@ use super::{Cli, PROGRAM};
 
 const COMPLETION_BEGIN: &str = "# >>> quinjet completions >>>";
 const COMPLETION_END: &str = "# <<< quinjet completions <<<";
-const SHORTCUT_BEGIN: &str = "# >>> quinjet shortcut >>>";
-const SHORTCUT_END: &str = "# <<< quinjet shortcut <<<";
+const LEGACY_SHORTCUT_BEGIN: &str = "# >>> quinjet shortcut >>>";
+const LEGACY_SHORTCUT_END: &str = "# <<< quinjet shortcut <<<";
 
 struct ProfileIntegration {
     path: PathBuf,
     completion: Option<String>,
-    shortcut: String,
 }
 
 struct Target {
@@ -56,30 +55,37 @@ fn install_with_mode(shell: Shell, automatic: bool) -> Result<Vec<PathBuf>> {
     let script = script(shell)?;
     let contents = format!("{marker}{script}");
     let targets = targets(shell)?;
+    let legacy_shortcut = legacy_shortcut_exists(&targets)?;
     let mut installed = Vec::new();
-    for target in targets {
+    for target in &targets {
         if !automatic || !installed_before || target.script.exists() {
             write_file(&target.script, contents.as_bytes())?;
             installed.push(target.script.clone());
         }
-        if let Some(profile) = target.profile {
-            let add_missing = !automatic || !installed_before;
-            if let Some(command) = &profile.completion {
-                integrate_profile(
-                    &profile.path,
-                    COMPLETION_BEGIN,
-                    COMPLETION_END,
-                    command,
-                    add_missing,
-                )?;
-            }
+        if let Some(profile) = &target.profile
+            && let Some(command) = &profile.completion
+        {
             integrate_profile(
                 &profile.path,
-                SHORTCUT_BEGIN,
-                SHORTCUT_END,
-                &profile.shortcut,
-                add_missing,
+                COMPLETION_BEGIN,
+                COMPLETION_END,
+                command,
+                !automatic || !installed_before,
             )?;
+        }
+    }
+    if let Some(shortcut) = install_shortcut(automatic, installed_before, legacy_shortcut)? {
+        installed.push(shortcut);
+    }
+    if shortcut_is_enabled()? {
+        for target in &targets {
+            if let Some(profile) = &target.profile {
+                remove_profile_integration(
+                    &profile.path,
+                    LEGACY_SHORTCUT_BEGIN,
+                    LEGACY_SHORTCUT_END,
+                )?;
+            }
         }
     }
     write_file(&state, b"installed\n")?;
@@ -190,7 +196,7 @@ fn has_installed_target(shell: Shell) -> bool {
 }
 
 fn completion_is_current(shell: Shell) -> Result<bool> {
-    if !shell_state(shell)?.exists() {
+    if !shell_state(shell)?.exists() || !shortcut_state()?.exists() {
         return Ok(false);
     }
     let marker = binary_marker();
@@ -225,7 +231,6 @@ fn targets_in(shell: Shell, directories: &CompletionDirs) -> Result<Vec<Target>>
             profile: Some(ProfileIntegration {
                 path: directories.home.join(".bashrc"),
                 completion: None,
-                shortcut: "alias q='quinjet'".to_owned(),
             }),
         }]),
         Shell::Elvish => {
@@ -235,7 +240,6 @@ fn targets_in(shell: Shell, directories: &CompletionDirs) -> Result<Vec<Target>>
                 profile: Some(ProfileIntegration {
                     path: root.join("rc.elv"),
                     completion: Some("use quinjet".to_owned()),
-                    shortcut: "fn q {|@args| quinjet $@args }".to_owned(),
                 }),
             }])
         }
@@ -244,7 +248,6 @@ fn targets_in(shell: Shell, directories: &CompletionDirs) -> Result<Vec<Target>>
             profile: Some(ProfileIntegration {
                 path: directories.config.join("fish/config.fish"),
                 completion: None,
-                shortcut: "alias q quinjet".to_owned(),
             }),
         }]),
         Shell::Zsh => {
@@ -257,7 +260,6 @@ fn targets_in(shell: Shell, directories: &CompletionDirs) -> Result<Vec<Target>>
                     completion: Some(format!(
                         "fpath=('{escaped}' $fpath)\nautoload -Uz compinit\ncompinit"
                     )),
-                    shortcut: "alias q='quinjet'".to_owned(),
                 }),
             }])
         }
@@ -324,7 +326,6 @@ fn powershell_target(profile: &Path) -> Target {
         profile: Some(ProfileIntegration {
             path: profile.to_path_buf(),
             completion: Some(format!(". '{escaped}'")),
-            shortcut: "Set-Alias -Name q -Value quinjet".to_owned(),
         }),
     }
 }
@@ -353,6 +354,19 @@ fn shell_state(shell: Shell) -> Result<PathBuf> {
     Ok(state_root()?.join(format!("{shell}-installed")))
 }
 
+fn shortcut_state() -> Result<PathBuf> {
+    Ok(state_root()?.join("shortcut-installed"))
+}
+
+fn shortcut_is_enabled() -> Result<bool> {
+    let state = shortcut_state()?;
+    match fs::read_to_string(&state) {
+        Ok(contents) => Ok(contents != "removed\n"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).with_context(|| format!("failed to read {}", state.display())),
+    }
+}
+
 fn state_root() -> Result<PathBuf> {
     #[cfg(windows)]
     if let Some(local) = env_path("LOCALAPPDATA") {
@@ -364,6 +378,197 @@ fn state_root() -> Result<PathBuf> {
     Ok(env_path("XDG_STATE_HOME")
         .unwrap_or_else(|| home.join(".local/state"))
         .join("quinjet"))
+}
+
+fn legacy_shortcut_exists(targets: &[Target]) -> Result<bool> {
+    for target in targets {
+        let Some(profile) = &target.profile else {
+            continue;
+        };
+        match fs::read_to_string(&profile.path) {
+            Ok(contents) if contents.contains(LEGACY_SHORTCUT_BEGIN) => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("failed to read {}", profile.path.display()));
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn install_shortcut(
+    automatic: bool,
+    shell_installed_before: bool,
+    legacy_shortcut: bool,
+) -> Result<Option<PathBuf>> {
+    let state = shortcut_state()?;
+    if automatic && state.exists() {
+        return Ok(None);
+    }
+    if automatic && shell_installed_before && !legacy_shortcut {
+        write_file(&state, b"removed\n")?;
+        return Ok(None);
+    }
+    let (executable, shortcuts) = shortcut_paths()?;
+    let mut failure = None;
+    for shortcut in shortcuts {
+        match create_shortcut(&executable, &shortcut) {
+            Ok(()) => {
+                let mut record = shortcut.display().to_string();
+                record.push('\n');
+                write_file(&state, record.as_bytes())?;
+                return Ok(Some(shortcut));
+            }
+            Err(error) => failure = Some(error),
+        }
+    }
+    let error =
+        failure.unwrap_or_else(|| anyhow::anyhow!("no directory on PATH can hold the q shortcut"));
+    if automatic {
+        write_file(&state, b"removed\n")?;
+        return Ok(None);
+    }
+    Err(error)
+}
+
+fn shortcut_paths() -> Result<(PathBuf, Vec<PathBuf>)> {
+    // nosemgrep: rust.lang.security.current-exe.current-exe
+    let executable = env::current_exe().context("failed to locate the Quinjet executable")?;
+    let parent = executable
+        .parent()
+        .context("the Quinjet executable has no parent directory")?;
+    let name = if cfg!(windows) { "q.cmd" } else { "q" };
+    let path_dirs: Vec<PathBuf> = env::var_os("PATH")
+        .map(|path| env::split_paths(&path).collect())
+        .unwrap_or_default();
+    let home = env_path("HOME").or_else(|| env_path("USERPROFILE"));
+    let local_bin = home.as_ref().map(|home| home.join(".local/bin"));
+    let cargo_bin = env_path("CARGO_HOME")
+        .map(|cargo| cargo.join("bin"))
+        .or_else(|| home.as_ref().map(|home| home.join(".cargo/bin")));
+    let xdg_bin = env_path("XDG_BIN_HOME");
+    let mut shortcuts = Vec::new();
+    let mut blocked = false;
+    for directory in path_dirs {
+        let shortcut = directory.join(name);
+        if fs::symlink_metadata(&shortcut).is_ok() {
+            if !shortcuts.contains(&shortcut) {
+                shortcuts.push(shortcut);
+            }
+            blocked = true;
+            break;
+        }
+        let user_bin = [&local_bin, &cargo_bin, &xdg_bin]
+            .into_iter()
+            .flatten()
+            .any(|candidate| candidate == &directory);
+        if (directory == parent || user_bin) && !shortcuts.contains(&shortcut) {
+            shortcuts.push(shortcut);
+        }
+    }
+    let adjacent = parent.join(name);
+    if !blocked && !shortcuts.contains(&adjacent) {
+        shortcuts.push(adjacent);
+    }
+    Ok((executable, shortcuts))
+}
+
+#[cfg(unix)]
+fn create_shortcut(executable: &Path, shortcut: &Path) -> Result<()> {
+    use std::os::unix::fs::symlink;
+
+    let parent = shortcut
+        .parent()
+        .context("the q shortcut has no parent directory")?;
+    fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
+    match fs::symlink_metadata(shortcut) {
+        Ok(_) => {
+            let resolves_to_executable = fs::canonicalize(shortcut)
+                .and_then(|resolved| {
+                    fs::canonicalize(executable).map(|executable| resolved == executable)
+                })
+                .unwrap_or(false);
+            if resolves_to_executable {
+                return Ok(());
+            }
+            bail!(
+                "refusing to replace the existing q command at {}",
+                shortcut.display()
+            )
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {}", shortcut.display()));
+        }
+    }
+    let name = executable
+        .file_name()
+        .context("the Quinjet executable has no file name")?;
+    let target = if shortcut.parent() == executable.parent() {
+        Path::new(name)
+    } else {
+        executable
+    };
+    symlink(target, shortcut)
+        .with_context(|| format!("failed to install the q shortcut at {}", shortcut.display()))
+}
+
+#[cfg(windows)]
+fn create_shortcut(executable: &Path, shortcut: &Path) -> Result<()> {
+    let command = if shortcut.parent() == executable.parent() {
+        let name = executable
+            .file_name()
+            .and_then(OsStr::to_str)
+            .context("the Quinjet executable name is not valid UTF-8")?;
+        format!("%~dp0{name}")
+    } else {
+        executable
+            .to_str()
+            .context("the Quinjet executable path is not valid UTF-8")?
+            .replace('%', "%%")
+    };
+    let contents = format!("@\"{command}\" %*\r\n");
+    match fs::read_to_string(shortcut) {
+        Ok(existing) if existing == contents => return Ok(()),
+        Ok(_) => bail!(
+            "refusing to replace the existing q command at {}",
+            shortcut.display()
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {}", shortcut.display()));
+        }
+    }
+    write_file(shortcut, contents.as_bytes())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn create_shortcut(_executable: &Path, _shortcut: &Path) -> Result<()> {
+    bail!("q shortcut installation is not supported on this platform")
+}
+
+fn remove_profile_integration(profile: &Path, begin: &str, end: &str) -> Result<()> {
+    let contents = match fs::read_to_string(profile) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to read {}", profile.display()));
+        }
+    };
+    let Some((before, block)) = contents.split_once(begin) else {
+        return Ok(());
+    };
+    let Some((_, after)) = block.split_once(end) else {
+        return Ok(());
+    };
+    let after = after.strip_prefix('\n').unwrap_or(after);
+    let mut updated = String::with_capacity(before.len() + after.len());
+    updated.push_str(before);
+    updated.push_str(after);
+    let destination = profile_destination(profile)?;
+    write_file(&destination, updated.as_bytes())
 }
 
 fn integrate_profile(
@@ -507,34 +712,45 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(unix)]
     #[test]
-    fn every_shell_integration_defines_the_q_shortcut() -> Result<()> {
+    fn q_shortcut_resolves_to_the_executable() -> Result<()> {
         let directory = tempfile::tempdir()?;
-        let directories = CompletionDirs {
-            home: directory.path().join("home"),
-            config: directory.path().join("config"),
-            data: directory.path().join("data"),
-            zsh: directory.path().join("zsh"),
-        };
-        for shell in [Shell::Bash, Shell::Elvish, Shell::Fish, Shell::Zsh] {
-            let target = targets_in(shell, &directories)?
-                .into_iter()
-                .next()
-                .context("shell had no completion target")?;
-            let profile = target.profile.context("shell had no profile integration")?;
-            let expected = match shell {
-                Shell::Bash | Shell::Zsh => "alias q='quinjet'",
-                Shell::Elvish => "fn q {|@args| quinjet $@args }",
-                Shell::Fish => "alias q quinjet",
-                _ => return Err(anyhow::anyhow!("unexpected shell")),
-            };
-            ensure!(profile.shortcut == expected);
-        }
-        let powershell = powershell_target(&directory.path().join("profile.ps1"));
-        let profile = powershell
-            .profile
-            .context("PowerShell had no profile integration")?;
-        ensure!(profile.shortcut == "Set-Alias -Name q -Value quinjet");
+        let executable = directory.path().join("quinjet");
+        let shortcut = directory.path().join("q");
+        fs::write(&executable, "binary")?;
+        create_shortcut(&executable, &shortcut)?;
+        ensure!(fs::canonicalize(&shortcut)? == fs::canonicalize(&executable)?);
+        create_shortcut(&executable, &shortcut)?;
+        let fallback = directory.path().join("bin/q");
+        create_shortcut(&executable, &fallback)?;
+        ensure!(fs::canonicalize(&fallback)? == fs::canonicalize(&executable)?);
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn q_shortcut_batch_file_invokes_the_executable() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let executable = directory.path().join("app/quinjet.exe");
+        let shortcut = directory.path().join("bin/q.cmd");
+        fs::create_dir_all(executable.parent().context("executable had no parent")?)?;
+        fs::write(&executable, "binary")?;
+        create_shortcut(&executable, &shortcut)?;
+        ensure!(fs::read_to_string(&shortcut)?.contains(&executable.display().to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_shortcut_block_is_removed() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let profile = directory.path().join("profile");
+        fs::write(
+            &profile,
+            "existing\n# >>> quinjet shortcut >>>\nalias q='quinjet'\n# <<< quinjet shortcut <<<\nafter\n",
+        )?;
+        remove_profile_integration(&profile, LEGACY_SHORTCUT_BEGIN, LEGACY_SHORTCUT_END)?;
+        ensure!(fs::read_to_string(&profile)? == "existing\nafter\n");
         Ok(())
     }
 
@@ -550,7 +766,13 @@ mod tests {
         fs::write(&target, "existing\n")?;
         let profile = directory.path().join(".bashrc");
         symlink(&target, &profile)?;
-        integrate_profile(&profile, SHORTCUT_BEGIN, SHORTCUT_END, "load quinjet", true)?;
+        integrate_profile(
+            &profile,
+            LEGACY_SHORTCUT_BEGIN,
+            LEGACY_SHORTCUT_END,
+            "load quinjet",
+            true,
+        )?;
         ensure!(fs::symlink_metadata(&profile)?.file_type().is_symlink());
         ensure!(fs::read_to_string(&target)?.contains("load quinjet"));
         Ok(())
@@ -560,10 +782,22 @@ mod tests {
     fn profile_integration_is_idempotent() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let profile = directory.path().join("profile");
-        integrate_profile(&profile, SHORTCUT_BEGIN, SHORTCUT_END, "load quinjet", true)?;
-        integrate_profile(&profile, SHORTCUT_BEGIN, SHORTCUT_END, "load quinjet", true)?;
+        integrate_profile(
+            &profile,
+            LEGACY_SHORTCUT_BEGIN,
+            LEGACY_SHORTCUT_END,
+            "load quinjet",
+            true,
+        )?;
+        integrate_profile(
+            &profile,
+            LEGACY_SHORTCUT_BEGIN,
+            LEGACY_SHORTCUT_END,
+            "load quinjet",
+            true,
+        )?;
         let contents = fs::read_to_string(&profile)?;
-        ensure!(contents.matches(SHORTCUT_BEGIN).count() == 1);
+        ensure!(contents.matches(LEGACY_SHORTCUT_BEGIN).count() == 1);
         ensure!(contents.contains("load quinjet"));
         Ok(())
     }

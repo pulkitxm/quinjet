@@ -99,7 +99,7 @@ From the latest source:
 cargo install --git https://github.com/pulkitxm/quinjet --locked
 ```
 
-The first invocation after a Cargo, cargo-binstall, package-manager, or copied-binary installation detects your shell, installs its completions, and adds `q` as a shortcut for `quinjet` in your user configuration. Later invocations refresh stale scripts without rewriting current ones. A persistent installed-once marker means that deleting a generated script or marked profile block opts out permanently; updates do not restore what you removed.
+The first invocation after a Cargo, cargo-binstall, package-manager, or copied-binary installation detects your shell, installs its completions, and adds a `q` launcher on `PATH`, beside the Quinjet executable when that directory is writable. The launcher works in the current shell without reloading its profile. Later invocations refresh stale scripts without rewriting current ones. Persistent installed-once markers mean that deleting a generated script, marked completion block, or `q` launcher opts out permanently; updates do not restore what you removed.
 
 Git is required at runtime. A terminal with true-color support is recommended. The Pull Requests view additionally requires the [GitHub CLI](https://cli.github.com/) with an authenticated account (`gh auth login`). All non-GitHub features remain available without `gh`.
 

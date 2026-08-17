@@ -220,7 +220,7 @@ struct CompletionsArgs {
     /// Shell to write or install a completion script for
     #[arg(value_enum, required_unless_present = "install")]
     shell: Option<Shell>,
-    /// Install completions and a q shortcut into the user's shell configuration
+    /// Install completions and a q launcher on PATH
     #[arg(long)]
     install: bool,
     #[arg(long, hide = true, requires = "install")]

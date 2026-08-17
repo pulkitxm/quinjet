@@ -81,11 +81,12 @@ $ quinjet update
 Updated Quinjet from 1.2.3 to 1.3.0
 ```
 
-The completion refresh is silent. On the first installation it writes the
-generated script plus marked completion and `q` profile integrations. On an
-update it rewrites only completion scripts that still exist. The installed-once
-state described by [`quinjet completions`](./generated/completions.md) prevents
-an update from restoring anything the user removed.
+The shell-integration refresh is silent. On the first installation it writes
+the generated script, any marked completion integration, and a `q` launcher on
+`PATH`. On an update it rewrites only completion scripts that
+still exist. The installed-once state described by
+[`quinjet completions`](./generated/completions.md) prevents an update from
+restoring anything the user removed.
 
 The JSON form has one stable object. `asset` is `null` when no newer release
 exists; `status` is `up_to_date`, `available`, or `updated`:
@@ -114,7 +115,7 @@ failures clean up the temporary file and preserve the old executable. The
 explicit `update` command is the confirmation, so there is no `--yes` flag.
 The startup completion check also runs when the current version is already up
 to date. It repairs a stale existing script without another download, but
-leaves a removed script or marked profile block removed.
+leaves a removed script, marked completion block, or `q` launcher removed.
 
 Cargo's installation tracker is not rewritten. The executable on disk is the
 new release, but Cargo may continue to record the version it originally

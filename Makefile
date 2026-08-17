@@ -45,10 +45,12 @@ install-check: build
 	rm -rf /tmp/quinjet-install
 	$(CARGO) install --path . --locked --root /tmp/quinjet-install
 	HOME=/tmp/quinjet-install/home XDG_DATA_HOME=/tmp/quinjet-install/data SHELL=/bin/bash \
-		/tmp/quinjet-install/bin/quinjet --version
+		PATH=/tmp/quinjet-install/bin:$$PATH /tmp/quinjet-install/bin/quinjet --version
 	test -s /tmp/quinjet-install/data/bash-completion/completions/quinjet
-	grep -F "alias q='quinjet'" /tmp/quinjet-install/home/.bashrc >/dev/null
+	test -L /tmp/quinjet-install/bin/q
+	PATH=/tmp/quinjet-install/bin:$$PATH q --version
 	test -s /tmp/quinjet-install/home/.local/state/quinjet/bash-installed
+	test -s /tmp/quinjet-install/home/.local/state/quinjet/shortcut-installed
 	HOME=/tmp/quinjet-install/home XDG_DATA_HOME=/tmp/quinjet-install/data SHELL=/bin/bash \
 		/tmp/quinjet-install/bin/quinjet --help >/dev/null
 

@@ -273,7 +273,7 @@ install_completions() {
             info "installing ${shell_name} completions"
             "${DESTINATION}" completions "${shell_name}" --install --automatic >/dev/null ||
                 fail "could not install ${shell_name} completions"
-            info "start a new ${shell_name} session to enable completions and q"
+            info "installed q on PATH; start a new ${shell_name} session only to enable completions"
             ;;
         *) ;;
     esac
