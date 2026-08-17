@@ -154,6 +154,13 @@ impl PullRequestTreeEntry {
             Self::Directory { depth, .. } | Self::File { depth, .. } => *depth,
         }
     }
+
+    const fn directory_depth(&self) -> Option<usize> {
+        match self {
+            Self::Directory { depth, .. } => Some(*depth),
+            Self::File { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -1196,13 +1203,9 @@ impl App {
                             .get(..self.pull_request_tree_cursor)
                             .and_then(|parents| {
                                 parents.iter().rposition(|entry| {
-                                    matches!(
-                                        entry,
-                                        PullRequestTreeEntry::Directory {
-                                            depth: parent_depth,
-                                            ..
-                                        } if *parent_depth < depth
-                                    )
+                                    entry
+                                        .directory_depth()
+                                        .is_some_and(|parent_depth| parent_depth < depth)
                                 })
                             });
                     if let Some(cursor) = parent_cursor {
@@ -1216,13 +1219,9 @@ impl App {
                         .get(..self.pull_request_tree_cursor)
                         .and_then(|parents| {
                             parents.iter().rposition(|entry| {
-                                matches!(
-                                    entry,
-                                    PullRequestTreeEntry::Directory {
-                                        depth: parent_depth,
-                                        ..
-                                    } if *parent_depth < depth
-                                )
+                                entry
+                                    .directory_depth()
+                                    .is_some_and(|parent_depth| parent_depth < depth)
                             })
                         });
                 if let Some(cursor) = parent_cursor {
@@ -5182,21 +5181,19 @@ impl App {
 
     pub(crate) fn branch_open_target(&self, branch: &str) -> Option<OpenTarget> {
         self.repository_web_url().map(|repository| {
-            OpenTarget::Browser(format!(
-                "{}/tree/{}",
-                repository.trim_end_matches('/'),
-                encode_url_path(branch)
-            ))
+            let mut url = repository.trim_end_matches('/').to_owned();
+            url.push_str("/tree/");
+            url.push_str(&encode_url_path(branch));
+            OpenTarget::Browser(url)
         })
     }
 
     pub(crate) fn commit_open_target(&self, commit: &str) -> Option<OpenTarget> {
         self.repository_web_url().map(|repository| {
-            OpenTarget::Browser(format!(
-                "{}/commit/{}",
-                repository.trim_end_matches('/'),
-                encode_url_path(commit)
-            ))
+            let mut url = repository.trim_end_matches('/').to_owned();
+            url.push_str("/commit/");
+            url.push_str(&encode_url_path(commit));
+            OpenTarget::Browser(url)
         })
     }
 
