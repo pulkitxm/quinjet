@@ -124,6 +124,9 @@ pub(super) fn auto_install() {
         return;
     }
     let active = detected_shell();
+    if active.is_none() {
+        drop(install_shortcut(true, shell_integration_exists(), false));
+    }
     for shell in shells_to_refresh(active) {
         if completion_is_current(shell).unwrap_or(false) {
             continue;
@@ -184,6 +187,18 @@ fn shells_to_refresh(active: Option<Shell>) -> Vec<Shell> {
         }
     }
     shells
+}
+
+fn shell_integration_exists() -> bool {
+    [
+        Shell::Bash,
+        Shell::Elvish,
+        Shell::Fish,
+        Shell::PowerShell,
+        Shell::Zsh,
+    ]
+    .into_iter()
+    .any(|shell| shell_state(shell).is_ok_and(|state| state.exists()))
 }
 
 fn has_installed_target(shell: Shell) -> bool {

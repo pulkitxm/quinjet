@@ -37,7 +37,8 @@ Usage: install.sh [OPTIONS]
 
 Options:
   -v, --version VERSION  Release to install, such as v0.1.0 (default: latest)
-  -b, --bin-dir DIR      Installation directory (default: $XDG_BIN_HOME or ~/.local/bin)
+  -b, --bin-dir DIR      Installation directory (default: /usr/local/bin as root when on PATH,
+                         otherwise $XDG_BIN_HOME or ~/.local/bin)
       --no-modify-path   Do not update a shell startup file
   -h, --help             Print this help
 
@@ -95,9 +96,19 @@ case "${NO_MODIFY_PATH}" in
     *) fail "QUINJET_NO_MODIFY_PATH must be 0 or 1" ;;
 esac
 
+path_contains() {
+    directory=$1
+    case ":${PATH:-}:" in
+        *:"${directory}":*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 if [ -z "${BIN_DIR}" ]; then
     if [ -n "${XDG_BIN_HOME:-}" ]; then
         BIN_DIR=${XDG_BIN_HOME}
+    elif has id && [ "$(id -u 2>/dev/null || true)" = 0 ] && [ -d /usr/local/bin ] && [ -w /usr/local/bin ] && path_contains /usr/local/bin; then
+        BIN_DIR=/usr/local/bin
     else
         [ -n "${HOME:-}" ] || fail "HOME is not set; provide --bin-dir"
         BIN_DIR=${HOME}/.local/bin
@@ -269,23 +280,23 @@ install_completions() {
     configured_shell=${SHELL:-}
     shell_name=${configured_shell##*/}
     case "${shell_name}" in
-        bash | elvish | fish | zsh)
-            info "installing ${shell_name} completions"
-            "${DESTINATION}" completions "${shell_name}" --install --automatic >/dev/null ||
-                fail "could not install ${shell_name} completions"
-            info "installed q on PATH; start a new ${shell_name} session only to enable completions"
+        bash | elvish | fish | zsh) ;;
+        '')
+            shell_name=bash
+            info "SHELL is not set; using bash completion paths"
             ;;
-        *) ;;
+        *) return ;;
     esac
+    info "installing ${shell_name} completions"
+    "${DESTINATION}" completions "${shell_name}" --install --automatic >/dev/null ||
+        fail "could not install ${shell_name} completions"
+    info "installed q beside Quinjet; start a new ${shell_name} session only to enable completions"
 }
 
 install_completions
 
 path_contains_bin_dir() {
-    case ":${PATH:-}:" in
-        *:"${BIN_DIR}":*) return 0 ;;
-        *) return 1 ;;
-    esac
+    path_contains "${BIN_DIR}"
 }
 
 add_default_dir_to_path() {
@@ -331,11 +342,11 @@ add_default_dir_to_path() {
 printf '\nQuinjet was installed to %s\n' "${DESTINATION}"
 if ! path_contains_bin_dir; then
     if add_default_dir_to_path; then
-        warn "restart your shell or update PATH in the current shell before running quinjet"
+        warn "restart your shell or run the command below before using Quinjet"
     else
         warn "${BIN_DIR} is not on PATH"
-        printf 'Run this before using Quinjet:\n  export PATH="%s:%sPATH"\n' "${BIN_DIR}" '$'
     fi
+    printf 'Run this before using Quinjet in the current shell:\n  export PATH="%s:%sPATH"\n' "${BIN_DIR}" '$'
 fi
 
 if ! has git; then

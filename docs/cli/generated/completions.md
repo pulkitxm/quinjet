@@ -54,10 +54,14 @@ same check on its first invocation. Completion installation also adds a `q`
 launcher beside the Quinjet executable, or in a user bin directory already on
 `PATH` when the executable directory is not writable. On Unix this is a
 symbolic link; on Windows it is `q.cmd`. The launcher is available to the
-current shell immediately. Quinjet never replaces an unrelated `q` command
-that is already on `PATH`. The current shell is
-detected from `$SHELL`, from a PowerShell environment, or from the Windows
-platform. Name a shell explicitly when detection is not appropriate:
+current shell immediately when that directory is already on `PATH`. Quinjet
+never replaces an unrelated `q` command that is already on `PATH`. The current
+shell is detected from `$SHELL`, from a PowerShell environment, or from the
+Windows platform. When no shell is detectable, first-run maintenance still
+installs `q` but leaves completion selection for an explicit command. The Unix
+release installer uses bash completion paths when `$SHELL` is unset so both
+pieces are installed. Name a shell explicitly when detection is not
+appropriate:
 
 ```bash
 quinjet completions --install
