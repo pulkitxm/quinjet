@@ -1,6 +1,5 @@
 mod theme;
 
-use std::collections::HashMap;
 use std::ops::Range;
 
 use ratatui::Frame;
@@ -12,9 +11,9 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use self::theme::Theme;
 use crate::app::{
-    App, ContentFileHit, ContentStepHit, DiffLayout, Focus, Modal, PaletteCommand,
-    PullRequestSection, PullRequestTreeEntry, ScmAction, ScmActionHit, SidebarHit, SidebarHitArea,
-    ToastLevel, UiGeometry, View,
+    App, ChangeRow, ChangeSection, ContentFileHit, ContentStepHit, DiffLayout, Focus, Modal,
+    PaletteCommand, PullRequestSection, PullRequestTreeEntry, ScmAction, ScmActionHit, SidebarHit,
+    SidebarHitArea, ToastLevel, UiGeometry, View,
 };
 use crate::convert::cells;
 use crate::git::diff::{DiffDocument, DiffLine, DiffLineKind, HighlightSpan, PullRequestDetails};
@@ -374,11 +373,19 @@ fn draw_changes_sidebar(
         inner.height.saturating_sub(controls_height),
     );
     let visible = app.visible_change_indices();
-    let row_count = change_row_count(app, &visible);
+    let rows = app.change_rows();
+    let row_count = rows.len();
     let height = list_area.height as usize;
-    let selected_row = selected_change_row(app, &visible);
+    let selected_row = rows
+        .iter()
+        .position(|row| match row {
+            ChangeRow::Section { section, .. } => app.selected_change_section == Some(*section),
+            ChangeRow::Change { cursor, .. } => {
+                app.selected_change_section.is_none() && *cursor == app.change_cursor
+            }
+        })
+        .unwrap_or_default();
     ensure_offset(&mut app.sidebar_offset, selected_row, height, row_count);
-    let rows = build_change_rows(app, &visible);
     let mut hits = Vec::new();
     let mut action_hits = Vec::new();
     let end = (app.sidebar_offset + height).min(rows.len());
@@ -386,8 +393,12 @@ fn draw_changes_sidebar(
         (list_area.y..list_area.bottom()).zip(rows.iter().take(end).skip(app.sidebar_offset))
     {
         match row {
-            ChangeRow::Header { area: group, count } => {
-                let selected = app.selected_change_group == Some(*group);
+            ChangeRow::Section {
+                section,
+                count,
+                collapsed,
+            } => {
+                let selected = app.selected_change_section == Some(*section);
                 let background = if selected {
                     theme.selected
                 } else {
@@ -395,9 +406,12 @@ fn draw_changes_sidebar(
                 };
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![
-                        Span::styled(" ▾ ", Style::default().fg(theme.muted)),
                         Span::styled(
-                            group.label().to_uppercase(),
+                            if *collapsed { " ▸ " } else { " ▾ " },
+                            Style::default().fg(theme.muted),
+                        ),
+                        Span::styled(
+                            section.label().to_uppercase(),
                             Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
                         ),
                         Span::styled(format!("  {count}"), Style::default().fg(theme.muted)),
@@ -405,11 +419,11 @@ fn draw_changes_sidebar(
                     .style(Style::default().bg(background)),
                     Rect::new(list_area.x, y, list_area.width, 1),
                 );
-                let (label, action) = match group {
-                    ChangeArea::Staged => ("[−]", ScmAction::UnstageGroup(*group)),
-                    ChangeArea::Conflict | ChangeArea::Unstaged => {
-                        ("[+]", ScmAction::StageGroup(*group))
-                    }
+                let (label, action) = match section {
+                    ChangeSection::Staged => ("[−]", ScmAction::UnstageSection(*section)),
+                    ChangeSection::Conflict
+                    | ChangeSection::Unstaged
+                    | ChangeSection::Untracked => ("[+]", ScmAction::StageSection(*section)),
                 };
                 let action_area = Rect::new(list_area.right().saturating_sub(4), y, 4, 1);
                 frame.render_widget(
@@ -424,15 +438,19 @@ fn draw_changes_sidebar(
                 });
                 hits.push(SidebarHitArea {
                     area: Rect::new(list_area.x, y, list_area.width, 1),
-                    target: SidebarHit::ChangeGroup(*group),
+                    target: SidebarHit::ChangeSection(*section),
                 });
             }
             ChangeRow::Change {
                 index,
                 cursor,
-                change,
+                section: _,
             } => {
-                let selected = app.selected_change_group.is_none() && *cursor == app.change_cursor;
+                let Some(change) = app.status.changes.get(*index) else {
+                    continue;
+                };
+                let selected =
+                    app.selected_change_section.is_none() && *cursor == app.change_cursor;
                 let row_style = if selected {
                     Style::default().bg(theme.selected)
                 } else {
@@ -446,7 +464,7 @@ fn draw_changes_sidebar(
                 );
                 let line = Line::from(vec![
                     Span::styled(
-                        if selected { " › " } else { "   " },
+                        if selected { " • " } else { "   " },
                         Style::default().fg(theme.accent),
                     ),
                     Span::styled(
@@ -595,123 +613,6 @@ fn draw_changes_sidebar(
         });
     }
     (hits, action_hits)
-}
-
-#[derive(Clone)]
-enum ChangeRow<'a> {
-    Header {
-        area: ChangeArea,
-        count: usize,
-    },
-    Change {
-        index: usize,
-        cursor: usize,
-        change: &'a Change,
-    },
-}
-
-fn selected_change_row(app: &App, visible: &[usize]) -> usize {
-    let selected_index = visible.get(app.change_cursor).copied();
-    let selected_area = selected_index
-        .and_then(|index| app.status.changes.get(index))
-        .map(|change| change.area);
-    let mut row = 0;
-    for area in [
-        ChangeArea::Conflict,
-        ChangeArea::Staged,
-        ChangeArea::Unstaged,
-    ] {
-        let group: Vec<_> = visible
-            .iter()
-            .filter(|index| {
-                app.status
-                    .changes
-                    .get(**index)
-                    .is_some_and(|change| change.area == area)
-            })
-            .copied()
-            .collect();
-        if group.is_empty() {
-            continue;
-        }
-        if app.selected_change_group == Some(area) {
-            return row;
-        }
-        row += 1;
-        if selected_area == Some(area) {
-            return row
-                + group
-                    .iter()
-                    .position(|index| Some(*index) == selected_index)
-                    .unwrap_or_default();
-        }
-        row += group.len();
-    }
-    0
-}
-
-fn change_row_count(app: &App, visible: &[usize]) -> usize {
-    let group_count = [
-        ChangeArea::Conflict,
-        ChangeArea::Staged,
-        ChangeArea::Unstaged,
-    ]
-    .into_iter()
-    .filter(|area| {
-        visible.iter().any(|index| {
-            app.status
-                .changes
-                .get(*index)
-                .is_some_and(|change| change.area == *area)
-        })
-    })
-    .count();
-    visible.len() + group_count
-}
-
-fn build_change_rows<'a>(app: &'a App, visible: &[usize]) -> Vec<ChangeRow<'a>> {
-    let mut rows = Vec::new();
-    let mut cursor_map = HashMap::new();
-    for (cursor, index) in visible.iter().enumerate() {
-        let _ = cursor_map.insert(*index, cursor);
-    }
-    for area in [
-        ChangeArea::Conflict,
-        ChangeArea::Staged,
-        ChangeArea::Unstaged,
-    ] {
-        let group: Vec<_> = visible
-            .iter()
-            .filter(|index| {
-                app.status
-                    .changes
-                    .get(**index)
-                    .is_some_and(|change| change.area == area)
-            })
-            .copied()
-            .collect();
-        if group.is_empty() {
-            continue;
-        }
-        rows.push(ChangeRow::Header {
-            area,
-            count: group.len(),
-        });
-        for index in group {
-            let (Some(cursor), Some(change)) = (
-                cursor_map.get(&index).copied(),
-                app.status.changes.get(index),
-            ) else {
-                continue;
-            };
-            rows.push(ChangeRow::Change {
-                index,
-                cursor,
-                change,
-            });
-        }
-    }
-    rows
 }
 
 fn draw_history_sidebar(
@@ -4816,6 +4717,12 @@ mod tests {
                 area: ChangeArea::Staged,
                 status: ChangeStatus::Modified,
             },
+            Change {
+                path: PathBuf::from("notes.txt"),
+                original_path: None,
+                area: ChangeArea::Unstaged,
+                status: ChangeStatus::Untracked,
+            },
         ];
         let backend = TestBackend::new(120, 30);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -4834,6 +4741,8 @@ mod tests {
         assert!(rendered.contains("[c] Commit"));
         assert!(rendered.contains("[S] Stashes"));
         assert!(rendered.contains("[d] Compare Branch"));
+        assert!(rendered.contains("UNTRACKED CHANGES"));
+        assert!(!rendered.contains('›'));
         assert!(
             app.geometry
                 .scm_action_hits

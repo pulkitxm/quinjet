@@ -12,7 +12,7 @@ use crate::git::github::{
     PullRequestDiffIndex, PullRequestFile, PullRequestFileStatus, PullRequestProgress,
 };
 use crate::git::history::Commit;
-use crate::git::status::{Change, ChangeArea, RepoStatus};
+use crate::git::status::{Change, ChangeArea, ChangeStatus, RepoStatus};
 use crate::git::worker::{WorkerCommand, WorkerEvent};
 use crate::git::{Branch, ConflictChoice, GitOperation, HistoryBranch, LocalDiffRequest, Stash};
 
@@ -55,6 +55,57 @@ pub(crate) enum View {
 pub(crate) enum Focus {
     Sidebar,
     Content,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum ChangeSection {
+    Conflict,
+    Staged,
+    Unstaged,
+    Untracked,
+}
+
+impl ChangeSection {
+    pub(crate) const ALL: [Self; 4] = [
+        Self::Conflict,
+        Self::Staged,
+        Self::Unstaged,
+        Self::Untracked,
+    ];
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Conflict => "Merge Changes",
+            Self::Staged => "Staged Changes",
+            Self::Unstaged => "Changes",
+            Self::Untracked => "Untracked Changes",
+        }
+    }
+
+    pub(crate) fn matches(self, change: &Change) -> bool {
+        match self {
+            Self::Conflict => change.area == ChangeArea::Conflict,
+            Self::Staged => change.area == ChangeArea::Staged,
+            Self::Unstaged => {
+                change.area == ChangeArea::Unstaged && change.status != ChangeStatus::Untracked
+            }
+            Self::Untracked => change.status == ChangeStatus::Untracked,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChangeRow {
+    Section {
+        section: ChangeSection,
+        count: usize,
+        collapsed: bool,
+    },
+    Change {
+        section: ChangeSection,
+        index: usize,
+        cursor: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -479,7 +530,7 @@ impl PaletteCommand {
 
 #[derive(Debug, Clone)]
 pub(crate) enum SidebarHit {
-    ChangeGroup(ChangeArea),
+    ChangeSection(ChangeSection),
     Change(usize),
     Commit(usize),
     PullRequestFiles,
@@ -515,8 +566,8 @@ pub(crate) enum ScmAction {
     Stage(usize),
     Unstage(usize),
     Resolve(usize),
-    StageGroup(ChangeArea),
-    UnstageGroup(ChangeArea),
+    StageSection(ChangeSection),
+    UnstageSection(ChangeSection),
     StageAll,
     UnstageAll,
     Commit,
@@ -542,7 +593,7 @@ pub(crate) enum AuxiliaryPreview {
     reason = "both variants are pointer-sized in practice and boxing would cost an allocation per row"
 )]
 enum ChangeTarget {
-    Group(ChangeArea),
+    Section(ChangeSection),
     Change(usize),
 }
 
@@ -635,7 +686,8 @@ pub(crate) struct App {
     pub pull_request_progress: Option<PullRequestProgress>,
     pub auxiliary_preview: Option<AuxiliaryPreview>,
     pub document: DiffDocument,
-    pub selected_change_group: Option<ChangeArea>,
+    pub selected_change_section: Option<ChangeSection>,
+    pub collapsed_change_sections: HashSet<ChangeSection>,
     pub selected_preview_file: Option<PathBuf>,
     pub preview_file_cursor: usize,
     pub collapsed_preview_files: HashSet<PathBuf>,
@@ -760,7 +812,8 @@ impl App {
             pull_request_progress: None,
             auxiliary_preview: None,
             document: DiffDocument::empty("Working Tree", "Loading changes…"),
-            selected_change_group: Some(ChangeArea::Unstaged),
+            selected_change_section: Some(ChangeSection::Unstaged),
+            collapsed_change_sections: HashSet::new(),
             selected_preview_file: None,
             preview_file_cursor: 0,
             collapsed_preview_files: HashSet::new(),
@@ -1083,53 +1136,70 @@ impl App {
             .and_then(|index| self.status.changes.get(*index))
     }
 
-    pub(crate) fn selected_group_changes(&self) -> Vec<Change> {
-        let Some(group) = self.selected_change_group else {
+    pub(crate) fn selected_section_changes(&self) -> Vec<Change> {
+        let Some(section) = self.selected_change_section else {
             return Vec::new();
         };
         self.visible_change_indices()
             .into_iter()
             .filter_map(|index| self.status.changes.get(index))
-            .filter(|change| change.area == group)
+            .filter(|change| section.matches(change))
             .cloned()
             .collect()
     }
 
-    fn change_targets(&self) -> Vec<ChangeTarget> {
+    pub(crate) fn change_rows(&self) -> Vec<ChangeRow> {
         let visible = self.visible_change_indices();
-        let mut targets = Vec::new();
-        for area in [
-            ChangeArea::Conflict,
-            ChangeArea::Staged,
-            ChangeArea::Unstaged,
-        ] {
-            if visible.iter().any(|index| {
-                self.status
-                    .changes
-                    .get(*index)
-                    .is_some_and(|change| change.area == area)
-            }) {
-                targets.push(ChangeTarget::Group(area));
-                targets.extend(
-                    visible
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, index)| {
-                            self.status
-                                .changes
-                                .get(**index)
-                                .is_some_and(|change| change.area == area)
-                        })
-                        .map(|(cursor, _)| ChangeTarget::Change(cursor)),
+        let mut rows = Vec::new();
+        for section in ChangeSection::ALL {
+            let members = visible
+                .iter()
+                .enumerate()
+                .filter_map(|(cursor, index)| {
+                    self.status
+                        .changes
+                        .get(*index)
+                        .filter(|change| section.matches(change))
+                        .map(|_| (*index, cursor))
+                })
+                .collect::<Vec<_>>();
+            if members.is_empty() {
+                continue;
+            }
+            let collapsed = self.collapsed_change_sections.contains(&section);
+            rows.push(ChangeRow::Section {
+                section,
+                count: members.len(),
+                collapsed,
+            });
+            if !collapsed {
+                rows.extend(
+                    members
+                        .into_iter()
+                        .map(|(index, cursor)| ChangeRow::Change {
+                            section,
+                            index,
+                            cursor,
+                        }),
                 );
             }
         }
-        targets
+        rows
+    }
+
+    fn change_targets(&self) -> Vec<ChangeTarget> {
+        self.change_rows()
+            .into_iter()
+            .map(|row| match row {
+                ChangeRow::Section { section, .. } => ChangeTarget::Section(section),
+                ChangeRow::Change { cursor, .. } => ChangeTarget::Change(cursor),
+            })
+            .collect()
     }
 
     fn selected_change_target(&self) -> Option<ChangeTarget> {
-        self.selected_change_group
-            .map(ChangeTarget::Group)
+        self.selected_change_section
+            .map(ChangeTarget::Section)
             .or(Some(ChangeTarget::Change(self.change_cursor)))
             .filter(|target| self.change_targets().contains(target))
     }
@@ -1269,11 +1339,65 @@ impl App {
 
     const fn select_change_target(&mut self, target: ChangeTarget) {
         match target {
-            ChangeTarget::Group(area) => self.selected_change_group = Some(area),
+            ChangeTarget::Section(section) => self.selected_change_section = Some(section),
             ChangeTarget::Change(cursor) => {
-                self.selected_change_group = None;
+                self.selected_change_section = None;
                 self.change_cursor = cursor;
             }
+        }
+    }
+
+    fn toggle_change_section(&mut self, section: ChangeSection) {
+        if !self.collapsed_change_sections.remove(&section) {
+            let _ = self.collapsed_change_sections.insert(section);
+        }
+        self.selected_change_section = Some(section);
+    }
+
+    fn toggle_selected_change_section(&mut self) -> bool {
+        let Some(section) = self.selected_change_section else {
+            return false;
+        };
+        self.toggle_change_section(section);
+        true
+    }
+
+    fn navigate_change_section_horizontal(&mut self, expand: bool, now: Instant) {
+        let Some(target) = self.selected_change_target() else {
+            return;
+        };
+        match target {
+            ChangeTarget::Section(section) => {
+                let collapsed = self.collapsed_change_sections.contains(&section);
+                if (expand && collapsed) || (!expand && !collapsed) {
+                    self.toggle_change_section(section);
+                } else if expand {
+                    let targets = self.change_targets();
+                    if let Some(index) = targets
+                        .iter()
+                        .position(|candidate| *candidate == target)
+                        .and_then(|index| targets.get(index.saturating_add(1)))
+                        .copied()
+                        .filter(|candidate| matches!(candidate, ChangeTarget::Change(_)))
+                    {
+                        self.select_change_target(index);
+                        self.schedule_preview(now);
+                    }
+                }
+            }
+            ChangeTarget::Change(_) if !expand => {
+                let Some(change) = self.selected_change() else {
+                    return;
+                };
+                if let Some(section) = ChangeSection::ALL
+                    .into_iter()
+                    .find(|section| section.matches(change))
+                {
+                    self.selected_change_section = Some(section);
+                    self.schedule_preview(now);
+                }
+            }
+            ChangeTarget::Change(_) => {}
         }
     }
 
@@ -1451,9 +1575,12 @@ impl App {
             KeyCode::Char('s' | ' ')
                 if self.view == View::Changes
                     && self.focus == Focus::Sidebar
-                    && self.selected_change_group.is_none() =>
+                    && self.selected_change_section.is_none() =>
             {
                 self.toggle_stage_selected(&mut effects);
+            }
+            KeyCode::Char(' ') if self.view == View::Changes && self.focus == Focus::Sidebar => {
+                let _ = self.toggle_selected_change_section();
             }
             KeyCode::Char(' ')
                 if self.view == View::PullRequests
@@ -1476,12 +1603,12 @@ impl App {
                 }
             }
             KeyCode::Char('u')
-                if self.view == View::Changes && self.selected_change_group.is_none() =>
+                if self.view == View::Changes && self.selected_change_section.is_none() =>
             {
                 self.unstage_selected(&mut effects);
             }
             KeyCode::Char('x')
-                if self.view == View::Changes && self.selected_change_group.is_none() =>
+                if self.view == View::Changes && self.selected_change_section.is_none() =>
             {
                 self.confirm_discard();
             }
@@ -1516,7 +1643,11 @@ impl App {
                 self.toggle_check_step(self.pull_request_step_cursor);
             }
             KeyCode::Enter if !self.sidebar_hidden => {
-                if !self.toggle_selected_pull_request_directory() {
+                if !self.toggle_selected_pull_request_directory()
+                    && !(self.view == View::Changes
+                        && self.focus == Focus::Sidebar
+                        && self.toggle_selected_change_section())
+                {
                     self.toggle_focus();
                 }
             }
@@ -1594,6 +1725,12 @@ impl App {
                     && self.pull_request_section == PullRequestSection::Files =>
             {
                 self.navigate_pull_request_tree_horizontal(true, now);
+            }
+            KeyCode::Left if self.focus == Focus::Sidebar && self.view == View::Changes => {
+                self.navigate_change_section_horizontal(false, now);
+            }
+            KeyCode::Right if self.focus == Focus::Sidebar && self.view == View::Changes => {
+                self.navigate_change_section_horizontal(true, now);
             }
             KeyCode::Left | KeyCode::Char('h') if self.focus == Focus::Content => {
                 self.horizontal_scroll = self.horizontal_scroll.saturating_sub(4);
@@ -1704,9 +1841,9 @@ impl App {
                             .map(|hit| hit.target.clone())
                         {
                             match hit {
-                                SidebarHit::ChangeGroup(group) => {
+                                SidebarHit::ChangeSection(section) => {
                                     self.auxiliary_preview = None;
-                                    self.selected_change_group = Some(group);
+                                    self.toggle_change_section(section);
                                     self.schedule_preview(now);
                                 }
                                 SidebarHit::Change(index) => {
@@ -1716,7 +1853,7 @@ impl App {
                                         .position(|visible| *visible == index)
                                     {
                                         self.auxiliary_preview = None;
-                                        self.selected_change_group = None;
+                                        self.selected_change_section = None;
                                         self.change_cursor = cursor;
                                         self.schedule_preview(now);
                                     }
@@ -2038,7 +2175,7 @@ impl App {
                 match result {
                     Ok(status) => {
                         let selected = self
-                            .selected_change_group
+                            .selected_change_section
                             .is_none()
                             .then(|| self.selected_change().cloned())
                             .flatten();
@@ -3271,7 +3408,7 @@ impl App {
             View::Changes => {
                 let targets = self.change_targets();
                 if targets.is_empty() {
-                    self.selected_change_group = Some(ChangeArea::Unstaged);
+                    self.selected_change_section = Some(ChangeSection::Unstaged);
                     self.change_cursor = 0;
                     return;
                 }
@@ -3450,7 +3587,7 @@ impl App {
                     .iter()
                     .position(|visible| *visible == index)
                 {
-                    self.selected_change_group = None;
+                    self.selected_change_section = None;
                     self.change_cursor = cursor;
                 }
                 match action {
@@ -3464,22 +3601,22 @@ impl App {
                     _ => unreachable!(),
                 }
             }
-            ScmAction::StageGroup(area) | ScmAction::UnstageGroup(area) => {
+            ScmAction::StageSection(section) | ScmAction::UnstageSection(section) => {
                 let paths = self
                     .status
                     .changes
                     .iter()
-                    .filter(|change| change.area == area)
+                    .filter(|change| section.matches(change))
                     .map(|change| change.path.clone())
                     .collect::<Vec<_>>();
                 if paths.is_empty() {
                     return;
                 }
                 match action {
-                    ScmAction::StageGroup(_) => {
+                    ScmAction::StageSection(_) => {
                         self.queue_operation(GitOperation::Stage(paths), effects);
                     }
-                    ScmAction::UnstageGroup(_) => {
+                    ScmAction::UnstageSection(_) => {
                         self.queue_operation(GitOperation::Unstage(paths), effects);
                     }
                     _ => unreachable!(),
@@ -3542,7 +3679,7 @@ impl App {
     }
 
     fn toggle_stage_selected(&mut self, effects: &mut Vec<AppEffect>) {
-        if self.selected_change_group.is_some() {
+        if self.selected_change_section.is_some() {
             return;
         }
         let Some(change) = self.selected_change().cloned() else {
@@ -3560,7 +3697,7 @@ impl App {
     }
 
     fn unstage_selected(&mut self, effects: &mut Vec<AppEffect>) {
-        if self.selected_change_group.is_some() {
+        if self.selected_change_section.is_some() {
             return;
         }
         let Some(change) = self.selected_change().cloned() else {
@@ -3572,7 +3709,7 @@ impl App {
     }
 
     fn confirm_discard(&mut self) {
-        if self.selected_change_group.is_some() {
+        if self.selected_change_section.is_some() {
             return;
         }
         let Some(change) = self.selected_change().cloned() else {
@@ -4483,8 +4620,8 @@ impl App {
                         },
                     });
                 }
-                let changes = if self.selected_change_group.is_some() {
-                    self.selected_group_changes()
+                let changes = if self.selected_change_section.is_some() {
+                    self.selected_section_changes()
                 } else {
                     self.selected_change().cloned().into_iter().collect()
                 };
@@ -4692,18 +4829,23 @@ impl App {
                 })
             })
         {
-            self.selected_change_group = None;
+            self.selected_change_section = None;
             self.change_cursor = cursor;
             return;
         }
         if self.selected_change_target().is_none() {
-            if visible.iter().any(|index| {
-                self.status
-                    .changes
-                    .get(*index)
-                    .is_some_and(|change| change.area == ChangeArea::Unstaged)
-            }) {
-                self.selected_change_group = Some(ChangeArea::Unstaged);
+            let preferred = [ChangeSection::Unstaged, ChangeSection::Untracked]
+                .into_iter()
+                .find(|section| {
+                    visible.iter().any(|index| {
+                        self.status
+                            .changes
+                            .get(*index)
+                            .is_some_and(|change| section.matches(change))
+                    })
+                });
+            if let Some(section) = preferred {
+                self.selected_change_section = Some(section);
             } else if let Some(target) = self.change_targets().first().copied() {
                 self.select_change_target(target);
             }
@@ -4964,7 +5106,7 @@ mod tests {
                 },
             ],
         };
-        app.selected_change_group = None;
+        app.selected_change_section = None;
         app
     }
 
@@ -5251,17 +5393,44 @@ mod tests {
     }
 
     #[test]
-    fn navigating_changes_includes_selectable_group_headers() {
+    fn change_sections_share_navigation_folding_and_membership() {
         let mut app = app_with_changes();
         let now = Instant::now();
-        app.selected_change_group = Some(ChangeArea::Staged);
+        app.status.changes.push(Change {
+            path: PathBuf::from("new.txt"),
+            original_path: None,
+            area: ChangeArea::Unstaged,
+            status: ChangeStatus::Untracked,
+        });
+        app.selected_change_section = Some(ChangeSection::Staged);
 
         app.navigate(1, now);
-        assert!(app.selected_change_group.is_none());
+        assert!(app.selected_change_section.is_none());
         assert_eq!(app.selected_change().unwrap().area, ChangeArea::Staged);
         app.navigate(1, now);
-        assert_eq!(app.selected_change_group, Some(ChangeArea::Unstaged));
-        assert_eq!(app.selected_group_changes().len(), 1);
+        assert_eq!(app.selected_change_section, Some(ChangeSection::Unstaged));
+        assert_eq!(app.selected_section_changes().len(), 1);
+
+        assert!(app.toggle_selected_change_section());
+        assert!(
+            app.collapsed_change_sections
+                .contains(&ChangeSection::Unstaged)
+        );
+        assert!(!app.change_rows().iter().any(|row| matches!(
+            row,
+            ChangeRow::Change {
+                section: ChangeSection::Unstaged,
+                ..
+            }
+        )));
+
+        app.navigate(1, now);
+        assert_eq!(app.selected_change_section, Some(ChangeSection::Untracked));
+        assert_eq!(app.selected_section_changes().len(), 1);
+        assert_eq!(
+            app.selected_section_changes()[0].path,
+            PathBuf::from("new.txt")
+        );
     }
 
     #[test]
@@ -5290,6 +5459,35 @@ mod tests {
                 } if paths == &[PathBuf::from("src/main.rs")]
             )
         ));
+    }
+
+    #[test]
+    fn clicking_a_change_section_selects_and_collapses_only_that_section() {
+        let mut app = app_with_changes();
+        app.geometry.sidebar = Rect::new(0, 0, 40, 20);
+        app.geometry.sidebar_hits = vec![SidebarHitArea {
+            area: Rect::new(0, 3, 40, 1),
+            target: SidebarHit::ChangeSection(ChangeSection::Unstaged),
+        }];
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 8,
+            row: 3,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        app.handle_mouse(click, Instant::now());
+
+        assert_eq!(app.selected_change_section, Some(ChangeSection::Unstaged));
+        assert!(
+            app.collapsed_change_sections
+                .contains(&ChangeSection::Unstaged)
+        );
+        assert!(
+            app.selected_section_changes()
+                .iter()
+                .all(|change| change.status != ChangeStatus::Untracked)
+        );
     }
 
     #[test]
