@@ -10,8 +10,12 @@ FIXTURES=${TEST_ROOT}/fixtures
 FAKE_BIN=${TEST_ROOT}/bin
 DOWNLOAD_LOG=${TEST_ROOT}/downloads.log
 ORIGINAL_PATH=${PATH}
+ROOT_INSTALLATION=
 
 cleanup() {
+    if [ -n "${ROOT_INSTALLATION}" ]; then
+        rm -f /usr/local/bin/quinjet /usr/local/bin/q
+    fi
     rm -rf "${TEST_ROOT}"
 }
 trap cleanup EXIT HUP INT TERM
@@ -95,7 +99,7 @@ run_installer() {
     env \
         HOME="${test_home}" \
         PATH="${FAKE_BIN}:${ORIGINAL_PATH}" \
-        SHELL="${QUINJET_TEST_SHELL:-/bin/sh}" \
+        SHELL="${QUINJET_TEST_SHELL-/bin/sh}" \
         QUINJET_TEST_OS="${test_os}" \
         QUINJET_TEST_ARCH="${test_arch}" \
         QUINJET_TEST_FIXTURES="${FIXTURES}" \
@@ -157,6 +161,22 @@ QUINJET_TEST_SHELL=/bin/bash run_installer "${home_dir}" Linux x86_64 --bin-dir 
 assert_contains 'generated bash completions' "${home_dir}/.local/share/bash-completion/completions/quinjet"
 assert_contains 'installing bash completions' "${case_dir}.out"
 
+printf 'test: installs q when SHELL is empty\n'
+case_dir=${TEST_ROOT}/empty-shell
+home_dir=${case_dir}/home
+bin_dir=${case_dir}/bin
+prepare_release quinjet-linux-x86_64 '#!/bin/sh
+set -eu
+[ "$1" = completions ] && [ "$2" = bash ] && [ "$3" = --install ] && [ "$4" = --automatic ]
+target=${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/quinjet
+mkdir -p "$(dirname "$target")"
+printf "fallback bash completions\\n" >"$target"
+ln -s quinjet "$(dirname "$0")/q"'
+QUINJET_TEST_SHELL='' run_installer "${home_dir}" Linux x86_64 --bin-dir "${bin_dir}" >"${case_dir}.out" 2>&1
+[ -L "${bin_dir}/q" ] || fail "q was not installed when SHELL was empty"
+assert_contains 'fallback bash completions' "${home_dir}/.local/share/bash-completion/completions/quinjet"
+assert_contains 'SHELL is not set; using bash completion paths' "${case_dir}.out"
+
 printf 'test: updates a shell profile once for the default bin directory\n'
 case_dir=${TEST_ROOT}/path-update
 home_dir=${case_dir}/home
@@ -172,7 +192,7 @@ for run in 1 2; do
         QUINJET_TEST_ARCH=x86_64 \
         QUINJET_TEST_FIXTURES="${FIXTURES}" \
         QUINJET_TEST_DOWNLOAD_LOG="${DOWNLOAD_LOG}" \
-        sh "${INSTALLER}" >"${case_dir}.${run}.out" 2>&1
+        sh "${INSTALLER}" --bin-dir "${home_dir}/.local/bin" >"${case_dir}.${run}.out" 2>&1
 done
 assert_equals '1' "$(grep -c "^export PATH=\"\\\$HOME/.local/bin:\\\$PATH\"\$" "${home_dir}/.zshrc")"
 assert_contains 'Added by the Quinjet installer' "${home_dir}/.zshrc"
@@ -196,5 +216,37 @@ fi
 after=$(wc -l <"${DOWNLOAD_LOG}" | tr -d ' ')
 assert_equals "${before}" "${after}"
 assert_contains 'invalid release version' "${case_dir}.out"
+
+if [ "${QUINJET_TEST_ROOT_DEFAULT:-0}" = 1 ]; then
+    printf 'test: root installation is immediately available on PATH\n'
+    assert_equals '0' "$(id -u)"
+    [ ! -e /usr/local/bin/quinjet ] || fail "/usr/local/bin/quinjet already exists"
+    [ ! -e /usr/local/bin/q ] || fail "/usr/local/bin/q already exists"
+    case_dir=${TEST_ROOT}/root-default
+    home_dir=${case_dir}/home
+    prepare_release quinjet-linux-x86_64 '#!/bin/sh
+set -eu
+case "$1" in
+    completions)
+        [ "$2" = bash ] && [ "$3" = --install ] && [ "$4" = --automatic ]
+        ln -s quinjet "$(dirname "$0")/q"
+        ;;
+    --version) printf "quinjet test\\n" ;;
+    *) exit 2 ;;
+esac'
+    ROOT_INSTALLATION=1
+    env \
+        HOME="${home_dir}" \
+        PATH="/usr/local/bin:${FAKE_BIN}:${ORIGINAL_PATH}" \
+        SHELL= \
+        QUINJET_TEST_OS=Linux \
+        QUINJET_TEST_ARCH=x86_64 \
+        QUINJET_TEST_FIXTURES="${FIXTURES}" \
+        QUINJET_TEST_DOWNLOAD_LOG="${DOWNLOAD_LOG}" \
+        sh "${INSTALLER}" >"${case_dir}.out" 2>&1
+    assert_contains 'installed to /usr/local/bin/quinjet' "${case_dir}.out"
+    assert_equals 'quinjet test' "$(PATH=/usr/local/bin quinjet --version)"
+    assert_equals 'quinjet test' "$(PATH=/usr/local/bin q --version)"
+fi
 
 printf 'All shell installer tests passed.\n'

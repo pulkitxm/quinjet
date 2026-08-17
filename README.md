@@ -52,7 +52,7 @@ On Windows PowerShell:
 powershell -c "irm https://quinjet.pulkit.page/install.ps1 | iex"
 ```
 
-The installer detects the operating system and CPU architecture, downloads the matching binary from the latest GitHub release, verifies its SHA-256 checksum, adds the installation directory to `PATH` when needed, installs completions for your configured shell, and adds `q` as a shortcut for `quinjet`. It does not require Rust or Cargo.
+The installer detects the operating system and CPU architecture, downloads the matching binary from the latest GitHub release, verifies its SHA-256 checksum, adds the installation directory to `PATH` when needed, installs completions, and adds `q` as a shortcut for `quinjet`. A root installation uses `/usr/local/bin` when it is writable and already on `PATH`, which makes both commands available in the current shell, including in containers. Other installations use the configured user directory and print the exact `export PATH=...` command when the parent shell still needs it. It does not require Rust or Cargo.
 
 Pass `--version` or `--bin-dir` to the shell installer to select a release or installation directory:
 
@@ -99,7 +99,7 @@ From the latest source:
 cargo install --git https://github.com/pulkitxm/quinjet --locked
 ```
 
-The first invocation after a Cargo, cargo-binstall, package-manager, or copied-binary installation detects your shell, installs its completions, and adds a `q` launcher on `PATH`, beside the Quinjet executable when that directory is writable. The launcher works in the current shell without reloading its profile. Later invocations refresh stale scripts without rewriting current ones. Persistent installed-once markers mean that deleting a generated script, marked completion block, or `q` launcher opts out permanently; updates do not restore what you removed.
+The first invocation after a Cargo, cargo-binstall, package-manager, or copied-binary installation detects your shell, installs its completions, and adds a `q` launcher on `PATH`, beside the Quinjet executable when that directory is writable. Even when no shell can be detected, the first invocation still installs `q`. The launcher works in the current shell whenever the executable directory was already on `PATH`; no profile reload is needed for `q` itself. Later invocations refresh stale scripts without rewriting current ones. Persistent installed-once markers mean that deleting a generated script, marked completion block, or `q` launcher opts out permanently; updates do not restore what you removed.
 
 Git is required at runtime. A terminal with true-color support is recommended. The Pull Requests view additionally requires the [GitHub CLI](https://cli.github.com/) with an authenticated account (`gh auth login`). All non-GitHub features remain available without `gh`.
 

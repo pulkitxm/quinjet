@@ -13,6 +13,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(not(windows))]
+use std::thread;
+#[cfg(not(windows))]
+use std::time::Duration;
 
 use anyhow::{Context, Result, ensure};
 
@@ -86,6 +90,21 @@ fn isolate_git(command: &mut ProcessCommand) {
         .env("LC_ALL", "C")
         .env("GIT_CONFIG_GLOBAL", GIT_NULL_DEVICE)
         .env("GIT_CONFIG_NOSYSTEM", "1");
+}
+
+#[cfg(not(windows))]
+fn copied_binary_output(command: &mut ProcessCommand, context: &str) -> Result<Output> {
+    let mut retries = 20;
+    loop {
+        match command.output() {
+            Ok(output) => return Ok(output),
+            Err(error) if error.raw_os_error() == Some(26) && retries > 0 => {
+                retries -= 1;
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => return Err(error).context(context.to_owned()),
+        }
+    }
 }
 
 struct Scratch {
@@ -583,7 +602,11 @@ fn shell_integration_makes_q_immediate_without_restoring_removals() -> Result<()
             .env("SHELL", "/bin/bash")
             .env("PSModulePath", "inherited-but-not-active");
         isolate_git(&mut update);
-        Run::from(update.output().context("failed to refresh completions")?)?.success()
+        Run::from(copied_binary_output(
+            &mut update,
+            "failed to refresh completions",
+        )?)?
+        .success()
     };
 
     fs::write(&shortcut, "unrelated q command\n")?;
@@ -607,11 +630,10 @@ fn shell_integration_makes_q_immediate_without_restoring_removals() -> Result<()
     invoke_q
         .arg("--version")
         .env("PATH", std::env::join_paths(path)?);
-    let q = Run::from(
-        invoke_q
-            .output()
-            .context("q was unavailable in the current shell")?,
-    )?
+    let q = Run::from(copied_binary_output(
+        &mut invoke_q,
+        "q was unavailable in the current shell",
+    )?)?
     .success()?;
     ensure!(q.stdout.contains("quinjet"));
 
@@ -631,9 +653,54 @@ fn shell_integration_makes_q_immediate_without_restoring_removals() -> Result<()
         .env("PATH", &bin)
         .env("SHELL", "/bin/bash");
     isolate_git(&mut restore);
-    drop(Run::from(restore.output().context("failed to restore completions")?)?.success()?);
+    drop(
+        Run::from(copied_binary_output(
+            &mut restore,
+            "failed to restore completions",
+        )?)?
+        .success()?,
+    );
     ensure!(completion.exists());
     ensure!(shortcut.exists());
+    Ok(())
+}
+
+#[cfg(all(not(windows), not(debug_assertions)))]
+#[test]
+fn shell_integration_without_a_detected_shell_still_installs_q() -> Result<()> {
+    let scratch = Scratch::directory()?;
+    let bin = scratch.path.join("bin");
+    let executable = bin.join("quinjet");
+    let shortcut = bin.join("q");
+    fs::create_dir_all(&bin)?;
+    let staged = bin.join("quinjet-stage");
+    fs::copy(env!("CARGO_BIN_EXE_quinjet"), &staged)?;
+    fs::rename(staged, &executable)?;
+
+    let mut first_run = ProcessCommand::new(&executable);
+    first_run
+        .arg("--version")
+        .env("HOME", &scratch.path)
+        .env("PATH", &bin)
+        .env_remove("PSModulePath")
+        .env_remove("SHELL");
+    isolate_git(&mut first_run);
+    drop(Run::from(copied_binary_output(&mut first_run, "failed first run")?)?.success()?);
+    ensure!(shortcut.exists());
+
+    let mut invoke_q = ProcessCommand::new("q");
+    invoke_q
+        .arg("--version")
+        .env("HOME", &scratch.path)
+        .env("PATH", &bin)
+        .env_remove("PSModulePath")
+        .env_remove("SHELL");
+    let q = Run::from(copied_binary_output(
+        &mut invoke_q,
+        "q was unavailable on PATH",
+    )?)?
+    .success()?;
+    ensure!(q.stdout.contains("quinjet"));
     Ok(())
 }
 
