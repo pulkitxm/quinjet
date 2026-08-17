@@ -5,6 +5,7 @@ mod update;
 mod watch;
 
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -1864,6 +1865,14 @@ const fn interval(seconds: u64, floor: u64) -> Duration {
 }
 
 pub(crate) fn open_url(url: &str) -> Result<()> {
+    open_target(OsStr::new(url), url)
+}
+
+pub(crate) fn open_path(path: &Path) -> Result<()> {
+    open_target(path.as_os_str(), &path.display().to_string())
+}
+
+fn open_target(target: &OsStr, display: &str) -> Result<()> {
     let opener = if cfg!(target_os = "macos") {
         "open"
     } else if cfg!(target_os = "windows") {
@@ -1873,12 +1882,12 @@ pub(crate) fn open_url(url: &str) -> Result<()> {
     };
     drop(
         std::process::Command::new(opener)
-            .arg(url)
+            .arg(target)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .with_context(|| format!("failed to hand {url} to {opener}"))?,
+            .with_context(|| format!("failed to hand {display} to {opener}"))?,
     );
     Ok(())
 }

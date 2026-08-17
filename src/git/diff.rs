@@ -200,6 +200,17 @@ pub(crate) struct DiffIndex {
 }
 
 impl DiffIndex {
+    pub(crate) fn line_counts(&self) -> DiffLineCounts {
+        self.files.iter().filter_map(|file| file.counts).fold(
+            DiffLineCounts::default(),
+            |total, counts| DiffLineCounts {
+                additions: total.additions.saturating_add(counts.additions),
+                deletions: total.deletions.saturating_add(counts.deletions),
+                binary: total.binary || counts.binary,
+            },
+        )
+    }
+
     #[cfg(test)]
     pub(crate) fn document(&self, loaded: &HashMap<PathBuf, DiffDocument>) -> DiffDocument {
         self.document_with_visibility(loaded, |_| true)
@@ -1120,6 +1131,52 @@ mod tests {
             ]
         );
         assert!(!skeleton.lines.iter().any(|line| line.text().contains("+?")));
+    }
+
+    #[test]
+    fn indexed_totals_do_not_depend_on_loaded_or_visible_patches() {
+        let index = DiffIndex {
+            title: "Commit".to_owned(),
+            files: vec![
+                DiffFileIndexEntry {
+                    path: PathBuf::from("one.rs"),
+                    old_path: None,
+                    status: "modified".to_owned(),
+                    counts: Some(DiffLineCounts {
+                        additions: 12,
+                        deletions: 2,
+                        binary: false,
+                    }),
+                },
+                DiffFileIndexEntry {
+                    path: PathBuf::from("two.rs"),
+                    old_path: None,
+                    status: "modified".to_owned(),
+                    counts: Some(DiffLineCounts {
+                        additions: 3,
+                        deletions: 7,
+                        binary: false,
+                    }),
+                },
+            ],
+            truncated: false,
+            commit_details: None,
+        };
+
+        assert_eq!(
+            index.line_counts(),
+            DiffLineCounts {
+                additions: 15,
+                deletions: 9,
+                binary: false,
+            }
+        );
+        assert_eq!(
+            index
+                .document_with_visibility(&HashMap::new(), |_| false)
+                .addition_count(),
+            0
+        );
     }
 
     #[test]

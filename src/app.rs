@@ -1,4 +1,6 @@
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::ffi::OsString;
+use std::fmt::Write;
 use std::mem::size_of_val;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -14,7 +16,7 @@ use crate::git::github::{
     PullRequestDiffIndex, PullRequestFile, PullRequestFileStatus, PullRequestProgress,
 };
 use crate::git::history::Commit;
-use crate::git::status::{Change, ChangeArea, RepoStatus};
+use crate::git::status::{Change, ChangeArea, ChangeStatus, RepoStatus};
 use crate::git::worker::{WorkerCommand, WorkerEvent};
 use crate::git::{Branch, ConflictChoice, GitOperation, HistoryBranch, LocalDiffRequest, Stash};
 
@@ -46,6 +48,7 @@ const MIN_CONTENT_WIDTH: u16 = 32;
 const DEFAULT_DIFF_SPLIT_PERCENT: u16 = 50;
 const MIN_DIFF_SPLIT_PERCENT: u16 = 20;
 const MAX_DIFF_SPLIT_PERCENT: u16 = 80;
+const OPERATION_SPINNER: [&str; 4] = ["◐", "◓", "◑", "◒"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum View {
@@ -58,6 +61,57 @@ pub(crate) enum View {
 pub(crate) enum Focus {
     Sidebar,
     Content,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum ChangeSection {
+    Conflict,
+    Staged,
+    Unstaged,
+    Untracked,
+}
+
+impl ChangeSection {
+    pub(crate) const ALL: [Self; 4] = [
+        Self::Conflict,
+        Self::Staged,
+        Self::Unstaged,
+        Self::Untracked,
+    ];
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Conflict => "Merge Changes",
+            Self::Staged => "Staged Changes",
+            Self::Unstaged => "Changes",
+            Self::Untracked => "Untracked Changes",
+        }
+    }
+
+    pub(crate) fn matches(self, change: &Change) -> bool {
+        match self {
+            Self::Conflict => change.area == ChangeArea::Conflict,
+            Self::Staged => change.area == ChangeArea::Staged,
+            Self::Unstaged => {
+                change.area == ChangeArea::Unstaged && change.status != ChangeStatus::Untracked
+            }
+            Self::Untracked => change.status == ChangeStatus::Untracked,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChangeRow {
+    Section {
+        section: ChangeSection,
+        count: usize,
+        collapsed: bool,
+    },
+    Change {
+        section: ChangeSection,
+        index: usize,
+        cursor: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,8 +137,15 @@ pub(crate) enum PullRequestFileView {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PullRequestTreeEntry {
-    Directory { path: PathBuf, depth: usize },
-    File { index: usize, depth: usize },
+    Directory {
+        path: PathBuf,
+        label: String,
+        depth: usize,
+    },
+    File {
+        index: usize,
+        depth: usize,
+    },
 }
 
 impl PullRequestTreeEntry {
@@ -93,6 +154,79 @@ impl PullRequestTreeEntry {
             Self::Directory { depth, .. } | Self::File { depth, .. } => *depth,
         }
     }
+
+    const fn directory_depth(&self) -> Option<usize> {
+        match self {
+            Self::Directory { depth, .. } => Some(*depth),
+            Self::File { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct PullRequestTreeNode {
+    path: PathBuf,
+    directories: BTreeMap<OsString, Self>,
+    files: Vec<usize>,
+}
+
+impl PullRequestTreeNode {
+    fn insert(&mut self, path: &Path, index: usize) {
+        let components = path.components().collect::<Vec<_>>();
+        let mut directory = PathBuf::new();
+        let mut node = self;
+        for component in components.iter().take(components.len().saturating_sub(1)) {
+            directory.push(component.as_os_str());
+            node = node
+                .directories
+                .entry(component.as_os_str().to_os_string())
+                .or_insert_with(|| Self {
+                    path: directory.clone(),
+                    ..Self::default()
+                });
+        }
+        node.files.push(index);
+    }
+
+    fn append_entries(
+        &self,
+        depth: usize,
+        collapsed: &HashSet<PathBuf>,
+        entries: &mut Vec<PullRequestTreeEntry>,
+    ) {
+        for directory in self.directories.values() {
+            let mut compacted = directory;
+            let mut label = compacted
+                .path
+                .file_name()
+                .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+            while compacted.files.is_empty() && compacted.directories.len() == 1 {
+                let Some(child) = compacted.directories.values().next() else {
+                    break;
+                };
+                label.push('/');
+                label.push_str(
+                    &child
+                        .path
+                        .file_name()
+                        .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+                );
+                compacted = child;
+            }
+            entries.push(PullRequestTreeEntry::Directory {
+                path: compacted.path.clone(),
+                label,
+                depth,
+            });
+            if !collapsed.contains(&compacted.path) {
+                compacted.append_entries(depth.saturating_add(1), collapsed, entries);
+            }
+        }
+        entries.extend(self.files.iter().map(|index| PullRequestTreeEntry::File {
+            index: *index,
+            depth,
+        }));
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,6 +234,18 @@ pub(crate) enum ToastLevel {
     Info,
     Success,
     Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum OpenTarget {
+    Browser(String),
+    Path(PathBuf),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct LinkHit {
+    pub area: Rect,
+    pub target: OpenTarget,
 }
 
 #[derive(Debug, Clone)]
@@ -482,7 +628,7 @@ impl PaletteCommand {
 
 #[derive(Debug, Clone)]
 pub(crate) enum SidebarHit {
-    ChangeGroup(ChangeArea),
+    ChangeSection(ChangeSection),
     Change(usize),
     Commit(usize),
     PullRequestFiles,
@@ -526,8 +672,8 @@ pub(crate) enum ScmAction {
     Stage(usize),
     Unstage(usize),
     Resolve(usize),
-    StageGroup(ChangeArea),
-    UnstageGroup(ChangeArea),
+    StageSection(ChangeSection),
+    UnstageSection(ChangeSection),
     StageAll,
     UnstageAll,
     Commit,
@@ -553,7 +699,7 @@ pub(crate) enum AuxiliaryPreview {
     reason = "both variants are pointer-sized in practice and boxing would cost an allocation per row"
 )]
 enum ChangeTarget {
-    Group(ChangeArea),
+    Section(ChangeSection),
     Change(usize),
 }
 
@@ -571,13 +717,14 @@ pub(crate) struct UiGeometry {
     pub scm_action_hits: Vec<ScmActionHit>,
     pub content_file_hits: Vec<ContentFileHit>,
     pub content_step_hits: Vec<ContentStepHit>,
+    pub link_hits: Vec<LinkHit>,
 }
 
 #[derive(Debug)]
 pub(crate) enum AppEffect {
     Git(Box<WorkerCommand>),
     SetMouseCapture(bool),
-    OpenUrl(String),
+    Open(OpenTarget),
     Quit,
 }
 
@@ -596,6 +743,7 @@ pub(crate) struct App {
     pub history_branch: Option<HistoryBranch>,
     pub pull_request: Option<PullRequest>,
     pub github_repositories: Vec<GitHubRepository>,
+    pub local_github_repository: Option<GitHubRepository>,
     pub pull_request_repository: Option<GitHubRepository>,
     pub pull_request_warnings: Vec<String>,
     /// Why the last lookup failed. The pull-request pane renders app state
@@ -649,7 +797,8 @@ pub(crate) struct App {
     pub pull_request_progress: Option<PullRequestProgress>,
     pub auxiliary_preview: Option<AuxiliaryPreview>,
     pub document: DiffDocument,
-    pub selected_change_group: Option<ChangeArea>,
+    pub selected_change_section: Option<ChangeSection>,
+    pub collapsed_change_sections: HashSet<ChangeSection>,
     pub selected_preview_file: Option<PathBuf>,
     pub preview_file_cursor: usize,
     pub collapsed_preview_files: HashSet<PathBuf>,
@@ -672,6 +821,7 @@ pub(crate) struct App {
     pub mouse_capture: bool,
     pub webhooks_listening: bool,
     pub busy: Option<String>,
+    pub operation_frame: usize,
     pub refreshing: bool,
     pub document_loading: bool,
     pub history_loading: bool,
@@ -742,6 +892,7 @@ impl App {
             history_branch: None,
             pull_request: None,
             github_repositories: Vec::new(),
+            local_github_repository: None,
             pull_request_repository: None,
             pull_request_warnings: Vec::new(),
             pull_request_error: None,
@@ -784,7 +935,8 @@ impl App {
             pull_request_progress: None,
             auxiliary_preview: None,
             document: DiffDocument::empty("Working Tree", "Loading changes…"),
-            selected_change_group: Some(ChangeArea::Unstaged),
+            selected_change_section: Some(ChangeSection::Unstaged),
+            collapsed_change_sections: HashSet::new(),
             selected_preview_file: None,
             preview_file_cursor: 0,
             collapsed_preview_files: HashSet::new(),
@@ -807,6 +959,7 @@ impl App {
             mouse_capture: true,
             webhooks_listening: false,
             busy: None,
+            operation_frame: 0,
             refreshing: false,
             document_loading: false,
             history_loading: false,
@@ -860,6 +1013,9 @@ impl App {
         self.request_refresh(&mut effects);
         self.request_history(true, &mut effects);
         self.request_history_branches(&mut effects);
+        effects.push(AppEffect::Git(Box::new(
+            WorkerCommand::LoadLocalGitHubRepository,
+        )));
         effects
     }
 
@@ -929,35 +1085,11 @@ impl App {
 
     fn rebuild_pull_request_tree(&mut self) {
         let mut entries = Vec::with_capacity(self.pull_request_files.len().saturating_mul(2));
-        let mut seen_directories = BTreeSet::new();
+        let mut root = PullRequestTreeNode::default();
         for (index, file) in self.pull_request_files.iter().enumerate() {
-            let components = file.path.components().collect::<Vec<_>>();
-            let mut directory = PathBuf::new();
-            let mut hidden = false;
-            for (depth, component) in components
-                .iter()
-                .take(components.len().saturating_sub(1))
-                .enumerate()
-            {
-                directory.push(component.as_os_str());
-                if seen_directories.insert(directory.clone()) {
-                    entries.push(PullRequestTreeEntry::Directory {
-                        path: directory.clone(),
-                        depth,
-                    });
-                }
-                if self.collapsed_pull_request_directories.contains(&directory) {
-                    hidden = true;
-                    break;
-                }
-            }
-            if !hidden {
-                entries.push(PullRequestTreeEntry::File {
-                    index,
-                    depth: components.len().saturating_sub(1),
-                });
-            }
+            root.insert(&file.path, index);
         }
+        root.append_entries(0, &self.collapsed_pull_request_directories, &mut entries);
         self.pull_request_tree = entries;
     }
 
@@ -1053,7 +1185,7 @@ impl App {
             return;
         };
         match entry {
-            PullRequestTreeEntry::Directory { path, depth } => {
+            PullRequestTreeEntry::Directory { path, depth, .. } => {
                 let collapsed = self.pull_request_directory_collapsed(&path);
                 if (expand && collapsed) || (!expand && !collapsed) {
                     self.toggle_pull_request_directory(path);
@@ -1066,36 +1198,32 @@ impl App {
                         self.select_pull_request_tree_entry(child, now);
                     }
                 } else {
-                    let parent_cursor = path
-                        .parent()
-                        .filter(|parent| !parent.as_os_str().is_empty())
-                        .and_then(|parent| {
-                            entries.iter().position(|entry| {
-                                matches!(
-                                    entry,
-                                    PullRequestTreeEntry::Directory { path, .. }
-                                        if path == parent
-                                )
-                            })
-                        });
+                    let parent_cursor =
+                        entries
+                            .get(..self.pull_request_tree_cursor)
+                            .and_then(|parents| {
+                                parents.iter().rposition(|entry| {
+                                    entry
+                                        .directory_depth()
+                                        .is_some_and(|parent_depth| parent_depth < depth)
+                                })
+                            });
                     if let Some(cursor) = parent_cursor {
                         self.pull_request_tree_cursor = cursor;
                     }
                 }
             }
-            PullRequestTreeEntry::File { index, .. } if !expand => {
-                let parent_cursor = self
-                    .pull_request_files
-                    .get(index)
-                    .and_then(|file| file.path.parent())
-                    .and_then(|parent| {
-                        entries.iter().position(|entry| {
-                            matches!(
-                                entry,
-                                PullRequestTreeEntry::Directory { path, .. } if path == parent
-                            )
-                        })
-                    });
+            PullRequestTreeEntry::File { depth, .. } if !expand => {
+                let parent_cursor =
+                    entries
+                        .get(..self.pull_request_tree_cursor)
+                        .and_then(|parents| {
+                            parents.iter().rposition(|entry| {
+                                entry
+                                    .directory_depth()
+                                    .is_some_and(|parent_depth| parent_depth < depth)
+                            })
+                        });
                 if let Some(cursor) = parent_cursor {
                     self.pull_request_tree_cursor = cursor;
                 }
@@ -1109,9 +1237,20 @@ impl App {
             let loaded = if index.files.len() == 1 && self.local_diff_single_loaded {
                 1
             } else {
-                self.local_diff_documents.len()
+                index
+                    .files
+                    .iter()
+                    .filter(|file| self.local_diff_documents.contains_key(&file.path))
+                    .count()
             };
             (loaded, index.files.len())
+        })
+    }
+
+    pub(crate) fn local_diff_line_counts(&self) -> Option<(usize, usize)> {
+        self.local_diff_index.as_ref().map(|index| {
+            let counts = index.line_counts();
+            (counts.additions, counts.deletions)
         })
     }
 
@@ -1122,53 +1261,70 @@ impl App {
             .and_then(|index| self.status.changes.get(*index))
     }
 
-    pub(crate) fn selected_group_changes(&self) -> Vec<Change> {
-        let Some(group) = self.selected_change_group else {
+    pub(crate) fn selected_section_changes(&self) -> Vec<Change> {
+        let Some(section) = self.selected_change_section else {
             return Vec::new();
         };
         self.visible_change_indices()
             .into_iter()
             .filter_map(|index| self.status.changes.get(index))
-            .filter(|change| change.area == group)
+            .filter(|change| section.matches(change))
             .cloned()
             .collect()
     }
 
-    fn change_targets(&self) -> Vec<ChangeTarget> {
+    pub(crate) fn change_rows(&self) -> Vec<ChangeRow> {
         let visible = self.visible_change_indices();
-        let mut targets = Vec::new();
-        for area in [
-            ChangeArea::Conflict,
-            ChangeArea::Staged,
-            ChangeArea::Unstaged,
-        ] {
-            if visible.iter().any(|index| {
-                self.status
-                    .changes
-                    .get(*index)
-                    .is_some_and(|change| change.area == area)
-            }) {
-                targets.push(ChangeTarget::Group(area));
-                targets.extend(
-                    visible
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, index)| {
-                            self.status
-                                .changes
-                                .get(**index)
-                                .is_some_and(|change| change.area == area)
-                        })
-                        .map(|(cursor, _)| ChangeTarget::Change(cursor)),
+        let mut rows = Vec::new();
+        for section in ChangeSection::ALL {
+            let members = visible
+                .iter()
+                .enumerate()
+                .filter_map(|(cursor, index)| {
+                    self.status
+                        .changes
+                        .get(*index)
+                        .filter(|change| section.matches(change))
+                        .map(|_| (*index, cursor))
+                })
+                .collect::<Vec<_>>();
+            if members.is_empty() {
+                continue;
+            }
+            let collapsed = self.collapsed_change_sections.contains(&section);
+            rows.push(ChangeRow::Section {
+                section,
+                count: members.len(),
+                collapsed,
+            });
+            if !collapsed {
+                rows.extend(
+                    members
+                        .into_iter()
+                        .map(|(index, cursor)| ChangeRow::Change {
+                            section,
+                            index,
+                            cursor,
+                        }),
                 );
             }
         }
-        targets
+        rows
+    }
+
+    fn change_targets(&self) -> Vec<ChangeTarget> {
+        self.change_rows()
+            .into_iter()
+            .map(|row| match row {
+                ChangeRow::Section { section, .. } => ChangeTarget::Section(section),
+                ChangeRow::Change { cursor, .. } => ChangeTarget::Change(cursor),
+            })
+            .collect()
     }
 
     fn selected_change_target(&self) -> Option<ChangeTarget> {
-        self.selected_change_group
-            .map(ChangeTarget::Group)
+        self.selected_change_section
+            .map(ChangeTarget::Section)
             .or(Some(ChangeTarget::Change(self.change_cursor)))
             .filter(|target| self.change_targets().contains(target))
     }
@@ -1308,11 +1464,65 @@ impl App {
 
     const fn select_change_target(&mut self, target: ChangeTarget) {
         match target {
-            ChangeTarget::Group(area) => self.selected_change_group = Some(area),
+            ChangeTarget::Section(section) => self.selected_change_section = Some(section),
             ChangeTarget::Change(cursor) => {
-                self.selected_change_group = None;
+                self.selected_change_section = None;
                 self.change_cursor = cursor;
             }
+        }
+    }
+
+    fn toggle_change_section(&mut self, section: ChangeSection) {
+        if !self.collapsed_change_sections.remove(&section) {
+            let _ = self.collapsed_change_sections.insert(section);
+        }
+        self.selected_change_section = Some(section);
+    }
+
+    fn toggle_selected_change_section(&mut self) -> bool {
+        let Some(section) = self.selected_change_section else {
+            return false;
+        };
+        self.toggle_change_section(section);
+        true
+    }
+
+    fn navigate_change_section_horizontal(&mut self, expand: bool, now: Instant) {
+        let Some(target) = self.selected_change_target() else {
+            return;
+        };
+        match target {
+            ChangeTarget::Section(section) => {
+                let collapsed = self.collapsed_change_sections.contains(&section);
+                if (expand && collapsed) || (!expand && !collapsed) {
+                    self.toggle_change_section(section);
+                } else if expand {
+                    let targets = self.change_targets();
+                    if let Some(index) = targets
+                        .iter()
+                        .position(|candidate| *candidate == target)
+                        .and_then(|index| targets.get(index.saturating_add(1)))
+                        .copied()
+                        .filter(|candidate| matches!(candidate, ChangeTarget::Change(_)))
+                    {
+                        self.select_change_target(index);
+                        self.schedule_preview(now);
+                    }
+                }
+            }
+            ChangeTarget::Change(_) if !expand => {
+                let Some(change) = self.selected_change() else {
+                    return;
+                };
+                if let Some(section) = ChangeSection::ALL
+                    .into_iter()
+                    .find(|section| section.matches(change))
+                {
+                    self.selected_change_section = Some(section);
+                    self.schedule_preview(now);
+                }
+            }
+            ChangeTarget::Change(_) => {}
         }
     }
 
@@ -1490,9 +1700,12 @@ impl App {
             KeyCode::Char('s' | ' ')
                 if self.view == View::Changes
                     && self.focus == Focus::Sidebar
-                    && self.selected_change_group.is_none() =>
+                    && self.selected_change_section.is_none() =>
             {
                 self.toggle_stage_selected(&mut effects);
+            }
+            KeyCode::Char(' ') if self.view == View::Changes && self.focus == Focus::Sidebar => {
+                let _ = self.toggle_selected_change_section();
             }
             KeyCode::Char(' ')
                 if self.view == View::PullRequests
@@ -1515,12 +1728,12 @@ impl App {
                 }
             }
             KeyCode::Char('u')
-                if self.view == View::Changes && self.selected_change_group.is_none() =>
+                if self.view == View::Changes && self.selected_change_section.is_none() =>
             {
                 self.unstage_selected(&mut effects);
             }
             KeyCode::Char('x')
-                if self.view == View::Changes && self.selected_change_group.is_none() =>
+                if self.view == View::Changes && self.selected_change_section.is_none() =>
             {
                 self.confirm_discard();
             }
@@ -1555,7 +1768,11 @@ impl App {
                 self.toggle_check_step(self.pull_request_step_cursor);
             }
             KeyCode::Enter if !self.sidebar_hidden => {
-                if !self.toggle_selected_pull_request_directory() {
+                if !(self.toggle_selected_pull_request_directory()
+                    || self.view == View::Changes
+                        && self.focus == Focus::Sidebar
+                        && self.toggle_selected_change_section())
+                {
                     self.toggle_focus();
                 }
             }
@@ -1634,6 +1851,12 @@ impl App {
             {
                 self.navigate_pull_request_tree_horizontal(true, now);
             }
+            KeyCode::Left if self.focus == Focus::Sidebar && self.view == View::Changes => {
+                self.navigate_change_section_horizontal(false, now);
+            }
+            KeyCode::Right if self.focus == Focus::Sidebar && self.view == View::Changes => {
+                self.navigate_change_section_horizontal(true, now);
+            }
             KeyCode::Left | KeyCode::Char('h') if self.focus == Focus::Content => {
                 self.horizontal_scroll = self.horizontal_scroll.saturating_sub(4);
             }
@@ -1689,7 +1912,15 @@ impl App {
 
         match event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                if self
+                if let Some(target) = self
+                    .geometry
+                    .link_hits
+                    .iter()
+                    .find(|hit| hit.area.contains((event.column, event.row).into()))
+                    .map(|hit| hit.target.clone())
+                {
+                    effects.push(AppEffect::Open(target));
+                } else if self
                     .geometry
                     .sidebar_divider
                     .contains((event.column, event.row).into())
@@ -1743,9 +1974,9 @@ impl App {
                             .map(|hit| hit.target.clone())
                         {
                             match hit {
-                                SidebarHit::ChangeGroup(group) => {
+                                SidebarHit::ChangeSection(section) => {
                                     self.auxiliary_preview = None;
-                                    self.selected_change_group = Some(group);
+                                    self.toggle_change_section(section);
                                     self.schedule_preview(now);
                                 }
                                 SidebarHit::Change(index) => {
@@ -1755,7 +1986,7 @@ impl App {
                                         .position(|visible| *visible == index)
                                     {
                                         self.auxiliary_preview = None;
-                                        self.selected_change_group = None;
+                                        self.selected_change_section = None;
                                         self.change_cursor = cursor;
                                         self.schedule_preview(now);
                                     }
@@ -1917,7 +2148,18 @@ impl App {
             self.refresh_pull_request_live(now, false, &mut effects);
             changed = true;
         }
+        if self.busy.is_some() {
+            self.operation_frame = self.operation_frame.wrapping_add(1) % OPERATION_SPINNER.len();
+            changed = true;
+        }
         (effects, changed)
+    }
+
+    pub(crate) fn operation_spinner(&self) -> &'static str {
+        OPERATION_SPINNER
+            .get(self.operation_frame % OPERATION_SPINNER.len())
+            .copied()
+            .unwrap_or("◐")
     }
 
     /// A GitHub webhook was forwarded to this session. The payload is only a
@@ -2083,7 +2325,7 @@ impl App {
                 match result {
                     Ok(status) => {
                         let selected = self
-                            .selected_change_group
+                            .selected_change_section
                             .is_none()
                             .then(|| self.selected_change().cloned())
                             .flatten();
@@ -2148,7 +2390,26 @@ impl App {
                         self.rebuild_local_diff_document();
                         self.content_scroll = 0;
                         self.horizontal_scroll = 0;
-                        if let Some(path) = first_path {
+                        let mut paths = self
+                            .local_diff_index
+                            .as_ref()
+                            .map(|index| {
+                                index
+                                    .files
+                                    .iter()
+                                    .filter(|file| {
+                                        !self.preview_file_collapsed(&file.path.to_string_lossy())
+                                    })
+                                    .map(|file| file.path.clone())
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default();
+                        if let Some(path) = first_path
+                            && !paths.contains(&path)
+                        {
+                            paths.insert(0, path);
+                        }
+                        for path in paths {
                             self.request_local_diff_file(path, &mut effects);
                         }
                     }
@@ -2161,10 +2422,18 @@ impl App {
             }
             WorkerEvent::LocalDiffFile {
                 generation,
+                workspace_generation,
                 path,
                 result,
             } => {
-                if generation != self.diff_generation {
+                if generation != self.diff_generation
+                    || self.local_diff_workspace_generation != Some(workspace_generation)
+                    || self.local_diff_loading_path.as_ref() != Some(&path)
+                    || !self
+                        .local_diff_index
+                        .as_ref()
+                        .is_some_and(|index| index.files.iter().any(|file| file.path == path))
+                {
                     return effects;
                 }
                 self.local_diff_loading_path = None;
@@ -2441,6 +2710,11 @@ impl App {
                         }
                         self.show_toast(error, ToastLevel::Error, now);
                     }
+                }
+            }
+            WorkerEvent::LocalGitHubRepository { result } => {
+                if let Ok(repository) = result {
+                    self.local_github_repository = repository;
                 }
             }
             WorkerEvent::PullRequestLookup { generation, result } => {
@@ -3332,7 +3606,7 @@ impl App {
             View::Changes => {
                 let targets = self.change_targets();
                 if targets.is_empty() {
-                    self.selected_change_group = Some(ChangeArea::Unstaged);
+                    self.selected_change_section = Some(ChangeSection::Unstaged);
                     self.change_cursor = 0;
                     return;
                 }
@@ -3511,7 +3785,7 @@ impl App {
                     .iter()
                     .position(|visible| *visible == index)
                 {
-                    self.selected_change_group = None;
+                    self.selected_change_section = None;
                     self.change_cursor = cursor;
                 }
                 match action {
@@ -3525,22 +3799,22 @@ impl App {
                     _ => unreachable!(),
                 }
             }
-            ScmAction::StageGroup(area) | ScmAction::UnstageGroup(area) => {
+            ScmAction::StageSection(section) | ScmAction::UnstageSection(section) => {
                 let paths = self
                     .status
                     .changes
                     .iter()
-                    .filter(|change| change.area == area)
+                    .filter(|change| section.matches(change))
                     .map(|change| change.path.clone())
                     .collect::<Vec<_>>();
                 if paths.is_empty() {
                     return;
                 }
                 match action {
-                    ScmAction::StageGroup(_) => {
+                    ScmAction::StageSection(_) => {
                         self.queue_operation(GitOperation::Stage(paths), effects);
                     }
-                    ScmAction::UnstageGroup(_) => {
+                    ScmAction::UnstageSection(_) => {
                         self.queue_operation(GitOperation::Unstage(paths), effects);
                     }
                     _ => unreachable!(),
@@ -3603,7 +3877,7 @@ impl App {
     }
 
     fn toggle_stage_selected(&mut self, effects: &mut Vec<AppEffect>) {
-        if self.selected_change_group.is_some() {
+        if self.selected_change_section.is_some() {
             return;
         }
         let Some(change) = self.selected_change().cloned() else {
@@ -3621,7 +3895,7 @@ impl App {
     }
 
     fn unstage_selected(&mut self, effects: &mut Vec<AppEffect>) {
-        if self.selected_change_group.is_some() {
+        if self.selected_change_section.is_some() {
             return;
         }
         let Some(change) = self.selected_change().cloned() else {
@@ -3633,7 +3907,7 @@ impl App {
     }
 
     fn confirm_discard(&mut self) {
-        if self.selected_change_group.is_some() {
+        if self.selected_change_section.is_some() {
             return;
         }
         let Some(change) = self.selected_change().cloned() else {
@@ -3908,7 +4182,6 @@ impl App {
             self.local_diff_pending_paths.push_back(path);
             return;
         }
-        self.diff_generation = self.diff_generation.wrapping_add(1);
         self.local_diff_loading_path = Some(path.clone());
         effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadLocalDiffFile {
             generation: self.diff_generation,
@@ -4498,6 +4771,7 @@ impl App {
         }
         self.operation_id = self.operation_id.wrapping_add(1);
         self.busy = Some(operation.label().to_owned());
+        self.operation_frame = 0;
         effects.push(AppEffect::Git(Box::new(WorkerCommand::Operate {
             id: self.operation_id,
             operation,
@@ -4612,8 +4886,8 @@ impl App {
                         },
                     });
                 }
-                let changes = if self.selected_change_group.is_some() {
-                    self.selected_group_changes()
+                let changes = if self.selected_change_section.is_some() {
+                    self.selected_section_changes()
                 } else {
                     self.selected_change().cloned().into_iter().collect()
                 };
@@ -4660,13 +4934,11 @@ impl App {
         self.reset_local_diff_runtime();
         self.local_diff_request = Some(request.clone());
         self.document_loading = true;
-        if self.document.file_count() == 0 {
-            self.selected_preview_file = None;
-            self.preview_file_cursor = 0;
-            self.collapsed_preview_files.clear();
-            self.expanded_preview_files.clear();
-            self.document = DiffDocument::empty(title, "Indexing changed files…");
-        }
+        self.selected_preview_file = None;
+        self.preview_file_cursor = 0;
+        self.collapsed_preview_files.clear();
+        self.expanded_preview_files.clear();
+        self.document = DiffDocument::empty(title, "Indexing changed files…");
         effects.push(AppEffect::Git(Box::new(WorkerCommand::PrepareLocalDiff {
             generation,
             request: Box::new(request),
@@ -4791,6 +5063,7 @@ impl App {
     fn schedule_preview(&mut self, now: Instant) {
         self.invalidate_preview();
         if self.view != View::PullRequests {
+            self.reset_local_diff_runtime();
             self.document = self.loading_document_for_view(self.view);
         }
         self.preview_due = Some(now + PREVIEW_DEBOUNCE);
@@ -4821,18 +5094,23 @@ impl App {
                 })
             })
         {
-            self.selected_change_group = None;
+            self.selected_change_section = None;
             self.change_cursor = cursor;
             return;
         }
         if self.selected_change_target().is_none() {
-            if visible.iter().any(|index| {
-                self.status
-                    .changes
-                    .get(*index)
-                    .is_some_and(|change| change.area == ChangeArea::Unstaged)
-            }) {
-                self.selected_change_group = Some(ChangeArea::Unstaged);
+            let preferred = [ChangeSection::Unstaged, ChangeSection::Untracked]
+                .into_iter()
+                .find(|section| {
+                    visible.iter().any(|index| {
+                        self.status
+                            .changes
+                            .get(*index)
+                            .is_some_and(|change| section.matches(change))
+                    })
+                });
+            if let Some(section) = preferred {
+                self.selected_change_section = Some(section);
             } else if let Some(target) = self.change_targets().first().copied() {
                 self.select_change_target(target);
             }
@@ -4880,7 +5158,7 @@ impl App {
             Some(url) => {
                 let url = url.to_owned();
                 self.show_toast(format!("Opening {url}"), ToastLevel::Info, now);
-                effects.push(AppEffect::OpenUrl(url));
+                effects.push(AppEffect::Open(OpenTarget::Browser(url)));
             }
             None => self.show_toast(
                 "Nothing to open: look up a pull request first".to_owned(),
@@ -4888,6 +5166,66 @@ impl App {
                 now,
             ),
         }
+    }
+
+    pub(crate) fn repository_open_target(&self) -> Option<OpenTarget> {
+        self.local_github_repository
+            .as_ref()
+            .or_else(|| {
+                self.pull_request
+                    .as_ref()
+                    .map(|pull_request| &pull_request.base_repository)
+            })
+            .map(|repository| OpenTarget::Browser(repository.url.clone()))
+    }
+
+    pub(crate) fn branch_open_target(&self, branch: &str) -> Option<OpenTarget> {
+        self.repository_web_url().map(|repository| {
+            let mut url = repository.trim_end_matches('/').to_owned();
+            url.push_str("/tree/");
+            url.push_str(&encode_url_path(branch));
+            OpenTarget::Browser(url)
+        })
+    }
+
+    pub(crate) fn commit_open_target(&self, commit: &str) -> Option<OpenTarget> {
+        self.repository_web_url().map(|repository| {
+            let mut url = repository.trim_end_matches('/').to_owned();
+            url.push_str("/commit/");
+            url.push_str(&encode_url_path(commit));
+            OpenTarget::Browser(url)
+        })
+    }
+
+    pub(crate) fn pull_request_open_target(&self, number: u64) -> Option<OpenTarget> {
+        if let Some(pull_request) = self
+            .pull_request
+            .as_ref()
+            .filter(|pull_request| pull_request.number == number)
+        {
+            return Some(OpenTarget::Browser(pull_request.url.clone()));
+        }
+        self.repository_web_url().map(|repository| {
+            OpenTarget::Browser(format!(
+                "{}/pull/{number}",
+                repository.trim_end_matches('/')
+            ))
+        })
+    }
+
+    pub(crate) fn workspace_open_target(&self) -> OpenTarget {
+        OpenTarget::Path(self.repository_root.clone())
+    }
+
+    fn repository_web_url(&self) -> Option<&str> {
+        self.local_github_repository
+            .as_ref()
+            .map(|repository| repository.url.as_str())
+            .or_else(|| {
+                self.pull_request
+                    .as_ref()
+                    .map(|pull_request| pull_request.base_repository.url.as_str())
+            })
     }
 
     fn show_toast(&mut self, message: String, level: ToastLevel, now: Instant) {
@@ -5036,6 +5374,18 @@ fn is_word_character(character: char) -> bool {
     character.is_alphanumeric() || character == '_'
 }
 
+fn encode_url_path(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'/') {
+            encoded.push(char::from(byte));
+        } else if write!(encoded, "%{byte:02X}").is_err() {
+            return String::new();
+        }
+    }
+    encoded
+}
+
 #[cfg(test)]
 #[expect(
     unused_results,
@@ -5107,7 +5457,7 @@ mod tests {
                 },
             ],
         };
-        app.selected_change_group = None;
+        app.selected_change_section = None;
         app
     }
 
@@ -5294,7 +5644,8 @@ mod tests {
         let effects = app.handle_key(KeyEvent::new(KeyCode::Char('O'), KeyModifiers::NONE), now);
         assert!(matches!(
             effects.as_slice(),
-            [AppEffect::OpenUrl(url)] if url == "https://github.com/o/r/pull/8"
+            [AppEffect::Open(OpenTarget::Browser(url))]
+                if url == "https://github.com/o/r/pull/8"
         ));
 
         app.pull_request_checks = vec![PullRequestCheck {
@@ -5312,7 +5663,8 @@ mod tests {
         assert!(
             matches!(
                 effects.as_slice(),
-                [AppEffect::OpenUrl(url)] if url.contains("/actions/runs/1/job/2")
+                [AppEffect::Open(OpenTarget::Browser(url))]
+                    if url.contains("/actions/runs/1/job/2")
             ),
             "a selected check opens the run it names, not the pull request"
         );
@@ -5394,17 +5746,44 @@ mod tests {
     }
 
     #[test]
-    fn navigating_changes_includes_selectable_group_headers() {
+    fn change_sections_share_navigation_folding_and_membership() {
         let mut app = app_with_changes();
         let now = Instant::now();
-        app.selected_change_group = Some(ChangeArea::Staged);
+        app.status.changes.push(Change {
+            path: PathBuf::from("new.txt"),
+            original_path: None,
+            area: ChangeArea::Unstaged,
+            status: ChangeStatus::Untracked,
+        });
+        app.selected_change_section = Some(ChangeSection::Staged);
 
         app.navigate(1, now);
-        assert!(app.selected_change_group.is_none());
+        assert!(app.selected_change_section.is_none());
         assert_eq!(app.selected_change().unwrap().area, ChangeArea::Staged);
         app.navigate(1, now);
-        assert_eq!(app.selected_change_group, Some(ChangeArea::Unstaged));
-        assert_eq!(app.selected_group_changes().len(), 1);
+        assert_eq!(app.selected_change_section, Some(ChangeSection::Unstaged));
+        assert_eq!(app.selected_section_changes().len(), 1);
+
+        assert!(app.toggle_selected_change_section());
+        assert!(
+            app.collapsed_change_sections
+                .contains(&ChangeSection::Unstaged)
+        );
+        assert!(!app.change_rows().iter().any(|row| matches!(
+            row,
+            ChangeRow::Change {
+                section: ChangeSection::Unstaged,
+                ..
+            }
+        )));
+
+        app.navigate(1, now);
+        assert_eq!(app.selected_change_section, Some(ChangeSection::Untracked));
+        assert_eq!(app.selected_section_changes().len(), 1);
+        assert_eq!(
+            app.selected_section_changes()[0].path,
+            PathBuf::from("new.txt")
+        );
     }
 
     #[test]
@@ -5433,6 +5812,90 @@ mod tests {
                 } if paths == &[PathBuf::from("src/main.rs")]
             )
         ));
+    }
+
+    #[test]
+    fn clicking_link_text_opens_its_target_before_the_containing_row() {
+        let mut app = app_with_changes();
+        app.geometry.sidebar = Rect::new(0, 0, 40, 20);
+        app.geometry.sidebar_hits = vec![SidebarHitArea {
+            area: Rect::new(0, 4, 40, 1),
+            target: SidebarHit::Change(0),
+        }];
+        app.geometry.link_hits = vec![LinkHit {
+            area: Rect::new(30, 4, 7, 1),
+            target: OpenTarget::Browser("https://github.com/acme/widget/commit/abc".to_owned()),
+        }];
+
+        let effects = app.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 32,
+                row: 4,
+                modifiers: KeyModifiers::NONE,
+            },
+            Instant::now(),
+        );
+
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Open(OpenTarget::Browser(url))]
+                if url == "https://github.com/acme/widget/commit/abc"
+        ));
+        assert_eq!(app.selected_change_section, None);
+        assert_eq!(app.change_cursor, 0);
+    }
+
+    #[test]
+    fn github_reference_targets_encode_branch_paths() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.local_github_repository = Some(GitHubRepository {
+            name_with_owner: "acme/widget".to_owned(),
+            url: "https://github.com/acme/widget".to_owned(),
+            remotes: vec!["origin".to_owned()],
+        });
+
+        assert_eq!(
+            app.branch_open_target("feature/fix #42"),
+            Some(OpenTarget::Browser(
+                "https://github.com/acme/widget/tree/feature/fix%20%2342".to_owned()
+            ))
+        );
+        assert_eq!(
+            app.pull_request_open_target(42),
+            Some(OpenTarget::Browser(
+                "https://github.com/acme/widget/pull/42".to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn clicking_a_change_section_selects_and_collapses_only_that_section() {
+        let mut app = app_with_changes();
+        app.geometry.sidebar = Rect::new(0, 0, 40, 20);
+        app.geometry.sidebar_hits = vec![SidebarHitArea {
+            area: Rect::new(0, 3, 40, 1),
+            target: SidebarHit::ChangeSection(ChangeSection::Unstaged),
+        }];
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 8,
+            row: 3,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        app.handle_mouse(click, Instant::now());
+
+        assert_eq!(app.selected_change_section, Some(ChangeSection::Unstaged));
+        assert!(
+            app.collapsed_change_sections
+                .contains(&ChangeSection::Unstaged)
+        );
+        assert!(
+            app.selected_section_changes()
+                .iter()
+                .all(|change| change.status != ChangeStatus::Untracked)
+        );
     }
 
     #[test]
@@ -5508,9 +5971,11 @@ mod tests {
                 AppEffect::Git(refresh),
                 AppEffect::Git(history),
                 AppEffect::Git(branches),
+                AppEffect::Git(repository),
             ] if matches!(refresh.as_ref(), WorkerCommand::Refresh { .. })
                 && matches!(history.as_ref(), WorkerCommand::LoadHistory { .. })
                 && matches!(branches.as_ref(), WorkerCommand::LoadHistoryBranches { .. })
+                && matches!(repository.as_ref(), WorkerCommand::LoadLocalGitHubRepository)
         ));
         assert!(!app.pull_request_loading);
         assert!(app.pull_request.is_none());
@@ -5697,6 +6162,7 @@ mod tests {
         app.handle_worker_event(
             WorkerEvent::LocalDiffFile {
                 generation: first_generation,
+                workspace_generation: 5,
                 path: PathBuf::from("src/first.rs"),
                 result: Ok(DiffDocument::empty("first", "loaded")),
             },
@@ -5756,6 +6222,7 @@ mod tests {
         let effects = app.handle_worker_event(
             WorkerEvent::LocalDiffFile {
                 generation: app.diff_generation,
+                workspace_generation: 5,
                 path: PathBuf::from("src/first.rs"),
                 result: Ok(indexed_document(&["src/first.rs"])),
             },
@@ -5776,6 +6243,7 @@ mod tests {
         let effects = app.handle_worker_event(
             WorkerEvent::LocalDiffFile {
                 generation: app.diff_generation,
+                workspace_generation: 5,
                 path: PathBuf::from("src/second.rs"),
                 result: Ok(indexed_document(&["src/second.rs"])),
             },
@@ -5793,6 +6261,7 @@ mod tests {
         let effects = app.handle_worker_event(
             WorkerEvent::LocalDiffFile {
                 generation: app.diff_generation,
+                workspace_generation: 5,
                 path: PathBuf::from("src/third.rs"),
                 result: Ok(indexed_document(&["src/third.rs"])),
             },
@@ -5801,6 +6270,90 @@ mod tests {
         assert!(effects.is_empty());
         assert_eq!(app.local_diff_documents.len(), 3);
         assert!(app.local_diff_pending_paths.is_empty());
+    }
+
+    #[test]
+    fn an_existing_expand_all_preference_loads_every_file_in_a_new_index() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.diff_generation = 9;
+        app.files_collapsed = false;
+        app.collapse_preference_set = true;
+
+        let effects = app.handle_worker_event(
+            WorkerEvent::LocalDiffIndex {
+                generation: 9,
+                result: Ok(DiffIndex {
+                    title: "Next commit".to_owned(),
+                    files: ["one.rs", "two.rs", "three.rs"]
+                        .into_iter()
+                        .map(|path| crate::git::diff::DiffFileIndexEntry {
+                            path: PathBuf::from(path),
+                            old_path: None,
+                            status: "modified".to_owned(),
+                            counts: None,
+                        })
+                        .collect(),
+                    truncated: false,
+                    commit_details: None,
+                }),
+            },
+            Instant::now(),
+        );
+
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Git(command)] if matches!(
+                command.as_ref(),
+                WorkerCommand::LoadLocalDiffFile { path, .. } if path == Path::new("one.rs")
+            )
+        ));
+        assert_eq!(
+            app.local_diff_pending_paths,
+            VecDeque::from([PathBuf::from("two.rs"), PathBuf::from("three.rs")])
+        );
+        assert!(
+            app.preview_file_paths()
+                .iter()
+                .all(|path| !app.preview_file_collapsed(&path.to_string_lossy()))
+        );
+    }
+
+    #[test]
+    fn local_diff_file_replies_must_match_the_prepared_workspace() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.diff_generation = 12;
+        app.handle_worker_event(
+            WorkerEvent::LocalDiffIndex {
+                generation: 12,
+                result: Ok(DiffIndex {
+                    title: "Current".to_owned(),
+                    files: vec![crate::git::diff::DiffFileIndexEntry {
+                        path: PathBuf::from("same.rs"),
+                        old_path: None,
+                        status: "modified".to_owned(),
+                        counts: None,
+                    }],
+                    truncated: false,
+                    commit_details: None,
+                }),
+            },
+            Instant::now(),
+        );
+
+        let effects = app.handle_worker_event(
+            WorkerEvent::LocalDiffFile {
+                generation: 12,
+                workspace_generation: 11,
+                path: PathBuf::from("same.rs"),
+                result: Ok(DiffDocument::empty("Old commit", "stale")),
+            },
+            Instant::now(),
+        );
+
+        assert!(effects.is_empty());
+        assert_eq!(app.local_diff_loading_path, Some(PathBuf::from("same.rs")));
+        assert!(!app.local_diff_single_loaded);
+        assert_ne!(app.document.title, "Old commit");
     }
 
     #[test]
@@ -5828,7 +6381,7 @@ mod tests {
         ));
 
         app.handle_key(
-            KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
             Instant::now(),
         );
         let cursor = app.pull_request_tree_cursor;
@@ -5894,6 +6447,40 @@ mod tests {
                 .iter()
                 .any(|entry| { matches!(entry, PullRequestTreeEntry::File { index: 1, .. }) })
         );
+    }
+
+    #[test]
+    fn pull_request_tree_compacts_single_child_directory_chains() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.pull_request_files = [
+            "apps/web/app/one.txt",
+            "apps/web/modules/marketing/landing/two.txt",
+        ]
+        .into_iter()
+        .map(|path| PullRequestFile {
+            path: PathBuf::from(path),
+            old_path: None,
+            status: PullRequestFileStatus::Modified,
+            counts: None,
+        })
+        .collect();
+
+        let entries = app.pull_request_tree_entries();
+
+        assert!(matches!(
+            entries.first(),
+            Some(PullRequestTreeEntry::Directory { path, label, depth: 0 })
+                if path == Path::new("apps/web") && label == "apps/web"
+        ));
+        assert!(entries.iter().any(|entry| matches!(
+            entry,
+            PullRequestTreeEntry::Directory { path, label, depth: 1 }
+                if path == Path::new("apps/web/modules/marketing/landing")
+                    && label == "modules/marketing/landing"
+        )));
+
+        app.toggle_pull_request_directory(PathBuf::from("apps/web"));
+        assert_eq!(app.pull_request_tree_entries().len(), 1);
     }
 
     #[test]
@@ -6128,9 +6715,7 @@ mod tests {
                         ),
                         _ => matches!(command.as_ref(), WorkerCommand::LoadCheckRunLog { .. }),
                     },
-                    AppEffect::SetMouseCapture(_) | AppEffect::OpenUrl(_) | AppEffect::Quit => {
-                        false
-                    }
+                    AppEffect::SetMouseCapture(_) | AppEffect::Open(_) | AppEffect::Quit => false,
                 })
                 .count()
         };
@@ -6554,11 +7139,26 @@ mod tests {
         let mut app = App::new("/tmp/repo", "repo");
         app.diff_generation = 7;
         app.document = DiffDocument::empty("Current", "keep me");
+        app.local_diff_workspace_generation = Some(7);
+        app.local_diff_index = Some(DiffIndex {
+            title: "Previous commit".to_owned(),
+            files: vec![crate::git::diff::DiffFileIndexEntry {
+                path: PathBuf::from("stale.rs"),
+                old_path: None,
+                status: "modified".to_owned(),
+                counts: None,
+            }],
+            truncated: false,
+            commit_details: None,
+        });
 
-        app.schedule_preview(Instant::now());
+        let now = Instant::now();
+        app.schedule_preview(now);
+        app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE), now);
         let effects = app.handle_worker_event(
             WorkerEvent::LocalDiffFile {
                 generation: 7,
+                workspace_generation: 7,
                 path: PathBuf::from("stale.rs"),
                 result: Ok(DiffDocument::empty("Stale", "replace me")),
             },
@@ -6567,6 +7167,8 @@ mod tests {
 
         assert!(effects.is_empty());
         assert_eq!(app.diff_generation, 8);
+        assert!(app.local_diff_index.is_none());
+        assert!(app.local_diff_workspace_generation.is_none());
         assert_eq!(app.document.title, "Working Tree");
         assert_eq!(app.document.lines[0].text(), "Loading selected changes…");
     }
@@ -6811,6 +7413,20 @@ mod tests {
                 } if old == "topic" && new == "feature/topic")
         ));
         assert_eq!(app.busy.as_deref(), Some("Renaming branch"));
+    }
+
+    #[test]
+    fn long_running_git_operations_animate_until_completion() {
+        let mut app = App::new("/tmp/repo", "repo");
+        let mut effects = Vec::new();
+        app.queue_operation(GitOperation::Pull, &mut effects);
+        let initial = app.operation_spinner();
+
+        let (_, changed) = app.tick(Instant::now());
+
+        assert!(changed);
+        assert_ne!(app.operation_spinner(), initial);
+        assert_eq!(app.busy.as_deref(), Some("Pulling changes"));
     }
 
     #[expect(
