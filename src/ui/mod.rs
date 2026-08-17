@@ -13,8 +13,8 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use self::theme::Theme;
 use crate::app::{
     App, ContentFileHit, ContentStepHit, DiffLayout, Focus, Modal, PaletteCommand,
-    PullRequestSection, PullRequestTreeEntry, ScmAction, ScmActionHit, SidebarHit, SidebarHitArea,
-    ToastLevel, UiGeometry, View,
+    PullRequestContentRow, PullRequestSection, PullRequestTreeEntry, ScmAction, ScmActionHit,
+    SidebarHit, SidebarHitArea, ToastLevel, UiGeometry, View,
 };
 use crate::convert::cells;
 use crate::git::diff::{DiffDocument, DiffLine, DiffLineKind, HighlightSpan, PullRequestDetails};
@@ -914,17 +914,18 @@ fn draw_pull_requests_sidebar(
             body_area.width.saturating_sub(overview_width),
             1,
         );
+        let overview_label = format!(
+            "PR {}",
+            if app.pull_request_refreshing() {
+                "⟳"
+            } else {
+                "↻"
+            }
+        );
         draw_pull_request_section_tab(
             frame,
             overview_tab,
-            format!(
-                "PR{}",
-                if app.pull_request_checks_loading && app.pull_request_checks.is_empty() {
-                    " ⟳"
-                } else {
-                    ""
-                }
-            ),
+            overview_label.clone(),
             app.pull_request_section == PullRequestSection::Overview,
             theme,
         );
@@ -935,6 +936,15 @@ fn draw_pull_requests_sidebar(
             app.pull_request_section == PullRequestSection::Files,
             theme,
         );
+        let overview_label_x = overview_tab.x
+            + overview_tab
+                .width
+                .saturating_sub(cells(overview_label.width()))
+                / 2;
+        hits.push(SidebarHitArea {
+            area: Rect::new(overview_label_x.saturating_add(3), overview_tab.y, 1, 1),
+            target: SidebarHit::PullRequestRefresh,
+        });
         hits.push(SidebarHitArea {
             area: overview_tab,
             target: SidebarHit::PullRequestOverview,
@@ -1127,16 +1137,17 @@ fn draw_pull_request_file_tree(
         );
         return Vec::new();
     }
-    let rows = app.pull_request_tree_entries();
+    let row_count = app.pull_request_tree_entries().len();
     app.pull_request_tree_cursor = app
         .pull_request_tree_cursor
-        .min(rows.len().saturating_sub(1));
+        .min(row_count.saturating_sub(1));
     ensure_offset(
         &mut app.sidebar_offset,
         app.pull_request_tree_cursor,
         area.height as usize,
-        rows.len(),
+        row_count,
     );
+    let rows = &app.pull_request_tree;
     let mut hits = Vec::new();
     for (offset, row) in rows
         .iter()
@@ -1353,6 +1364,15 @@ fn draw_pull_request_check_list(
                 SidebarHit::PullRequestCheck(index),
             )
         };
+        if row == 0 {
+            let refresh_x = area.x.saturating_add(cells(line.width().saturating_sub(1)));
+            if refresh_x < area.right() {
+                hits.push(SidebarHitArea {
+                    area: Rect::new(refresh_x, y, 1, 1),
+                    target: SidebarHit::PullRequestConversationRefresh,
+                });
+            }
+        }
         frame.render_widget(
             Paragraph::new(line).style(Style::default().bg(background)),
             row_area,
@@ -1383,17 +1403,19 @@ fn draw_pull_request_check_list(
 }
 
 fn conversation_row_suffix(app: &App) -> String {
-    if app.pull_request_conversation_loading && app.pull_request_conversation.entries.is_empty() {
-        return "  ⟳".to_owned();
-    }
+    let refresh = if app.pull_request_conversation_loading {
+        "  ⟳"
+    } else {
+        "  ↻"
+    };
     if app.pull_request_conversation_error.is_some() {
-        return "  ⚠".to_owned();
+        return format!("  ⚠{refresh}");
     }
     let comments = app.pull_request_conversation.comment_count();
     if comments == 0 {
-        String::new()
+        refresh.to_owned()
     } else {
-        format!("  {comments}")
+        format!("  {comments}{refresh}")
     }
 }
 
@@ -1413,16 +1435,9 @@ const fn pull_request_check_icon(
 
 /// A pre-wrapped content row, optionally anchored to a check step so a click or
 /// the step cursor can find it after scrolling.
-struct ContentRow {
-    line: Line<'static>,
-    step: Option<usize>,
-    /// Whether this row may exceed the pane and therefore scrolls sideways.
-    /// Prose is wrapped to fit and stays put, which keeps the surrounding text
-    /// readable while a long value, a line of code or a log row is chased right.
-    wide: bool,
-}
+type ContentRow = PullRequestContentRow;
 
-impl ContentRow {
+impl PullRequestContentRow {
     const fn plain(line: Line<'static>) -> Self {
         Self {
             line,
@@ -1466,11 +1481,24 @@ fn draw_pull_request_overview(
     }
 
     let width = inner.width as usize;
-    let rows = if showing_check {
-        check_run_rows(app, width, theme)
-    } else {
-        conversation_rows(app, width, theme)
-    };
+    let rows_key = (
+        showing_check,
+        width,
+        app.pull_request_generation,
+        app.pull_request_checks_generation,
+        app.pull_request_conversation_generation,
+        app.pull_request_check_log_generation,
+        app.pull_request_content_generation,
+    );
+    if app.pull_request_content_rows_key != Some(rows_key) {
+        app.pull_request_content_rows = if showing_check {
+            check_run_rows(app, width, theme)
+        } else {
+            conversation_rows(app, width, theme)
+        };
+        app.pull_request_content_rows_key = Some(rows_key);
+    }
+    let rows = &app.pull_request_content_rows;
     let content_width = rows
         .iter()
         .filter(|row| row.wide)
@@ -2356,11 +2384,15 @@ fn draw_content(
         0
     };
     let side_by_side = app.diff_layout == DiffLayout::SideBySide && inner.width >= 72;
-    let diff_rows = if side_by_side {
-        side_by_side_rows(&app.document, app).len()
+    let side_rows = optional_side_by_side_rows(side_by_side, &app.document, app);
+    let unified_rows = if side_by_side {
+        None
     } else {
-        unified_row_indices(&app.document, app).len()
+        Some(unified_row_indices(&app.document, app))
     };
+    let diff_rows = side_rows
+        .as_ref()
+        .map_or_else(|| unified_rows.as_ref().map_or(0, Vec::len), Vec::len);
     let visual_length = details_rows + diff_rows;
     let max_scroll = visual_length.saturating_sub(inner.height as usize);
     app.content_scroll = app.content_scroll.min(max_scroll);
@@ -2409,12 +2441,15 @@ fn draw_content(
     );
     let (divider, content_file_hits) = if render_area.width < 2 || render_area.height == 0 {
         (None, Vec::new())
-    } else if side_by_side {
-        let (divider, hits) = draw_side_by_side_diff(frame, render_area, app, diff_scroll, theme);
+    } else if let Some(rows) = side_rows.as_deref() {
+        let (divider, hits) =
+            draw_side_by_side_diff(frame, render_area, app, rows, diff_scroll, theme);
         (Some(divider), hits)
-    } else {
-        let hits = draw_unified_diff(frame, render_area, app, diff_scroll, theme);
+    } else if let Some(rows) = unified_rows.as_deref() {
+        let hits = draw_unified_diff(frame, render_area, app, rows, diff_scroll, theme);
         (None, hits)
+    } else {
+        (None, Vec::new())
     };
     draw_scrollbar(frame, inner, app.content_scroll, visual_length, theme);
     (divider, content_file_hits, Vec::new())
@@ -2827,10 +2862,10 @@ fn draw_unified_diff(
     frame: &mut Frame<'_>,
     area: Rect,
     app: &App,
+    rows: &[usize],
     diff_scroll: usize,
     theme: &Theme,
 ) -> Vec<ContentFileHit> {
-    let rows = unified_row_indices(&app.document, app);
     let first_index = rows.get(diff_scroll).copied().unwrap_or_default();
     let mut in_file = inside_file_before(&app.document, first_index);
     let emphasis = intraline_emphasis(&app.document.lines);
@@ -3073,6 +3108,7 @@ fn draw_side_by_side_diff(
     frame: &mut Frame<'_>,
     area: Rect,
     app: &App,
+    rows: &[SideBySideRow<'_>],
     diff_scroll: usize,
     theme: &Theme,
 ) -> (Rect, Vec<ContentFileHit>) {
@@ -3098,7 +3134,6 @@ fn draw_side_by_side_diff(
         theme.border
     };
 
-    let rows = side_by_side_rows(&app.document, app);
     let sticky = rows.get(diff_scroll).and_then(|first| match first {
         SideBySideRow::FileHeader(_) | SideBySideRow::FileFooter => None,
         _ => rows
@@ -3271,6 +3306,14 @@ fn side_by_side_rows<'a>(document: &'a DiffDocument, app: &App) -> Vec<SideBySid
         }
     }
     rows
+}
+
+fn optional_side_by_side_rows<'a>(
+    enabled: bool,
+    document: &'a DiffDocument,
+    app: &App,
+) -> Option<Vec<SideBySideRow<'a>>> {
+    enabled.then(|| side_by_side_rows(document, app))
 }
 
 fn intraline_emphasis(lines: &[DiffLine]) -> Vec<Option<Range<usize>>> {
@@ -4931,6 +4974,7 @@ mod tests {
 
         app.collapsed_pull_request_directories
             .insert(std::path::PathBuf::from("src"));
+        app.pull_request_tree.clear();
         terminal.clear().unwrap();
         terminal
             .draw(|frame| {
@@ -5214,6 +5258,20 @@ mod tests {
             .map(ratatui::buffer::Cell::symbol)
             .collect();
         assert!(rendered.contains("Conversation"));
+        assert!(rendered.contains("PR ↻"));
+        assert!(rendered.contains("Conversation  ↻"));
+        assert!(
+            app.geometry
+                .sidebar_hits
+                .iter()
+                .any(|hit| matches!(hit.target, SidebarHit::PullRequestRefresh))
+        );
+        assert!(
+            app.geometry
+                .sidebar_hits
+                .iter()
+                .any(|hit| matches!(hit.target, SidebarHit::PullRequestConversationRefresh))
+        );
         assert!(rendered.contains("CI / ubuntu"));
         assert!(rendered.contains("Ship the rocket"));
         assert!(rendered.contains("octocat/widget:feature/rocket"));
@@ -5224,6 +5282,41 @@ mod tests {
             rendered.contains("Launch"),
             "the pull-request body is part of the default view"
         );
+
+        let refresh_area = app
+            .geometry
+            .sidebar_hits
+            .iter()
+            .find(|hit| matches!(hit.target, SidebarHit::PullRequestConversationRefresh))
+            .expect("the conversation refresh control has a hit area")
+            .area;
+        let effects = app.handle_mouse(
+            crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                column: refresh_area.x,
+                row: refresh_area.y,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+            std::time::Instant::now(),
+        );
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            crate::app::AppEffect::Git(command)
+                if matches!(
+                    command.as_ref(),
+                    crate::git::worker::WorkerCommand::LoadPullRequestConversation { .. }
+                )
+        )));
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect();
+        assert!(rendered.contains("PR ⟳"));
+        assert!(rendered.contains("Conversation  ⟳"));
     }
 
     fn overview_app() -> App {
@@ -5271,6 +5364,9 @@ mod tests {
 
     #[test]
     fn a_long_conversation_stays_bounded_to_render() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
         let mut app = overview_app();
         let body = "Some reasonably long review comment body that wraps across several \
 terminal rows because that is what real pull-request comments look like in practice."
@@ -5308,6 +5404,62 @@ terminal rows because that is what real pull-request comments look like in pract
                 .any(|row| row.line.to_string().contains("Older activity was omitted")),
             "a truncated thread says so rather than silently dropping history"
         );
+
+        let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        let cache_key = app.pull_request_content_rows_key;
+        let cache_pointer = app.pull_request_content_rows.as_ptr();
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        assert_eq!(app.pull_request_content_rows_key, cache_key);
+        assert_eq!(app.pull_request_content_rows.as_ptr(), cache_pointer);
+    }
+
+    #[test]
+    fn a_large_check_log_scrolls_from_a_cached_layout() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = overview_app();
+        app.pull_request_check_cursor = Some(0);
+        assert!(app.expanded_check_steps.insert(1));
+        app.pull_request_check_log = Some(crate::git::github::CheckRunLog {
+            steps: vec![CheckStep {
+                number: 1,
+                name: "Large build".to_owned(),
+                status: PullRequestCheckStatus::Passed,
+                conclusion: "success".to_owned(),
+                started_at: String::new(),
+                completed_at: String::new(),
+                lines: (0..50_000)
+                    .map(|index| CheckLogLine {
+                        timestamp: String::new(),
+                        text: format!("output line {index}"),
+                        severity: CheckLogSeverity::Normal,
+                    })
+                    .collect(),
+            }],
+            loose_lines: Vec::new(),
+            truncated: false,
+            unavailable: None,
+            log_pending: false,
+        });
+        let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        assert!(app.pull_request_content_rows.len() > 50_000);
+        let cache_pointer = app.pull_request_content_rows.as_ptr();
+        app.content_scroll = usize::MAX;
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect();
+
+        assert_eq!(app.pull_request_content_rows.as_ptr(), cache_pointer);
+        assert!(rendered.contains("output line 49999"));
     }
 
     #[test]

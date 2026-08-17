@@ -76,6 +76,19 @@ impl PullRequestCheck {
         let job = job.split(['?', '#', '/']).next()?;
         job.parse().ok()
     }
+
+    pub(crate) fn identity(&self) -> String {
+        self.job_id().map_or_else(
+            || {
+                if self.link.is_empty() {
+                    format!("{}\n{}\n{}", self.workflow, self.name, self.started_at)
+                } else {
+                    self.link.clone()
+                }
+            },
+            |job| job.to_string(),
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -690,6 +703,14 @@ mod tests {
         );
         assert_eq!(check("https://ci.example.test/build/9").job_id(), None);
         assert_eq!(check("").job_id(), None);
+        assert_eq!(
+            check("https://github.com/acme/widget/actions/runs/123/job/456").identity(),
+            "456"
+        );
+        assert_eq!(
+            check("https://ci.example.test/build/9").identity(),
+            "https://ci.example.test/build/9"
+        );
     }
 
     fn failing_status() -> std::process::ExitStatus {

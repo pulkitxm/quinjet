@@ -257,6 +257,7 @@ struct SharedMailbox {
 enum WorkerLane {
     Background,
     GitHubMetadata,
+    Conversation,
     LocalPreview,
     PullRequestPreview,
     Warm,
@@ -270,8 +271,8 @@ const fn worker_lane(command: &WorkerCommand) -> WorkerLane {
         WorkerCommand::LoadGitHubRepositories { .. }
         | WorkerCommand::LookupPullRequest { .. }
         | WorkerCommand::LoadPullRequestChecks { .. }
-        | WorkerCommand::LoadPullRequestConversation { .. }
         | WorkerCommand::LoadCheckRunLog { .. } => WorkerLane::GitHubMetadata,
+        WorkerCommand::LoadPullRequestConversation { .. } => WorkerLane::Conversation,
         WorkerCommand::PrefetchCheckRunLogs { .. } => WorkerLane::Warm,
         WorkerCommand::PreparePullRequest { .. }
         | WorkerCommand::LoadPullRequestFile { .. }
@@ -283,6 +284,7 @@ const fn worker_lane(command: &WorkerCommand) -> WorkerLane {
 pub(crate) struct GitWorker {
     mailbox: Arc<SharedMailbox>,
     github_mailbox: Arc<SharedMailbox>,
+    conversation_mailbox: Arc<SharedMailbox>,
     local_preview_mailbox: Arc<SharedMailbox>,
     pull_request_preview_mailbox: Arc<SharedMailbox>,
     warm_mailbox: Arc<SharedMailbox>,
@@ -298,6 +300,7 @@ impl GitWorker {
     pub(crate) fn start(repository: Repository) -> Self {
         let mailbox = new_mailbox();
         let github_mailbox = new_mailbox();
+        let conversation_mailbox = new_mailbox();
         let local_preview_mailbox = new_mailbox();
         let pull_request_preview_mailbox = new_mailbox();
         let warm_mailbox = new_mailbox();
@@ -305,15 +308,18 @@ impl GitWorker {
         let worker_warm_generation = Arc::clone(&warm_generation);
         let worker_mailbox = Arc::clone(&mailbox);
         let worker_github_mailbox = Arc::clone(&github_mailbox);
+        let worker_conversation_mailbox = Arc::clone(&conversation_mailbox);
         let worker_local_preview_mailbox = Arc::clone(&local_preview_mailbox);
         let worker_pull_request_preview_mailbox = Arc::clone(&pull_request_preview_mailbox);
         let worker_warm_mailbox = Arc::clone(&warm_mailbox);
         let github_repository = repository.clone_for_worker();
+        let conversation_repository = repository.clone_for_worker();
         let local_preview_repository = repository.clone_for_worker();
         let pull_request_preview_repository = repository.clone_for_worker();
         let warm_repository = repository.clone_for_worker();
         let (event_tx, event_rx) = unbounded();
         let github_events = event_tx.clone();
+        let conversation_events = event_tx.clone();
         let local_preview_events = event_tx.clone();
         let pull_request_preview_events = event_tx.clone();
         let warm_events = event_tx.clone();
@@ -330,6 +336,18 @@ impl GitWorker {
                     run_worker(&github_repository, &worker_github_mailbox, &github_events);
                 })
                 .expect("failed to start GitHub metadata worker"),
+        );
+        drop(
+            thread::Builder::new()
+                .name("quinjet-conversation".to_owned())
+                .spawn(move || {
+                    run_worker(
+                        &conversation_repository,
+                        &worker_conversation_mailbox,
+                        &conversation_events,
+                    );
+                })
+                .expect("failed to start conversation worker"),
         );
         drop(
             thread::Builder::new()
@@ -371,6 +389,7 @@ impl GitWorker {
         Self {
             mailbox,
             github_mailbox,
+            conversation_mailbox,
             local_preview_mailbox,
             pull_request_preview_mailbox,
             warm_mailbox,
@@ -388,6 +407,7 @@ impl GitWorker {
         }
         let target = match worker_lane(&command) {
             WorkerLane::GitHubMetadata => &self.github_mailbox,
+            WorkerLane::Conversation => &self.conversation_mailbox,
             WorkerLane::LocalPreview => &self.local_preview_mailbox,
             WorkerLane::PullRequestPreview => &self.pull_request_preview_mailbox,
             WorkerLane::Warm => &self.warm_mailbox,
@@ -414,6 +434,7 @@ impl Drop for GitWorker {
     fn drop(&mut self) {
         shutdown_mailbox(&self.mailbox);
         shutdown_mailbox(&self.github_mailbox);
+        shutdown_mailbox(&self.conversation_mailbox);
         shutdown_mailbox(&self.local_preview_mailbox);
         shutdown_mailbox(&self.pull_request_preview_mailbox);
         shutdown_mailbox(&self.warm_mailbox);
@@ -888,12 +909,19 @@ mod tests {
         };
         assert_eq!(worker_lane(&pr_preview), WorkerLane::PullRequestPreview);
         assert_eq!(
-            worker_lane(&WorkerCommand::Refresh { generation: 4 }),
+            worker_lane(&WorkerCommand::LoadPullRequestConversation {
+                generation: 4,
+                pull_request: Box::new(request.clone()),
+            }),
+            WorkerLane::Conversation
+        );
+        assert_eq!(
+            worker_lane(&WorkerCommand::Refresh { generation: 5 }),
             WorkerLane::Background
         );
         assert_eq!(
             worker_lane(&WorkerCommand::LookupPullRequest {
-                generation: 5,
+                generation: 6,
                 repositories: Vec::new(),
                 repository: None,
                 number: 42,
@@ -903,7 +931,7 @@ mod tests {
         );
         assert_eq!(
             worker_lane(&WorkerCommand::LoadPullRequestChecks {
-                generation: 6,
+                generation: 7,
                 pull_request: Box::new(request),
                 refresh: false,
             }),

@@ -1,9 +1,11 @@
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::mem::size_of_val;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
+use ratatui::text::Line;
 
 use crate::convert::{count, offset};
 use crate::git::diff::{DiffDocument, DiffIndex, DiffLineKind, PullRequestDetails};
@@ -22,6 +24,7 @@ const TOAST_DURATION: Duration = Duration::from_secs(4);
 const HISTORY_PAGE_SIZE: usize = 300;
 const PULL_REQUEST_PREFETCH_BATCH: usize = 12;
 const MAX_PREFETCHED_PULL_REQUEST_FILES: usize = 400;
+const MAX_PULL_REQUEST_DOCUMENT_BYTES: usize = 32 * 1024 * 1024;
 /// Poll cadences for an open pull request. A run in progress changes state in
 /// seconds and is worth watching closely; a settled pull request only needs to
 /// notice new comments; a pull request nobody is looking at needs less again.
@@ -484,7 +487,9 @@ pub(crate) enum SidebarHit {
     Commit(usize),
     PullRequestFiles,
     PullRequestOverview,
+    PullRequestRefresh,
     PullRequestConversation,
+    PullRequestConversationRefresh,
     PullRequestChooseRepository,
     PullRequestLookup,
     PullRequestDirectory(PathBuf),
@@ -508,6 +513,12 @@ pub(crate) struct ContentFileHit {
 pub(crate) struct ContentStepHit {
     pub area: Rect,
     pub step: usize,
+}
+
+pub(crate) struct PullRequestContentRow {
+    pub line: Line<'static>,
+    pub step: Option<usize>,
+    pub wide: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -601,6 +612,7 @@ pub(crate) struct App {
     pub pull_request_section: PullRequestSection,
     pub pull_request_file_view: PullRequestFileView,
     pub pull_request_files: Vec<PullRequestFile>,
+    pub pull_request_tree: Vec<PullRequestTreeEntry>,
     pub pull_request_total_files: usize,
     pub pull_request_files_truncated: bool,
     pub pull_request_file_cursor: usize,
@@ -613,11 +625,10 @@ pub(crate) struct App {
     pub pull_request_checks_loading: bool,
     pub pull_request_checks_error: Option<String>,
     pub pull_request_checks_from_cache: bool,
-    /// How many settled runs the background warm has already covered, so a
-    /// poll that reports the same set does not queue the work again.
-    pub pull_request_prefetched_logs: usize,
+    pub pull_request_prefetched_logs: HashSet<String>,
     pub pull_request_conversation: PullRequestConversation,
     pub pull_request_conversation_loading: bool,
+    pub pull_request_conversation_refresh_again: bool,
     pub pull_request_conversation_error: Option<String>,
     pub pull_request_check_log: Option<CheckRunLog>,
     pub pull_request_check_log_loading: bool,
@@ -628,6 +639,9 @@ pub(crate) struct App {
     /// it. Scrolling the selection into view on every frame instead would pin
     /// the pane to the selected step and make its own output unreadable.
     pub pull_request_step_reveal: bool,
+    pub pull_request_content_rows: Vec<PullRequestContentRow>,
+    pub pull_request_content_rows_key: Option<(bool, usize, u64, u64, u64, u64, u64)>,
+    pub pull_request_content_generation: u64,
     /// Whether the last draw left the content pane scrolled to its end. The
     /// renderer owns the row count, so it reports this back for the one decision
     /// that needs it: whether a growing log should keep following.
@@ -676,6 +690,9 @@ pub(crate) struct App {
     pub repository_generation: u64,
     pub pull_request_workspace_generation: Option<u64>,
     pub pull_request_documents: HashMap<PathBuf, DiffDocument>,
+    pub pull_request_document_order: VecDeque<PathBuf>,
+    pub pull_request_document_bytes: usize,
+    pub pull_request_prefetched_paths: HashSet<PathBuf>,
     pub pull_request_loading_path: Option<PathBuf>,
     /// The path whose patch currently occupies `document` in single-file view.
     /// Tracking it explicitly keeps the cache authoritative about which files
@@ -685,9 +702,7 @@ pub(crate) struct App {
     pub pull_request_checks_generation: u64,
     pub pull_request_conversation_generation: u64,
     pub pull_request_check_log_generation: u64,
-    /// Workflow and name of the check the loaded log belongs to, so a live
-    /// refresh can tell a new selection from an update of the same run.
-    pub pull_request_check_log_target: Option<(String, String)>,
+    pub pull_request_check_log_target: Option<String>,
     pub local_diff_request: Option<LocalDiffRequest>,
     pub local_diff_workspace_generation: Option<u64>,
     pub local_diff_index: Option<DiffIndex>,
@@ -711,6 +726,10 @@ pub(crate) struct App {
 }
 
 impl App {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the constructor explicitly initializes every independent state field"
+    )]
     pub(crate) fn new(root: impl AsRef<Path>, name: impl Into<String>) -> Self {
         Self {
             repository_root: root.as_ref().to_path_buf(),
@@ -736,6 +755,7 @@ impl App {
             pull_request_section: PullRequestSection::Overview,
             pull_request_file_view: PullRequestFileView::AllFiles,
             pull_request_files: Vec::new(),
+            pull_request_tree: Vec::new(),
             pull_request_total_files: 0,
             pull_request_files_truncated: false,
             pull_request_file_cursor: 0,
@@ -746,9 +766,10 @@ impl App {
             pull_request_checks_loading: false,
             pull_request_checks_error: None,
             pull_request_checks_from_cache: false,
-            pull_request_prefetched_logs: 0,
+            pull_request_prefetched_logs: HashSet::new(),
             pull_request_conversation: PullRequestConversation::default(),
             pull_request_conversation_loading: false,
+            pull_request_conversation_refresh_again: false,
             pull_request_conversation_error: None,
             pull_request_check_log: None,
             pull_request_check_log_loading: false,
@@ -756,6 +777,9 @@ impl App {
             expanded_check_steps: HashSet::new(),
             pull_request_step_cursor: 0,
             pull_request_step_reveal: false,
+            pull_request_content_rows: Vec::new(),
+            pull_request_content_rows_key: None,
+            pull_request_content_generation: 0,
             content_at_bottom: true,
             pull_request_progress: None,
             auxiliary_preview: None,
@@ -798,6 +822,9 @@ impl App {
             repository_generation: 0,
             pull_request_workspace_generation: None,
             pull_request_documents: HashMap::new(),
+            pull_request_document_order: VecDeque::new(),
+            pull_request_document_bytes: 0,
+            pull_request_prefetched_paths: HashSet::new(),
             pull_request_loading_path: None,
             pull_request_single_file: None,
             pull_request_prefetching: false,
@@ -900,7 +927,7 @@ impl App {
             .and_then(|cursor| self.pull_request_checks.get(cursor))
     }
 
-    pub(crate) fn pull_request_tree_entries(&self) -> Vec<PullRequestTreeEntry> {
+    fn rebuild_pull_request_tree(&mut self) {
         let mut entries = Vec::with_capacity(self.pull_request_files.len().saturating_mul(2));
         let mut seen_directories = BTreeSet::new();
         for (index, file) in self.pull_request_files.iter().enumerate() {
@@ -931,7 +958,14 @@ impl App {
                 });
             }
         }
-        entries
+        self.pull_request_tree = entries;
+    }
+
+    pub(crate) fn pull_request_tree_entries(&mut self) -> &[PullRequestTreeEntry] {
+        if self.pull_request_tree.is_empty() && !self.pull_request_files.is_empty() {
+            self.rebuild_pull_request_tree();
+        }
+        &self.pull_request_tree
     }
 
     pub(crate) fn pull_request_directory_collapsed(&self, path: &Path) -> bool {
@@ -939,8 +973,9 @@ impl App {
     }
 
     fn sync_pull_request_tree_cursor_to_file(&mut self) {
+        self.rebuild_pull_request_tree();
         self.pull_request_tree_cursor = self
-            .pull_request_tree_entries()
+            .pull_request_tree
             .iter()
             .position(|entry| {
                 matches!(
@@ -954,17 +989,18 @@ impl App {
 
     fn select_pull_request_tree_entry(&mut self, cursor: usize, now: Instant) {
         let entries = self.pull_request_tree_entries();
-        let Some(entry) = entries.get(cursor.min(entries.len().saturating_sub(1))) else {
+        let length = entries.len();
+        let Some(entry) = entries.get(cursor.min(length.saturating_sub(1))).cloned() else {
             self.pull_request_tree_cursor = 0;
             return;
         };
-        self.pull_request_tree_cursor = cursor.min(entries.len() - 1);
+        self.pull_request_tree_cursor = cursor.min(length - 1);
         if let PullRequestTreeEntry::File { index, .. } = entry {
-            let changed_file = *index != self.pull_request_file_cursor;
+            let changed_file = index != self.pull_request_file_cursor;
             let entering_single_file =
                 self.pull_request_file_view != PullRequestFileView::SingleFile;
             if changed_file || entering_single_file {
-                self.pull_request_file_cursor = *index;
+                self.pull_request_file_cursor = index;
                 self.pull_request_file_view = PullRequestFileView::SingleFile;
                 self.content_scroll = 0;
                 self.horizontal_scroll = 0;
@@ -981,8 +1017,9 @@ impl App {
         if !self.collapsed_pull_request_directories.remove(&path) {
             let _ = self.collapsed_pull_request_directories.insert(path.clone());
         }
+        self.rebuild_pull_request_tree();
         self.pull_request_tree_cursor = self
-            .pull_request_tree_entries()
+            .pull_request_tree
             .iter()
             .position(|entry| {
                 matches!(entry, PullRequestTreeEntry::Directory { path: entry_path, .. } if entry_path == &path)
@@ -997,10 +1034,9 @@ impl App {
         {
             return false;
         }
-        let Some(PullRequestTreeEntry::Directory { path, .. }) = self
-            .pull_request_tree_entries()
-            .get(self.pull_request_tree_cursor)
-            .cloned()
+        let cursor = self.pull_request_tree_cursor;
+        let Some(PullRequestTreeEntry::Directory { path, .. }) =
+            self.pull_request_tree_entries().get(cursor).cloned()
         else {
             return false;
         };
@@ -1009,7 +1045,10 @@ impl App {
     }
 
     fn navigate_pull_request_tree_horizontal(&mut self, expand: bool, now: Instant) {
-        let entries = self.pull_request_tree_entries();
+        if self.pull_request_tree_entries().is_empty() {
+            return;
+        }
+        let entries = &self.pull_request_tree;
         let Some(entry) = entries.get(self.pull_request_tree_cursor).cloned() else {
             return;
         };
@@ -1740,8 +1779,14 @@ impl App {
                                         PullRequestSection::Overview,
                                         &mut effects,
                                     ),
+                                SidebarHit::PullRequestRefresh => {
+                                    self.refresh_pull_request_live(now, true, &mut effects);
+                                }
                                 SidebarHit::PullRequestConversation => {
                                     self.select_pull_request_check(None, &mut effects);
+                                }
+                                SidebarHit::PullRequestConversationRefresh => {
+                                    self.request_pull_request_conversation(true, &mut effects);
                                 }
                                 SidebarHit::PullRequestChooseRepository => {
                                     self.open_pull_request_repositories(&mut effects);
@@ -2183,7 +2228,7 @@ impl App {
                         match self.pull_request_file_view {
                             PullRequestFileView::AllFiles => {
                                 if let Some(path) = path {
-                                    drop(self.pull_request_documents.insert(path, document));
+                                    self.cache_pull_request_document(path, document);
                                     self.rebuild_pull_request_all_files_document();
                                 } else {
                                     self.document = document;
@@ -2214,7 +2259,9 @@ impl App {
                 self.pull_request_prefetching = false;
                 if let Ok(documents) = result {
                     for (path, document) in documents {
-                        let _ = self.pull_request_documents.entry(path).or_insert(document);
+                        if !self.pull_request_documents.contains_key(&path) {
+                            self.cache_pull_request_document(path, document);
+                        }
                     }
                     if self.pull_request_file_view == PullRequestFileView::AllFiles {
                         self.rebuild_pull_request_all_files_document();
@@ -2231,17 +2278,17 @@ impl App {
                     Ok(snapshot) => {
                         let selected = self
                             .selected_pull_request_check()
-                            .map(|check| (check.workflow.clone(), check.name.clone()));
+                            .map(PullRequestCheck::identity);
                         let was_running = self
                             .selected_pull_request_check()
                             .is_some_and(|check| check.status.is_running());
                         self.pull_request_checks_from_cache = snapshot.from_cache;
                         self.pull_request_checks = snapshot.checks;
+                        self.invalidate_pull_request_content_rows();
                         let cursor = selected.and_then(|selected| {
-                            self.pull_request_checks.iter().position(|check| {
-                                (check.workflow.as_str(), check.name.as_str())
-                                    == (selected.0.as_str(), selected.1.as_str())
-                            })
+                            self.pull_request_checks
+                                .iter()
+                                .position(|check| check.identity() == selected)
                         });
                         let _ = self.set_check_cursor(cursor);
                         self.pull_request_checks_error = None;
@@ -2250,7 +2297,10 @@ impl App {
                         }
                         self.request_check_log_prefetch(&mut effects);
                     }
-                    Err(error) => self.pull_request_checks_error = Some(error),
+                    Err(error) => {
+                        self.pull_request_checks_error = Some(error);
+                        self.invalidate_pull_request_content_rows();
+                    }
                 }
             }
             WorkerEvent::CheckRunLog { generation, result } => {
@@ -2278,6 +2328,7 @@ impl App {
                             self.reveal_check_step(number);
                         }
                         self.pull_request_check_log = Some(log);
+                        self.invalidate_pull_request_content_rows();
                         self.pull_request_check_log_error = None;
                         if following {
                             self.content_scroll = usize::MAX;
@@ -2286,6 +2337,7 @@ impl App {
                     Err(error) => {
                         self.pull_request_check_log = None;
                         self.pull_request_check_log_error = Some(error);
+                        self.invalidate_pull_request_content_rows();
                     }
                 }
             }
@@ -2298,8 +2350,16 @@ impl App {
                     Ok(conversation) => {
                         self.pull_request_conversation = conversation;
                         self.pull_request_conversation_error = None;
+                        self.invalidate_pull_request_content_rows();
                     }
-                    Err(error) => self.pull_request_conversation_error = Some(error),
+                    Err(error) => {
+                        self.pull_request_conversation_error = Some(error);
+                        self.invalidate_pull_request_content_rows();
+                    }
+                }
+                if self.pull_request_conversation_refresh_again {
+                    self.pull_request_conversation_refresh_again = false;
+                    self.request_pull_request_conversation(true, &mut effects);
                 }
             }
             WorkerEvent::History {
@@ -2394,6 +2454,7 @@ impl App {
                             self.github_repositories = snapshot.repositories;
                         }
                         let previous = self.pull_request.replace(snapshot.pull_request);
+                        self.invalidate_pull_request_content_rows();
                         let current = self.pull_request.as_ref().expect("just assigned");
                         let same = previous.as_ref().is_some_and(|previous| {
                             previous.number == current.number
@@ -3303,8 +3364,8 @@ impl App {
             View::PullRequests => {
                 match self.pull_request_section {
                     PullRequestSection::Files => {
-                        let entries = self.pull_request_tree_entries();
-                        if entries.is_empty() {
+                        let length = self.pull_request_tree_entries().len();
+                        if length == 0 {
                             self.pull_request_file_cursor = 0;
                             self.pull_request_tree_cursor = 0;
                             return;
@@ -3313,7 +3374,7 @@ impl App {
                             self.pull_request_tree_cursor
                                 .saturating_sub(amount.unsigned_abs())
                         } else {
-                            (self.pull_request_tree_cursor + count(amount)).min(entries.len() - 1)
+                            (self.pull_request_tree_cursor + count(amount)).min(length - 1)
                         };
                         self.select_pull_request_tree_entry(cursor, now);
                     }
@@ -3872,6 +3933,9 @@ impl App {
     fn reset_pull_request_diff_runtime(&mut self) {
         self.pull_request_workspace_generation = None;
         self.pull_request_documents.clear();
+        self.pull_request_document_order.clear();
+        self.pull_request_document_bytes = 0;
+        self.pull_request_prefetched_paths.clear();
         self.pull_request_loading_path = None;
         self.pull_request_single_file = None;
         self.pull_request_prefetching = false;
@@ -3882,6 +3946,7 @@ impl App {
         self.pull_request_section = PullRequestSection::Overview;
         self.pull_request_file_view = PullRequestFileView::AllFiles;
         self.pull_request_files.clear();
+        self.pull_request_tree.clear();
         self.pull_request_total_files = 0;
         self.pull_request_files_truncated = false;
         self.pull_request_file_cursor = 0;
@@ -3892,9 +3957,10 @@ impl App {
         self.pull_request_checks_loading = false;
         self.pull_request_checks_error = None;
         self.pull_request_checks_generation = self.pull_request_checks_generation.wrapping_add(1);
-        self.pull_request_prefetched_logs = 0;
+        self.pull_request_prefetched_logs.clear();
         self.pull_request_conversation = PullRequestConversation::default();
         self.pull_request_conversation_loading = false;
+        self.pull_request_conversation_refresh_again = false;
         self.pull_request_conversation_error = None;
         self.pull_request_conversation_generation =
             self.pull_request_conversation_generation.wrapping_add(1);
@@ -3906,6 +3972,9 @@ impl App {
             self.pull_request_check_log_generation.wrapping_add(1);
         self.expanded_check_steps.clear();
         self.pull_request_step_cursor = 0;
+        self.pull_request_content_rows.clear();
+        self.pull_request_content_rows_key = None;
+        self.pull_request_content_generation = self.pull_request_content_generation.wrapping_add(1);
         self.pull_request_checks_read_at = None;
         self.pull_request_detail_read_at = None;
         self.pull_request_log_read_at = None;
@@ -4006,10 +4075,50 @@ impl App {
         if self.pull_request_documents.contains_key(&path) {
             return;
         }
-        drop(
-            self.pull_request_documents
-                .insert(path, std::mem::take(&mut self.document)),
-        );
+        let document = std::mem::take(&mut self.document);
+        self.cache_pull_request_document(path, document);
+    }
+
+    fn cache_pull_request_document(&mut self, path: PathBuf, document: DiffDocument) {
+        if let Some(previous) = self.pull_request_documents.remove(&path) {
+            self.pull_request_document_bytes = self
+                .pull_request_document_bytes
+                .saturating_sub(diff_document_size(&previous));
+            self.pull_request_document_order
+                .retain(|candidate| candidate != &path);
+        }
+        self.pull_request_document_bytes = self
+            .pull_request_document_bytes
+            .saturating_add(diff_document_size(&document));
+        let _ = self.pull_request_prefetched_paths.insert(path.clone());
+        self.pull_request_document_order.push_back(path.clone());
+        drop(self.pull_request_documents.insert(path, document));
+        self.prune_pull_request_documents(MAX_PULL_REQUEST_DOCUMENT_BYTES);
+    }
+
+    fn prune_pull_request_documents(&mut self, maximum_bytes: usize) {
+        while self.pull_request_document_bytes > maximum_bytes
+            && self.pull_request_documents.len() > 1
+        {
+            let Some(expired) = self.pull_request_document_order.pop_front() else {
+                break;
+            };
+            if let Some(document) = self.pull_request_documents.remove(&expired) {
+                self.pull_request_document_bytes = self
+                    .pull_request_document_bytes
+                    .saturating_sub(diff_document_size(&document));
+            }
+        }
+    }
+
+    fn take_pull_request_document(&mut self, path: &Path) -> Option<DiffDocument> {
+        let document = self.pull_request_documents.remove(path)?;
+        self.pull_request_document_bytes = self
+            .pull_request_document_bytes
+            .saturating_sub(diff_document_size(&document));
+        self.pull_request_document_order
+            .retain(|candidate| candidate != path);
+        Some(document)
     }
 
     fn show_pull_request_all_files(&mut self) {
@@ -4070,7 +4179,7 @@ impl App {
             if self.pull_request_documents.contains_key(&path) {
                 self.cache_current_pull_request_single_document();
             }
-            if let Some(document) = self.pull_request_documents.remove(&path) {
+            if let Some(document) = self.take_pull_request_document(&path) {
                 self.document_loading = false;
                 self.document = document;
                 self.pull_request_single_file = Some(path);
@@ -4117,15 +4226,18 @@ impl App {
         let Some(workspace_generation) = self.pull_request_workspace_generation else {
             return;
         };
-        if self.pull_request_documents.len() >= MAX_PREFETCHED_PULL_REQUEST_FILES {
+        if self.pull_request_prefetched_paths.len() >= MAX_PREFETCHED_PULL_REQUEST_FILES {
             return;
         }
+        let remaining = MAX_PREFETCHED_PULL_REQUEST_FILES
+            .saturating_sub(self.pull_request_prefetched_paths.len());
         let paths: Vec<PathBuf> = self
             .pull_request_files
             .iter()
             .map(|file| file.path.clone())
             .filter(|path| self.pull_request_file_needs_patch(path))
-            .take(PULL_REQUEST_PREFETCH_BATCH)
+            .filter(|path| !self.pull_request_prefetched_paths.contains(path))
+            .take(PULL_REQUEST_PREFETCH_BATCH.min(remaining))
             .collect();
         if paths.is_empty() {
             return;
@@ -4188,7 +4300,13 @@ impl App {
         self.content_scroll = 0;
         self.horizontal_scroll = 0;
         self.invalidate_check_run_log();
+        self.invalidate_pull_request_content_rows();
         true
+    }
+
+    const fn invalidate_pull_request_content_rows(&mut self) {
+        self.pull_request_content_generation = self.pull_request_content_generation.wrapping_add(1);
+        self.pull_request_content_rows_key = None;
     }
 
     fn invalidate_check_run_log(&mut self) {
@@ -4225,6 +4343,7 @@ impl App {
             let _ = self.expanded_check_steps.insert(step);
         }
         self.reveal_check_step(step);
+        self.invalidate_pull_request_content_rows();
     }
 
     fn toggle_all_check_steps(&mut self) {
@@ -4235,6 +4354,7 @@ impl App {
             self.expanded_check_steps.clear();
         }
         self.content_scroll = 0;
+        self.invalidate_pull_request_content_rows();
     }
 
     /// Move between steps the way `[` and `]` move between diff hunks, so a long
@@ -4290,7 +4410,7 @@ impl App {
                 self.pull_request_check_log_generation.wrapping_add(1);
             return;
         };
-        let target = (check.workflow.clone(), check.name.clone());
+        let target = check.identity();
         if self.pull_request_check_log_target.as_ref() == Some(&target) {
             if self.pull_request_check_log_loading {
                 return;
@@ -4327,13 +4447,20 @@ impl App {
         let settled: Vec<PullRequestCheck> = self
             .pull_request_checks
             .iter()
-            .filter(|check| !check.status.is_running())
+            .filter(|check| !check.status.is_running() && check.job_id().is_some())
+            .filter(|check| {
+                !self
+                    .pull_request_prefetched_logs
+                    .contains(&check.identity())
+            })
+            .take(32_usize.saturating_sub(self.pull_request_prefetched_logs.len()))
             .cloned()
             .collect();
-        if settled.is_empty() || self.pull_request_prefetched_logs == settled.len() {
+        if settled.is_empty() {
             return;
         }
-        self.pull_request_prefetched_logs = settled.len();
+        self.pull_request_prefetched_logs
+            .extend(settled.iter().map(PullRequestCheck::identity));
         effects.push(AppEffect::Git(Box::new(
             WorkerCommand::PrefetchCheckRunLogs {
                 generation: 0,
@@ -4344,9 +4471,11 @@ impl App {
     }
 
     fn request_pull_request_conversation(&mut self, refresh: bool, effects: &mut Vec<AppEffect>) {
-        if self.pull_request_conversation_loading
-            || (!refresh && !self.pull_request_conversation.entries.is_empty())
-        {
+        if self.pull_request_conversation_loading {
+            self.pull_request_conversation_refresh_again |= refresh;
+            return;
+        }
+        if !refresh && !self.pull_request_conversation.entries.is_empty() {
             return;
         }
         let Some(pull_request) = self.pull_request.clone() else {
@@ -4783,6 +4912,20 @@ fn pull_request_loading_document(pull_request: &PullRequest, message: &str) -> D
     );
     document.pull_request_details = Some(pull_request_details(pull_request));
     document
+}
+
+fn diff_document_size(document: &DiffDocument) -> usize {
+    let lines = document.lines.iter().fold(0_usize, |total, line| {
+        let spans = line.spans.iter().fold(0_usize, |span_total, span| {
+            span_total.saturating_add(size_of_val(span) + span.text.capacity())
+        });
+        total
+            .saturating_add(size_of_val(line))
+            .saturating_add(spans)
+    });
+    size_of_val(document)
+        .saturating_add(document.title.capacity())
+        .saturating_add(lines)
 }
 
 fn pull_request_details(pull_request: &PullRequest) -> PullRequestDetails {
@@ -5677,9 +5820,10 @@ mod tests {
             .collect();
         app.sync_pull_request_tree_cursor_to_file();
 
+        let cursor = app.pull_request_tree_cursor;
         let entries = app.pull_request_tree_entries();
         assert!(matches!(
-            entries.get(app.pull_request_tree_cursor),
+            entries.get(cursor),
             Some(PullRequestTreeEntry::File { index: 0, .. })
         ));
 
@@ -5687,9 +5831,9 @@ mod tests {
             KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
             Instant::now(),
         );
+        let cursor = app.pull_request_tree_cursor;
         assert!(matches!(
-            app.pull_request_tree_entries()
-                .get(app.pull_request_tree_cursor),
+            app.pull_request_tree_entries().get(cursor),
             Some(PullRequestTreeEntry::Directory { path, .. }) if path == Path::new("src")
         ));
 
@@ -5901,6 +6045,61 @@ mod tests {
     }
 
     #[test]
+    fn conversation_refresh_replays_when_the_previous_read_finishes() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.pull_request = Some(pull_request(8, "Conversation", "acme/widget"));
+        let mut first = Vec::new();
+        app.request_pull_request_conversation(true, &mut first);
+        let generation = app.pull_request_conversation_generation;
+
+        let mut coalesced = Vec::new();
+        app.request_pull_request_conversation(true, &mut coalesced);
+        assert!(coalesced.is_empty());
+        assert!(app.pull_request_conversation_refresh_again);
+
+        let replayed = app.handle_worker_event(
+            WorkerEvent::PullRequestConversation {
+                generation,
+                result: Ok(PullRequestConversation::default()),
+            },
+            Instant::now(),
+        );
+        assert!(matches!(
+            replayed.as_slice(),
+            [AppEffect::Git(command)]
+                if matches!(command.as_ref(), WorkerCommand::LoadPullRequestConversation { .. })
+        ));
+        assert!(app.pull_request_conversation_loading);
+    }
+
+    #[test]
+    fn parsed_pull_request_documents_evict_oldest_entries_by_size() {
+        let mut app = App::new("/tmp/repo", "repo");
+        let mut document = indexed_document(&["src/file.rs"]);
+        document.title = "x".repeat(1_024);
+        let document_size = diff_document_size(&document);
+
+        for name in ["first.rs", "second.rs", "third.rs"] {
+            app.cache_pull_request_document(PathBuf::from(name), document.clone());
+        }
+        app.prune_pull_request_documents(document_size.saturating_mul(2));
+
+        assert_eq!(app.pull_request_documents.len(), 2);
+        assert!(
+            !app.pull_request_documents
+                .contains_key(Path::new("first.rs"))
+        );
+        assert!(
+            app.pull_request_documents
+                .contains_key(Path::new("second.rs"))
+        );
+        assert!(
+            app.pull_request_documents
+                .contains_key(Path::new("third.rs"))
+        );
+    }
+
+    #[test]
     fn a_fast_tick_only_speeds_up_the_reads_that_change_that_fast() {
         let mut app = App::new("/tmp/repo", "repo");
         let start = Instant::now();
@@ -6025,8 +6224,7 @@ mod tests {
             check("No-comment policy", PullRequestCheckStatus::Passed),
         ];
         app.pull_request_check_cursor = Some(0);
-        app.pull_request_check_log_target =
-            Some(("CI".to_owned(), "Build every workspace".to_owned()));
+        app.pull_request_check_log_target = Some(app.pull_request_checks[0].identity());
         app.pull_request_check_log = Some(CheckRunLog {
             steps: vec![crate::git::github::CheckStep {
                 number: 1,
