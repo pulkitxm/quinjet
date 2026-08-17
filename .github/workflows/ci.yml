@@ -251,6 +251,9 @@ jobs:
       - name: Shell installer
         if: runner.os != 'Windows'
         run: sh tests/install.sh
+      - name: Root container-style shell installer
+        if: runner.os == 'Linux'
+        run: sudo env PATH="${PATH}" QUINJET_TEST_ROOT_DEFAULT=1 sh tests/install.sh
       - name: PowerShell installer
         if: runner.os == 'Windows'
         shell: pwsh

@@ -45,7 +45,7 @@ Where the binary lands:
 
 | Platform | Directory |
 | --- | --- |
-| Linux, macOS | `$QUINJET_INSTALL_DIR`, else `$XDG_BIN_HOME`, else `~/.local/bin` |
+| Linux, macOS | `$QUINJET_INSTALL_DIR`, else `/usr/local/bin` for root when writable and on `PATH`, else `$XDG_BIN_HOME`, else `~/.local/bin` |
 | Windows | `$QUINJET_INSTALL_DIR`, else `%LOCALAPPDATA%\Programs\Quinjet\bin`, else `%HOME%\.local\bin` |
 
 The shell installer takes `-v`/`--version`, `-b`/`--bin-dir`,
@@ -81,8 +81,9 @@ completions and the `q` shortcut on the first invocation after `cargo install`,
 cargo-binstall, a package-manager installation, or copying a release binary. It
 detects the current shell, writes its completion integration, and places the
 `q` launcher beside the Quinjet executable or in a user bin directory already
-on `PATH`. The release scripts run the same installation path before they
-finish. The launcher is visible in the current shell immediately.
+on `PATH`. If no shell is detectable, it still installs `q`. The release
+scripts run the same installation path before they finish. The launcher is
+visible in the current shell whenever its directory was already on `PATH`.
 
 Quinjet stores an installed-once marker under
 `$XDG_STATE_HOME/quinjet`, else `~/.local/state/quinjet`, or
@@ -149,19 +150,25 @@ Windows. See
   next to the destination and moved into place, so an interrupted install never
   leaves a half-written `quinjet` on your `PATH`.
 - The shell installer reads `$SHELL` and installs completions plus the `q`
-  shortcut when it names bash, zsh, fish, or elvish. The PowerShell installer
-  always installs both for PowerShell. Generated scripts and marked completion
-  blocks live in user-owned directories. The `q` launcher is `q` on Unix or
-  `q.cmd` on Windows. It lives beside the executable when possible, with a
-  user-owned directory already on `PATH` as the fallback.
-- `PATH` is only edited when the destination is exactly `~/.local/bin` and
-  `--no-modify-path` was not passed. The line goes into `config.fish` for fish
+  shortcut when it names bash, zsh, fish, or elvish. If `$SHELL` is unset, the
+  installer uses the bash completion paths so that `q` is still installed. The
+  PowerShell installer always installs both for PowerShell. Generated scripts
+  and marked completion blocks live in
+  user-owned directories. The `q` launcher is `q` on Unix or `q.cmd` on
+  Windows. It lives beside the executable when possible, with a user-owned
+  directory already on `PATH` as the fallback.
+- A root shell defaults to `/usr/local/bin` when that directory is writable and
+  already on `PATH`. Other Unix shells default to `$XDG_BIN_HOME` or
+  `~/.local/bin`. `PATH` is only edited when the destination is exactly
+  `~/.local/bin` and `--no-modify-path` was not passed. The line goes into
+  `config.fish` for fish
   (`fish_add_path "$HOME/.local/bin"`), `$ZDOTDIR/.zshrc` for zsh, `~/.bashrc`
   for bash, and `~/.profile` for anything else, under the comment
   `# Added by the Quinjet installer`. Choose your own `--bin-dir` and the
   installer will tell you the directory is not on `PATH` and leave your startup
-  files alone. On Windows the entry is prepended to the user `Path` and needs a
-  new terminal.
+  files alone. Whenever the destination is not on the current `PATH`, it prints
+  the exact `export PATH=...` command to run in that shell. On Windows the entry
+  is prepended to the user `Path` and needs a new terminal.
 - **Both installers check for `git` and warn when it is missing. Neither one
   checks for `gh`.** A machine that installed cleanly can still fail the first
   `quinjet pr view`. See

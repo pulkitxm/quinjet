@@ -637,6 +637,37 @@ fn shell_integration_makes_q_immediate_without_restoring_removals() -> Result<()
     Ok(())
 }
 
+#[cfg(all(not(windows), not(debug_assertions)))]
+#[test]
+fn shell_integration_without_a_detected_shell_still_installs_q() -> Result<()> {
+    let scratch = Scratch::directory()?;
+    let bin = scratch.path.join("bin");
+    let executable = bin.join("quinjet");
+    let shortcut = bin.join("q");
+    fs::create_dir_all(&bin)?;
+    fs::copy(env!("CARGO_BIN_EXE_quinjet"), &executable)?;
+
+    let mut first_run = ProcessCommand::new(&executable);
+    first_run
+        .arg("--version")
+        .env("HOME", &scratch.path)
+        .env("PATH", &bin)
+        .env_remove("SHELL");
+    isolate_git(&mut first_run);
+    drop(Run::from(first_run.output().context("failed first run")?)?.success()?);
+    ensure!(shortcut.exists());
+
+    let mut invoke_q = ProcessCommand::new("q");
+    invoke_q
+        .arg("--version")
+        .env("HOME", &scratch.path)
+        .env("PATH", &bin)
+        .env_remove("SHELL");
+    let q = Run::from(invoke_q.output().context("q was unavailable on PATH")?)?.success()?;
+    ensure!(q.stdout.contains("quinjet"));
+    Ok(())
+}
+
 #[cfg(windows)]
 #[test]
 fn shell_integration_makes_q_immediate_on_windows() -> Result<()> {
