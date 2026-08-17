@@ -726,6 +726,10 @@ pub(crate) struct App {
 }
 
 impl App {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the constructor explicitly initializes every independent state field"
+    )]
     pub(crate) fn new(root: impl AsRef<Path>, name: impl Into<String>) -> Self {
         Self {
             repository_root: root.as_ref().to_path_buf(),
@@ -4300,7 +4304,7 @@ impl App {
         true
     }
 
-    fn invalidate_pull_request_content_rows(&mut self) {
+    const fn invalidate_pull_request_content_rows(&mut self) {
         self.pull_request_content_generation = self.pull_request_content_generation.wrapping_add(1);
         self.pull_request_content_rows_key = None;
     }
@@ -4449,7 +4453,7 @@ impl App {
                     .pull_request_prefetched_logs
                     .contains(&check.identity())
             })
-            .take(32usize.saturating_sub(self.pull_request_prefetched_logs.len()))
+            .take(32_usize.saturating_sub(self.pull_request_prefetched_logs.len()))
             .cloned()
             .collect();
         if settled.is_empty() {
@@ -4911,8 +4915,8 @@ fn pull_request_loading_document(pull_request: &PullRequest, message: &str) -> D
 }
 
 fn diff_document_size(document: &DiffDocument) -> usize {
-    let lines = document.lines.iter().fold(0usize, |total, line| {
-        let spans = line.spans.iter().fold(0usize, |span_total, span| {
+    let lines = document.lines.iter().fold(0_usize, |total, line| {
+        let spans = line.spans.iter().fold(0_usize, |span_total, span| {
             span_total.saturating_add(size_of_val(span) + span.text.capacity())
         });
         total

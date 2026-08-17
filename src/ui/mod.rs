@@ -2384,11 +2384,7 @@ fn draw_content(
         0
     };
     let side_by_side = app.diff_layout == DiffLayout::SideBySide && inner.width >= 72;
-    let side_rows = if side_by_side {
-        Some(side_by_side_rows(&app.document, app))
-    } else {
-        None
-    };
+    let side_rows = optional_side_by_side_rows(side_by_side, &app.document, app);
     let unified_rows = if side_by_side {
         None
     } else {
@@ -3310,6 +3306,14 @@ fn side_by_side_rows<'a>(document: &'a DiffDocument, app: &App) -> Vec<SideBySid
         }
     }
     rows
+}
+
+fn optional_side_by_side_rows<'a>(
+    enabled: bool,
+    document: &'a DiffDocument,
+    app: &App,
+) -> Option<Vec<SideBySideRow<'a>>> {
+    enabled.then(|| side_by_side_rows(document, app))
 }
 
 fn intraline_emphasis(lines: &[DiffLine]) -> Vec<Option<Range<usize>>> {

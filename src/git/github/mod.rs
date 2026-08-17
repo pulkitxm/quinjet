@@ -310,10 +310,6 @@ impl PreparedPullRequest {
         ))
     }
 
-    #[expect(
-        clippy::option_if_let_else,
-        reason = "the branch is one arm of a longer chain that map_or_else cannot express"
-    )]
     /// Produce many file documents from a single `git diff`. Spawning one Git
     /// process per file dominates the cost of a wide pull request, so batching
     /// is what lets the whole diff arrive while the reader is still reading the
