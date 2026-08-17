@@ -79,18 +79,19 @@ published static Linux artifacts.
 Cargo has no post-install hook for a binary crate. Quinjet therefore installs
 completions and the `q` shortcut on the first invocation after `cargo install`,
 cargo-binstall, a package-manager installation, or copying a release binary. It
-detects the current shell and writes to that shell's user configuration. The
-release scripts run the same installation path before they finish, so those
-installations have both immediately.
+detects the current shell, writes its completion integration, and places the
+`q` launcher beside the Quinjet executable or in a user bin directory already
+on `PATH`. The release scripts run the same installation path before they
+finish. The launcher is visible in the current shell immediately.
 
 Quinjet stores an installed-once marker under
 `$XDG_STATE_HOME/quinjet`, else `~/.local/state/quinjet`, or
 `%LOCALAPPDATA%\Quinjet\state` on Windows. Later executables update a generated
 completion script only while that script still exists. If you remove the
-script, its marked profile block, or the marked `q` block, the state marker
-records that installation already happened and automatic maintenance does not
-put it back. An explicit `completions --install` is how to restore anything you
-removed intentionally.
+script, its marked completion profile block, or the `q` launcher, the state
+marker records that installation already happened and automatic maintenance
+does not put it back. An explicit `completions --install` is how to restore
+anything you removed intentionally.
 
 Run the installer explicitly when you want to select the shell yourself:
 
@@ -149,9 +150,10 @@ Windows. See
   leaves a half-written `quinjet` on your `PATH`.
 - The shell installer reads `$SHELL` and installs completions plus the `q`
   shortcut when it names bash, zsh, fish, or elvish. The PowerShell installer
-  always installs both for PowerShell. Generated scripts and marked profile
-  blocks live in user-owned directories, so a system binary directory does not
-  require root access to them.
+  always installs both for PowerShell. Generated scripts and marked completion
+  blocks live in user-owned directories. The `q` launcher is `q` on Unix or
+  `q.cmd` on Windows. It lives beside the executable when possible, with a
+  user-owned directory already on `PATH` as the fallback.
 - `PATH` is only edited when the destination is exactly `~/.local/bin` and
   `--no-modify-path` was not passed. The line goes into `config.fish` for fish
   (`fish_add_path "$HOME/.local/bin"`), `$ZDOTDIR/.zshrc` for zsh, `~/.bashrc`

@@ -182,7 +182,7 @@ function Install-Quinjet {
         if ($LASTEXITCODE -ne 0) {
             throw "could not install PowerShell completions"
         }
-        Write-Info "start a new PowerShell session to enable completions and q"
+        Write-Info "installed q on PATH; start a new PowerShell session only to enable completions"
 
         Write-Output "`nQuinjet was installed to $destination"
 

@@ -199,9 +199,9 @@ stale. See [the caching rules](#what-is-cached).
 stdout, and exit 0. The root help includes common examples and the web reference.
 `completions`, `man`, and `capabilities` generate their output on demand from the
 same fully defined clap command tree. `completions --install` writes that output
-and a `q` shortcut to the current user's shell configuration, and installed
-release binaries check the completion marker at startup. Persistent shell state
-prevents automatic maintenance from restoring integration the user removed.
+for the current user's shell and places a `q` launcher on `PATH`. Installed release binaries check the completion marker at startup.
+Persistent shell state prevents automatic maintenance from restoring
+integration the user removed.
 `update --check` checks release metadata without replacing the executable.
 
 ## What needs `git`, and what needs `gh`
@@ -213,7 +213,7 @@ nothing else. The metadata verbs run without a repository.
 
 | Verb | Also needs |
 | --- | --- |
-| `completions`, `man`, `capabilities` | nothing for generated stdout, including no repository and no `git`; `completions --install` also needs a home directory and permission to update completion files, state, and the shell profile that receives `q` |
+| `completions`, `man`, `capabilities` | nothing for generated stdout, including no repository and no `git`; `completions --install` also needs a home directory and permission to update completion files, state, any completion profile block, and a writable bin directory on `PATH` for `q` |
 | `update` | network access to GitHub Releases, permission to replace the running executable and refresh user completions, and `curl`/`wget` on Unix or PowerShell on Windows; no `git`, `gh`, or Cargo |
 | `status`, `diff`, `log`, `show`, `stage`, `unstage`, `discard`, `commit`, `resolve`, `branch`, `stash`, `cherry-pick`, `revert` | nothing |
 | `fetch`, `pull`, `push`, `sync` | network and whatever credentials Git is configured with |
