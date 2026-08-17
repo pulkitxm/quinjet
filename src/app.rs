@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -693,6 +693,7 @@ pub(crate) struct App {
     pub local_diff_index: Option<DiffIndex>,
     pub local_diff_documents: HashMap<PathBuf, DiffDocument>,
     pub local_diff_loading_path: Option<PathBuf>,
+    pub local_diff_pending_paths: VecDeque<PathBuf>,
     pub local_diff_single_loaded: bool,
     pub branch_generation: u64,
     pub history_branch_generation: u64,
@@ -809,6 +810,7 @@ impl App {
             local_diff_index: None,
             local_diff_documents: HashMap::new(),
             local_diff_loading_path: None,
+            local_diff_pending_paths: VecDeque::new(),
             local_diff_single_loaded: false,
             branch_generation: 0,
             history_branch_generation: 0,
@@ -1166,7 +1168,7 @@ impl App {
         }
     }
 
-    fn toggle_all_preview_files(&mut self) {
+    fn toggle_all_preview_files(&mut self, effects: &mut Vec<AppEffect>) {
         if !self.preview_files_collapsible() {
             return;
         }
@@ -1176,6 +1178,13 @@ impl App {
         self.expanded_preview_files.clear();
         self.content_scroll = 0;
         self.rebuild_indexed_preview_document();
+        if self.files_collapsed {
+            self.local_diff_pending_paths.clear();
+        } else {
+            for path in self.preview_file_paths() {
+                self.request_local_diff_file(path, effects);
+            }
+        }
     }
 
     fn toggle_preview_file(&mut self, path: PathBuf, effects: &mut Vec<AppEffect>) {
@@ -1410,7 +1419,7 @@ impl App {
             KeyCode::Char('e' | 'E') if self.check_log_visible() => {
                 self.toggle_all_check_steps();
             }
-            KeyCode::Char('e' | 'E') => self.toggle_all_preview_files(),
+            KeyCode::Char('e' | 'E') => self.toggle_all_preview_files(&mut effects),
             KeyCode::Char('t' | 'T') => {
                 self.expanded_diff = !self.expanded_diff;
                 self.content_scroll = 0;
@@ -2130,6 +2139,7 @@ impl App {
                     }
                     Err(error) => self.show_toast(error, ToastLevel::Error, now),
                 }
+                self.request_next_local_diff_file(&mut effects);
             }
             WorkerEvent::PullRequestIndex { generation, result } => {
                 if generation != self.diff_generation {
@@ -3071,7 +3081,7 @@ impl App {
                 }
             }
             PaletteCommand::ToggleDiffLayout => self.toggle_diff_layout(),
-            PaletteCommand::ToggleAllFiles => self.toggle_all_preview_files(),
+            PaletteCommand::ToggleAllFiles => self.toggle_all_preview_files(effects),
             PaletteCommand::ShowChanges => self.switch_view(View::Changes, effects),
             PaletteCommand::ShowHistory => self.switch_view(View::History, effects),
             PaletteCommand::ShowPullRequests => self.switch_view(View::PullRequests, effects),
@@ -3765,6 +3775,7 @@ impl App {
         self.local_diff_index = None;
         self.local_diff_documents.clear();
         self.local_diff_loading_path = None;
+        self.local_diff_pending_paths.clear();
         self.local_diff_single_loaded = false;
     }
 
@@ -3828,7 +3839,12 @@ impl App {
         if !indexed
             || self.local_diff_documents.contains_key(&path)
             || self.local_diff_loading_path.as_ref() == Some(&path)
+            || self.local_diff_pending_paths.contains(&path)
         {
+            return;
+        }
+        if self.local_diff_loading_path.is_some() {
+            self.local_diff_pending_paths.push_back(path);
             return;
         }
         self.diff_generation = self.diff_generation.wrapping_add(1);
@@ -3838,6 +3854,17 @@ impl App {
             workspace_generation,
             path,
         })));
+    }
+
+    fn request_next_local_diff_file(&mut self, effects: &mut Vec<AppEffect>) {
+        while let Some(path) = self.local_diff_pending_paths.pop_front() {
+            if !self.preview_file_collapsed(&path.to_string_lossy())
+                && !self.local_diff_documents.contains_key(&path)
+            {
+                self.request_local_diff_file(path, effects);
+                return;
+            }
+        }
     }
 
     /// Drop only the prepared diff. The section, cursors, checks and
@@ -5547,6 +5574,90 @@ mod tests {
                 } if path == Path::new("src/second.rs")
             )
         ));
+    }
+
+    #[test]
+    fn expanding_all_local_files_loads_every_visible_diff_in_order() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.diff_generation = 5;
+        let now = Instant::now();
+        let effects = app.handle_worker_event(
+            WorkerEvent::LocalDiffIndex {
+                generation: 5,
+                result: Ok(DiffIndex {
+                    title: "Commit details".to_owned(),
+                    files: ["src/first.rs", "src/second.rs", "src/third.rs"]
+                        .into_iter()
+                        .map(|path| crate::git::diff::DiffFileIndexEntry {
+                            path: PathBuf::from(path),
+                            old_path: None,
+                            status: "modified".to_owned(),
+                            counts: None,
+                        })
+                        .collect(),
+                    truncated: false,
+                    commit_details: None,
+                }),
+            },
+            now,
+        );
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Git(command)] if matches!(
+                command.as_ref(),
+                WorkerCommand::LoadLocalDiffFile { path, .. }
+                    if path == Path::new("src/first.rs")
+            )
+        ));
+
+        let effects = app.handle_worker_event(
+            WorkerEvent::LocalDiffFile {
+                generation: app.diff_generation,
+                path: PathBuf::from("src/first.rs"),
+                result: Ok(indexed_document(&["src/first.rs"])),
+            },
+            now,
+        );
+        assert!(effects.is_empty());
+
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE), now);
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Git(command)] if matches!(
+                command.as_ref(),
+                WorkerCommand::LoadLocalDiffFile { path, .. }
+                    if path == Path::new("src/second.rs")
+            )
+        ));
+
+        let effects = app.handle_worker_event(
+            WorkerEvent::LocalDiffFile {
+                generation: app.diff_generation,
+                path: PathBuf::from("src/second.rs"),
+                result: Ok(indexed_document(&["src/second.rs"])),
+            },
+            now,
+        );
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Git(command)] if matches!(
+                command.as_ref(),
+                WorkerCommand::LoadLocalDiffFile { path, .. }
+                    if path == Path::new("src/third.rs")
+            )
+        ));
+
+        let effects = app.handle_worker_event(
+            WorkerEvent::LocalDiffFile {
+                generation: app.diff_generation,
+                path: PathBuf::from("src/third.rs"),
+                result: Ok(indexed_document(&["src/third.rs"])),
+            },
+            now,
+        );
+        assert!(effects.is_empty());
+        assert_eq!(app.local_diff_documents.len(), 3);
+        assert!(app.local_diff_pending_paths.is_empty());
     }
 
     #[test]
