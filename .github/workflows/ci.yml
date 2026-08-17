@@ -220,10 +220,12 @@ jobs:
       - name: Cargo installation creates completions on first use
         run: |
           HOME="${RUNNER_TEMP}/quinjet-home" XDG_DATA_HOME="${RUNNER_TEMP}/quinjet-data" SHELL=/bin/bash \
-            /tmp/quinjet-install/bin/quinjet --version
+            PATH="/tmp/quinjet-install/bin:${PATH}" /tmp/quinjet-install/bin/quinjet --version
           test -s "${RUNNER_TEMP}/quinjet-data/bash-completion/completions/quinjet"
-          grep -F "alias q='quinjet'" "${RUNNER_TEMP}/quinjet-home/.bashrc" >/dev/null
+          test -L /tmp/quinjet-install/bin/q
+          PATH="/tmp/quinjet-install/bin:${PATH}" q --version
           test -s "${RUNNER_TEMP}/quinjet-home/.local/state/quinjet/bash-installed"
+          test -s "${RUNNER_TEMP}/quinjet-home/.local/state/quinjet/shortcut-installed"
       - run: /tmp/quinjet-install/bin/quinjet --help >/dev/null
       - name: Binary stays under the size budget
         env:

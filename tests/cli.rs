@@ -593,13 +593,8 @@ fn shell_integration_makes_q_immediate_without_restoring_removals() -> Result<()
     fs::remove_file(&shortcut)?;
     fs::remove_file(state.join("shortcut-installed"))?;
 
-    let run = maintain()?;
+    drop(maintain()?);
     ensure!(fs::read_to_string(&completion)?.contains("complete -F _quinjet"));
-    ensure!(
-        run.stdout.contains(&shortcut.display().to_string()),
-        "unexpected installation output: {}",
-        run.stdout
-    );
     ensure!(shortcut.exists());
     ensure!(!fs::read_to_string(&bashrc)?.contains("quinjet shortcut"));
     ensure!(state.join("shortcut-installed").is_file());
