@@ -737,7 +737,11 @@ mod tests {
 
         let directory = tempfile::tempdir()?;
         let executable = directory.path().join("quinjet");
+        let replaced = directory.path().join("quinjet-replaced");
         let invocation = directory.path().join("invocation");
+        fs::write(&executable, "#!/bin/sh\nexit 99\n")?;
+        let captured = executable.clone();
+        fs::rename(&executable, &replaced)?;
         let escaped = single_quote(&invocation.to_string_lossy());
         fs::write(
             &executable,
@@ -746,7 +750,7 @@ mod tests {
         let mut permissions = fs::metadata(&executable)?.permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(&executable, permissions)?;
-        refresh_with(&executable, Shell::Bash)?;
+        refresh_with(&captured, Shell::Bash)?;
         ensure!(fs::read_to_string(invocation)? == "completions bash --install --automatic\n");
         Ok(())
     }
