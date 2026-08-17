@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::ffi::OsString;
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -222,6 +223,18 @@ pub(crate) enum ToastLevel {
     Info,
     Success,
     Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum OpenTarget {
+    Browser(String),
+    Path(PathBuf),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct LinkHit {
+    pub area: Rect,
+    pub target: OpenTarget,
 }
 
 #[derive(Debug, Clone)]
@@ -685,13 +698,14 @@ pub(crate) struct UiGeometry {
     pub scm_action_hits: Vec<ScmActionHit>,
     pub content_file_hits: Vec<ContentFileHit>,
     pub content_step_hits: Vec<ContentStepHit>,
+    pub link_hits: Vec<LinkHit>,
 }
 
 #[derive(Debug)]
 pub(crate) enum AppEffect {
     Git(Box<WorkerCommand>),
     SetMouseCapture(bool),
-    OpenUrl(String),
+    Open(OpenTarget),
     Quit,
 }
 
@@ -710,6 +724,7 @@ pub(crate) struct App {
     pub history_branch: Option<HistoryBranch>,
     pub pull_request: Option<PullRequest>,
     pub github_repositories: Vec<GitHubRepository>,
+    pub local_github_repository: Option<GitHubRepository>,
     pub pull_request_repository: Option<GitHubRepository>,
     pub pull_request_warnings: Vec<String>,
     /// Why the last lookup failed. The pull-request pane renders app state
@@ -849,6 +864,7 @@ impl App {
             history_branch: None,
             pull_request: None,
             github_repositories: Vec::new(),
+            local_github_repository: None,
             pull_request_repository: None,
             pull_request_warnings: Vec::new(),
             pull_request_error: None,
@@ -960,6 +976,9 @@ impl App {
         self.request_refresh(&mut effects);
         self.request_history(true, &mut effects);
         self.request_history_branches(&mut effects);
+        effects.push(AppEffect::Git(Box::new(
+            WorkerCommand::LoadLocalGitHubRepository,
+        )));
         effects
     }
 
@@ -1852,7 +1871,15 @@ impl App {
 
         match event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                if self
+                if let Some(target) = self
+                    .geometry
+                    .link_hits
+                    .iter()
+                    .find(|hit| hit.area.contains((event.column, event.row).into()))
+                    .map(|hit| hit.target.clone())
+                {
+                    effects.push(AppEffect::Open(target));
+                } else if self
                     .geometry
                     .sidebar_divider
                     .contains((event.column, event.row).into())
@@ -2610,6 +2637,11 @@ impl App {
                         }
                         self.show_toast(error, ToastLevel::Error, now);
                     }
+                }
+            }
+            WorkerEvent::LocalGitHubRepository { result } => {
+                if let Ok(repository) = result {
+                    self.local_github_repository = repository;
                 }
             }
             WorkerEvent::PullRequestLookup { generation, result } => {
@@ -4983,7 +5015,7 @@ impl App {
             Some(url) => {
                 let url = url.to_owned();
                 self.show_toast(format!("Opening {url}"), ToastLevel::Info, now);
-                effects.push(AppEffect::OpenUrl(url));
+                effects.push(AppEffect::Open(OpenTarget::Browser(url)));
             }
             None => self.show_toast(
                 "Nothing to open: look up a pull request first".to_owned(),
@@ -4991,6 +5023,68 @@ impl App {
                 now,
             ),
         }
+    }
+
+    pub(crate) fn repository_open_target(&self) -> Option<OpenTarget> {
+        self.local_github_repository
+            .as_ref()
+            .or_else(|| {
+                self.pull_request
+                    .as_ref()
+                    .map(|pull_request| &pull_request.base_repository)
+            })
+            .map(|repository| OpenTarget::Browser(repository.url.clone()))
+    }
+
+    pub(crate) fn branch_open_target(&self, branch: &str) -> Option<OpenTarget> {
+        self.repository_web_url().map(|repository| {
+            OpenTarget::Browser(format!(
+                "{}/tree/{}",
+                repository.trim_end_matches('/'),
+                encode_url_path(branch)
+            ))
+        })
+    }
+
+    pub(crate) fn commit_open_target(&self, commit: &str) -> Option<OpenTarget> {
+        self.repository_web_url().map(|repository| {
+            OpenTarget::Browser(format!(
+                "{}/commit/{}",
+                repository.trim_end_matches('/'),
+                encode_url_path(commit)
+            ))
+        })
+    }
+
+    pub(crate) fn pull_request_open_target(&self, number: u64) -> Option<OpenTarget> {
+        if let Some(pull_request) = self
+            .pull_request
+            .as_ref()
+            .filter(|pull_request| pull_request.number == number)
+        {
+            return Some(OpenTarget::Browser(pull_request.url.clone()));
+        }
+        self.repository_web_url().map(|repository| {
+            OpenTarget::Browser(format!(
+                "{}/pull/{number}",
+                repository.trim_end_matches('/')
+            ))
+        })
+    }
+
+    pub(crate) fn workspace_open_target(&self) -> OpenTarget {
+        OpenTarget::Path(self.repository_root.clone())
+    }
+
+    fn repository_web_url(&self) -> Option<&str> {
+        self.local_github_repository
+            .as_ref()
+            .map(|repository| repository.url.as_str())
+            .or_else(|| {
+                self.pull_request
+                    .as_ref()
+                    .map(|pull_request| pull_request.base_repository.url.as_str())
+            })
     }
 
     fn show_toast(&mut self, message: String, level: ToastLevel, now: Instant) {
@@ -5123,6 +5217,18 @@ fn next_character(value: &str, cursor: usize) -> Option<(usize, char)> {
 
 fn is_word_character(character: char) -> bool {
     character.is_alphanumeric() || character == '_'
+}
+
+fn encode_url_path(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'/') {
+            encoded.push(char::from(byte));
+        } else if write!(encoded, "%{byte:02X}").is_err() {
+            return String::new();
+        }
+    }
+    encoded
 }
 
 #[cfg(test)]
@@ -5383,7 +5489,8 @@ mod tests {
         let effects = app.handle_key(KeyEvent::new(KeyCode::Char('O'), KeyModifiers::NONE), now);
         assert!(matches!(
             effects.as_slice(),
-            [AppEffect::OpenUrl(url)] if url == "https://github.com/o/r/pull/8"
+            [AppEffect::Open(OpenTarget::Browser(url))]
+                if url == "https://github.com/o/r/pull/8"
         ));
 
         app.pull_request_checks = vec![PullRequestCheck {
@@ -5401,7 +5508,8 @@ mod tests {
         assert!(
             matches!(
                 effects.as_slice(),
-                [AppEffect::OpenUrl(url)] if url.contains("/actions/runs/1/job/2")
+                [AppEffect::Open(OpenTarget::Browser(url))]
+                    if url.contains("/actions/runs/1/job/2")
             ),
             "a selected check opens the run it names, not the pull request"
         );
@@ -5552,6 +5660,61 @@ mod tests {
     }
 
     #[test]
+    fn clicking_link_text_opens_its_target_before_the_containing_row() {
+        let mut app = app_with_changes();
+        app.geometry.sidebar = Rect::new(0, 0, 40, 20);
+        app.geometry.sidebar_hits = vec![SidebarHitArea {
+            area: Rect::new(0, 4, 40, 1),
+            target: SidebarHit::Change(0),
+        }];
+        app.geometry.link_hits = vec![LinkHit {
+            area: Rect::new(30, 4, 7, 1),
+            target: OpenTarget::Browser("https://github.com/acme/widget/commit/abc".to_owned()),
+        }];
+
+        let effects = app.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 32,
+                row: 4,
+                modifiers: KeyModifiers::NONE,
+            },
+            Instant::now(),
+        );
+
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Open(OpenTarget::Browser(url))]
+                if url == "https://github.com/acme/widget/commit/abc"
+        ));
+        assert_eq!(app.selected_change_section, None);
+        assert_eq!(app.change_cursor, 0);
+    }
+
+    #[test]
+    fn github_reference_targets_encode_branch_paths() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.local_github_repository = Some(GitHubRepository {
+            name_with_owner: "acme/widget".to_owned(),
+            url: "https://github.com/acme/widget".to_owned(),
+            remotes: vec!["origin".to_owned()],
+        });
+
+        assert_eq!(
+            app.branch_open_target("feature/fix #42"),
+            Some(OpenTarget::Browser(
+                "https://github.com/acme/widget/tree/feature/fix%20%2342".to_owned()
+            ))
+        );
+        assert_eq!(
+            app.pull_request_open_target(42),
+            Some(OpenTarget::Browser(
+                "https://github.com/acme/widget/pull/42".to_owned()
+            ))
+        );
+    }
+
+    #[test]
     fn clicking_a_change_section_selects_and_collapses_only_that_section() {
         let mut app = app_with_changes();
         app.geometry.sidebar = Rect::new(0, 0, 40, 20);
@@ -5653,9 +5816,11 @@ mod tests {
                 AppEffect::Git(refresh),
                 AppEffect::Git(history),
                 AppEffect::Git(branches),
+                AppEffect::Git(repository),
             ] if matches!(refresh.as_ref(), WorkerCommand::Refresh { .. })
                 && matches!(history.as_ref(), WorkerCommand::LoadHistory { .. })
                 && matches!(branches.as_ref(), WorkerCommand::LoadHistoryBranches { .. })
+                && matches!(repository.as_ref(), WorkerCommand::LoadLocalGitHubRepository)
         ));
         assert!(!app.pull_request_loading);
         assert!(app.pull_request.is_none());
@@ -6339,9 +6504,7 @@ mod tests {
                         ),
                         _ => matches!(command.as_ref(), WorkerCommand::LoadCheckRunLog { .. }),
                     },
-                    AppEffect::SetMouseCapture(_) | AppEffect::OpenUrl(_) | AppEffect::Quit => {
-                        false
-                    }
+                    AppEffect::SetMouseCapture(_) | AppEffect::Open(_) | AppEffect::Quit => false,
                 })
                 .count()
         };

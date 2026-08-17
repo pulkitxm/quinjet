@@ -11,9 +11,9 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use self::theme::Theme;
 use crate::app::{
-    App, ChangeRow, ChangeSection, ContentFileHit, ContentStepHit, DiffLayout, Focus, Modal,
-    PaletteCommand, PullRequestSection, PullRequestTreeEntry, ScmAction, ScmActionHit, SidebarHit,
-    SidebarHitArea, ToastLevel, UiGeometry, View,
+    App, ChangeRow, ChangeSection, ContentFileHit, ContentStepHit, DiffLayout, Focus, LinkHit,
+    Modal, OpenTarget, PaletteCommand, PullRequestSection, PullRequestTreeEntry, ScmAction,
+    ScmActionHit, SidebarHit, SidebarHitArea, ToastLevel, UiGeometry, View,
 };
 use crate::convert::cells;
 use crate::git::diff::{DiffDocument, DiffLine, DiffLineKind, HighlightSpan, PullRequestDetails};
@@ -132,18 +132,19 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
         .areas(main)
     };
 
-    let (changes_tab, history_tab, pull_requests_tab) = draw_tabs(frame, tabs, app, &theme);
+    let (changes_tab, history_tab, pull_requests_tab, mut link_hits) =
+        draw_tabs(frame, tabs, app, &theme);
     let (sidebar_hits, scm_action_hits) = if app.sidebar_hidden {
         (Vec::new(), Vec::new())
     } else {
-        draw_sidebar(frame, sidebar_area, app, &theme)
+        draw_sidebar(frame, sidebar_area, app, &theme, &mut link_hits)
     };
     if !app.sidebar_hidden {
         draw_main_divider(frame, sidebar_divider, app.resize_target.is_some(), &theme);
     }
     let (diff_divider, content_file_hits, content_step_hits) =
-        draw_content(frame, content_area, app, &theme);
-    draw_footer(frame, footer, app, &theme);
+        draw_content(frame, content_area, app, &theme, &mut link_hits);
+    draw_footer(frame, footer, app, &theme, &mut link_hits);
 
     app.geometry = UiGeometry {
         changes_tab,
@@ -158,6 +159,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
         scm_action_hits,
         content_file_hits,
         content_step_hits,
+        link_hits,
     };
 
     if let Some(modal) = app.modal.as_ref() {
@@ -210,12 +212,15 @@ fn draw_too_small(frame: &mut Frame<'_>, theme: &Theme) {
     );
 }
 
-fn draw_tabs(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) -> (Rect, Rect, Rect) {
-    let repository = if app.repository_root.to_string_lossy() == app.repository_name {
-        app.repository_name.clone()
-    } else {
-        format!("{}  {}", app.repository_name, app.repository_root.display())
-    };
+fn draw_tabs(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &App,
+    theme: &Theme,
+) -> (Rect, Rect, Rect, Vec<LinkHit>) {
+    let mut link_hits = Vec::new();
+    let path = app.repository_root.display().to_string();
+    let show_path = path != app.repository_name;
     let branch = if app.status.branch.head.is_empty() {
         "detecting branch…".to_owned()
     } else {
@@ -266,17 +271,49 @@ fn draw_tabs(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) -> (Re
         app.view == View::PullRequests,
         theme,
     );
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                " QUINJET ",
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD),
+    let prefix = " QUINJET ";
+    let repository_x = title_area.x.saturating_add(cells(prefix.width()));
+    let repository_area = clipped_link_area(
+        repository_x,
+        title_area.y.saturating_add(1),
+        app.repository_name.width(),
+        title_area,
+    );
+    let mut title = vec![
+        Span::styled(
+            prefix,
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ),
+        interactive_span(
+            app.repository_name.clone(),
+            app.repository_open_target(),
+            repository_area,
+            theme,
+            &mut link_hits,
+        ),
+    ];
+    if show_path {
+        let path_x = repository_x
+            .saturating_add(cells(app.repository_name.width()))
+            .saturating_add(2);
+        title.push(Span::raw("  "));
+        title.push(interactive_span(
+            path.clone(),
+            Some(app.workspace_open_target()),
+            clipped_link_area(
+                path_x,
+                title_area.y.saturating_add(1),
+                path.width(),
+                title_area,
             ),
-            Span::styled(repository, Style::default().fg(theme.text)),
-        ]))
-        .block(
+            theme,
+            &mut link_hits,
+        ));
+    }
+    frame.render_widget(
+        Paragraph::new(Line::from(title)).block(
             Block::default()
                 .borders(Borders::TOP | Borders::BOTTOM)
                 .border_style(Style::default().fg(theme.border))
@@ -284,8 +321,47 @@ fn draw_tabs(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) -> (Re
         ),
         title_area,
     );
+    let branch_line = if app.status.branch.head.is_empty() {
+        Line::from(branch.clone())
+    } else {
+        let branch_start = branch_area
+            .right()
+            .saturating_sub(1)
+            .saturating_sub(cells(branch.width()));
+        let branch_name_x = branch_start.saturating_add(cells(" ".width()));
+        let branch_target = if app.status.branch.detached {
+            app.status
+                .branch
+                .oid
+                .as_deref()
+                .and_then(|oid| app.commit_open_target(oid))
+        } else {
+            app.branch_open_target(&app.status.branch.head)
+        };
+        let branch_name = app.status.branch.head.clone();
+        let branch_suffix = branch
+            .strip_prefix(&format!(" {branch_name}"))
+            .unwrap_or_default()
+            .to_owned();
+        Line::from(vec![
+            Span::raw(" "),
+            interactive_span(
+                branch_name.clone(),
+                branch_target,
+                clipped_link_area(
+                    branch_name_x,
+                    branch_area.y.saturating_add(1),
+                    branch_name.width(),
+                    branch_area,
+                ),
+                theme,
+                &mut link_hits,
+            ),
+            Span::raw(branch_suffix),
+        ])
+    };
     frame.render_widget(
-        Paragraph::new(branch)
+        Paragraph::new(branch_line)
             .alignment(Alignment::Right)
             .style(Style::default().fg(theme.accent).bg(theme.panel))
             .block(
@@ -295,7 +371,7 @@ fn draw_tabs(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) -> (Re
             ),
         branch_area,
     );
-    (changes_tab, history_tab, pull_requests_tab)
+    (changes_tab, history_tab, pull_requests_tab, link_hits)
 }
 
 fn draw_tab(frame: &mut Frame<'_>, area: Rect, label: &str, active: bool, theme: &Theme) {
@@ -329,10 +405,14 @@ fn draw_sidebar(
     area: Rect,
     app: &mut App,
     theme: &Theme,
+    link_hits: &mut Vec<LinkHit>,
 ) -> (Vec<SidebarHitArea>, Vec<ScmActionHit>) {
     match app.view {
         View::Changes => draw_changes_sidebar(frame, area, app, theme),
-        View::History => (draw_history_sidebar(frame, area, app, theme), Vec::new()),
+        View::History => (
+            draw_history_sidebar(frame, area, app, theme, link_hits),
+            Vec::new(),
+        ),
         View::PullRequests => (
             draw_pull_requests_sidebar(frame, area, app, theme),
             Vec::new(),
@@ -620,6 +700,7 @@ fn draw_history_sidebar(
     area: Rect,
     app: &mut App,
     theme: &Theme,
+    link_hits: &mut Vec<LinkHit>,
 ) -> Vec<SidebarHitArea> {
     let title = if app.filter.is_empty() {
         format!(
@@ -704,14 +785,29 @@ fn draw_history_sidebar(
             Paragraph::new(line).style(row_style),
             Rect::new(inner.x, y, inner.width.saturating_sub(10), 1),
         );
+        let sha_area = Rect::new(
+            inner
+                .right()
+                .saturating_sub(1)
+                .saturating_sub(cells(commit.short_id.width())),
+            y,
+            cells(commit.short_id.width()),
+            1,
+        );
         frame.render_widget(
-            Paragraph::new(commit.short_id.as_str())
-                .alignment(Alignment::Right)
-                .style(Style::default().fg(theme.muted).bg(if selected {
-                    theme.selected
-                } else {
-                    theme.panel
-                })),
+            Paragraph::new(Line::from(interactive_span(
+                commit.short_id.clone(),
+                app.commit_open_target(&commit.id),
+                sha_area,
+                theme,
+                link_hits,
+            )))
+            .alignment(Alignment::Right)
+            .style(Style::default().bg(if selected {
+                theme.selected
+            } else {
+                theme.panel
+            })),
             Rect::new(inner.right().saturating_sub(10), y, 9, 1),
         );
         hits.push(SidebarHitArea {
@@ -1351,6 +1447,7 @@ fn draw_pull_request_overview(
     area: Rect,
     app: &mut App,
     theme: &Theme,
+    link_hits: &mut Vec<LinkHit>,
 ) -> Vec<ContentStepHit> {
     let showing_check = app.pull_request_check_cursor.is_some();
     let focused = app.focus == Focus::Content && app.modal.is_none();
@@ -1433,6 +1530,15 @@ fn draw_pull_request_overview(
                 area: row_area,
                 step,
             });
+        } else if app.content_scroll.saturating_add(offset) == 0
+            && let Some(pull_request) = app.selected_pull_request()
+            && let Some(target) = app.pull_request_open_target(pull_request.number)
+        {
+            let label = format!("#{}", pull_request.number);
+            let area = clipped_link_area(row_area.x, row_area.y, label.width(), row_area);
+            if area.width > 0 {
+                link_hits.push(LinkHit { area, target });
+            }
         }
     }
     draw_scrollbar(frame, inner, app.content_scroll, rows.len(), theme);
@@ -1518,7 +1624,7 @@ fn conversation_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> 
             format!("#{}  ", pull_request.number),
             Style::default()
                 .fg(theme.accent)
-                .add_modifier(Modifier::BOLD),
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
         ),
         Span::styled(
             pull_request.title.clone(),
@@ -2199,9 +2305,10 @@ fn draw_content(
     area: Rect,
     app: &mut App,
     theme: &Theme,
+    link_hits: &mut Vec<LinkHit>,
 ) -> (Option<Rect>, Vec<ContentFileHit>, Vec<ContentStepHit>) {
     if app.view == View::PullRequests && app.pull_request_section == PullRequestSection::Overview {
-        let step_hits = draw_pull_request_overview(frame, area, app, theme);
+        let step_hits = draw_pull_request_overview(frame, area, app, theme, link_hits);
         return (None, Vec::new(), step_hits);
     }
     let file_action = if app.preview_files_collapsible() {
@@ -2277,6 +2384,7 @@ fn draw_content(
                 diff_scroll,
                 details_rows,
                 theme,
+                link_hits,
             );
         } else if let Some(details) = app.document.pull_request_details.as_ref() {
             draw_pull_request_details_scrolled(
@@ -2333,6 +2441,7 @@ fn draw_commit_details_scrolled(
     scroll: usize,
     total_rows: usize,
     theme: &Theme,
+    link_hits: &mut Vec<LinkHit>,
 ) {
     let Some(details) = app.document.commit_details.as_ref() else {
         return;
@@ -2352,11 +2461,50 @@ fn draw_commit_details_scrolled(
     let inner = block.inner(full_area);
     block.render(full_area, &mut buffer);
     let file_count = document.file_count();
+    let subject = pull_request_reference(&details.subject)
+        .and_then(|(start, end, number)| {
+            Some((
+                details.subject.get(..start)?,
+                details.subject.get(start..end)?,
+                details.subject.get(end..)?,
+                app.pull_request_open_target(number)?,
+            ))
+        })
+        .map_or_else(
+            || {
+                Line::from(Span::styled(
+                    details.subject.as_str(),
+                    Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                ))
+            },
+            |(prefix, reference, suffix, target)| {
+                Line::from(vec![
+                    Span::styled(
+                        prefix,
+                        Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                    ),
+                    interactive_span(
+                        reference.to_owned(),
+                        Some(target),
+                        scrolled_detail_link_area(
+                            area,
+                            scroll,
+                            inner.y,
+                            inner.x.saturating_add(cells(prefix.width())),
+                            reference.width(),
+                        ),
+                        theme,
+                        link_hits,
+                    ),
+                    Span::styled(
+                        suffix,
+                        Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                    ),
+                ])
+            },
+        );
     let lines = vec![
-        Line::from(Span::styled(
-            details.subject.as_str(),
-            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
-        )),
+        subject,
         detail_line(
             "Author",
             format!(
@@ -2373,7 +2521,25 @@ fn draw_commit_details_scrolled(
             ),
             theme,
         ),
-        detail_line("Commit", details.id.clone(), theme),
+        Line::from(vec![
+            Span::styled(
+                format!("{:<DETAIL_LABEL_WIDTH$}", "Commit"),
+                Style::default().fg(theme.muted),
+            ),
+            interactive_span(
+                details.id.clone(),
+                app.commit_open_target(&details.id),
+                scrolled_detail_link_area(
+                    area,
+                    scroll,
+                    inner.y.saturating_add(3),
+                    inner.x.saturating_add(cells(DETAIL_LABEL_WIDTH)),
+                    details.id.width(),
+                ),
+                theme,
+                link_hits,
+            ),
+        ]),
         Line::from(vec![
             Span::styled("Changes    ", Style::default().fg(theme.muted)),
             Span::styled(
@@ -2694,6 +2860,71 @@ fn detail_line<'a>(label: &'a str, value: String, theme: &Theme) -> Line<'a> {
         ),
         Span::styled(value, Style::default().fg(theme.text)),
     ])
+}
+
+fn interactive_span(
+    text: String,
+    target: Option<OpenTarget>,
+    area: Rect,
+    theme: &Theme,
+    hits: &mut Vec<LinkHit>,
+) -> Span<'static> {
+    let style = if let Some(target) = target {
+        if area.width > 0 && area.height > 0 {
+            hits.push(LinkHit { area, target });
+        }
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+    } else {
+        Style::default().fg(theme.text).add_modifier(Modifier::BOLD)
+    };
+    Span::styled(text, style)
+}
+
+fn clipped_link_area(x: u16, y: u16, width: usize, container: Rect) -> Rect {
+    if y < container.y || y >= container.bottom() || x >= container.right() {
+        return Rect::default();
+    }
+    Rect::new(
+        x.max(container.x),
+        y,
+        cells(width).min(container.right().saturating_sub(x.max(container.x))),
+        1,
+    )
+}
+
+fn scrolled_detail_link_area(
+    area: Rect,
+    scroll: usize,
+    source_y: u16,
+    source_x: u16,
+    width: usize,
+) -> Rect {
+    let scroll = cells(scroll);
+    if source_y < scroll {
+        return Rect::default();
+    }
+    let row = source_y - scroll;
+    clipped_link_area(
+        area.x.saturating_add(source_x),
+        area.y.saturating_add(row),
+        width,
+        area,
+    )
+}
+
+fn pull_request_reference(text: &str) -> Option<(usize, usize, u64)> {
+    text.match_indices('#').find_map(|(start, _)| {
+        let rest = text.get(start.saturating_add(1)..)?;
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        if digits == 0 {
+            return None;
+        }
+        let end = start.saturating_add(1).saturating_add(digits);
+        let number = text.get(start.saturating_add(1)..end)?.parse().ok()?;
+        Some((start, end, number))
+    })
 }
 
 fn unified_row_indices(document: &DiffDocument, app: &App) -> Vec<usize> {
@@ -3526,7 +3757,13 @@ fn draw_scrollbar(frame: &mut Frame<'_>, area: Rect, offset: usize, length: usiz
     clippy::option_if_let_else,
     reason = "the branch is one arm of a longer chain that map_or_else cannot express"
 )]
-fn draw_footer(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) {
+fn draw_footer(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &App,
+    theme: &Theme,
+    link_hits: &mut Vec<LinkHit>,
+) {
     let left = if let Some(busy) = app.busy.as_deref() {
         Line::from(vec![
             Span::styled(
@@ -3564,15 +3801,24 @@ fn draw_footer(frame: &mut Frame<'_>, area: Rect, app: &App, theme: &Theme) {
             Span::styled("Refreshing repository…", Style::default().fg(theme.muted)),
         ])
     } else {
+        let branch = if app.status.branch.head.is_empty() {
+            "—".to_owned()
+        } else {
+            app.status.branch.head.clone()
+        };
         Line::from(vec![
             Span::styled("  ", Style::default().fg(theme.accent)),
-            Span::styled(
-                if app.status.branch.head.is_empty() {
-                    "—"
-                } else {
-                    &app.status.branch.head
-                },
-                Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+            interactive_span(
+                branch.clone(),
+                app.branch_open_target(&app.status.branch.head),
+                clipped_link_area(
+                    area.x.saturating_add(cells("  ".width())),
+                    area.y.saturating_add(1),
+                    branch.width(),
+                    area,
+                ),
+                theme,
+                link_hits,
             ),
             Span::styled(
                 format!(
@@ -4694,6 +4940,38 @@ mod tests {
         assert!(app.geometry.history_tab.x > app.geometry.changes_tab.x);
         assert!(app.geometry.pull_requests_tab.x > app.geometry.history_tab.x);
         assert!(app.geometry.pull_requests_tab.right() <= 72);
+    }
+
+    #[test]
+    fn header_registers_repository_branch_and_workspace_links() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = App::new("/tmp/repo", "repo");
+        app.status.branch.head = "feature/link".to_owned();
+        app.local_github_repository = Some(GitHubRepository {
+            name_with_owner: "acme/repo".to_owned(),
+            url: "https://github.com/acme/repo".to_owned(),
+            remotes: vec!["origin".to_owned()],
+        });
+        let backend = TestBackend::new(160, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+
+        assert!(app.geometry.link_hits.iter().any(|hit| matches!(
+            &hit.target,
+            OpenTarget::Browser(url) if url == "https://github.com/acme/repo"
+        )));
+        assert!(app.geometry.link_hits.iter().any(|hit| matches!(
+            &hit.target,
+            OpenTarget::Browser(url)
+                if url == "https://github.com/acme/repo/tree/feature/link"
+        )));
+        assert!(app.geometry.link_hits.iter().any(|hit| matches!(
+            &hit.target,
+            OpenTarget::Path(path) if path == std::path::Path::new("/tmp/repo")
+        )));
     }
 
     #[test]
