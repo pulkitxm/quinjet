@@ -1,6 +1,7 @@
 mod app;
 mod cli;
 mod convert;
+mod date_time;
 mod git;
 mod ui;
 mod watch;

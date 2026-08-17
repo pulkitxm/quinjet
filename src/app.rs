@@ -48,6 +48,7 @@ const MIN_CONTENT_WIDTH: u16 = 32;
 const DEFAULT_DIFF_SPLIT_PERCENT: u16 = 50;
 const MIN_DIFF_SPLIT_PERCENT: u16 = 20;
 const MAX_DIFF_SPLIT_PERCENT: u16 = 80;
+const OPERATION_SPINNER: [&str; 4] = ["◐", "◓", "◑", "◒"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum View {
@@ -813,6 +814,7 @@ pub(crate) struct App {
     pub mouse_capture: bool,
     pub webhooks_listening: bool,
     pub busy: Option<String>,
+    pub operation_frame: usize,
     pub refreshing: bool,
     pub document_loading: bool,
     pub history_loading: bool,
@@ -950,6 +952,7 @@ impl App {
             mouse_capture: true,
             webhooks_listening: false,
             busy: None,
+            operation_frame: 0,
             refreshing: false,
             document_loading: false,
             history_loading: false,
@@ -2146,7 +2149,18 @@ impl App {
             self.refresh_pull_request_live(now, false, &mut effects);
             changed = true;
         }
+        if self.busy.is_some() {
+            self.operation_frame = self.operation_frame.wrapping_add(1) % OPERATION_SPINNER.len();
+            changed = true;
+        }
         (effects, changed)
+    }
+
+    pub(crate) fn operation_spinner(&self) -> &'static str {
+        OPERATION_SPINNER
+            .get(self.operation_frame % OPERATION_SPINNER.len())
+            .copied()
+            .unwrap_or("◐")
     }
 
     /// A GitHub webhook was forwarded to this session. The payload is only a
@@ -4758,6 +4772,7 @@ impl App {
         }
         self.operation_id = self.operation_id.wrapping_add(1);
         self.busy = Some(operation.label().to_owned());
+        self.operation_frame = 0;
         effects.push(AppEffect::Git(Box::new(WorkerCommand::Operate {
             id: self.operation_id,
             operation,
@@ -7401,6 +7416,20 @@ mod tests {
                 } if old == "topic" && new == "feature/topic")
         ));
         assert_eq!(app.busy.as_deref(), Some("Renaming branch"));
+    }
+
+    #[test]
+    fn long_running_git_operations_animate_until_completion() {
+        let mut app = App::new("/tmp/repo", "repo");
+        let mut effects = Vec::new();
+        app.queue_operation(GitOperation::Pull, &mut effects);
+        let initial = app.operation_spinner();
+
+        let (_, changed) = app.tick(Instant::now());
+
+        assert!(changed);
+        assert_ne!(app.operation_spinner(), initial);
+        assert_eq!(app.busy.as_deref(), Some("Pulling changes"));
     }
 
     #[expect(

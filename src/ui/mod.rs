@@ -17,6 +17,7 @@ use crate::app::{
     UiGeometry, View,
 };
 use crate::convert::cells;
+use crate::date_time::format_local_timestamp;
 use crate::git::diff::{DiffDocument, DiffLine, DiffLineKind, HighlightSpan, PullRequestDetails};
 use crate::git::github::{
     CheckLogLine, CheckLogSeverity, CheckStep, ConversationEntry, ConversationKind,
@@ -1665,8 +1666,8 @@ fn conversation_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> 
         format!(
             "{state}  ·  @{}  ·  opened {}  ·  updated {}",
             pull_request.author,
-            short_timestamp(&pull_request.created_at),
-            short_timestamp(&pull_request.updated_at)
+            format_local_timestamp(&pull_request.created_at),
+            format_local_timestamp(&pull_request.updated_at)
         ),
         theme,
     )));
@@ -1781,7 +1782,7 @@ fn push_conversation_entry(
     theme: &Theme,
 ) {
     let (icon, color, action) = conversation_marker(entry, theme);
-    let stamp = short_timestamp(&entry.timestamp);
+    let stamp = format_local_timestamp(&entry.timestamp);
     let stamp = if stamp.is_empty() {
         String::new()
     } else {
@@ -1980,7 +1981,7 @@ fn check_run_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> {
             "Ran",
             format!(
                 "{}{}",
-                short_timestamp(&check.started_at),
+                format_local_timestamp(&check.started_at),
                 match check.duration_label() {
                     duration if duration.is_empty() => String::new(),
                     duration => format!("  ·  {duration}"),
@@ -2146,17 +2147,6 @@ fn section_rule(label: &str, width: usize, theme: &Theme) -> Line<'static> {
 
 fn short_oid(value: &str) -> String {
     value.chars().take(7).collect()
-}
-
-/// Show the calendar day and clock time from an RFC 3339 stamp without pulling
-/// in a date library; the seconds and zone add nothing at this size.
-fn short_timestamp(value: &str) -> String {
-    let Some((date, rest)) = value.split_once('T') else {
-        return value.to_owned();
-    };
-    let time = rest.split(['Z', '+', '.']).next().unwrap_or_default();
-    let time = time.rsplit_once(':').map_or(time, |(head, _)| head);
-    format!("{date} {time}")
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -2545,7 +2535,9 @@ fn draw_commit_details_scrolled(
             "Author",
             format!(
                 "{} <{}>  ·  {}",
-                details.author, details.author_email, details.authored_at
+                details.author,
+                details.author_email,
+                format_local_timestamp(&details.authored_at)
             ),
             theme,
         ),
@@ -2553,7 +2545,9 @@ fn draw_commit_details_scrolled(
             "Committer",
             format!(
                 "{} <{}>  ·  {}",
-                details.committer, details.committer_email, details.committed_at
+                details.committer,
+                details.committer_email,
+                format_local_timestamp(&details.committed_at)
             ),
             theme,
         ),
@@ -2659,7 +2653,8 @@ fn draw_pull_request_details_scrolled(
             "Status",
             format!(
                 "{state}  ·  @{}  ·  updated {}",
-                details.author, details.updated_at
+                details.author,
+                format_local_timestamp(&details.updated_at)
             ),
             theme,
         ),
@@ -3811,7 +3806,7 @@ fn draw_footer(
     let left = if let Some(busy) = app.busy.as_deref() {
         Line::from(vec![
             Span::styled(
-                " ⟳ ",
+                format!(" {} ", app.operation_spinner()),
                 Style::default()
                     .fg(theme.accent)
                     .add_modifier(Modifier::BOLD),
@@ -4183,7 +4178,11 @@ fn draw_branches(
                         style,
                     ),
                     Span::styled(
-                        format!("  {}  {}", branch.short_id, branch.relative_date),
+                        format!(
+                            "  {}  {}",
+                            branch.short_id,
+                            format_local_timestamp(&branch.relative_date)
+                        ),
                         Style::default()
                             .fg(theme.muted)
                             .bg(style.bg.unwrap_or(theme.panel)),
@@ -4290,7 +4289,7 @@ fn draw_history_branches(
                             "  {}  {}  {}",
                             if branch.remote { "remote" } else { "local" },
                             branch.short_id,
-                            branch.relative_date
+                            format_local_timestamp(&branch.relative_date)
                         ),
                         Style::default().fg(theme.muted).bg(background),
                     ),
@@ -4393,7 +4392,7 @@ fn draw_compare_branches(
                             "  {}  {}  {}",
                             if branch.remote { "remote" } else { "local" },
                             branch.short_id,
-                            branch.relative_date
+                            format_local_timestamp(&branch.relative_date)
                         ),
                         Style::default().fg(theme.muted).bg(background),
                     ),
@@ -4503,7 +4502,11 @@ fn draw_stashes(
                         Style::default().fg(theme.text).bg(background),
                     ),
                     Span::styled(
-                        format!("{branch}  {}  {}", stash.short_id, stash.relative_date),
+                        format!(
+                            "{branch}  {}  {}",
+                            stash.short_id,
+                            format_local_timestamp(&stash.relative_date)
+                        ),
                         Style::default().fg(theme.muted).bg(background),
                     ),
                 ]))
@@ -5854,9 +5857,11 @@ terminal rows because that is what real pull-request comments look like in pract
         assert!(scrollable.iter().any(|row| row.contains("cargo test")));
         assert!(scrollable.iter().any(|row| row.contains("  short line")));
         assert!(
-            scrollable
-                .iter()
-                .any(|row| row.contains("State") && row.contains("opened 2026-08-01")),
+            scrollable.iter().any(|row| row.contains("State")
+                && row.contains(&format!(
+                    "opened {}",
+                    format_local_timestamp("2026-08-01T09:00:00Z")
+                ))),
             "a single-line value that outgrows the pane scrolls rather than being clipped"
         );
         let long = rows
@@ -6024,7 +6029,7 @@ terminal rows because that is what real pull-request comments look like in pract
         assert!(rendered.contains("Format, lint, and test"));
         assert!(rendered.contains("#42"));
         assert!(rendered.contains("acme/widget:main"));
-        assert!(rendered.contains("2026-08-01 09:00"));
+        assert!(rendered.contains(&format_local_timestamp("2026-08-01T09:00:00Z")));
         assert!(rendered.contains("Description"));
         assert!(
             rendered.contains("Launch safely"),
