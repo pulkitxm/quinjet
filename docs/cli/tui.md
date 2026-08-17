@@ -53,9 +53,11 @@ The default is `quinjet`.
 
 Inside the interface, open the command palette with `:` or `Ctrl+P`. `Change
 Theme…` opens all twelve palettes and `Change Appearance…` opens the system,
-light, and dark choices. The active choice is marked, and selecting another
-choice redraws every view immediately. These changes last for the current run;
-use the launch flags to choose the initial settings for a later run.
+light, and dark choices. Moving through the theme list previews each palette
+immediately. `Enter` keeps the preview for the current run, while `Esc` closes
+the picker and restores the theme that was active when it opened. Picker lists
+wrap between their first and last entries. Use the launch flags to choose the
+initial settings for a later run.
 
 `--appearance system` asks the operating system for its current preference once
 after Quinjet verifies that it owns an interactive terminal, and again when

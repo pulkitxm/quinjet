@@ -538,6 +538,7 @@ pub(crate) enum Modal {
     },
     Themes {
         selected: usize,
+        original: ThemeName,
     },
     Appearances {
         selected: usize,
@@ -3104,10 +3105,8 @@ impl App {
                 }
                 let visible = Self::filtered_branches(items, &query.value);
                 match key.code {
-                    KeyCode::Up => *selected = selected.saturating_sub(1),
-                    KeyCode::Down => {
-                        *selected = (*selected + 1).min(visible.len().saturating_sub(1));
-                    }
+                    KeyCode::Up => *selected = previous_list_index(*selected, visible.len()),
+                    KeyCode::Down => *selected = next_list_index(*selected, visible.len()),
                     KeyCode::Enter if !*loading => {
                         if let Some(branch) =
                             visible.get(*selected).and_then(|index| items.get(*index))
@@ -3194,9 +3193,11 @@ impl App {
                 }
                 let visible = Self::filtered_history_branches(items, &query.value);
                 match key.code {
-                    KeyCode::Up | KeyCode::Char('k') => *selected = selected.saturating_sub(1),
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        *selected = previous_list_index(*selected, visible.len());
+                    }
                     KeyCode::Down | KeyCode::Char('j') => {
-                        *selected = (*selected + 1).min(visible.len().saturating_sub(1));
+                        *selected = next_list_index(*selected, visible.len());
                     }
                     KeyCode::Enter if !*loading => {
                         if let Some(branch) = visible
@@ -3229,9 +3230,11 @@ impl App {
                     .filter(|index| items.get(*index).is_some_and(|item| !item.current))
                     .collect::<Vec<_>>();
                 match key.code {
-                    KeyCode::Up | KeyCode::Char('k') => *selected = selected.saturating_sub(1),
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        *selected = previous_list_index(*selected, visible.len());
+                    }
                     KeyCode::Down | KeyCode::Char('j') => {
-                        *selected = (*selected + 1).min(visible.len().saturating_sub(1));
+                        *selected = next_list_index(*selected, visible.len());
                     }
                     KeyCode::Enter if !*loading => {
                         if let Some(branch) = visible
@@ -3268,9 +3271,11 @@ impl App {
                     .and_then(|index| items.get(*index))
                     .cloned();
                 match key.code {
-                    KeyCode::Up | KeyCode::Char('k') => *selected = selected.saturating_sub(1),
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        *selected = previous_list_index(*selected, visible.len());
+                    }
                     KeyCode::Down | KeyCode::Char('j') => {
-                        *selected = (*selected + 1).min(visible.len().saturating_sub(1));
+                        *selected = next_list_index(*selected, visible.len());
                     }
                     KeyCode::Enter if !*loading => {
                         if let Some(stash) = selected_stash {
@@ -3353,9 +3358,11 @@ impl App {
                 }
                 let visible = Self::filtered_github_repositories(items, &query.value);
                 match key.code {
-                    KeyCode::Up | KeyCode::Char('k') => *selected = selected.saturating_sub(1),
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        *selected = previous_list_index(*selected, visible.len());
+                    }
                     KeyCode::Down | KeyCode::Char('j') => {
-                        *selected = (*selected + 1).min(visible.len().saturating_sub(1));
+                        *selected = next_list_index(*selected, visible.len());
                     }
                     KeyCode::Enter if !*loading => {
                         if let Some(repository) = visible
@@ -3390,10 +3397,8 @@ impl App {
                 }
                 let commands = self.palette_commands(&query.value);
                 match key.code {
-                    KeyCode::Up => *selected = selected.saturating_sub(1),
-                    KeyCode::Down => {
-                        *selected = (*selected + 1).min(commands.len().saturating_sub(1));
-                    }
+                    KeyCode::Up => *selected = previous_list_index(*selected, commands.len()),
+                    KeyCode::Down => *selected = next_list_index(*selected, commands.len()),
                     KeyCode::Enter => {
                         if let Some(command) = commands.get(*selected).copied() {
                             self.execute_palette(command, &mut effects, now);
@@ -3407,19 +3412,27 @@ impl App {
                 }
                 self.modal = Some(modal);
             }
-            Modal::Themes { selected } => {
+            Modal::Themes { selected, original } => {
                 match key.code {
-                    KeyCode::Esc => return effects,
+                    KeyCode::Esc => {
+                        self.apply_theme(*original);
+                        return effects;
+                    }
                     KeyCode::Up | KeyCode::Char('k') => {
-                        *selected = selected.saturating_sub(1);
+                        *selected = previous_list_index(*selected, ThemeName::ALL.len());
+                        if let Some(name) = ThemeName::ALL.get(*selected).copied() {
+                            self.apply_theme(name);
+                        }
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
-                        *selected = (*selected + 1).min(ThemeName::ALL.len().saturating_sub(1));
+                        *selected = next_list_index(*selected, ThemeName::ALL.len());
+                        if let Some(name) = ThemeName::ALL.get(*selected).copied() {
+                            self.apply_theme(name);
+                        }
                     }
                     KeyCode::Enter => {
                         if let Some(name) = ThemeName::ALL.get(*selected).copied() {
-                            self.theme_name = name;
-                            self.theme = Theme::new(name, self.appearance);
+                            self.apply_theme(name);
                             self.show_toast(
                                 format!("Theme changed to {}", name.label()),
                                 ToastLevel::Success,
@@ -3436,11 +3449,10 @@ impl App {
                 match key.code {
                     KeyCode::Esc => return effects,
                     KeyCode::Up | KeyCode::Char('k') => {
-                        *selected = selected.saturating_sub(1);
+                        *selected = previous_list_index(*selected, AppearanceChoice::ALL.len());
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
-                        *selected =
-                            (*selected + 1).min(AppearanceChoice::ALL.len().saturating_sub(1));
+                        *selected = next_list_index(*selected, AppearanceChoice::ALL.len());
                     }
                     KeyCode::Enter => {
                         if let Some(choice) = AppearanceChoice::ALL.get(*selected).copied() {
@@ -3517,6 +3529,7 @@ impl App {
                         .iter()
                         .position(|name| *name == self.theme_name)
                         .unwrap_or_default(),
+                    original: self.theme_name,
                 });
             }
             PaletteCommand::ChangeAppearance => {
@@ -3530,6 +3543,11 @@ impl App {
             PaletteCommand::Help => self.modal = Some(Modal::Help { scroll: 0 }),
             PaletteCommand::Quit => effects.push(AppEffect::Quit),
         }
+    }
+
+    fn apply_theme(&mut self, name: ThemeName) {
+        self.theme_name = name;
+        self.theme = Theme::new(name, self.appearance);
     }
 
     fn apply_live_modal_filter(&mut self) {
@@ -5359,6 +5377,22 @@ fn pull_request_loading_document(pull_request: &PullRequest, message: &str) -> D
     );
     document.pull_request_details = Some(pull_request_details(pull_request));
     document
+}
+
+const fn previous_list_index(selected: usize, length: usize) -> usize {
+    if selected == 0 {
+        length.saturating_sub(1)
+    } else {
+        selected.saturating_sub(1)
+    }
+}
+
+const fn next_list_index(selected: usize, length: usize) -> usize {
+    if selected.saturating_add(1) >= length {
+        0
+    } else {
+        selected.saturating_add(1)
+    }
 }
 
 fn diff_document_size(document: &DiffDocument) -> usize {
@@ -7821,6 +7855,37 @@ mod tests {
     }
 
     #[test]
+    fn command_palette_navigation_wraps() {
+        let mut app = App::new("/tmp/repo", "repo");
+        let now = Instant::now();
+        app.modal = Some(Modal::CommandPalette {
+            query: TextBuffer::default(),
+            selected: PaletteCommand::ALL.len().saturating_sub(1),
+        });
+
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), now);
+        assert!(matches!(
+            app.modal,
+            Some(Modal::CommandPalette { selected: 0, .. })
+        ));
+
+        app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), now);
+        assert!(matches!(
+            app.modal,
+            Some(Modal::CommandPalette { selected, .. })
+                if selected == PaletteCommand::ALL.len().saturating_sub(1)
+        ));
+    }
+
+    #[test]
+    fn list_navigation_wraps_and_handles_empty_lists() {
+        assert_eq!(previous_list_index(0, 3), 2);
+        assert_eq!(next_list_index(2, 3), 0);
+        assert_eq!(previous_list_index(0, 0), 0);
+        assert_eq!(next_list_index(0, 0), 0);
+    }
+
+    #[test]
     fn command_palette_switches_theme_and_appearance_in_place() {
         let mut app = App::new("/tmp/repo", "repo");
         let now = Instant::now();
@@ -7832,7 +7897,29 @@ mod tests {
             vec![PaletteCommand::ChangeTheme]
         );
         app.execute_palette(PaletteCommand::ChangeTheme, &mut Vec::new(), now);
-        assert!(matches!(app.modal, Some(Modal::Themes { selected: 1 })));
+        assert!(matches!(
+            app.modal,
+            Some(Modal::Themes {
+                selected: 1,
+                original: ThemeName::Catppuccin,
+            })
+        ));
+        app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), now);
+        app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), now);
+
+        assert_eq!(app.theme_name, ThemeName::Monokai);
+        assert_ne!(app.theme.background, original_background);
+        assert!(matches!(
+            app.modal,
+            Some(Modal::Themes { selected: 11, .. })
+        ));
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), now);
+
+        assert_eq!(app.theme_name, ThemeName::Catppuccin);
+        assert_eq!(app.theme.background, original_background);
+        assert!(app.modal.is_none());
+
+        app.execute_palette(PaletteCommand::ChangeTheme, &mut Vec::new(), now);
         app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), now);
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
 

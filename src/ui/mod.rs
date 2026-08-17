@@ -3935,7 +3935,7 @@ fn draw_modal(frame: &mut Frame<'_>, modal: &Modal, app: &App, theme: &Theme) {
         Modal::CommandPalette { query, selected } => {
             draw_palette(frame, app, query, *selected, theme);
         }
-        Modal::Themes { selected } => {
+        Modal::Themes { selected, .. } => {
             draw_theme_picker(frame, *selected, app.theme_name, theme);
         }
         Modal::Appearances { selected } => {
@@ -5120,7 +5120,10 @@ mod tests {
 
         let mut app = App::new("/tmp/repo", "repo");
         app.set_theme_selection(ThemeName::TokyoNight, AppearanceChoice::Dark);
-        app.modal = Some(Modal::Themes { selected: 9 });
+        app.modal = Some(Modal::Themes {
+            selected: 9,
+            original: ThemeName::TokyoNight,
+        });
         let theme = app.theme;
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
 
