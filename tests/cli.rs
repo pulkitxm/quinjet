@@ -549,6 +549,67 @@ fn completions_cover_every_supported_shell() -> Result<()> {
     Ok(())
 }
 
+#[cfg(not(windows))]
+#[test]
+fn shell_integration_updates_existing_completions_without_restoring_removals() -> Result<()> {
+    let scratch = Scratch::directory()?;
+    let data = scratch.path.join("data");
+    let mut command = ProcessCommand::new(env!("CARGO_BIN_EXE_quinjet"));
+    command
+        .args(["completions", "--install"])
+        .env("HOME", &scratch.path)
+        .env("XDG_DATA_HOME", &data)
+        .env("SHELL", "/bin/bash");
+    isolate_git(&mut command);
+    let run = Run::from(command.output().context("failed to install completions")?)?.success()?;
+    let completion = data.join("bash-completion/completions/quinjet");
+    let script = fs::read_to_string(&completion)?;
+    ensure!(script.contains("complete -F _quinjet"));
+    ensure!(run.stdout.contains(&completion.display().to_string()));
+    let bashrc = scratch.path.join(".bashrc");
+    ensure!(fs::read_to_string(&bashrc)?.contains("alias q='quinjet'"));
+    ensure!(
+        scratch
+            .path
+            .join(".local/state/quinjet/bash-installed")
+            .is_file()
+    );
+
+    let maintain = || -> Result<Run> {
+        let mut update = ProcessCommand::new(env!("CARGO_BIN_EXE_quinjet"));
+        update
+            .args(["completions", "bash", "--install", "--automatic"])
+            .env("HOME", &scratch.path)
+            .env("XDG_DATA_HOME", &data)
+            .env("SHELL", "/bin/bash");
+        isolate_git(&mut update);
+        Run::from(update.output().context("failed to refresh completions")?)?.success()
+    };
+
+    fs::write(&completion, "stale completion\n")?;
+    fs::remove_file(&bashrc)?;
+    drop(maintain()?);
+    ensure!(fs::read_to_string(&completion)?.contains("complete -F _quinjet"));
+    ensure!(!bashrc.exists());
+
+    fs::remove_file(&completion)?;
+    drop(maintain()?);
+    ensure!(!completion.exists());
+    ensure!(!bashrc.exists());
+
+    let mut restore = ProcessCommand::new(env!("CARGO_BIN_EXE_quinjet"));
+    restore
+        .args(["completions", "bash", "--install"])
+        .env("HOME", &scratch.path)
+        .env("XDG_DATA_HOME", &data)
+        .env("SHELL", "/bin/bash");
+    isolate_git(&mut restore);
+    drop(Run::from(restore.output().context("failed to restore completions")?)?.success()?);
+    ensure!(completion.exists());
+    ensure!(fs::read_to_string(&bashrc)?.contains("alias q='quinjet'"));
+    Ok(())
+}
+
 #[test]
 fn capabilities_describe_the_installed_command_tree() -> Result<()> {
     let run = run_in(None, &["capabilities", "--json"])?.success()?;

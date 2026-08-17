@@ -31,12 +31,32 @@ function Assert-Contains {
 function Set-ReleaseFixture {
     param(
         [string] $Contents,
+        [switch] $Executable,
         [switch] $InvalidChecksum
     )
 
     $asset = "quinjet-windows-x86_64.exe"
     $assetPath = Join-Path $Fixtures $asset
-    [IO.File]::WriteAllText($assetPath, $Contents)
+    if ($Executable) {
+        $source = @'
+using System;
+using System.IO;
+
+public static class QuinjetInstallerFixture
+{
+    public static void Main(string[] arguments)
+    {
+        File.WriteAllText(
+            Environment.GetEnvironmentVariable("QUINJET_TEST_COMPLETION_LOG"),
+            string.Join(" ", arguments));
+    }
+}
+'@
+        Add-Type -TypeDefinition $source -OutputAssembly $assetPath -OutputType ConsoleApplication
+    }
+    else {
+        [IO.File]::WriteAllText($assetPath, $Contents)
+    }
     $hash = if ($InvalidChecksum) { "0" * 64 } else { (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash }
     [IO.File]::WriteAllText((Join-Path $Fixtures "SHA256SUMS"), "$hash  dist/$asset`n")
 }
@@ -67,15 +87,20 @@ $global:QuinjetDownloadsLog = $DownloadsLog
 $originalInstallDir = $env:QUINJET_INSTALL_DIR
 $originalVersion = $env:QUINJET_VERSION
 $originalNoModifyPath = $env:QUINJET_NO_MODIFY_PATH
+$originalCompletionLog = $env:QUINJET_TEST_COMPLETION_LOG
 
 try {
     Write-Host "test: installs and verifies a pinned Windows release"
     $binDir = Join-Path $TestRoot "successful-install\bin"
-    Set-ReleaseFixture -Contents "Windows binary"
+    $env:QUINJET_TEST_COMPLETION_LOG = Join-Path $TestRoot "completions.log"
+    Set-ReleaseFixture -Executable
+    $expectedHash = (Get-FileHash -LiteralPath (Join-Path $Fixtures "quinjet-windows-x86_64.exe") -Algorithm SHA256).Hash
     & $Installer -Version "1.2.3" -BinDir $binDir -NoModifyPath *> (Join-Path $TestRoot "successful-install.log")
 
     $installed = Join-Path $binDir "quinjet.exe"
-    Assert-Equal -Expected "Windows binary" -Actual ([IO.File]::ReadAllText($installed)) -Message "installed binary contents"
+    $actualHash = (Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash
+    Assert-Equal -Expected $expectedHash -Actual $actualHash -Message "installed binary hash"
+    Assert-Equal -Expected "completions powershell --install --automatic" -Actual ([IO.File]::ReadAllText($env:QUINJET_TEST_COMPLETION_LOG)) -Message "completion installation arguments"
     Assert-Contains -Needle "https://github.com/pulkitxm/quinjet/releases/download/v1.2.3/quinjet-windows-x86_64.exe" -Path $DownloadsLog
     Assert-Contains -Needle "verified SHA-256 checksum" -Path (Join-Path $TestRoot "successful-install.log")
 
@@ -129,6 +154,7 @@ finally {
     $env:QUINJET_INSTALL_DIR = $originalInstallDir
     $env:QUINJET_VERSION = $originalVersion
     $env:QUINJET_NO_MODIFY_PATH = $originalNoModifyPath
+    $env:QUINJET_TEST_COMPLETION_LOG = $originalCompletionLog
     Remove-Item Function:\Invoke-WebRequest -Force -ErrorAction SilentlyContinue
     Remove-Variable QuinjetFixtures -Scope Global -ErrorAction SilentlyContinue
     Remove-Variable QuinjetDownloadsLog -Scope Global -ErrorAction SilentlyContinue

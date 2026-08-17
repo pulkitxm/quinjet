@@ -95,7 +95,7 @@ run_installer() {
     env \
         HOME="${test_home}" \
         PATH="${FAKE_BIN}:${ORIGINAL_PATH}" \
-        SHELL=/bin/sh \
+        SHELL="${QUINJET_TEST_SHELL:-/bin/sh}" \
         QUINJET_TEST_OS="${test_os}" \
         QUINJET_TEST_ARCH="${test_arch}" \
         QUINJET_TEST_FIXTURES="${FIXTURES}" \
@@ -143,10 +143,25 @@ fi
 assert_equals 'existing binary' "$(cat "${bin_dir}/quinjet")"
 assert_contains 'checksum verification failed' "${case_dir}.out"
 
+printf 'test: installs completions for the configured shell\n'
+case_dir=${TEST_ROOT}/completions
+home_dir=${case_dir}/home
+bin_dir=${case_dir}/bin
+prepare_release quinjet-linux-x86_64 '#!/bin/sh
+set -eu
+[ "$1" = completions ] && [ "$2" = bash ] && [ "$3" = --install ] && [ "$4" = --automatic ]
+target=${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/quinjet
+mkdir -p "$(dirname "$target")"
+printf "generated bash completions\\n" >"$target"'
+QUINJET_TEST_SHELL=/bin/bash run_installer "${home_dir}" Linux x86_64 --bin-dir "${bin_dir}" >"${case_dir}.out" 2>&1
+assert_contains 'generated bash completions' "${home_dir}/.local/share/bash-completion/completions/quinjet"
+assert_contains 'installing bash completions' "${case_dir}.out"
+
 printf 'test: updates a shell profile once for the default bin directory\n'
 case_dir=${TEST_ROOT}/path-update
 home_dir=${case_dir}/home
-prepare_release quinjet-linux-x86_64 'path binary'
+prepare_release quinjet-linux-x86_64 '#!/bin/sh
+exit 0'
 mkdir -p "${home_dir}"
 for run in 1 2; do
     env \

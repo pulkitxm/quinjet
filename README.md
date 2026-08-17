@@ -52,7 +52,7 @@ On Windows PowerShell:
 powershell -c "irm https://quinjet.pulkit.page/install.ps1 | iex"
 ```
 
-The installer detects the operating system and CPU architecture, downloads the matching binary from the latest GitHub release, verifies its SHA-256 checksum, and adds the installation directory to `PATH` when needed. It does not require Rust or Cargo.
+The installer detects the operating system and CPU architecture, downloads the matching binary from the latest GitHub release, verifies its SHA-256 checksum, adds the installation directory to `PATH` when needed, installs completions for your configured shell, and adds `q` as a shortcut for `quinjet`. It does not require Rust or Cargo.
 
 Pass `--version` or `--bin-dir` to the shell installer to select a release or installation directory:
 
@@ -72,8 +72,10 @@ quinjet update
 
 The updater replaces the executable that is actually running, so it works for
 script, Cargo, cargo-binstall, and custom-directory installations without
-guessing where the binary lives. It pins the download to one release and
-verifies the published SHA-256 checksum before replacing anything.
+guessing where the binary lives. It pins the download to one release, verifies
+the published SHA-256 checksum before replacing anything, and refreshes the
+installed shell completions with the new executable. It leaves a completion or
+`q` shortcut alone when you removed it after the first installation.
 
 ### Cargo
 
@@ -96,6 +98,8 @@ From the latest source:
 ```bash
 cargo install --git https://github.com/pulkitxm/quinjet --locked
 ```
+
+The first invocation after a Cargo, cargo-binstall, package-manager, or copied-binary installation detects your shell, installs its completions, and adds `q` as a shortcut for `quinjet` in your user configuration. Later invocations refresh stale scripts without rewriting current ones. A persistent installed-once marker means that deleting a generated script or marked profile block opts out permanently; updates do not restore what you removed.
 
 Git is required at runtime. A terminal with true-color support is recommended. The Pull Requests view additionally requires the [GitHub CLI](https://cli.github.com/) with an authenticated account (`gh auth login`). All non-GitHub features remain available without `gh`.
 

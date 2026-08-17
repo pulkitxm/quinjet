@@ -19,6 +19,7 @@ quinjet diff --staged            what its diff pane shows for the index
 quinjet pr checks 12 --watch     what the pull-request pane polls for
 quinjet pr logs 12 clippy        one check run's steps and its log
 quinjet completions bash         generate metadata without a repository
+quinjet completions --install    install completions and the q shortcut
 quinjet man --dir ./man1         generate all manual pages on demand
 quinjet capabilities --json      inspect the installed command surface
 quinjet update --check           check the latest stable release

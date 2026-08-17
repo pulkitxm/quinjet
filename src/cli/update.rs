@@ -8,7 +8,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::Emitter;
+use super::{Emitter, completion};
 
 const API_URL: &str = "https://api.github.com/repos/pulkitxm/quinjet/releases/latest";
 const RELEASES_URL: &str = "https://github.com/pulkitxm/quinjet/releases";
@@ -47,6 +47,10 @@ pub(super) fn run(out: &Emitter, check_only: bool) -> Result<u8> {
             self_replace::self_replace(staged).context("failed to replace the running executable")
         },
     )?;
+    if result.status == UpdateStatus::Updated {
+        out.set_progress("Refreshing shell completions");
+        completion::refresh_replaced_executable()?;
+    }
     out.emit(&result, || result.text())?;
     Ok(0)
 }
