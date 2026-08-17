@@ -1,4 +1,4 @@
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
@@ -154,13 +154,20 @@ impl Repository {
             pull_request.number,
             pull_request.updated_at
         );
+        let identity = format!(
+            "{}\n{}",
+            pull_request.base_repository.url.trim_end_matches('/'),
+            pull_request.number
+        );
         let timeline = self.conversation_records(
             &format!("conversation-timeline-v1\n{stamp}"),
+            &format!("conversation-timeline-validator-v1\n{identity}"),
             timeline_args(pull_request),
             "unable to load the pull-request timeline",
         )?;
         let comments = self.conversation_records(
             &format!("conversation-comments-v1\n{stamp}"),
+            &format!("conversation-comments-validator-v1\n{identity}"),
             review_comment_args(pull_request),
             "unable to load pull-request review comments",
         )?;
@@ -197,6 +204,7 @@ impl Repository {
     fn conversation_records(
         &self,
         key: &str,
+        validator_key: &str,
         args: Vec<OsString>,
         error_context: &str,
     ) -> Result<ConversationRecords> {
@@ -207,12 +215,16 @@ impl Repository {
                 from_cache: true,
             });
         }
-        let single_page: Vec<OsString> = args
+        let single_page = args
             .iter()
-            .filter(|arg| arg.as_os_str() != OsStr::new("--paginate"))
+            .filter(|arg| {
+                arg.as_encoded_bytes() != b"api" && arg.as_encoded_bytes() != b"--paginate"
+            })
             .cloned()
             .collect();
-        if let Ok(read) = self.validated_gh(&format!("{key}\nvalidated"), single_page) {
+        if let Ok(read) = self.validated_gh(validator_key, single_page)
+            && read.complete
+        {
             let entries = parse_conversation(&read.data).context(error_context.to_owned())?;
             cache_write(key, &read.data);
             return Ok(ConversationRecords {

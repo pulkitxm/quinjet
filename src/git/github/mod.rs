@@ -348,29 +348,38 @@ impl PreparedPullRequest {
             )?
         };
         let sections = split_patch_by_file(&patch);
-        Ok(files
-            .into_iter()
-            .map(|file| {
-                let body = if let Some(patch) = cached.get(&file.path) {
-                    patch.as_slice()
-                } else {
-                    let body = sections
-                        .iter()
-                        .find(|section| section.matches(&file.path))
-                        .map(|section| section.body)
-                        .unwrap_or_default();
-                    if !truncated {
-                        let key = patch_cache_key(&self.merge_base, &self.head, &file.path);
-                        cache_write_bounded(&key, body, MAX_CACHED_PATCH_BYTES);
-                    }
-                    body
-                };
-                (
+        let mut documents = Vec::with_capacity(files.len());
+        for file in files {
+            if let Some(body) = cached.get(&file.path) {
+                documents.push((
                     file.path.clone(),
-                    pull_request_file_document(body, &self.pull_request, file, truncated),
-                )
-            })
-            .collect())
+                    pull_request_file_document(body, &self.pull_request, file, false),
+                ));
+                continue;
+            }
+            let Some((index, section)) = sections
+                .iter()
+                .enumerate()
+                .find(|(_, section)| section.matches(&file.path))
+            else {
+                continue;
+            };
+            let section_truncated = truncated && index == sections.len().saturating_sub(1);
+            if !section_truncated {
+                let key = patch_cache_key(&self.merge_base, &self.head, &file.path);
+                cache_write_bounded(&key, section.body, MAX_CACHED_PATCH_BYTES);
+            }
+            documents.push((
+                file.path.clone(),
+                pull_request_file_document(
+                    section.body,
+                    &self.pull_request,
+                    file,
+                    section_truncated,
+                ),
+            ));
+        }
+        Ok(documents)
     }
 }
 
@@ -408,6 +417,7 @@ pub(crate) fn cache_write_bounded(key: &str, data: &[u8], limit: usize) {
 pub(crate) struct ValidatedRead {
     pub data: Vec<u8>,
     pub unchanged: bool,
+    pub complete: bool,
 }
 
 impl Repository {
@@ -438,9 +448,11 @@ impl Repository {
             return Ok(ValidatedRead {
                 data: split_validator(&entry).1.to_vec(),
                 unchanged: true,
+                complete: true,
             });
         }
-        if let Some(etag) = header_value(head, "etag").filter(|_| !has_next_page(head)) {
+        let complete = !has_next_page(head);
+        if let Some(etag) = header_value(head, "etag").filter(|_| complete) {
             let mut entry = etag.into_bytes();
             entry.push(b'\n');
             entry.extend_from_slice(body);
@@ -449,6 +461,7 @@ impl Repository {
         Ok(ValidatedRead {
             data: body.to_vec(),
             unchanged: false,
+            complete,
         })
     }
 }

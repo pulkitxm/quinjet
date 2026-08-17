@@ -484,7 +484,9 @@ pub(crate) enum SidebarHit {
     Commit(usize),
     PullRequestFiles,
     PullRequestOverview,
+    PullRequestRefresh,
     PullRequestConversation,
+    PullRequestConversationRefresh,
     PullRequestChooseRepository,
     PullRequestLookup,
     PullRequestDirectory(PathBuf),
@@ -618,6 +620,7 @@ pub(crate) struct App {
     pub pull_request_prefetched_logs: usize,
     pub pull_request_conversation: PullRequestConversation,
     pub pull_request_conversation_loading: bool,
+    pub pull_request_conversation_refresh_again: bool,
     pub pull_request_conversation_error: Option<String>,
     pub pull_request_check_log: Option<CheckRunLog>,
     pub pull_request_check_log_loading: bool,
@@ -749,6 +752,7 @@ impl App {
             pull_request_prefetched_logs: 0,
             pull_request_conversation: PullRequestConversation::default(),
             pull_request_conversation_loading: false,
+            pull_request_conversation_refresh_again: false,
             pull_request_conversation_error: None,
             pull_request_check_log: None,
             pull_request_check_log_loading: false,
@@ -1740,8 +1744,14 @@ impl App {
                                         PullRequestSection::Overview,
                                         &mut effects,
                                     ),
+                                SidebarHit::PullRequestRefresh => {
+                                    self.refresh_pull_request_live(now, true, &mut effects);
+                                }
                                 SidebarHit::PullRequestConversation => {
                                     self.select_pull_request_check(None, &mut effects);
+                                }
+                                SidebarHit::PullRequestConversationRefresh => {
+                                    self.request_pull_request_conversation(true, &mut effects);
                                 }
                                 SidebarHit::PullRequestChooseRepository => {
                                     self.open_pull_request_repositories(&mut effects);
@@ -2300,6 +2310,10 @@ impl App {
                         self.pull_request_conversation_error = None;
                     }
                     Err(error) => self.pull_request_conversation_error = Some(error),
+                }
+                if self.pull_request_conversation_refresh_again {
+                    self.pull_request_conversation_refresh_again = false;
+                    self.request_pull_request_conversation(true, &mut effects);
                 }
             }
             WorkerEvent::History {
@@ -3895,6 +3909,7 @@ impl App {
         self.pull_request_prefetched_logs = 0;
         self.pull_request_conversation = PullRequestConversation::default();
         self.pull_request_conversation_loading = false;
+        self.pull_request_conversation_refresh_again = false;
         self.pull_request_conversation_error = None;
         self.pull_request_conversation_generation =
             self.pull_request_conversation_generation.wrapping_add(1);
@@ -4344,9 +4359,11 @@ impl App {
     }
 
     fn request_pull_request_conversation(&mut self, refresh: bool, effects: &mut Vec<AppEffect>) {
-        if self.pull_request_conversation_loading
-            || (!refresh && !self.pull_request_conversation.entries.is_empty())
-        {
+        if self.pull_request_conversation_loading {
+            self.pull_request_conversation_refresh_again |= refresh;
+            return;
+        }
+        if !refresh && !self.pull_request_conversation.entries.is_empty() {
             return;
         }
         let Some(pull_request) = self.pull_request.clone() else {

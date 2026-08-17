@@ -914,17 +914,18 @@ fn draw_pull_requests_sidebar(
             body_area.width.saturating_sub(overview_width),
             1,
         );
+        let overview_label = format!(
+            "PR {}",
+            if app.pull_request_refreshing() {
+                "⟳"
+            } else {
+                "↻"
+            }
+        );
         draw_pull_request_section_tab(
             frame,
             overview_tab,
-            format!(
-                "PR{}",
-                if app.pull_request_checks_loading && app.pull_request_checks.is_empty() {
-                    " ⟳"
-                } else {
-                    ""
-                }
-            ),
+            overview_label.clone(),
             app.pull_request_section == PullRequestSection::Overview,
             theme,
         );
@@ -935,6 +936,15 @@ fn draw_pull_requests_sidebar(
             app.pull_request_section == PullRequestSection::Files,
             theme,
         );
+        let overview_label_x = overview_tab.x
+            + overview_tab
+                .width
+                .saturating_sub(cells(overview_label.width()))
+                / 2;
+        hits.push(SidebarHitArea {
+            area: Rect::new(overview_label_x.saturating_add(3), overview_tab.y, 1, 1),
+            target: SidebarHit::PullRequestRefresh,
+        });
         hits.push(SidebarHitArea {
             area: overview_tab,
             target: SidebarHit::PullRequestOverview,
@@ -1353,6 +1363,15 @@ fn draw_pull_request_check_list(
                 SidebarHit::PullRequestCheck(index),
             )
         };
+        if row == 0 {
+            let refresh_x = area.x.saturating_add(cells(line.width().saturating_sub(1)));
+            if refresh_x < area.right() {
+                hits.push(SidebarHitArea {
+                    area: Rect::new(refresh_x, y, 1, 1),
+                    target: SidebarHit::PullRequestConversationRefresh,
+                });
+            }
+        }
         frame.render_widget(
             Paragraph::new(line).style(Style::default().bg(background)),
             row_area,
@@ -1383,17 +1402,19 @@ fn draw_pull_request_check_list(
 }
 
 fn conversation_row_suffix(app: &App) -> String {
-    if app.pull_request_conversation_loading && app.pull_request_conversation.entries.is_empty() {
-        return "  ⟳".to_owned();
-    }
+    let refresh = if app.pull_request_conversation_loading {
+        "  ⟳"
+    } else {
+        "  ↻"
+    };
     if app.pull_request_conversation_error.is_some() {
-        return "  ⚠".to_owned();
+        return format!("  ⚠{refresh}");
     }
     let comments = app.pull_request_conversation.comment_count();
     if comments == 0 {
-        String::new()
+        refresh.to_owned()
     } else {
-        format!("  {comments}")
+        format!("  {comments}{refresh}")
     }
 }
 
