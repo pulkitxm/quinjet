@@ -25,8 +25,9 @@ than repeating them.
 ## Installing
 
 The installers download a prebuilt binary from GitHub Releases, verify its
-SHA-256 checksum against the release's `SHA256SUMS`, and place it somewhere on
-your `PATH`. Neither one needs Rust or Cargo.
+SHA-256 checksum against the release's `SHA256SUMS`, place it somewhere on your
+`PATH`, install completions for your configured shell, and add `q` as a
+shortcut for `quinjet`. Neither one needs Rust or Cargo.
 
 On Linux or macOS:
 
@@ -75,6 +76,32 @@ released supported target: x86-64 and AArch64 Linux, x86-64 and Apple Silicon
 macOS, and x86-64 Windows. The Linux GNU and musl target triples map to the
 published static Linux artifacts.
 
+Cargo has no post-install hook for a binary crate. Quinjet therefore installs
+completions and the `q` shortcut on the first invocation after `cargo install`,
+cargo-binstall, a package-manager installation, or copying a release binary. It
+detects the current shell and writes to that shell's user configuration. The
+release scripts run the same installation path before they finish, so those
+installations have both immediately.
+
+Quinjet stores an installed-once marker under
+`$XDG_STATE_HOME/quinjet`, else `~/.local/state/quinjet`, or
+`%LOCALAPPDATA%\Quinjet\state` on Windows. Later executables update a generated
+completion script only while that script still exists. If you remove the
+script, its marked profile block, or the marked `q` block, the state marker
+records that installation already happened and automatic maintenance does not
+put it back. An explicit `completions --install` is how to restore anything you
+removed intentionally.
+
+Run the installer explicitly when you want to select the shell yourself:
+
+```bash
+quinjet completions bash --install
+quinjet completions zsh --install
+```
+
+See [`quinjet completions`](./generated/completions.md) for every path and
+supported shell.
+
 ### Updating an installation
 
 Every installation method can use the built-in updater:
@@ -95,10 +122,13 @@ The updater reads GitHub's latest stable release, compares semantic versions,
 and never downgrades. For a newer release it selects the same platform artifact
 as the installers, downloads `SHA256SUMS` and the binary from URLs pinned to the
 resolved tag, verifies the exact SHA-256 entry, stages the verified bytes beside
-the running executable, and replaces it while preserving its permissions. It
-does not need `git`, `gh`, Cargo, or an external checksum tool. `--check` stops
-after version and target selection and never downloads or replaces a binary. It
-uses `curl` or `wget` on Linux and macOS and PowerShell on Windows. See
+the running executable, and replaces it while preserving its permissions. The
+new executable then refreshes the active shell's existing completions before
+the update reports success. A script or profile block you removed stays
+removed. It does not need `git`, `gh`, Cargo, or an external checksum
+tool. `--check` stops after version and target selection and never downloads or
+replaces a binary. It uses `curl` or `wget` on Linux and macOS and PowerShell on
+Windows. See
 [`quinjet update`](./update.md) for its complete contract.
 
 ### What the installers check, and what they do not
@@ -117,6 +147,11 @@ uses `curl` or `wget` on Linux and macOS and PowerShell on Windows. See
   characters, or does not match. The download is staged into a temporary file
   next to the destination and moved into place, so an interrupted install never
   leaves a half-written `quinjet` on your `PATH`.
+- The shell installer reads `$SHELL` and installs completions plus the `q`
+  shortcut when it names bash, zsh, fish, or elvish. The PowerShell installer
+  always installs both for PowerShell. Generated scripts and marked profile
+  blocks live in user-owned directories, so a system binary directory does not
+  require root access to them.
 - `PATH` is only edited when the destination is exactly `~/.local/bin` and
   `--no-modify-path` was not passed. The line goes into `config.fish` for fish
   (`fish_add_path "$HOME/.local/bin"`), `$ZDOTDIR/.zshrc` for zsh, `~/.bashrc`
@@ -343,7 +378,7 @@ Commands:
   resolve      Take one side of a merge conflict
   repos        List the GitHub repositories this checkout points at
   pr           Read a pull request, its files, its conversation and its checks
-  completions  Print a shell completion script
+  completions  Print or install shell completions
   man          Print the manual page, or write one page per command
   capabilities Describe commands and arguments for automation
   update       Update this executable to the latest stable release
