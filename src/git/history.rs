@@ -118,6 +118,6 @@ mod tests {
             vec!["HEAD -> main", "origin/main", "tag: v1"]
         );
         assert_eq!(commits[1].subject, "Initial commit");
-        assert!(commits[1].parent_ids.is_empty());
+        assert_eq!(commits[1].parent_ids, Vec::<String>::new());
     }
 }

@@ -5,14 +5,14 @@ Puts the current changes on the stash and leaves the working tree clean.
 Usage:
 
 ```bash
-quinjet stash push [-m <message>] [--include-untracked | --staged] [-C <DIR>] [--json]
+quinjet stash push [-m <message>] [--include-untracked | --staged] [PATH...] [-C <DIR>] [--json]
 ```
 
 Arguments:
 
 | Name | Type / values | Default | What it does |
 | --- | --- | --- | --- |
-| none | | | `push` takes no positional argument. It stashes the repository, not a path. |
+| `PATH...` | path | none | Optional pathspecs. When present, only matching paths are stashed, as `git stash push -- <paths>`. |
 
 Options:
 
@@ -27,16 +27,16 @@ Options:
 
 The argv is assembled in exactly that order: `git stash push`, then
 `--include-untracked` if asked, then `--staged` if asked, then `--message` and
-the trimmed text only when the trimmed text is not empty. So
+the trimmed text only when the trimmed text is not empty, then `--` and the
+pathspecs when any were given. So
 `quinjet stash push` and `quinjet stash push -m "   "` produce the identical
 Git call, and the reflog gets Git's generated `WIP on <branch>: <commit>
 <subject>` subject rather than an empty message. Passing a message gives the
 `On <branch>: <message>` form instead, which is what [`stash
 list`](./list.md) splits back apart.
 
-The three variants are the whole of what `push` can do. There are no
-pathspecs, so a partial stash is not expressible; there is no `--keep-index`,
-no `--all` for ignored files, and no interactive `--patch`. `--staged` and
+There is no `--keep-index`, no `--all` for ignored files, and no interactive
+`--patch`. `--staged` and
 `--include-untracked` are declared as conflicting in clap, so
 `quinjet stash push --staged --include-untracked` is rejected before any Git
 runs:
@@ -87,6 +87,7 @@ quinjet stash push
 quinjet stash push -m "launch work"
 quinjet stash push --include-untracked -m "before the rebase"
 quinjet stash push --staged -m "index only"
+quinjet stash push src/app.rs src/ui/mod.rs -m "partial"
 quinjet stash push -C ~/code/project --json
 ```
 

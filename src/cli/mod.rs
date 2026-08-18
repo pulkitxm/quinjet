@@ -460,6 +460,9 @@ enum StashVerb {
         /// Stash only what is staged
         #[arg(long, conflicts_with = "include_untracked")]
         staged: bool,
+        /// Limit the stash to these paths
+        #[arg(value_name = "PATH", value_hint = ValueHint::AnyPath)]
+        paths: Vec<PathBuf>,
     },
     /// Apply a stash and keep it
     Apply {
@@ -1292,6 +1295,7 @@ fn stash(session: &mut Session, out: &Emitter, command: StashVerb) -> Result<u8>
             message,
             include_untracked,
             staged,
+            paths,
         } => operate(
             session,
             out,
@@ -1299,6 +1303,7 @@ fn stash(session: &mut Session, out: &Emitter, command: StashVerb) -> Result<u8>
                 message,
                 include_untracked,
                 staged,
+                paths,
             },
         ),
         StashVerb::Apply { reference } => {
@@ -1878,6 +1883,18 @@ const fn interval(seconds: u64, floor: u64) -> Duration {
 }
 
 pub(crate) fn open_url(url: &str) -> Result<()> {
+    if std::env::var_os("CMUX_SOCKET_PATH").is_some()
+        && let Ok(child) = std::process::Command::new("cmux")
+            .args(["browser", "open"])
+            .arg(url)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+    {
+        drop(child);
+        return Ok(());
+    }
     open_target(OsStr::new(url), url)
 }
 
@@ -2456,7 +2473,7 @@ mod tests {
         GitOperation::CreateBranch { .. } => GitOperation::CreateBranch { name: String::new(), start: None } => ["branch", "create"];
         GitOperation::RenameBranch { .. } => GitOperation::RenameBranch { old: String::new(), new: String::new() } => ["branch", "rename"];
         GitOperation::DeleteBranch(_) => GitOperation::DeleteBranch(String::new()) => ["branch", "delete"];
-        GitOperation::StashPush { .. } => GitOperation::StashPush { message: String::new(), include_untracked: false, staged: false } => ["stash", "push"];
+        GitOperation::StashPush { .. } => GitOperation::StashPush { message: String::new(), include_untracked: false, staged: false, paths: Vec::new() } => ["stash", "push"];
         GitOperation::StashApply(_) => GitOperation::StashApply(String::new()) => ["stash", "apply"];
         GitOperation::StashPop(_) => GitOperation::StashPop(None) => ["stash", "pop"];
         GitOperation::StashDrop(_) => GitOperation::StashDrop(String::new()) => ["stash", "drop"];

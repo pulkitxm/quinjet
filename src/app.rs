@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::ffi::OsString;
 use std::fmt::Write;
+use std::hash::Hash;
 use std::mem::size_of_val;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -14,6 +15,7 @@ use crate::git::diff::{DiffDocument, DiffIndex, DiffLineKind, PullRequestDetails
 use crate::git::github::{
     CheckRunLog, GitHubRepository, PullRequest, PullRequestCheck, PullRequestConversation,
     PullRequestDiffIndex, PullRequestFile, PullRequestFileStatus, PullRequestProgress,
+    RecentPullRequest,
 };
 use crate::git::history::Commit;
 use crate::git::status::{Change, ChangeArea, ChangeStatus, RepoStatus};
@@ -50,6 +52,65 @@ const DEFAULT_DIFF_SPLIT_PERCENT: u16 = 50;
 const MIN_DIFF_SPLIT_PERCENT: u16 = 20;
 const MAX_DIFF_SPLIT_PERCENT: u16 = 80;
 const OPERATION_SPINNER: [&str; 4] = ["◐", "◓", "◑", "◒"];
+
+const fn initial_recent_pull_requests() -> Vec<RecentPullRequest> {
+    Vec::new()
+}
+
+fn recent_pull_requests_for(
+    recent: Vec<RecentPullRequest>,
+    repository: &GitHubRepository,
+) -> Vec<RecentPullRequest> {
+    recent
+        .into_iter()
+        .filter(|entry| entry.repository.url.eq_ignore_ascii_case(&repository.url))
+        .collect()
+}
+
+fn toggle_membership<T: Eq + Hash>(items: &mut HashSet<T>, item: T) {
+    if !items.remove(&item) {
+        items.extend([item]);
+    }
+}
+
+#[cfg(not(test))]
+fn cached_recent_pull_requests_for(repository: &GitHubRepository) -> Vec<RecentPullRequest> {
+    recent_pull_requests_for(crate::git::github::recent_pull_requests(), repository)
+}
+
+#[cfg(test)]
+const fn cached_recent_pull_requests_for(_repository: &GitHubRepository) -> Vec<RecentPullRequest> {
+    Vec::new()
+}
+
+#[cfg(not(test))]
+fn updated_recent_pull_requests(
+    _existing: &[RecentPullRequest],
+    pull_request: &PullRequest,
+) -> Vec<RecentPullRequest> {
+    recent_pull_requests_for(
+        crate::git::github::record_recent_pull_request(pull_request),
+        &pull_request.base_repository,
+    )
+}
+
+#[cfg(test)]
+fn updated_recent_pull_requests(
+    existing: &[RecentPullRequest],
+    pull_request: &PullRequest,
+) -> Vec<RecentPullRequest> {
+    let current = RecentPullRequest::from(pull_request);
+    let mut recent = existing.to_vec();
+    recent.retain(|entry| {
+        entry
+            .repository
+            .url
+            .eq_ignore_ascii_case(&current.repository.url)
+            && entry.number != current.number
+    });
+    recent.insert(0, current);
+    recent_pull_requests_for(recent, &pull_request.base_repository)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum View {
@@ -113,6 +174,7 @@ pub(crate) enum ChangeRow {
         index: usize,
         cursor: usize,
     },
+    Spacer,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -247,6 +309,25 @@ pub(crate) enum OpenTarget {
 pub(crate) struct LinkHit {
     pub area: Rect,
     pub target: OpenTarget,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TextSelection {
+    pub pane: Rect,
+    pub anchor: (u16, u16),
+    pub head: (u16, u16),
+}
+
+impl TextSelection {
+    pub(crate) const fn ordered_endpoints(self) -> ((u16, u16), (u16, u16)) {
+        if self.anchor.1 < self.head.1
+            || (self.anchor.1 == self.head.1 && self.anchor.0 <= self.head.0)
+        {
+            (self.anchor, self.head)
+        } else {
+            (self.head, self.anchor)
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -480,13 +561,66 @@ pub(crate) enum PromptKind {
     StashPush {
         include_untracked: bool,
         staged: bool,
+        paths: Vec<PathBuf>,
     },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum ConfirmAction {
+    Operate(GitOperation),
+    OpenPrompt { title: String, kind: PromptKind },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ScmMenuItem {
+    StageAll,
+    UnstageAll,
+    CompareBranch,
+    ManageStashes,
+    StashAll,
+    StashIncludeUntracked,
+    StashStagedOnly,
+}
+
+impl ScmMenuItem {
+    pub(crate) const ALL: [Self; 7] = [
+        Self::StageAll,
+        Self::UnstageAll,
+        Self::CompareBranch,
+        Self::ManageStashes,
+        Self::StashAll,
+        Self::StashIncludeUntracked,
+        Self::StashStagedOnly,
+    ];
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::StageAll => "Stage All",
+            Self::UnstageAll => "Unstage All",
+            Self::CompareBranch => "Compare Branch",
+            Self::ManageStashes => "Manage Stashes",
+            Self::StashAll => "Stash All Changes",
+            Self::StashIncludeUntracked => "Stash Including Untracked",
+            Self::StashStagedOnly => "Stash Staged Only",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ModalAction {
+    CommitSubmit,
+    CommitCancel,
+    CommitToggleAmend,
+    ConfirmYes,
+    ConfirmNo,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) enum Modal {
     Help {
+        selected: usize,
         scroll: usize,
+        hover: Option<usize>,
     },
     Commit {
         input: TextBuffer,
@@ -500,7 +634,7 @@ pub(crate) enum Modal {
     Confirm {
         title: String,
         message: String,
-        operation: GitOperation,
+        action: ConfirmAction,
     },
     Branches {
         items: Vec<Branch>,
@@ -649,11 +783,10 @@ pub(crate) enum SidebarHit {
     Commit(usize),
     PullRequestFiles,
     PullRequestOverview,
-    PullRequestRefresh,
     PullRequestConversation,
-    PullRequestConversationRefresh,
     PullRequestChooseRepository,
     PullRequestLookup,
+    RecentPullRequest(usize),
     PullRequestDirectory(PathBuf),
     PullRequestFile(usize),
     PullRequestCheck(usize),
@@ -690,11 +823,16 @@ pub(crate) enum ScmAction {
     Resolve(usize),
     StageSection(ChangeSection),
     UnstageSection(ChangeSection),
-    StageAll,
-    UnstageAll,
-    Commit,
-    Stashes,
-    CompareBranch,
+    ToggleCheck(usize),
+    Primary,
+    ToggleMenu,
+    Menu(ScmMenuItem),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct HelpHit {
+    pub area: Rect,
+    pub index: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -731,14 +869,17 @@ pub(crate) struct UiGeometry {
     pub diff_divider: Option<Rect>,
     pub sidebar_hits: Vec<SidebarHitArea>,
     pub scm_action_hits: Vec<ScmActionHit>,
+    pub modal_action_hits: Vec<(Rect, ModalAction)>,
     pub content_file_hits: Vec<ContentFileHit>,
     pub content_step_hits: Vec<ContentStepHit>,
     pub link_hits: Vec<LinkHit>,
+    pub help_hits: Vec<HelpHit>,
 }
 
 #[derive(Debug)]
 pub(crate) enum AppEffect {
     Git(Box<WorkerCommand>),
+    Copy(String),
     SetMouseCapture(bool),
     Open(OpenTarget),
     Quit,
@@ -777,6 +918,8 @@ pub(crate) struct App {
     pub history_branches_loaded: bool,
     pub pull_request_lookup: TextBuffer,
     pub pull_request_lookup_active: bool,
+    pub recent_pull_requests: Vec<RecentPullRequest>,
+    pub recent_pull_request_cursor: usize,
     pub pull_request_section: PullRequestSection,
     pub pull_request_file_view: PullRequestFileView,
     pub pull_request_files: Vec<PullRequestFile>,
@@ -819,6 +962,9 @@ pub(crate) struct App {
     pub document: DiffDocument,
     pub selected_change_section: Option<ChangeSection>,
     pub collapsed_change_sections: HashSet<ChangeSection>,
+    pub checked_change_paths: HashSet<PathBuf>,
+    pub scm_menu_open: bool,
+    pub scm_menu_selected: usize,
     pub selected_preview_file: Option<PathBuf>,
     pub preview_file_cursor: usize,
     pub collapsed_preview_files: HashSet<PathBuf>,
@@ -839,6 +985,10 @@ pub(crate) struct App {
     pub modal: Option<Modal>,
     pub toast: Option<Toast>,
     pub mouse_capture: bool,
+    pub mouse_capture_preference: bool,
+    pub link_hover: Option<(u16, u16)>,
+    pub text_selection: Option<TextSelection>,
+    pub rendered_cells: Vec<Vec<char>>,
     pub webhooks_listening: bool,
     pub busy: Option<String>,
     pub operation_frame: usize,
@@ -928,6 +1078,8 @@ impl App {
             history_branches_loaded: false,
             pull_request_lookup: TextBuffer::default(),
             pull_request_lookup_active: false,
+            recent_pull_requests: initial_recent_pull_requests(),
+            recent_pull_request_cursor: 0,
             pull_request_section: PullRequestSection::Overview,
             pull_request_file_view: PullRequestFileView::AllFiles,
             pull_request_files: Vec::new(),
@@ -962,6 +1114,9 @@ impl App {
             document: DiffDocument::empty("Working Tree", "Loading changes…"),
             selected_change_section: Some(ChangeSection::Unstaged),
             collapsed_change_sections: HashSet::new(),
+            checked_change_paths: HashSet::new(),
+            scm_menu_open: false,
+            scm_menu_selected: 0,
             selected_preview_file: None,
             preview_file_cursor: 0,
             collapsed_preview_files: HashSet::new(),
@@ -982,6 +1137,10 @@ impl App {
             modal: None,
             toast: None,
             mouse_capture: true,
+            mouse_capture_preference: true,
+            link_hover: None,
+            text_selection: None,
+            rendered_cells: Vec::new(),
             webhooks_listening: false,
             busy: None,
             operation_frame: 0,
@@ -1108,6 +1267,40 @@ impl App {
         self.pull_request.as_ref()
     }
 
+    fn move_recent_pull_request_cursor(&mut self, delta: isize) {
+        if self.recent_pull_requests.is_empty() {
+            self.recent_pull_request_cursor = 0;
+            return;
+        }
+        self.recent_pull_request_cursor = if delta < 0 {
+            self.recent_pull_request_cursor
+                .saturating_sub(delta.unsigned_abs())
+        } else {
+            self.recent_pull_request_cursor
+                .saturating_add(count(delta))
+                .min(self.recent_pull_requests.len() - 1)
+        };
+    }
+
+    fn open_recent_pull_request(&mut self, index: usize, effects: &mut Vec<AppEffect>) -> bool {
+        let Some(recent) = self.recent_pull_requests.get(index).cloned() else {
+            return false;
+        };
+        self.recent_pull_request_cursor = index;
+        if !self
+            .github_repositories
+            .iter()
+            .any(|repository| repository.url.eq_ignore_ascii_case(&recent.repository.url))
+        {
+            self.github_repositories.push(recent.repository.clone());
+        }
+        self.pull_request_repository = Some(recent.repository);
+        self.pull_request_lookup = TextBuffer::new(recent.number.to_string());
+        self.pull_request_lookup_active = false;
+        self.request_pull_request_lookup(recent.number, false, false, effects);
+        true
+    }
+
     pub(crate) fn selected_pull_request_file(&self) -> Option<&PullRequestFile> {
         self.pull_request_files.get(self.pull_request_file_cursor)
     }
@@ -1180,9 +1373,7 @@ impl App {
         reason = "the caller has no use for the value afterwards"
     )]
     fn toggle_pull_request_directory(&mut self, path: PathBuf) {
-        if !self.collapsed_pull_request_directories.remove(&path) {
-            let _ = self.collapsed_pull_request_directories.insert(path.clone());
-        }
+        toggle_membership(&mut self.collapsed_pull_request_directories, path.clone());
         self.rebuild_pull_request_tree();
         self.pull_request_tree_cursor = self
             .pull_request_tree
@@ -1221,9 +1412,7 @@ impl App {
         match entry {
             PullRequestTreeEntry::Directory { path, depth, .. } => {
                 let collapsed = self.pull_request_directory_collapsed(&path);
-                if (expand && collapsed) || (!expand && !collapsed) {
-                    self.toggle_pull_request_directory(path);
-                } else if expand {
+                if expand && !collapsed {
                     let child = self.pull_request_tree_cursor.saturating_add(1);
                     if entries
                         .get(child)
@@ -1231,7 +1420,7 @@ impl App {
                     {
                         self.select_pull_request_tree_entry(child, now);
                     }
-                } else {
+                } else if !expand {
                     let parent_cursor =
                         entries
                             .get(..self.pull_request_tree_cursor)
@@ -1325,6 +1514,9 @@ impl App {
             if members.is_empty() {
                 continue;
             }
+            if !rows.is_empty() {
+                rows.push(ChangeRow::Spacer);
+            }
             let collapsed = self.collapsed_change_sections.contains(&section);
             rows.push(ChangeRow::Section {
                 section,
@@ -1349,9 +1541,10 @@ impl App {
     fn change_targets(&self) -> Vec<ChangeTarget> {
         self.change_rows()
             .into_iter()
-            .map(|row| match row {
-                ChangeRow::Section { section, .. } => ChangeTarget::Section(section),
-                ChangeRow::Change { cursor, .. } => ChangeTarget::Change(cursor),
+            .filter_map(|row| match row {
+                ChangeRow::Section { section, .. } => Some(ChangeTarget::Section(section)),
+                ChangeRow::Change { cursor, .. } => Some(ChangeTarget::Change(cursor)),
+                ChangeRow::Spacer => None,
             })
             .collect()
     }
@@ -1370,12 +1563,12 @@ impl App {
     }
 
     pub(crate) fn preview_files_collapsible(&self) -> bool {
-        if let Some(index) = self.local_diff_index.as_ref() {
-            return index.files.len() > 1;
-        }
         if self.view == View::PullRequests {
             return self.pull_request_file_view == PullRequestFileView::AllFiles
                 && self.pull_request_files.len() > 1;
+        }
+        if let Some(index) = self.local_diff_index.as_ref() {
+            return index.files.len() > 1;
         }
         self.document
             .lines
@@ -1395,6 +1588,32 @@ impl App {
         } else {
             self.collapsed_preview_files.contains(Path::new(path))
         }
+    }
+
+    fn reset_preview_file_folds(&mut self, paths: &[PathBuf]) {
+        self.collapsed_preview_files.clear();
+        self.expanded_preview_files.clear();
+        if paths.len() > 1 && !self.files_collapsed && !self.collapse_preference_set {
+            self.collapsed_preview_files.extend(paths.iter().cloned());
+        }
+    }
+
+    fn visible_preview_paths(&self, paths: &[PathBuf]) -> HashSet<PathBuf> {
+        if paths.len() <= 1 {
+            return paths.iter().cloned().collect();
+        }
+        if self.files_collapsed {
+            return paths
+                .iter()
+                .filter(|path| self.expanded_preview_files.contains(*path))
+                .cloned()
+                .collect();
+        }
+        paths
+            .iter()
+            .filter(|path| !self.collapsed_preview_files.contains(*path))
+            .cloned()
+            .collect()
     }
 
     fn toggle_all_preview_files(&mut self, effects: &mut Vec<AppEffect>) {
@@ -1426,9 +1645,7 @@ impl App {
         } else {
             &mut self.collapsed_preview_files
         };
-        if !overrides.remove(&path) {
-            let _ = overrides.insert(path.clone());
-        }
+        toggle_membership(overrides, path.clone());
         self.selected_preview_file = Some(path.clone());
         self.preview_file_cursor = self
             .preview_file_paths()
@@ -1507,9 +1724,7 @@ impl App {
     }
 
     fn toggle_change_section(&mut self, section: ChangeSection) {
-        if !self.collapsed_change_sections.remove(&section) {
-            let _ = self.collapsed_change_sections.insert(section);
-        }
+        toggle_membership(&mut self.collapsed_change_sections, section);
         self.selected_change_section = Some(section);
     }
 
@@ -1528,9 +1743,7 @@ impl App {
         match target {
             ChangeTarget::Section(section) => {
                 let collapsed = self.collapsed_change_sections.contains(&section);
-                if (expand && collapsed) || (!expand && !collapsed) {
-                    self.toggle_change_section(section);
-                } else if expand {
+                if expand && !collapsed {
                     let targets = self.change_targets();
                     if let Some(index) = targets
                         .iter()
@@ -1645,6 +1858,7 @@ impl App {
         reason = "the draw pass reads better as one top-to-bottom pass"
     )]
     pub(crate) fn handle_key(&mut self, key: KeyEvent, now: Instant) -> Vec<AppEffect> {
+        self.link_hover = None;
         if let Some(modal) = self.modal.take() {
             return self.handle_modal_key(modal, key, now);
         }
@@ -1671,7 +1885,13 @@ impl App {
 
         match key.code {
             KeyCode::Char('q') => effects.push(AppEffect::Quit),
-            KeyCode::Char('?') => self.modal = Some(Modal::Help { scroll: 0 }),
+            KeyCode::Char('?') => {
+                self.modal = Some(Modal::Help {
+                    selected: 0,
+                    scroll: 0,
+                    hover: None,
+                });
+            }
             KeyCode::Char(':') => {
                 self.modal = Some(Modal::CommandPalette {
                     query: TextBuffer::default(),
@@ -1682,12 +1902,12 @@ impl App {
             KeyCode::Char('2') => self.switch_view(View::History, &mut effects),
             KeyCode::Char('3') => self.switch_view(View::PullRequests, &mut effects),
             KeyCode::Tab | KeyCode::BackTab if !self.sidebar_hidden => {
-                self.toggle_focus();
+                self.toggle_focus(&mut effects);
             }
             KeyCode::Char('r') => self.request_active_refresh(&mut effects),
             KeyCode::Char('/') if self.view == View::PullRequests => {
                 self.pull_request_lookup_active = true;
-                self.focus = Focus::Sidebar;
+                self.set_focus(Focus::Sidebar, &mut effects);
             }
             KeyCode::Char('/') => {
                 self.modal = Some(Modal::Prompt {
@@ -1715,21 +1935,49 @@ impl App {
             KeyCode::Char('d') if self.view == View::Changes => {
                 self.open_compare_branches(&mut effects);
             }
+            KeyCode::Up if self.scm_menu_open && self.view == View::Changes => {
+                self.scm_menu_selected =
+                    previous_list_index(self.scm_menu_selected, ScmMenuItem::ALL.len());
+            }
+            KeyCode::Down if self.scm_menu_open && self.view == View::Changes => {
+                self.scm_menu_selected =
+                    next_list_index(self.scm_menu_selected, ScmMenuItem::ALL.len());
+            }
+            KeyCode::Enter if self.scm_menu_open && self.view == View::Changes => {
+                if let Some(item) = ScmMenuItem::ALL.get(self.scm_menu_selected).copied() {
+                    self.scm_menu_open = false;
+                    self.handle_scm_menu_item(item, &mut effects);
+                }
+            }
+            KeyCode::Esc if self.scm_menu_open => {
+                self.scm_menu_open = false;
+            }
             KeyCode::Char('S') if self.view == View::Changes => self.open_stashes(&mut effects),
             KeyCode::Char('o') if self.view == View::PullRequests => {
                 self.open_pull_request_repositories(&mut effects);
             }
             KeyCode::Char('c') if self.view == View::Changes => {
-                self.modal = Some(Modal::Commit {
-                    input: TextBuffer::default(),
-                    amend: false,
-                });
+                if self.primary_is_stash() {
+                    self.confirm_stash_selected();
+                } else {
+                    self.modal = Some(Modal::Commit {
+                        input: TextBuffer::default(),
+                        amend: false,
+                    });
+                }
             }
             KeyCode::Char('a') if self.view == View::Changes => {
-                self.queue_operation(GitOperation::StageAll, &mut effects);
+                self.handle_scm_menu_item(ScmMenuItem::StageAll, &mut effects);
             }
             KeyCode::Char('U') if self.view == View::Changes => {
-                self.queue_operation(GitOperation::UnstageAll, &mut effects);
+                self.handle_scm_menu_item(ScmMenuItem::UnstageAll, &mut effects);
+            }
+            KeyCode::Char('*')
+                if self.view == View::Changes
+                    && self.focus == Focus::Sidebar
+                    && self.selected_change_section.is_none() =>
+            {
+                self.toggle_checked_selected();
             }
             KeyCode::Char('s' | ' ')
                 if self.view == View::Changes
@@ -1740,6 +1988,15 @@ impl App {
             }
             KeyCode::Char(' ') if self.view == View::Changes && self.focus == Focus::Sidebar => {
                 let _ = self.toggle_selected_change_section();
+            }
+            KeyCode::Char(' ')
+                if self.view == View::PullRequests
+                    && self.pull_request.is_none()
+                    && !self.recent_pull_requests.is_empty()
+                    && self.focus == Focus::Sidebar =>
+            {
+                let _ =
+                    self.open_recent_pull_request(self.recent_pull_request_cursor, &mut effects);
             }
             KeyCode::Char(' ')
                 if self.view == View::PullRequests
@@ -1798,18 +2055,7 @@ impl App {
                 self.queue_operation(GitOperation::Pull, &mut effects);
             }
             KeyCode::Char('y') => self.queue_operation(GitOperation::Sync, &mut effects),
-            KeyCode::Enter if self.check_log_visible() && self.focus == Focus::Content => {
-                self.toggle_check_step(self.pull_request_step_cursor);
-            }
-            KeyCode::Enter if !self.sidebar_hidden => {
-                if !(self.toggle_selected_pull_request_directory()
-                    || self.view == View::Changes
-                        && self.focus == Focus::Sidebar
-                        && self.toggle_selected_change_section())
-                {
-                    self.toggle_focus();
-                }
-            }
+            KeyCode::Enter if !self.sidebar_hidden => self.toggle_focus(&mut effects),
             KeyCode::Esc => {
                 if self.auxiliary_preview.take().is_some() {
                     self.request_preview(&mut effects);
@@ -1825,7 +2071,7 @@ impl App {
                     self.pull_request_progress = None;
                     self.pull_request_poll_due = None;
                     self.pull_request_lookup = TextBuffer::default();
-                    self.pull_request_lookup_active = true;
+                    self.pull_request_lookup_active = self.recent_pull_requests.is_empty();
                     self.document = DiffDocument::empty(
                         "Open Pull Request",
                         "Enter a pull-request number and press Enter",
@@ -1835,8 +2081,18 @@ impl App {
                     self.normalize_selection();
                     self.schedule_preview(now);
                 } else {
-                    self.focus = Focus::Sidebar;
+                    self.set_focus(Focus::Sidebar, &mut effects);
                 }
+            }
+            KeyCode::Up | KeyCode::Char('k')
+                if self.view == View::PullRequests && self.pull_request.is_none() =>
+            {
+                self.move_recent_pull_request_cursor(-1);
+            }
+            KeyCode::Down | KeyCode::Char('j')
+                if self.view == View::PullRequests && self.pull_request.is_none() =>
+            {
+                self.move_recent_pull_request_cursor(1);
             }
             KeyCode::Up | KeyCode::Char('k') => self.navigate(-1, now),
             KeyCode::Down | KeyCode::Char('j') => self.navigate(1, now),
@@ -1855,11 +2111,9 @@ impl App {
                     self.pending_g = Some(now);
                 }
             }
-            KeyCode::Char('z') => self.toggle_sidebar(),
+            KeyCode::Char('z') => self.toggle_sidebar(&mut effects),
             KeyCode::Char('m') => effects.push(self.toggle_mouse_capture(now)),
-            KeyCode::Char('O') if self.view == View::PullRequests => {
-                self.open_selection_on_github(&mut effects, now);
-            }
+            KeyCode::Char('O') => self.open_selection_on_github(&mut effects, now),
             KeyCode::Char('[') if self.check_log_visible() => {
                 let _ = self.move_check_step_cursor(-1);
             }
@@ -1940,12 +2194,92 @@ impl App {
     )]
     pub(crate) fn handle_mouse(&mut self, event: MouseEvent, now: Instant) -> Vec<AppEffect> {
         let mut effects = Vec::new();
-        if self.modal.is_some() || event.modifiers.contains(KeyModifiers::SHIFT) {
+        self.link_hover = (event.kind == MouseEventKind::Moved
+            && event.modifiers.intersects(
+                KeyModifiers::CONTROL
+                    | KeyModifiers::SUPER
+                    | KeyModifiers::META
+                    | KeyModifiers::HYPER,
+            )
+            && self
+                .geometry
+                .link_hits
+                .iter()
+                .any(|hit| hit.area.contains((event.column, event.row).into())))
+        .then_some((event.column, event.row));
+        if let Some(Modal::Help {
+            selected, hover, ..
+        }) = &mut self.modal
+        {
+            let point = (event.column, event.row).into();
+            match event.kind {
+                MouseEventKind::Moved => {
+                    *hover = self
+                        .geometry
+                        .help_hits
+                        .iter()
+                        .find(|hit| hit.area.contains(point))
+                        .map(|hit| hit.index);
+                }
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if let Some(index) = self
+                        .geometry
+                        .help_hits
+                        .iter()
+                        .find(|hit| hit.area.contains(point))
+                        .map(|hit| hit.index)
+                    {
+                        *selected = index;
+                        *hover = Some(index);
+                    }
+                }
+                MouseEventKind::ScrollUp => {
+                    *selected = previous_list_index(*selected, crate::ui::help_shortcut_count());
+                    *hover = None;
+                }
+                MouseEventKind::ScrollDown => {
+                    *selected = next_list_index(*selected, crate::ui::help_shortcut_count());
+                    *hover = None;
+                }
+                _ => {}
+            }
+            return effects;
+        }
+        if matches!(
+            self.modal,
+            Some(Modal::Commit { .. } | Modal::Confirm { .. })
+        ) && event.kind == MouseEventKind::Down(MouseButton::Left)
+        {
+            if let Some(action) = self
+                .geometry
+                .modal_action_hits
+                .iter()
+                .find(|(area, _)| area.contains((event.column, event.row).into()))
+                .map(|(_, action)| *action)
+            {
+                self.handle_modal_action(action, &mut effects);
+            }
+            return effects;
+        }
+        if self.modal.is_some() {
+            return effects;
+        }
+        if event.modifiers.contains(KeyModifiers::SHIFT) {
+            match event.kind {
+                MouseEventKind::ScrollUp | MouseEventKind::ScrollLeft => {
+                    self.scroll_horizontal(false);
+                }
+                MouseEventKind::ScrollDown | MouseEventKind::ScrollRight => {
+                    self.scroll_horizontal(true);
+                }
+                _ => {}
+            }
             return effects;
         }
 
         match event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
+                self.text_selection = None;
                 if let Some(target) = self
                     .geometry
                     .link_hits
@@ -1994,12 +2328,14 @@ impl App {
                         .map(|hit| hit.action.clone())
                     {
                         self.handle_scm_action(action, &mut effects);
+                    } else if self.scm_menu_open {
+                        self.scm_menu_open = false;
                     } else if self
                         .geometry
                         .sidebar
                         .contains((event.column, event.row).into())
                     {
-                        self.focus = Focus::Sidebar;
+                        self.set_focus(Focus::Sidebar, &mut effects);
                         if let Some(hit) = self
                             .geometry
                             .sidebar_hits
@@ -2044,20 +2380,17 @@ impl App {
                                         PullRequestSection::Overview,
                                         &mut effects,
                                     ),
-                                SidebarHit::PullRequestRefresh => {
-                                    self.refresh_pull_request_live(now, true, &mut effects);
-                                }
                                 SidebarHit::PullRequestConversation => {
                                     self.select_pull_request_check(None, &mut effects);
-                                }
-                                SidebarHit::PullRequestConversationRefresh => {
-                                    self.request_pull_request_conversation(true, &mut effects);
                                 }
                                 SidebarHit::PullRequestChooseRepository => {
                                     self.open_pull_request_repositories(&mut effects);
                                 }
                                 SidebarHit::PullRequestLookup => {
                                     self.pull_request_lookup_active = true;
+                                }
+                                SidebarHit::RecentPullRequest(index) => {
+                                    let _ = self.open_recent_pull_request(index, &mut effects);
                                 }
                                 SidebarHit::PullRequestDirectory(path) => {
                                     self.toggle_pull_request_directory(path);
@@ -2089,7 +2422,6 @@ impl App {
                         .content
                         .contains((event.column, event.row).into())
                     {
-                        self.focus = Focus::Content;
                         if let Some(step) = self
                             .geometry
                             .content_step_hits
@@ -2097,6 +2429,7 @@ impl App {
                             .find(|hit| hit.area.contains((event.column, event.row).into()))
                             .map(|hit| hit.step)
                         {
+                            self.focus = Focus::Content;
                             self.toggle_check_step(step);
                         } else if let Some(path) = self
                             .geometry
@@ -2105,7 +2438,11 @@ impl App {
                             .find(|hit| hit.area.contains((event.column, event.row).into()))
                             .map(|hit| hit.path.clone())
                         {
+                            self.focus = Focus::Content;
                             self.toggle_preview_file(path, &mut effects);
+                        } else {
+                            self.focus = Focus::Content;
+                            self.start_text_selection(event.column, event.row);
                         }
                     }
                 }
@@ -2115,10 +2452,30 @@ impl App {
                 match self.resize_target {
                     Some(ResizeTarget::Sidebar) => self.resize_sidebar(event.column),
                     Some(ResizeTarget::Diff) => self.resize_diff(event.column),
-                    None => {}
+                    None => self.update_text_selection(event.column, event.row),
                 }
             }
-            MouseEventKind::Up(MouseButton::Left) => self.resize_target = None,
+            MouseEventKind::Up(MouseButton::Left) => {
+                if self.resize_target.take().is_none() {
+                    self.update_text_selection(event.column, event.row);
+                    let dragged = self
+                        .text_selection
+                        .is_some_and(|selection| selection.anchor != selection.head);
+                    if dragged {
+                        let text = self.selected_text();
+                        if !text.is_empty() {
+                            effects.push(AppEffect::Copy(text));
+                            self.show_toast(
+                                "Selection copied from this pane".to_owned(),
+                                ToastLevel::Success,
+                                now,
+                            );
+                        }
+                    } else {
+                        self.text_selection = None;
+                    }
+                }
+            }
             MouseEventKind::ScrollDown => {
                 if self
                     .geometry
@@ -2146,10 +2503,10 @@ impl App {
                 }
             }
             MouseEventKind::ScrollLeft => {
-                self.horizontal_scroll = self.horizontal_scroll.saturating_sub(3);
+                self.scroll_horizontal(false);
             }
             MouseEventKind::ScrollRight => {
-                self.horizontal_scroll = self.horizontal_scroll.saturating_add(3);
+                self.scroll_horizontal(true);
             }
             _ => {}
         }
@@ -2207,8 +2564,8 @@ impl App {
         effects
     }
 
-    /// Whether any pull-request read is on its way. The view shows one reload
-    /// mark for all of them, because the reader cares that it is refreshing,
+    /// Whether any pull-request read is on its way. The view shows one status
+    /// label for all of them, because the reader cares that it is refreshing,
     /// not which of four endpoints is answering.
     pub(crate) const fn pull_request_refreshing(&self) -> bool {
         self.pull_request_loading
@@ -2368,6 +2725,12 @@ impl App {
                         let branch_changed = self.status.branch.head != status.branch.head
                             || self.status.branch.oid != status.branch.oid;
                         self.status = status;
+                        self.checked_change_paths.retain(|path| {
+                            self.status
+                                .changes
+                                .iter()
+                                .any(|change| &change.path == path)
+                        });
                         self.restore_change_selection(selected.as_ref());
                         self.last_refresh = Some(now);
                         if branch_changed
@@ -2399,17 +2762,14 @@ impl App {
                         let selected_path = self.selected_preview_file.clone().filter(|selected| {
                             index.files.iter().any(|file| &file.path == selected)
                         });
+                        let paths = index
+                            .files
+                            .iter()
+                            .map(|file| file.path.clone())
+                            .collect::<Vec<_>>();
                         self.local_diff_workspace_generation = Some(generation);
                         self.local_diff_documents.clear();
-                        self.collapsed_preview_files.clear();
-                        self.expanded_preview_files.clear();
-                        if index.files.len() > 1
-                            && !self.files_collapsed
-                            && !self.collapse_preference_set
-                        {
-                            self.collapsed_preview_files
-                                .extend(index.files.iter().map(|file| file.path.clone()));
-                        }
+                        self.reset_preview_file_folds(&paths);
                         self.selected_preview_file = selected_path
                             .or_else(|| index.files.first().map(|file| file.path.clone()));
                         self.preview_file_cursor = self
@@ -2472,20 +2832,19 @@ impl App {
                 }
                 self.local_diff_loading_path = None;
                 match result {
-                    Ok(document) => {
-                        if self
-                            .local_diff_index
-                            .as_ref()
-                            .is_some_and(|index| index.files.len() == 1)
-                        {
-                            self.document = document;
-                            self.local_diff_single_loaded = true;
-                        } else {
-                            drop(self.local_diff_documents.insert(path, document));
-                            self.rebuild_local_diff_document();
-                        }
+                    Ok(document) => self.store_local_diff_document(path, document),
+                    Err(error) => {
+                        let title = self.local_diff_index.as_ref().map_or_else(
+                            || "Preview Error".to_owned(),
+                            |index| index.title.clone(),
+                        );
+                        self.store_local_diff_document(
+                            path,
+                            DiffDocument::empty(&title, format!("Unable to load diff: {error}")),
+                        );
+                        self.local_diff_request = None;
+                        self.show_toast(error, ToastLevel::Error, now);
                     }
-                    Err(error) => self.show_toast(error, ToastLevel::Error, now),
                 }
                 self.request_next_local_diff_file(&mut effects);
             }
@@ -2758,6 +3117,10 @@ impl App {
             }
             WorkerEvent::LocalGitHubRepository { result } => {
                 if let Ok(repository) = result {
+                    self.recent_pull_requests = repository
+                        .as_ref()
+                        .map_or_else(Vec::new, cached_recent_pull_requests_for);
+                    self.recent_pull_request_cursor = 0;
                     self.local_github_repository = repository;
                 }
             }
@@ -2771,6 +3134,7 @@ impl App {
                         if !snapshot.repositories.is_empty() {
                             self.github_repositories = snapshot.repositories;
                         }
+                        let newly_opened = self.pull_request.is_none();
                         let previous = self.pull_request.replace(snapshot.pull_request);
                         self.invalidate_pull_request_content_rows();
                         let current = self.pull_request.as_ref().expect("just assigned");
@@ -2783,6 +3147,11 @@ impl App {
                         });
                         let head_moved =
                             previous.is_some_and(|previous| previous.head_oid != current.head_oid);
+                        if newly_opened {
+                            self.recent_pull_requests =
+                                updated_recent_pull_requests(&self.recent_pull_requests, current);
+                            self.recent_pull_request_cursor = 0;
+                        }
                         self.pull_request_repository = snapshot.selected_repository;
                         self.pull_request_warnings = snapshot.warnings;
                         self.pull_request_exact_number = snapshot.exact_number;
@@ -2968,22 +3337,39 @@ impl App {
     ) -> Vec<AppEffect> {
         let mut effects = Vec::new();
         match &mut modal {
-            Modal::Help { scroll } => match key.code {
-                KeyCode::Esc | KeyCode::Char('?' | 'q') => {}
+            Modal::Help {
+                selected, hover, ..
+            } => match key.code {
+                KeyCode::Esc | KeyCode::Char('?' | 'q') | KeyCode::Enter => {}
                 KeyCode::Up | KeyCode::Char('k') => {
-                    *scroll = scroll.saturating_sub(1);
+                    *selected = previous_list_index(*selected, crate::ui::help_shortcut_count());
+                    *hover = None;
                     self.modal = Some(modal);
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    *scroll = scroll.saturating_add(1);
+                    *selected = next_list_index(*selected, crate::ui::help_shortcut_count());
+                    *hover = None;
                     self.modal = Some(modal);
                 }
                 KeyCode::PageUp => {
-                    *scroll = scroll.saturating_sub(10);
+                    *selected = selected.saturating_sub(10);
+                    *hover = None;
                     self.modal = Some(modal);
                 }
                 KeyCode::PageDown => {
-                    *scroll = scroll.saturating_add(10);
+                    let count = crate::ui::help_shortcut_count();
+                    *selected = (*selected + 10).min(count.saturating_sub(1));
+                    *hover = None;
+                    self.modal = Some(modal);
+                }
+                KeyCode::Home | KeyCode::Char('g') => {
+                    *selected = 0;
+                    *hover = None;
+                    self.modal = Some(modal);
+                }
+                KeyCode::End | KeyCode::Char('G') => {
+                    *selected = crate::ui::help_shortcut_count().saturating_sub(1);
+                    *hover = None;
                     self.modal = Some(modal);
                 }
                 _ => self.modal = Some(modal),
@@ -2998,13 +3384,28 @@ impl App {
                         .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
                 {
                     let message = input.value.trim().to_owned();
-                    self.queue_operation(
-                        GitOperation::Commit {
-                            message,
-                            amend: *amend,
-                        },
-                        &mut effects,
-                    );
+                    if message.is_empty() {
+                        self.modal = Some(modal);
+                        return effects;
+                    }
+                    if *amend {
+                        self.modal = Some(Modal::Confirm {
+                            title: "Amend Commit?".to_owned(),
+                            message: "Replace the previous commit with this message?".to_owned(),
+                            action: ConfirmAction::Operate(GitOperation::Commit {
+                                message,
+                                amend: true,
+                            }),
+                        });
+                    } else {
+                        self.queue_operation(
+                            GitOperation::Commit {
+                                message,
+                                amend: false,
+                            },
+                            &mut effects,
+                        );
+                    }
                     return effects;
                 }
                 edit_text(input, key, true);
@@ -3047,15 +3448,18 @@ impl App {
                         PromptKind::StashPush {
                             include_untracked,
                             staged,
+                            paths,
                         } => {
                             self.queue_operation(
                                 GitOperation::StashPush {
                                     message: input.value.trim().to_owned(),
                                     include_untracked: *include_untracked,
                                     staged: *staged,
+                                    paths: paths.clone(),
                                 },
                                 &mut effects,
                             );
+                            self.checked_change_paths.clear();
                         }
                     }
                     return effects;
@@ -3068,10 +3472,20 @@ impl App {
                 }
                 self.modal = Some(modal);
             }
-            Modal::Confirm { operation, .. } => match key.code {
-                KeyCode::Enter | KeyCode::Char('y' | 'Y') => {
-                    self.queue_operation(operation.clone(), &mut effects);
-                }
+            Modal::Confirm { action, .. } => match key.code {
+                KeyCode::Enter | KeyCode::Char('y' | 'Y') => match action {
+                    ConfirmAction::Operate(operation) => {
+                        self.queue_operation(operation.clone(), &mut effects);
+                    }
+                    ConfirmAction::OpenPrompt { title, kind } => {
+                        self.modal = Some(Modal::Prompt {
+                            title: title.clone(),
+                            input: TextBuffer::default(),
+                            kind: kind.clone(),
+                        });
+                        return effects;
+                    }
+                },
                 KeyCode::Esc | KeyCode::Char('n' | 'N') => {}
                 _ => self.modal = Some(modal),
             },
@@ -3171,7 +3585,9 @@ impl App {
                                         "Delete local branch `{}`? Git will refuse if it is not merged.",
                                         branch.name
                                     ),
-                                    operation: GitOperation::DeleteBranch(branch.name.clone()),
+                                    action: ConfirmAction::Operate(GitOperation::DeleteBranch(
+                                        branch.name.clone(),
+                                    )),
                                 });
                             }
                             return effects;
@@ -3245,7 +3661,7 @@ impl App {
                             .cloned()
                         {
                             self.auxiliary_preview = Some(AuxiliaryPreview::Branch(branch));
-                            self.focus = Focus::Content;
+                            self.set_focus(Focus::Content, &mut effects);
                             self.content_scroll = 0;
                             self.request_preview(&mut effects);
                         }
@@ -3282,7 +3698,7 @@ impl App {
                     KeyCode::Enter if !*loading => {
                         if let Some(stash) = selected_stash {
                             self.auxiliary_preview = Some(AuxiliaryPreview::Stash(stash));
-                            self.focus = Focus::Content;
+                            self.set_focus(Focus::Content, &mut effects);
                             self.content_scroll = 0;
                             self.request_preview(&mut effects);
                         }
@@ -3324,7 +3740,7 @@ impl App {
                                 title: "Drop All Stashes?".to_owned(),
                                 message: "Permanently delete every stash? This cannot be undone."
                                     .to_owned(),
-                                operation: GitOperation::StashClear,
+                                action: ConfirmAction::Operate(GitOperation::StashClear),
                             });
                         }
                         return effects;
@@ -3337,7 +3753,9 @@ impl App {
                                     "Permanently delete {} — {}?",
                                     stash.reference, stash.message
                                 ),
-                                operation: GitOperation::StashDrop(stash.reference),
+                                action: ConfirmAction::Operate(GitOperation::StashDrop(
+                                    stash.reference,
+                                )),
                             });
                         }
                         return effects;
@@ -3559,7 +3977,13 @@ impl App {
                     original_appearance: self.appearance,
                 });
             }
-            PaletteCommand::Help => self.modal = Some(Modal::Help { scroll: 0 }),
+            PaletteCommand::Help => {
+                self.modal = Some(Modal::Help {
+                    selected: 0,
+                    scroll: 0,
+                    hover: None,
+                });
+            }
             PaletteCommand::Quit => effects.push(AppEffect::Quit),
         }
     }
@@ -3635,11 +4059,11 @@ impl App {
             .clamp(MIN_DIFF_SPLIT_PERCENT, MAX_DIFF_SPLIT_PERCENT);
     }
 
-    fn switch_view(&mut self, view: View, _effects: &mut Vec<AppEffect>) {
+    fn switch_view(&mut self, view: View, effects: &mut Vec<AppEffect>) {
         self.pull_request_lookup_active = false;
         if self.view == view {
             if view == View::PullRequests && self.pull_request.is_none() {
-                self.pull_request_lookup_active = true;
+                self.pull_request_lookup_active = self.recent_pull_requests.is_empty();
             }
             return;
         }
@@ -3649,7 +4073,7 @@ impl App {
         self.selected_preview_file = None;
         self.collapsed_preview_files.clear();
         self.expanded_preview_files.clear();
-        self.focus = Focus::Sidebar;
+        self.set_focus(Focus::Sidebar, effects);
         self.sidebar_offset = 0;
         self.content_scroll = 0;
         self.horizontal_scroll = 0;
@@ -3657,7 +4081,7 @@ impl App {
         self.document = self.loading_document_for_view(view);
         self.schedule_pull_request_poll(Instant::now());
         if view == View::PullRequests && self.pull_request.is_none() {
-            self.pull_request_lookup_active = true;
+            self.pull_request_lookup_active = self.recent_pull_requests.is_empty();
         } else {
             self.preview_due = Some(Instant::now() + PREVIEW_DEBOUNCE);
         }
@@ -3698,20 +4122,22 @@ impl App {
         }
     }
 
-    const fn toggle_focus(&mut self) {
-        self.focus = match self.focus {
+    fn toggle_focus(&mut self, effects: &mut Vec<AppEffect>) {
+        let focus = match self.focus {
             Focus::Sidebar => Focus::Content,
             Focus::Content => Focus::Sidebar,
         };
+        self.set_focus(focus, effects);
     }
 
-    const fn toggle_sidebar(&mut self) {
+    fn toggle_sidebar(&mut self, effects: &mut Vec<AppEffect>) {
         self.sidebar_hidden = !self.sidebar_hidden;
-        self.focus = if self.sidebar_hidden {
+        let focus = if self.sidebar_hidden {
             Focus::Content
         } else {
             Focus::Sidebar
         };
+        self.set_focus(focus, effects);
         self.resize_target = None;
         if self.sidebar_hidden {
             self.pull_request_lookup_active = false;
@@ -3735,7 +4161,7 @@ impl App {
             return;
         }
         if self.focus == Focus::Content {
-            if self.preview_files_all_collapsed() {
+            if self.preview_files_collapsible() {
                 self.navigate_preview_file(amount);
             } else if amount < 0 {
                 self.content_scroll = self.content_scroll.saturating_sub(amount.unsigned_abs());
@@ -3964,17 +4390,141 @@ impl App {
                     _ => unreachable!(),
                 }
             }
-            ScmAction::StageAll => self.queue_operation(GitOperation::StageAll, effects),
-            ScmAction::UnstageAll => self.queue_operation(GitOperation::UnstageAll, effects),
-            ScmAction::Commit => {
-                self.modal = Some(Modal::Commit {
-                    input: TextBuffer::default(),
-                    amend: false,
+            ScmAction::ToggleCheck(index) => {
+                let Some(change) = self.status.changes.get(index) else {
+                    return;
+                };
+                if self.checked_change_paths.contains(&change.path) {
+                    self.checked_change_paths
+                        .retain(|path| path != &change.path);
+                } else {
+                    self.checked_change_paths.extend([change.path.clone()]);
+                }
+            }
+            ScmAction::Primary => {
+                self.scm_menu_open = false;
+                if self.checked_change_paths.is_empty() {
+                    self.modal = Some(Modal::Commit {
+                        input: TextBuffer::default(),
+                        amend: false,
+                    });
+                } else {
+                    self.confirm_stash_selected();
+                }
+            }
+            ScmAction::ToggleMenu => {
+                self.scm_menu_open = !self.scm_menu_open;
+                if self.scm_menu_open {
+                    self.scm_menu_selected = 0;
+                }
+            }
+            ScmAction::Menu(item) => {
+                self.scm_menu_open = false;
+                self.handle_scm_menu_item(item, effects);
+            }
+        }
+    }
+
+    fn handle_scm_menu_item(&mut self, item: ScmMenuItem, effects: &mut Vec<AppEffect>) {
+        match item {
+            ScmMenuItem::StageAll => {
+                self.modal = Some(Modal::Confirm {
+                    title: "Stage All?".to_owned(),
+                    message: "Stage every change in the working tree?".to_owned(),
+                    action: ConfirmAction::Operate(GitOperation::StageAll),
                 });
             }
-            ScmAction::Stashes => self.open_stashes(effects),
-            ScmAction::CompareBranch => self.open_compare_branches(effects),
+            ScmMenuItem::UnstageAll => {
+                self.modal = Some(Modal::Confirm {
+                    title: "Unstage All?".to_owned(),
+                    message: "Unstage every staged change?".to_owned(),
+                    action: ConfirmAction::Operate(GitOperation::UnstageAll),
+                });
+            }
+            ScmMenuItem::CompareBranch => self.open_compare_branches(effects),
+            ScmMenuItem::ManageStashes => self.open_stashes(effects),
+            ScmMenuItem::StashAll => {
+                self.modal = Some(Modal::Confirm {
+                    title: "Stash All Changes?".to_owned(),
+                    message: "Stash tracked working-tree changes?".to_owned(),
+                    action: ConfirmAction::OpenPrompt {
+                        title: "Stash Changes".to_owned(),
+                        kind: PromptKind::StashPush {
+                            include_untracked: false,
+                            staged: false,
+                            paths: Vec::new(),
+                        },
+                    },
+                });
+            }
+            ScmMenuItem::StashIncludeUntracked => {
+                self.modal = Some(Modal::Confirm {
+                    title: "Stash Including Untracked?".to_owned(),
+                    message: "Stash tracked and untracked working-tree changes?".to_owned(),
+                    action: ConfirmAction::OpenPrompt {
+                        title: "Stash Changes Including Untracked".to_owned(),
+                        kind: PromptKind::StashPush {
+                            include_untracked: true,
+                            staged: false,
+                            paths: Vec::new(),
+                        },
+                    },
+                });
+            }
+            ScmMenuItem::StashStagedOnly => {
+                self.modal = Some(Modal::Confirm {
+                    title: "Stash Staged Only?".to_owned(),
+                    message: "Stash only staged changes and leave the rest in place?".to_owned(),
+                    action: ConfirmAction::OpenPrompt {
+                        title: "Stash Staged Changes".to_owned(),
+                        kind: PromptKind::StashPush {
+                            include_untracked: false,
+                            staged: true,
+                            paths: Vec::new(),
+                        },
+                    },
+                });
+            }
         }
+    }
+
+    fn confirm_stash_selected(&mut self) {
+        let mut paths = self
+            .checked_change_paths
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        if paths.is_empty() {
+            return;
+        }
+        paths.sort();
+        let include_untracked = self.status.changes.iter().any(|change| {
+            paths.iter().any(|path| path == &change.path)
+                && change.status == ChangeStatus::Untracked
+        });
+        let mut message = String::from("Stash these files?");
+        for path in &paths {
+            let label = self
+                .status
+                .changes
+                .iter()
+                .find(|change| &change.path == path)
+                .map_or_else(|| path.display().to_string(), Change::display_path);
+            message.push_str("\n  ");
+            message.push_str(&label);
+        }
+        self.modal = Some(Modal::Confirm {
+            title: "Stash Selected?".to_owned(),
+            message,
+            action: ConfirmAction::OpenPrompt {
+                title: "Stash Selected Changes".to_owned(),
+                kind: PromptKind::StashPush {
+                    include_untracked,
+                    staged: false,
+                    paths,
+                },
+            },
+        });
     }
 
     fn prompt_stash(&mut self, include_untracked: bool, staged: bool) {
@@ -3991,8 +4541,85 @@ impl App {
             kind: PromptKind::StashPush {
                 include_untracked,
                 staged,
+                paths: Vec::new(),
             },
         });
+    }
+
+    fn toggle_checked_selected(&mut self) {
+        if self.selected_change_section.is_some() {
+            return;
+        }
+        let Some(path) = self.selected_change().map(|change| change.path.clone()) else {
+            return;
+        };
+        if self.checked_change_paths.contains(&path) {
+            self.checked_change_paths.retain(|checked| checked != &path);
+        } else {
+            self.checked_change_paths.extend([path]);
+        }
+    }
+
+    pub(crate) fn primary_is_stash(&self) -> bool {
+        !self.checked_change_paths.is_empty()
+    }
+
+    fn handle_modal_action(&mut self, action: ModalAction, effects: &mut Vec<AppEffect>) {
+        match action {
+            ModalAction::CommitSubmit => {
+                let Some(Modal::Commit { input, amend }) = self.modal.take() else {
+                    return;
+                };
+                let message = input.value.trim().to_owned();
+                if message.is_empty() {
+                    self.modal = Some(Modal::Commit { input, amend });
+                    return;
+                }
+                if amend {
+                    self.modal = Some(Modal::Confirm {
+                        title: "Amend Commit?".to_owned(),
+                        message: "Replace the previous commit with this message?".to_owned(),
+                        action: ConfirmAction::Operate(GitOperation::Commit {
+                            message,
+                            amend: true,
+                        }),
+                    });
+                } else {
+                    self.queue_operation(
+                        GitOperation::Commit {
+                            message,
+                            amend: false,
+                        },
+                        effects,
+                    );
+                }
+            }
+            ModalAction::CommitCancel | ModalAction::ConfirmNo => {
+                self.modal = None;
+            }
+            ModalAction::CommitToggleAmend => {
+                if let Some(Modal::Commit { amend, .. }) = &mut self.modal {
+                    *amend = !*amend;
+                }
+            }
+            ModalAction::ConfirmYes => {
+                let Some(Modal::Confirm { action, .. }) = self.modal.take() else {
+                    return;
+                };
+                match action {
+                    ConfirmAction::Operate(operation) => {
+                        self.queue_operation(operation, effects);
+                    }
+                    ConfirmAction::OpenPrompt { title, kind } => {
+                        self.modal = Some(Modal::Prompt {
+                            title,
+                            input: TextBuffer::default(),
+                            kind,
+                        });
+                    }
+                }
+            }
+        }
     }
 
     fn open_stashes(&mut self, effects: &mut Vec<AppEffect>) {
@@ -4067,7 +4694,7 @@ impl App {
                 "Permanently discard changes to `{}`? This cannot be undone.",
                 change.display_path()
             ),
-            operation: GitOperation::Discard(vec![change]),
+            action: ConfirmAction::Operate(GitOperation::Discard(vec![change])),
         });
     }
 
@@ -4081,7 +4708,7 @@ impl App {
                 "Apply {} — {} to the current branch?",
                 commit.short_id, commit.subject
             ),
-            operation: GitOperation::CherryPick(commit.id.clone()),
+            action: ConfirmAction::Operate(GitOperation::CherryPick(commit.id.clone())),
         });
     }
 
@@ -4095,7 +4722,7 @@ impl App {
                 "Create a commit that reverts {} — {}?",
                 commit.short_id, commit.subject
             ),
-            operation: GitOperation::Revert(commit.id.clone()),
+            action: ConfirmAction::Operate(GitOperation::Revert(commit.id.clone())),
         });
     }
 
@@ -4201,7 +4828,9 @@ impl App {
     fn handle_pull_request_lookup_key(&mut self, key: KeyEvent, now: Instant) -> Vec<AppEffect> {
         let mut effects = Vec::new();
         match key.code {
-            KeyCode::Char('z') if key.modifiers == KeyModifiers::NONE => self.toggle_sidebar(),
+            KeyCode::Char('z') if key.modifiers == KeyModifiers::NONE => {
+                self.toggle_sidebar(&mut effects);
+            }
             KeyCode::Char('m') if key.modifiers == KeyModifiers::NONE => {
                 effects.push(self.toggle_mouse_capture(now));
             }
@@ -4270,22 +4899,12 @@ impl App {
 
     fn rebuild_local_diff_document(&mut self) {
         if let Some(index) = &self.local_diff_index {
-            let visible = if index.files.len() <= 1 {
-                index
-                    .files
-                    .iter()
-                    .map(|file| file.path.clone())
-                    .collect::<HashSet<_>>()
-            } else if self.files_collapsed {
-                self.expanded_preview_files.clone()
-            } else {
-                index
-                    .files
-                    .iter()
-                    .filter(|file| !self.collapsed_preview_files.contains(&file.path))
-                    .map(|file| file.path.clone())
-                    .collect()
-            };
+            let paths = index
+                .files
+                .iter()
+                .map(|file| file.path.clone())
+                .collect::<Vec<_>>();
+            let visible = self.visible_preview_paths(&paths);
             self.document = index.document_with_visibility(&self.local_diff_documents, |path| {
                 visible.contains(path)
             });
@@ -4304,6 +4923,20 @@ impl App {
                     },
                 );
             }
+        }
+    }
+
+    fn store_local_diff_document(&mut self, path: PathBuf, document: DiffDocument) {
+        if self
+            .local_diff_index
+            .as_ref()
+            .is_some_and(|index| index.files.len() == 1)
+        {
+            self.document = document;
+            self.local_diff_single_loaded = true;
+        } else {
+            drop(self.local_diff_documents.insert(path, document));
+            self.rebuild_local_diff_document();
         }
     }
 
@@ -4413,15 +5046,12 @@ impl App {
             .pull_request_file_cursor
             .min(self.pull_request_files.len().saturating_sub(1));
         self.sync_pull_request_tree_cursor_to_file();
-        self.collapsed_preview_files.clear();
-        self.expanded_preview_files.clear();
-        if self.pull_request_files.len() > 1
-            && !self.files_collapsed
-            && !self.collapse_preference_set
-        {
-            self.collapsed_preview_files
-                .extend(self.pull_request_files.iter().map(|file| file.path.clone()));
-        }
+        let paths = self
+            .pull_request_files
+            .iter()
+            .map(|file| file.path.clone())
+            .collect::<Vec<_>>();
+        self.reset_preview_file_folds(&paths);
         self.selected_preview_file = self
             .selected_pull_request_file()
             .map(|file| file.path.clone());
@@ -4465,22 +5095,12 @@ impl App {
             truncated: self.pull_request_files_truncated,
             commit_details: None,
         };
-        let visible = if index.files.len() <= 1 {
-            index
-                .files
-                .iter()
-                .map(|file| file.path.clone())
-                .collect::<HashSet<_>>()
-        } else if self.files_collapsed {
-            self.expanded_preview_files.clone()
-        } else {
-            index
-                .files
-                .iter()
-                .filter(|file| !self.collapsed_preview_files.contains(&file.path))
-                .map(|file| file.path.clone())
-                .collect()
-        };
+        let paths = index
+            .files
+            .iter()
+            .map(|file| file.path.clone())
+            .collect::<Vec<_>>();
+        let visible = self.visible_preview_paths(&paths);
         let mut document = index
             .document_with_visibility(&self.pull_request_documents, |path| visible.contains(path));
         document.pull_request_details = Some(pull_request_details(pull_request));
@@ -4758,9 +5378,7 @@ impl App {
     }
 
     fn toggle_check_step(&mut self, step: usize) {
-        if !self.expanded_check_steps.remove(&step) {
-            let _ = self.expanded_check_steps.insert(step);
-        }
+        toggle_membership(&mut self.expanded_check_steps, step);
         self.reveal_check_step(step);
         self.invalidate_pull_request_content_rows();
     }
@@ -5269,6 +5887,7 @@ impl App {
     /// the terminal, which is the only place either can happen.
     fn toggle_mouse_capture(&mut self, now: Instant) -> AppEffect {
         self.mouse_capture = !self.mouse_capture;
+        self.mouse_capture_preference = self.mouse_capture;
         self.show_toast(
             if self.mouse_capture {
                 "Mouse on · quinjet handles clicks and the wheel".to_owned()
@@ -5279,6 +5898,114 @@ impl App {
             now,
         );
         AppEffect::SetMouseCapture(self.mouse_capture)
+    }
+
+    pub(crate) const fn configure_mouse_capture(&mut self, enabled: bool) {
+        self.mouse_capture = enabled;
+        self.mouse_capture_preference = enabled;
+    }
+
+    fn set_focus(&mut self, focus: Focus, effects: &mut Vec<AppEffect>) {
+        self.focus = focus;
+        let enabled = self.mouse_capture_preference;
+        if self.mouse_capture != enabled {
+            self.mouse_capture = enabled;
+            effects.push(AppEffect::SetMouseCapture(enabled));
+        }
+    }
+
+    fn start_text_selection(&mut self, column: u16, row: u16) {
+        let Some(pane) = self.text_selection_pane(column, row) else {
+            return;
+        };
+        self.text_selection = Some(TextSelection {
+            pane,
+            anchor: (column, row),
+            head: (column, row),
+        });
+    }
+
+    fn update_text_selection(&mut self, column: u16, row: u16) {
+        let Some(selection) = self.text_selection.as_mut() else {
+            return;
+        };
+        selection.head = (
+            column.clamp(selection.pane.x, selection.pane.right().saturating_sub(1)),
+            row.clamp(selection.pane.y, selection.pane.bottom().saturating_sub(1)),
+        );
+    }
+
+    const fn scroll_horizontal(&mut self, right: bool) {
+        self.horizontal_scroll = if right {
+            self.horizontal_scroll.saturating_add(3)
+        } else {
+            self.horizontal_scroll.saturating_sub(3)
+        };
+        self.text_selection = None;
+    }
+
+    fn text_selection_pane(&self, column: u16, row: u16) -> Option<Rect> {
+        let point = (column, row).into();
+        if !self.geometry.content.contains(point) {
+            return None;
+        }
+        let Some(divider) = self.geometry.diff_divider else {
+            return Some(self.geometry.content);
+        };
+        if column < divider.x {
+            return Some(Rect::new(
+                self.geometry.content.x,
+                self.geometry.content.y,
+                divider.x.saturating_sub(self.geometry.content.x),
+                self.geometry.content.height,
+            ));
+        }
+        if column >= divider.right() {
+            return Some(Rect::new(
+                divider.right(),
+                self.geometry.content.y,
+                self.geometry
+                    .content
+                    .right()
+                    .saturating_sub(divider.right()),
+                self.geometry.content.height,
+            ));
+        }
+        None
+    }
+
+    fn selected_text(&self) -> String {
+        let Some(selection) = self.text_selection else {
+            return String::new();
+        };
+        let ((start_x, start_y), (end_x, end_y)) = selection.ordered_endpoints();
+        let mut selected = String::new();
+        for row in start_y..=end_y {
+            let first = if row == start_y {
+                start_x
+            } else {
+                selection.pane.x
+            };
+            let last = if row == end_y {
+                end_x
+            } else {
+                selection.pane.right().saturating_sub(1)
+            };
+            let mut line = String::new();
+            if let Some(cells) = self.rendered_cells.get(row as usize) {
+                for column in first..=last {
+                    if let Some(symbol) = cells.get(column as usize) {
+                        line.push(*symbol);
+                    }
+                }
+            }
+            let trimmed = line.trim_end();
+            selected.push_str(trimmed);
+            if row != end_y {
+                selected.push('\n');
+            }
+        }
+        selected
     }
 
     /// A check's own link is the run it describes; anywhere else in the pull
@@ -5300,14 +6027,26 @@ impl App {
     }
 
     fn open_selection_on_github(&mut self, effects: &mut Vec<AppEffect>, now: Instant) {
-        match self.github_url_for_selection() {
-            Some(url) => {
-                let url = url.to_owned();
-                self.show_toast(format!("Opening {url}"), ToastLevel::Info, now);
-                effects.push(AppEffect::Open(OpenTarget::Browser(url)));
+        let target = match self.view {
+            View::Changes => self.branch_open_target(&self.status.branch.head),
+            View::History => self
+                .selected_commit()
+                .and_then(|commit| self.commit_open_target(&commit.id)),
+            View::PullRequests => self
+                .github_url_for_selection()
+                .map(|url| OpenTarget::Browser(url.to_owned())),
+        };
+        match target {
+            Some(target) => {
+                let destination = match &target {
+                    OpenTarget::Browser(url) => url.clone(),
+                    OpenTarget::Path(path) => path.display().to_string(),
+                };
+                self.show_toast(format!("Opening {destination}"), ToastLevel::Info, now);
+                effects.push(AppEffect::Open(target));
             }
             None => self.show_toast(
-                "Nothing to open: look up a pull request first".to_owned(),
+                "Nothing to open on GitHub for this selection".to_owned(),
                 ToastLevel::Error,
                 now,
             ),
@@ -5315,14 +6054,15 @@ impl App {
     }
 
     pub(crate) fn repository_open_target(&self) -> Option<OpenTarget> {
-        self.local_github_repository
-            .as_ref()
-            .or_else(|| {
-                self.pull_request
-                    .as_ref()
-                    .map(|pull_request| &pull_request.base_repository)
-            })
+        self.github_repository_context()
             .map(|repository| OpenTarget::Browser(repository.url.clone()))
+    }
+
+    pub(crate) fn pull_request_repository_open_target(&self) -> Option<OpenTarget> {
+        self.pull_request_repository
+            .as_ref()
+            .map(|repository| OpenTarget::Browser(repository.url.clone()))
+            .or_else(|| self.repository_open_target())
     }
 
     pub(crate) fn branch_open_target(&self, branch: &str) -> Option<OpenTarget> {
@@ -5363,15 +6103,58 @@ impl App {
         OpenTarget::Path(self.repository_root.clone())
     }
 
-    fn repository_web_url(&self) -> Option<&str> {
-        self.local_github_repository
+    pub(crate) fn account_open_target(&self, account: &str) -> Option<OpenTarget> {
+        if account.is_empty()
+            || account.len() > 39
+            || !account
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        {
+            return None;
+        }
+        let repository = self
+            .pull_request
             .as_ref()
+            .map(|pull_request| &pull_request.base_repository)
+            .or(self.local_github_repository.as_ref())?;
+        let root = repository_root_url(repository)?;
+        Some(OpenTarget::Browser(format!(
+            "{}/{}",
+            root.trim_end_matches('/'),
+            account
+        )))
+    }
+
+    pub(crate) fn pull_request_base_branch_open_target(&self) -> Option<OpenTarget> {
+        let pull_request = self.pull_request.as_ref()?;
+        repository_branch_open_target(&pull_request.base_repository.url, &pull_request.base_ref)
+    }
+
+    pub(crate) fn pull_request_head_branch_open_target(&self) -> Option<OpenTarget> {
+        let pull_request = self.pull_request.as_ref()?;
+        let repository_name = pull_request.head_repository.as_deref()?;
+        let repository_url = if repository_name
+            .eq_ignore_ascii_case(&pull_request.base_repository.name_with_owner)
+        {
+            pull_request.base_repository.url.clone()
+        } else {
+            let root = repository_root_url(&pull_request.base_repository)?;
+            format!("{}/{repository_name}", root.trim_end_matches('/'))
+        };
+        repository_branch_open_target(&repository_url, &pull_request.head_ref)
+    }
+
+    fn repository_web_url(&self) -> Option<&str> {
+        self.github_repository_context()
             .map(|repository| repository.url.as_str())
-            .or_else(|| {
-                self.pull_request
-                    .as_ref()
-                    .map(|pull_request| pull_request.base_repository.url.as_str())
-            })
+    }
+
+    fn github_repository_context(&self) -> Option<&GitHubRepository> {
+        self.local_github_repository.as_ref().or_else(|| {
+            self.pull_request
+                .as_ref()
+                .map(|pull_request| &pull_request.base_repository)
+        })
     }
 
     fn show_toast(&mut self, message: String, level: ToastLevel, now: Instant) {
@@ -5534,6 +6317,25 @@ fn next_character(value: &str, cursor: usize) -> Option<(usize, char)> {
 
 fn is_word_character(character: char) -> bool {
     character.is_alphanumeric() || character == '_'
+}
+
+fn repository_root_url(repository: &GitHubRepository) -> Option<&str> {
+    repository
+        .url
+        .trim_end_matches('/')
+        .strip_suffix(&repository.name_with_owner)
+        .map(|root| root.trim_end_matches('/'))
+}
+
+fn repository_branch_open_target(repository: &str, branch: &str) -> Option<OpenTarget> {
+    if repository.is_empty() || branch.is_empty() {
+        return None;
+    }
+    Some(OpenTarget::Browser(format!(
+        "{}/tree/{}",
+        repository.trim_end_matches('/'),
+        encode_url_path(branch)
+    )))
 }
 
 fn encode_url_path(value: &str) -> String {
@@ -5761,10 +6563,76 @@ mod tests {
         let mut app = app_with_changes();
         let now = Instant::now();
 
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
         assert_eq!(app.focus, Focus::Content);
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+        assert!(app.mouse_capture);
+        assert!(effects.is_empty());
+
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
         assert_eq!(app.focus, Focus::Sidebar);
+        assert!(app.mouse_capture);
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn enter_moves_focus_without_folding_files_or_check_steps() {
+        let now = Instant::now();
+        let mut diff = App::new("/tmp/repo", "repo");
+        diff.document = indexed_document(&["src/main.rs", "src/lib.rs"]);
+        diff.selected_preview_file = Some(PathBuf::from("src/main.rs"));
+        diff.focus = Focus::Content;
+
+        diff.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+
+        assert_eq!(diff.focus, Focus::Sidebar);
+        assert!(!diff.preview_file_collapsed("src/main.rs"));
+
+        let mut log = App::new("/tmp/repo", "repo");
+        log.view = View::PullRequests;
+        log.pull_request_section = PullRequestSection::Overview;
+        log.pull_request_check_cursor = Some(0);
+        log.pull_request_step_cursor = 4;
+        let _ = log.expanded_check_steps.insert(4);
+        log.focus = Focus::Content;
+
+        log.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+
+        assert_eq!(log.focus, Focus::Sidebar);
+        assert!(log.check_step_expanded(4));
+    }
+
+    #[test]
+    fn preview_focus_preserves_an_explicit_no_mouse_setting() {
+        let mut app = app_with_changes();
+        let now = Instant::now();
+        app.configure_mouse_capture(false);
+
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+        assert_eq!(app.focus, Focus::Content);
+        assert!(!app.mouse_capture);
+        assert!(effects.is_empty());
+
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+        assert_eq!(app.focus, Focus::Sidebar);
+        assert!(!app.mouse_capture);
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn expanded_preview_files_are_selectable_from_the_content_pane() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.document = indexed_document(&["src/main.rs", "src/lib.rs"]);
+        app.selected_preview_file = Some(PathBuf::from("src/main.rs"));
+        app.focus = Focus::Content;
+
+        app.handle_key(
+            KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+            Instant::now(),
+        );
+
+        assert_eq!(app.selected_preview_file, Some(PathBuf::from("src/lib.rs")));
+        assert_eq!(app.preview_file_cursor, 1);
+        assert!(app.content_scroll > 0);
     }
 
     #[test]
@@ -5791,9 +6659,45 @@ mod tests {
     }
 
     #[test]
-    fn shift_o_opens_the_run_being_read_rather_than_always_the_pull_request() {
+    fn shift_o_opens_branches_commits_pull_requests_and_checks() {
         let mut app = app_with_changes();
         let now = Instant::now();
+        app.local_github_repository = Some(GitHubRepository {
+            name_with_owner: "o/r".to_owned(),
+            url: "https://github.com/o/r".to_owned(),
+            remotes: vec!["origin".to_owned()],
+        });
+        app.status.branch.head = "feature/right-pane".to_owned();
+
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Char('O'), KeyModifiers::NONE), now);
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Open(OpenTarget::Browser(url))]
+                if url == "https://github.com/o/r/tree/feature/right-pane"
+        ));
+
+        app.view = View::History;
+        app.history.push(Commit {
+            id: "abc123".to_owned(),
+            short_id: "abc123".to_owned(),
+            parent_ids: Vec::new(),
+            author: String::new(),
+            author_email: String::new(),
+            authored_at: String::new(),
+            committer: String::new(),
+            committer_email: String::new(),
+            committed_at: String::new(),
+            relative_date: String::new(),
+            subject: "Selectable commit".to_owned(),
+            decorations: Vec::new(),
+        });
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Char('O'), KeyModifiers::NONE), now);
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Open(OpenTarget::Browser(url))]
+                if url == "https://github.com/o/r/commit/abc123"
+        ));
+
         app.view = View::PullRequests;
 
         let effects = app.handle_key(KeyEvent::new(KeyCode::Char('O'), KeyModifiers::NONE), now);
@@ -5946,6 +6850,21 @@ mod tests {
             app.selected_section_changes()[0].path,
             PathBuf::from("new.txt")
         );
+
+        let rows = app.change_rows();
+        let section_count = rows
+            .iter()
+            .filter(|row| matches!(row, ChangeRow::Section { .. }))
+            .count();
+        let spacer_count = rows
+            .iter()
+            .filter(|row| matches!(row, ChangeRow::Spacer))
+            .count();
+        assert_eq!(
+            spacer_count,
+            section_count.saturating_sub(1),
+            "adjacent change sections should be separated by a blank spacer row"
+        );
     }
 
     #[test]
@@ -6009,6 +6928,50 @@ mod tests {
     }
 
     #[test]
+    fn command_hover_tracks_only_link_cells() {
+        let mut app = app_with_changes();
+        app.geometry.link_hits = vec![LinkHit {
+            area: Rect::new(30, 4, 7, 1),
+            target: OpenTarget::Browser("https://github.com/acme/widget".to_owned()),
+        }];
+
+        let effects = app.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Moved,
+                column: 32,
+                row: 4,
+                modifiers: KeyModifiers::SUPER,
+            },
+            Instant::now(),
+        );
+
+        assert!(effects.is_empty());
+        assert_eq!(app.link_hover, Some((32, 4)));
+
+        app.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Moved,
+                column: 20,
+                row: 4,
+                modifiers: KeyModifiers::SUPER,
+            },
+            Instant::now(),
+        );
+        assert_eq!(app.link_hover, None);
+
+        app.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Moved,
+                column: 32,
+                row: 4,
+                modifiers: KeyModifiers::NONE,
+            },
+            Instant::now(),
+        );
+        assert_eq!(app.link_hover, None);
+    }
+
+    #[test]
     fn github_reference_targets_encode_branch_paths() {
         let mut app = App::new("/tmp/repo", "repo");
         app.local_github_repository = Some(GitHubRepository {
@@ -6029,6 +6992,41 @@ mod tests {
                 "https://github.com/acme/widget/pull/42".to_owned()
             ))
         );
+    }
+
+    #[test]
+    fn pull_request_accounts_and_both_branches_resolve_from_one_repository_root() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.pull_request = Some(pull_request(42, "Ship it", "acme/widget"));
+
+        assert_eq!(
+            app.account_open_target("octocat"),
+            Some(OpenTarget::Browser("https://github.com/octocat".to_owned()))
+        );
+        assert_eq!(app.account_open_target("not a login"), None);
+        assert_eq!(
+            app.pull_request_base_branch_open_target(),
+            Some(OpenTarget::Browser(
+                "https://github.com/acme/widget/tree/main".to_owned()
+            ))
+        );
+        assert_eq!(
+            app.pull_request_head_branch_open_target(),
+            Some(OpenTarget::Browser(
+                "https://github.com/octocat/fork/tree/feature/42".to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn recent_pull_requests_are_scoped_to_the_open_repository() {
+        let widget = RecentPullRequest::from(&pull_request(39, "Widget", "acme/widget"));
+        let unrelated = RecentPullRequest::from(&pull_request(42, "Other", "acme/other"));
+        let repository = widget.repository.clone();
+
+        let recent = recent_pull_requests_for(vec![unrelated, widget.clone()], &repository);
+
+        assert_eq!(recent, vec![widget]);
     }
 
     #[test]
@@ -6077,6 +7075,7 @@ mod tests {
         };
 
         app.handle_mouse(click, Instant::now());
+        assert!(app.mouse_capture);
         assert!(
             app.collapsed_preview_files
                 .contains(Path::new("src/main.rs"))
@@ -6086,6 +7085,97 @@ mod tests {
             !app.collapsed_preview_files
                 .contains(Path::new("src/main.rs"))
         );
+    }
+
+    #[test]
+    fn dragging_plain_preview_content_selects_only_its_starting_pane() {
+        let mut app = app_with_changes();
+        app.geometry.content = Rect::new(20, 4, 80, 20);
+        app.geometry.diff_divider = Some(Rect::new(59, 4, 1, 20));
+        app.rendered_cells = vec![vec!['x'; 100]; 24];
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 70,
+            row: 10,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        let effects = app.handle_mouse(click, Instant::now());
+        assert_eq!(app.focus, Focus::Content);
+        assert!(app.mouse_capture);
+        assert!(effects.is_empty());
+
+        let drag = MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column: 10,
+            row: 12,
+            modifiers: KeyModifiers::NONE,
+        };
+        let effects = app.handle_mouse(drag, Instant::now());
+        assert!(effects.is_empty());
+        assert!(app.text_selection.is_some_and(|selection| {
+            selection.pane == Rect::new(60, 4, 40, 20) && selection.head == (60, 12)
+        }));
+
+        let drag = MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column: 73,
+            row: 10,
+            modifiers: KeyModifiers::NONE,
+        };
+        app.handle_mouse(drag, Instant::now());
+        let release = MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: 73,
+            row: 10,
+            modifiers: KeyModifiers::NONE,
+        };
+        let effects = app.handle_mouse(release, Instant::now());
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Copy(text)] if text == "xxxx"
+        ));
+    }
+
+    #[test]
+    fn horizontal_swipes_accept_native_and_shift_wheel_events() {
+        let mut app = app_with_changes();
+        let event = |kind, modifiers| MouseEvent {
+            kind,
+            column: 40,
+            row: 12,
+            modifiers,
+        };
+        app.text_selection = Some(TextSelection {
+            pane: Rect::new(20, 4, 40, 20),
+            anchor: (25, 8),
+            head: (30, 8),
+        });
+
+        app.handle_mouse(
+            event(MouseEventKind::ScrollRight, KeyModifiers::NONE),
+            Instant::now(),
+        );
+        assert_eq!(app.horizontal_scroll, 3);
+        assert!(app.text_selection.is_none());
+
+        app.handle_mouse(
+            event(MouseEventKind::ScrollDown, KeyModifiers::SHIFT),
+            Instant::now(),
+        );
+        assert_eq!(app.horizontal_scroll, 6);
+
+        app.handle_mouse(
+            event(MouseEventKind::ScrollUp, KeyModifiers::SHIFT),
+            Instant::now(),
+        );
+        assert_eq!(app.horizontal_scroll, 3);
+
+        app.handle_mouse(
+            event(MouseEventKind::ScrollLeft, KeyModifiers::NONE),
+            Instant::now(),
+        );
+        assert_eq!(app.horizontal_scroll, 0);
     }
 
     #[test]
@@ -6157,6 +7247,42 @@ mod tests {
         assert_eq!(app.view, View::PullRequests);
         assert!(app.pull_request_lookup_active);
         assert_eq!(app.document.title, "Open Pull Request");
+    }
+
+    #[test]
+    fn recent_pull_requests_open_with_space_while_enter_moves_focus() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.recent_pull_requests = vec![
+            RecentPullRequest::from(&pull_request(39, "First", "acme/widget")),
+            RecentPullRequest::from(&pull_request(42, "Second", "acme/widget")),
+        ];
+        let now = Instant::now();
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE), now);
+        assert!(!app.pull_request_lookup_active);
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE), now);
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+
+        assert!(effects.is_empty());
+        assert_eq!(app.focus, Focus::Content);
+        assert!(app.pull_request.is_none());
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE), now);
+
+        assert_eq!(app.recent_pull_request_cursor, 1);
+        assert_eq!(app.pull_request_lookup.value, "42");
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::Git(command)] if matches!(
+                command.as_ref(),
+                WorkerCommand::LookupPullRequest {
+                    number: 42,
+                    repository: Some(repository),
+                    ..
+                } if repository.name_with_owner == "acme/widget"
+            )
+        ));
     }
 
     #[test]
@@ -6551,6 +7677,47 @@ mod tests {
     }
 
     #[test]
+    fn local_diff_failure_replaces_the_loading_placeholder() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.diff_generation = 12;
+        app.handle_worker_event(
+            WorkerEvent::LocalDiffIndex {
+                generation: 12,
+                result: Ok(DiffIndex {
+                    title: "Stash".to_owned(),
+                    files: vec![crate::git::diff::DiffFileIndexEntry {
+                        path: PathBuf::from("index2.ts"),
+                        old_path: None,
+                        status: "added".to_owned(),
+                        counts: None,
+                    }],
+                    truncated: false,
+                    commit_details: None,
+                }),
+            },
+            Instant::now(),
+        );
+
+        app.handle_worker_event(
+            WorkerEvent::LocalDiffFile {
+                generation: 12,
+                workspace_generation: 12,
+                path: PathBuf::from("index2.ts"),
+                result: Err("missing stash parent".to_owned()),
+            },
+            Instant::now(),
+        );
+
+        assert!(app.local_diff_single_loaded);
+        assert!(
+            app.document
+                .lines
+                .iter()
+                .any(|line| line.text() == "Unable to load diff: missing stash parent")
+        );
+    }
+
+    #[test]
     fn pull_request_folders_are_selectable_and_collapsible() {
         let mut app = App::new("/tmp/repo", "repo");
         app.view = View::PullRequests;
@@ -6588,6 +7755,17 @@ mod tests {
             KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
             Instant::now(),
         );
+        assert_eq!(app.focus, Focus::Content);
+        assert!(!app.pull_request_directory_collapsed(Path::new("src")));
+
+        app.handle_key(
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            Instant::now(),
+        );
+        app.handle_key(
+            KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
+            Instant::now(),
+        );
         assert!(app.pull_request_directory_collapsed(Path::new("src")));
         assert_eq!(
             app.pull_request_tree_entries()
@@ -6599,6 +7777,12 @@ mod tests {
 
         app.handle_key(
             KeyEvent::new(KeyCode::Right, KeyModifiers::NONE),
+            Instant::now(),
+        );
+        assert!(app.pull_request_directory_collapsed(Path::new("src")));
+
+        app.handle_key(
+            KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
             Instant::now(),
         );
         assert!(!app.pull_request_directory_collapsed(Path::new("src")));
@@ -6952,7 +8136,10 @@ mod tests {
                         ),
                         _ => matches!(command.as_ref(), WorkerCommand::LoadCheckRunLog { .. }),
                     },
-                    AppEffect::SetMouseCapture(_) | AppEffect::Open(_) | AppEffect::Quit => false,
+                    AppEffect::Copy(_)
+                    | AppEffect::SetMouseCapture(_)
+                    | AppEffect::Open(_)
+                    | AppEffect::Quit => false,
                 })
                 .count()
         };
@@ -7844,9 +9031,10 @@ mod tests {
                         message,
                         include_untracked: false,
                         staged: false,
+                        paths,
                     },
                     ..
-                } if message == "checkpoint"
+                } if message == "checkpoint" && paths.is_empty()
             )
         ));
     }

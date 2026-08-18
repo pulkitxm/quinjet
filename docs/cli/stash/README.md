@@ -124,7 +124,7 @@ be read.
   option and the verb exits 1 with Git's own message. `--staged` and
   `--include-untracked` are mutually exclusive, and clap rejects the pair before
   any Git runs.
-- `push` implements three variants and nothing else. There are no pathspecs, no
+- `push` implements three variants plus optional pathspecs. There is no
   `--keep-index`, no `--all` for ignored files, and no `--patch`. There is also
   no `quinjet stash branch`, no `create` and no `store`.
 - `apply` and `pop` always pass `--index`. There is no way to ask for the

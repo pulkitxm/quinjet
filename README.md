@@ -170,7 +170,7 @@ Exit codes are part of the contract: `0` success, `1` failure or a watched run t
 
 ### Changes, staging, branch comparison, and stashes
 
-The Changes view follows the VS Code SCM grouping model: conflicts, staged changes, and working-tree changes are separate selectable groups. Every file row has a visible `[+]`, `[−]`, or `[!]` action, and group headers expose stage-all/unstage-all actions. The bottom toolbar provides Commit, Stashes, Stage All, Unstage All, and Compare Branch entry points. Keyboard equivalents remain available.
+The Changes view follows the VS Code SCM grouping model: conflicts, staged changes, and working-tree changes are separate selectable groups. Every file row has a checkbox for stash selection plus a visible `[+]`, `[−]`, or `[!]` stage action, and group headers expose stage-all/unstage-all actions. The bottom toolbar is a single primary button (`Commit`, or `Stash` when any file is checked) with a `▶` menu for Stage All, Unstage All, Compare Branch, Manage Stashes, and the full-tree stash variants. Keyboard equivalents remain available.
 
 All local code views are index-first. Quinjet enumerates paths and immediately renders stable collapsed file headers, then loads only the first file in the background. Expanding another header requests only that path and keeps the result cached for the current view; it never calculates the complete patch up front. Click a file header or focus the preview and press `Space` to expand it. A single-file preview always stays expanded and shows no collapse control.
 
@@ -192,7 +192,7 @@ A run still in progress is shown as it happens rather than as a placeholder: fin
 
 Prose is wrapped to the pane and stays put. Code blocks, log output and diff context keep their original width instead, and `h`/`l` or `←`/`→` scroll only those, so a pasted terminal capture or a long log line can be read without the surrounding comment sliding away. The panel title shows how far the widest line extends past the edge.
 
-**Files** (`Shift+F`) is the changed-file tree. Quinjet prepares a local Git comparison as soon as a PR opens and indexes every changed path together with its exact line counts, so headers read `+40 -0` immediately rather than resolving one file at a time. Patches then stream in behind batched reads, and anything you select is usually already there. Every file and folder is selectable; click a folder or use `Left`/`Right`, `h`/`l`, `Enter`, or `Space` to collapse and expand it. Rapid selections coalesce and stale results are discarded, so a PR with one file and a PR with thousands use the same stable layout.
+**Files** (`Shift+F`) is the changed-file tree. Quinjet prepares a local Git comparison as soon as a PR opens and indexes every changed path together with its exact line counts, so headers read `+40 -0` immediately rather than resolving one file at a time. Patches then stream in behind batched reads, and anything you select is usually already there. Every file and folder is selectable; click a folder or press `Space` to collapse and expand it. Left and right move through the hierarchy without changing its folded state. Rapid selections coalesce and stale results are discarded, so a PR with one file and a PR with thousands use the same stable layout.
 
 Press `o` to discover or choose a configured remote repository, and `r` to refetch the current PR immediately.
 
@@ -235,7 +235,7 @@ The UI intentionally stays uncluttered; press `?` for the complete shortcut refe
 | `Shift+P` / `Shift+F` in Pull Requests | The PR and its checks/all changed files |
 | `j` / `k`, `[` / `]` in a check log | Previous/next step |
 | `Space` / `e` in a check log | Fold the selected step/every step |
-| `←` / `→`, `h` / `l`, `Enter`, or `Space` on a PR folder | Collapse/expand that folder |
+| `Space` on a PR folder | Collapse/expand that folder |
 | `r` | Refresh status; refetch the opened PR and checks in the PR view |
 | `/` | Filter changes/history, or focus the numeric PR field |
 | `[` / `]` | Previous/next diff hunk |
