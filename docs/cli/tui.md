@@ -336,6 +336,8 @@ The verbs in the right-hand column are documented in their groups:
 | selecting a check that is still running | `quinjet pr logs <n> "<check>" --watch` |
 | the pull-request poll itself | `quinjet pr checks <n> --watch` |
 | `Shift+O` | Opens the selected branch or commit on GitHub. In Pull Requests it is `quinjet pr open <n>`, or `quinjet pr open <n> --check <name>` when a check is selected. |
+| primary CTA in Pull Requests | `quinjet pr merge <n> --squash\|--merge\|--rebase --yes`, `quinjet pr close <n> --yes`, `quinjet pr reopen <n> --yes`, or `quinjet pr open <n>`, depending on state and the last chosen merge method |
+| `▶` on the Pull Requests toolbar | the other merge methods, Close, and Open in browser (or only Open in browser when the PR is closed) |
 | `t` or `T` | `--expanded`, on `diff`, `show`, `branch compare` and `stash show`. `pr diff` has no `--expanded`: a pull-request patch is cached per file by its merge-base and head commits at three lines of context, and a second context width would need a second cache key |
 | `v` | no verb. The command line prints unified patches only |
 | `e` / `E` on a diff | no verb. A verb prints every file it was asked for |
