@@ -887,7 +887,8 @@ fn capabilities_describe_the_installed_command_tree() -> Result<()> {
                 "solarized",
                 "tokyo-night",
                 "ayu",
-                "monokai"
+                "monokai",
+                "github"
             ])
     );
     let appearance = tui["arguments"]

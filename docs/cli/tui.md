@@ -20,7 +20,7 @@ Options:
 
 | Name | Type / values | Default | What it does |
 | --- | --- | --- | --- |
-| `--theme <THEME>` | `quinjet`, `catppuccin`, `dracula`, `everforest`, `gruvbox`, `nord`, `one`, `rose-pine`, `solarized`, `tokyo-night`, `ayu`, `monokai` | `quinjet` | Selects one unified palette for every surface, state, diff background, status color, and syntax token. |
+| `--theme <THEME>` | `quinjet`, `catppuccin`, `dracula`, `everforest`, `gruvbox`, `nord`, `one`, `rose-pine`, `solarized`, `tokyo-night`, `ayu`, `monokai`, `github` | `quinjet` | Selects one unified palette for every surface, state, diff background, status color, and syntax token. |
 | `--appearance <APPEARANCE>` | `system`, `light`, `dark` | `system` | Selects the light or dark variant. `system` detects the operating-system preference once during startup. |
 | `--no-mouse` | flag | off | Starts with the mouse released, so the terminal keeps its own selection and copy behavior. Every feature stays reachable from the keyboard. |
 | `--webhook-listen <ADDRESS>` | port, or `host:port` | not listening | Binds a loopback HTTP listener. A forwarded GitHub delivery refreshes the open pull request immediately instead of waiting for the next poll. |
@@ -48,11 +48,11 @@ selection, focus, status and feedback colors, diff rows, intraline emphasis,
 and syntax highlighting. No view keeps a separate fixed color scheme.
 
 The palettes are `quinjet`, `catppuccin`, `dracula`, `everforest`, `gruvbox`,
-`nord`, `one`, `rose-pine`, `solarized`, `tokyo-night`, `ayu`, and `monokai`.
-The default is `quinjet`.
+`nord`, `one`, `rose-pine`, `solarized`, `tokyo-night`, `ayu`, `monokai`, and
+`github`. The last is labeled `GitHub` in the picker. The default is `quinjet`.
 
 Inside the interface, open the command palette with `:` or `Ctrl+P`. `Change
-Theme…` opens all twelve palettes and `Change Appearance…` opens the system,
+Theme…` opens all thirteen palettes and `Change Appearance…` opens the system,
 light, and dark choices. Moving through the theme list previews each palette
 immediately. `Enter` keeps the preview for the current run, while `Esc` closes
 the picker and restores the theme that was active when it opened. Picker lists

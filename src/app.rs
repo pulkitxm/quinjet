@@ -7907,11 +7907,11 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), now);
         app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), now);
 
-        assert_eq!(app.theme_name, ThemeName::Monokai);
+        assert_eq!(app.theme_name, ThemeName::Github);
         assert_ne!(app.theme.background, original_background);
         assert!(matches!(
             app.modal,
-            Some(Modal::Themes { selected: 11, .. })
+            Some(Modal::Themes { selected: 12, .. })
         ));
         app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), now);
 

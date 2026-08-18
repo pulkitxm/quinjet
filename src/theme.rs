@@ -25,10 +25,11 @@ pub(crate) enum ThemeName {
     TokyoNight,
     Ayu,
     Monokai,
+    Github,
 }
 
 impl ThemeName {
-    pub(crate) const ALL: [Self; 12] = [
+    pub(crate) const ALL: [Self; 13] = [
         Self::Quinjet,
         Self::Catppuccin,
         Self::Dracula,
@@ -41,6 +42,7 @@ impl ThemeName {
         Self::TokyoNight,
         Self::Ayu,
         Self::Monokai,
+        Self::Github,
     ];
 
     pub(crate) const fn label(self) -> &'static str {
@@ -57,6 +59,7 @@ impl ThemeName {
             Self::TokyoNight => "Tokyo Night",
             Self::Ayu => "Ayu",
             Self::Monokai => "Monokai",
+            Self::Github => "GitHub",
         }
     }
 }
@@ -358,6 +361,8 @@ const fn palette(name: ThemeName, appearance: Appearance) -> &'static [u32; 16] 
         (ThemeName::Ayu, Appearance::Light) => &AYU_LIGHT,
         (ThemeName::Monokai, Appearance::Dark) => &MONOKAI_DARK,
         (ThemeName::Monokai, Appearance::Light) => &MONOKAI_LIGHT,
+        (ThemeName::Github, Appearance::Dark) => &GITHUB_DARK,
+        (ThemeName::Github, Appearance::Light) => &GITHUB_LIGHT,
     }
 }
 
@@ -457,6 +462,14 @@ const MONOKAI_LIGHT: [u32; 16] = [
     0xf9f8f5, 0xf0efe9, 0xe4e2da, 0xa7a59b, 0x737167, 0x3a3935, 0x272822, 0x171814, 0xd81e5b,
     0xc9670a, 0x8b7d00, 0x5c8f0b, 0x168c82, 0x007fa3, 0x7950c5, 0x9e4b1b,
 ];
+const GITHUB_DARK: [u32; 16] = [
+    0x0d1117, 0x151b23, 0x212830, 0x3d444d, 0x9198a1, 0xf0f6fc, 0xffffff, 0xffffff, 0xff7b72,
+    0xf0883e, 0xd29922, 0x3fb950, 0x39c5cf, 0x4493f8, 0xbe8fff, 0xffa657,
+];
+const GITHUB_LIGHT: [u32; 16] = [
+    0xffffff, 0xf6f8fa, 0xeff2f5, 0xd1d9e0, 0x59636e, 0x1f2328, 0x25292e, 0x1f2328, 0xcf222e,
+    0xbc4c00, 0x9a6700, 0x1a7f37, 0x1b7c83, 0x0969da, 0x8250df, 0x953800,
+];
 
 #[cfg(test)]
 mod tests {
@@ -491,21 +504,7 @@ mod tests {
 
     #[test]
     fn every_theme_has_distinct_light_and_dark_surfaces() {
-        let names = [
-            ThemeName::Quinjet,
-            ThemeName::Catppuccin,
-            ThemeName::Dracula,
-            ThemeName::Everforest,
-            ThemeName::Gruvbox,
-            ThemeName::Nord,
-            ThemeName::One,
-            ThemeName::RosePine,
-            ThemeName::Solarized,
-            ThemeName::TokyoNight,
-            ThemeName::Ayu,
-            ThemeName::Monokai,
-        ];
-        for name in names {
+        for name in ThemeName::ALL {
             let light = Theme::new(name, Appearance::Light);
             let dark = Theme::new(name, Appearance::Dark);
             assert_ne!(light.background, dark.background, "{name:?}");
@@ -516,21 +515,7 @@ mod tests {
 
     #[test]
     fn every_theme_keeps_text_and_graphics_readable_on_every_surface() {
-        let names = [
-            ThemeName::Quinjet,
-            ThemeName::Catppuccin,
-            ThemeName::Dracula,
-            ThemeName::Everforest,
-            ThemeName::Gruvbox,
-            ThemeName::Nord,
-            ThemeName::One,
-            ThemeName::RosePine,
-            ThemeName::Solarized,
-            ThemeName::TokyoNight,
-            ThemeName::Ayu,
-            ThemeName::Monokai,
-        ];
-        for name in names {
+        for name in ThemeName::ALL {
             for appearance in [Appearance::Light, Appearance::Dark] {
                 let theme = Theme::new(name, appearance);
                 let surfaces = [

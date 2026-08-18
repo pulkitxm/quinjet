@@ -4781,12 +4781,23 @@ fn draw_choice_picker(
     let block = modal_block(title, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    let list_area = Rect::new(
+        inner.x,
+        inner.y,
+        inner.width,
+        inner.height.saturating_sub(1),
+    );
+    let offset = selected.saturating_sub(list_area.height.saturating_sub(1) as usize);
     let lines = choices
         .iter()
+        .skip(offset)
+        .take(list_area.height as usize)
         .enumerate()
-        .map(|(index, (label, current))| choice_line(label, *current, index == selected, theme))
+        .map(|(index, (label, current))| {
+            choice_line(label, *current, offset + index == selected, theme)
+        })
         .collect::<Vec<_>>();
-    frame.render_widget(Paragraph::new(lines), inner);
+    frame.render_widget(Paragraph::new(lines), list_area);
     draw_modal_hint(frame, area, "Enter apply   Esc close", theme);
 }
 
@@ -5141,6 +5152,36 @@ mod tests {
         assert!(rendered.contains("Select Theme"));
         assert!(rendered.contains("Catppuccin"));
         assert!(rendered.contains("✓ Tokyo Night"));
+        assert!(rendered.contains("GitHub"));
+        assert!(rendered.contains("Enter apply   Esc close"));
+    }
+
+    #[test]
+    fn theme_picker_keeps_the_last_theme_visible_at_minimum_height() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = App::new("/tmp/repo", "repo");
+        app.set_theme_selection(ThemeName::Github, AppearanceChoice::Dark);
+        app.modal = Some(Modal::Themes {
+            selected: 12,
+            original: ThemeName::Github,
+        });
+        let theme = app.theme;
+        let mut terminal = Terminal::new(TestBackend::new(80, 18)).unwrap();
+
+        terminal
+            .draw(|frame| draw(frame, &mut app, &theme))
+            .unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect();
+
+        assert!(rendered.contains("✓ GitHub"));
         assert!(rendered.contains("Enter apply   Esc close"));
     }
 
