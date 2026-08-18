@@ -14,8 +14,8 @@ use crate::convert::{count, offset};
 use crate::git::diff::{DiffDocument, DiffIndex, DiffLineKind, PullRequestDetails};
 use crate::git::github::{
     CheckRunLog, GitHubRepository, PullRequest, PullRequestCheck, PullRequestConversation,
-    PullRequestDiffIndex, PullRequestFile, PullRequestFileStatus, PullRequestProgress,
-    RecentPullRequest,
+    PullRequestDiffIndex, PullRequestFile, PullRequestFileStatus, PullRequestMergeMethod,
+    PullRequestOperation, PullRequestProgress, RecentPullRequest,
 };
 use crate::git::history::Commit;
 use crate::git::status::{Change, ChangeArea, ChangeStatus, RepoStatus};
@@ -568,7 +568,14 @@ pub(crate) enum PromptKind {
 #[derive(Debug, Clone)]
 pub(crate) enum ConfirmAction {
     Operate(GitOperation),
-    OpenPrompt { title: String, kind: PromptKind },
+    OpenPrompt {
+        title: String,
+        kind: PromptKind,
+    },
+    PullRequest {
+        pull_request: Box<PullRequest>,
+        operation: PullRequestOperation,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -602,6 +609,40 @@ impl ScmMenuItem {
             Self::StashAll => "Stash All Changes",
             Self::StashIncludeUntracked => "Stash Including Untracked",
             Self::StashStagedOnly => "Stash Staged Only",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PrMenuItem {
+    Merge(PullRequestMergeMethod),
+    Close,
+    OpenInBrowser,
+}
+
+impl PrMenuItem {
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Merge(method) => method.label(),
+            Self::Close => "Close pull request",
+            Self::OpenInBrowser => "Open in browser",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PrPrimaryAction {
+    Merge(PullRequestMergeMethod),
+    Reopen,
+    OpenInBrowser,
+}
+
+impl PrPrimaryAction {
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Merge(method) => method.label(),
+            Self::Reopen => "Reopen pull request",
+            Self::OpenInBrowser => "Open in browser",
         }
     }
 }
@@ -827,6 +868,9 @@ pub(crate) enum ScmAction {
     Primary,
     ToggleMenu,
     Menu(ScmMenuItem),
+    PrPrimary,
+    PrToggleMenu,
+    PrMenu(PrMenuItem),
 }
 
 #[derive(Debug, Clone)]
@@ -965,6 +1009,9 @@ pub(crate) struct App {
     pub checked_change_paths: HashSet<PathBuf>,
     pub scm_menu_open: bool,
     pub scm_menu_selected: usize,
+    pub pr_menu_open: bool,
+    pub pr_menu_selected: usize,
+    pub preferred_merge_method: PullRequestMergeMethod,
     pub selected_preview_file: Option<PathBuf>,
     pub preview_file_cursor: usize,
     pub collapsed_preview_files: HashSet<PathBuf>,
@@ -1117,6 +1164,9 @@ impl App {
             checked_change_paths: HashSet::new(),
             scm_menu_open: false,
             scm_menu_selected: 0,
+            pr_menu_open: false,
+            pr_menu_selected: 0,
+            preferred_merge_method: PullRequestMergeMethod::default(),
             selected_preview_file: None,
             preview_file_cursor: 0,
             collapsed_preview_files: HashSet::new(),
@@ -1949,8 +1999,28 @@ impl App {
                     self.handle_scm_menu_item(item, &mut effects);
                 }
             }
-            KeyCode::Esc if self.scm_menu_open => {
+            KeyCode::Up if self.pr_menu_open && self.view == View::PullRequests => {
+                let items = self.pr_menu_items();
+                if !items.is_empty() {
+                    self.pr_menu_selected = previous_list_index(self.pr_menu_selected, items.len());
+                }
+            }
+            KeyCode::Down if self.pr_menu_open && self.view == View::PullRequests => {
+                let items = self.pr_menu_items();
+                if !items.is_empty() {
+                    self.pr_menu_selected = next_list_index(self.pr_menu_selected, items.len());
+                }
+            }
+            KeyCode::Enter if self.pr_menu_open && self.view == View::PullRequests => {
+                let items = self.pr_menu_items();
+                if let Some(item) = items.get(self.pr_menu_selected).copied() {
+                    self.pr_menu_open = false;
+                    self.handle_pr_menu_item(item, &mut effects);
+                }
+            }
+            KeyCode::Esc if self.scm_menu_open || self.pr_menu_open => {
                 self.scm_menu_open = false;
+                self.pr_menu_open = false;
             }
             KeyCode::Char('S') if self.view == View::Changes => self.open_stashes(&mut effects),
             KeyCode::Char('o') if self.view == View::PullRequests => {
@@ -2328,8 +2398,9 @@ impl App {
                         .map(|hit| hit.action.clone())
                     {
                         self.handle_scm_action(action, &mut effects);
-                    } else if self.scm_menu_open {
+                    } else if self.scm_menu_open || self.pr_menu_open {
                         self.scm_menu_open = false;
+                        self.pr_menu_open = false;
                     } else if self
                         .geometry
                         .sidebar
@@ -3301,6 +3372,7 @@ impl App {
                 id,
                 label,
                 changes_history,
+                refresh_pull_request,
                 result,
             } => {
                 if id != self.operation_id {
@@ -3314,10 +3386,16 @@ impl App {
                         if changes_history {
                             self.request_history(true, &mut effects);
                         }
+                        if refresh_pull_request {
+                            self.refresh_loaded_pull_request(&mut effects);
+                        }
                     }
                     Err(error) => {
                         self.show_toast(format!("{label}: {error}"), ToastLevel::Error, now);
                         self.request_refresh(&mut effects);
+                        if refresh_pull_request {
+                            self.refresh_loaded_pull_request(&mut effects);
+                        }
                     }
                 }
             }
@@ -3484,6 +3562,16 @@ impl App {
                             kind: kind.clone(),
                         });
                         return effects;
+                    }
+                    ConfirmAction::PullRequest {
+                        pull_request,
+                        operation,
+                    } => {
+                        self.queue_pull_request_operation(
+                            *pull_request.clone(),
+                            operation.clone(),
+                            &mut effects,
+                        );
                     }
                 },
                 KeyCode::Esc | KeyCode::Char('n' | 'N') => {}
@@ -4069,6 +4157,8 @@ impl App {
         }
         self.view = view;
         self.auxiliary_preview = None;
+        self.scm_menu_open = false;
+        self.pr_menu_open = false;
         self.reset_local_diff_runtime();
         self.selected_preview_file = None;
         self.collapsed_preview_files.clear();
@@ -4422,6 +4512,27 @@ impl App {
                 self.scm_menu_open = false;
                 self.handle_scm_menu_item(item, effects);
             }
+            ScmAction::PrPrimary => {
+                self.pr_menu_open = false;
+                if let Some(action) = self.pr_primary_action() {
+                    self.handle_pr_primary(action, effects);
+                }
+            }
+            ScmAction::PrToggleMenu => {
+                let items = self.pr_menu_items();
+                if items.is_empty() {
+                    self.pr_menu_open = false;
+                    return;
+                }
+                self.pr_menu_open = !self.pr_menu_open;
+                if self.pr_menu_open {
+                    self.pr_menu_selected = 0;
+                }
+            }
+            ScmAction::PrMenu(item) => {
+                self.pr_menu_open = false;
+                self.handle_pr_menu_item(item, effects);
+            }
         }
     }
 
@@ -4616,6 +4727,12 @@ impl App {
                             input: TextBuffer::default(),
                             kind,
                         });
+                    }
+                    ConfirmAction::PullRequest {
+                        pull_request,
+                        operation,
+                    } => {
+                        self.queue_pull_request_operation(*pull_request, operation, effects);
                     }
                 }
             }
@@ -5542,6 +5659,125 @@ impl App {
         })));
     }
 
+    fn queue_pull_request_operation(
+        &mut self,
+        pull_request: PullRequest,
+        operation: PullRequestOperation,
+        effects: &mut Vec<AppEffect>,
+    ) {
+        if self.busy.is_some() {
+            return;
+        }
+        if let PullRequestOperation::Merge { method, .. } = &operation {
+            self.preferred_merge_method = *method;
+        }
+        self.operation_id = self.operation_id.wrapping_add(1);
+        self.busy = Some(operation.label().to_owned());
+        self.operation_frame = 0;
+        effects.push(AppEffect::Git(Box::new(
+            WorkerCommand::OperatePullRequest {
+                id: self.operation_id,
+                pull_request: Box::new(pull_request),
+                operation,
+            },
+        )));
+    }
+
+    fn refresh_loaded_pull_request(&mut self, effects: &mut Vec<AppEffect>) {
+        let Some(number) = self.pull_request_exact_number.or_else(|| {
+            self.pull_request
+                .as_ref()
+                .map(|pull_request| pull_request.number)
+        }) else {
+            return;
+        };
+        self.request_pull_request_lookup(number, true, true, effects);
+    }
+
+    pub(crate) fn pr_primary_action(&self) -> Option<PrPrimaryAction> {
+        let pull_request = self.selected_pull_request()?;
+        Some(match pull_request.state.as_str() {
+            "MERGED" => PrPrimaryAction::OpenInBrowser,
+            "CLOSED" => PrPrimaryAction::Reopen,
+            _ => PrPrimaryAction::Merge(self.preferred_merge_method),
+        })
+    }
+
+    pub(crate) fn pr_menu_items(&self) -> Vec<PrMenuItem> {
+        let Some(pull_request) = self.selected_pull_request() else {
+            return Vec::new();
+        };
+        match pull_request.state.as_str() {
+            "MERGED" => Vec::new(),
+            "CLOSED" => vec![PrMenuItem::OpenInBrowser],
+            _ => {
+                let mut items = PullRequestMergeMethod::ALL
+                    .into_iter()
+                    .filter(|method| *method != self.preferred_merge_method)
+                    .map(PrMenuItem::Merge)
+                    .collect::<Vec<_>>();
+                items.push(PrMenuItem::Close);
+                items.push(PrMenuItem::OpenInBrowser);
+                items
+            }
+        }
+    }
+
+    fn handle_pr_primary(&mut self, action: PrPrimaryAction, effects: &mut Vec<AppEffect>) {
+        match action {
+            PrPrimaryAction::OpenInBrowser => self.open_selected_pull_request_in_browser(effects),
+            PrPrimaryAction::Merge(method) => {
+                self.confirm_pull_request_operation(PullRequestOperation::Merge {
+                    method,
+                    delete_branch: false,
+                });
+            }
+            PrPrimaryAction::Reopen => {
+                self.confirm_pull_request_operation(PullRequestOperation::Reopen);
+            }
+        }
+    }
+
+    fn handle_pr_menu_item(&mut self, item: PrMenuItem, effects: &mut Vec<AppEffect>) {
+        match item {
+            PrMenuItem::OpenInBrowser => self.open_selected_pull_request_in_browser(effects),
+            PrMenuItem::Merge(method) => {
+                self.preferred_merge_method = method;
+                self.confirm_pull_request_operation(PullRequestOperation::Merge {
+                    method,
+                    delete_branch: false,
+                });
+            }
+            PrMenuItem::Close => {
+                self.confirm_pull_request_operation(PullRequestOperation::Close);
+            }
+        }
+    }
+
+    fn confirm_pull_request_operation(&mut self, operation: PullRequestOperation) {
+        let Some(pull_request) = self.selected_pull_request().cloned() else {
+            return;
+        };
+        self.modal = Some(Modal::Confirm {
+            title: operation.confirm_title(),
+            message: operation.confirm_message(&pull_request),
+            action: ConfirmAction::PullRequest {
+                pull_request: Box::new(pull_request),
+                operation,
+            },
+        });
+    }
+
+    fn open_selected_pull_request_in_browser(&self, effects: &mut Vec<AppEffect>) {
+        let Some(url) = self
+            .selected_pull_request()
+            .map(|pull_request| pull_request.url.clone())
+        else {
+            return;
+        };
+        effects.push(AppEffect::Open(OpenTarget::Browser(url)));
+    }
+
     fn request_active_refresh(&mut self, effects: &mut Vec<AppEffect>) {
         if self.view == View::Changes && self.auxiliary_preview.is_none() {
             self.changes_diff_version = self.changes_diff_version.wrapping_add(1);
@@ -6400,6 +6636,58 @@ mod tests {
             deletions: 1,
             changed_files: 2,
         }
+    }
+
+    #[test]
+    fn pull_request_cta_actions_follow_state_and_remembered_merge_method() {
+        let mut app = App::new("/tmp/repo", "repo");
+        assert_eq!(app.pr_primary_action(), None);
+        assert_eq!(app.pr_menu_items(), Vec::new());
+
+        app.pull_request = Some(pull_request(12, "Ship it", "acme/widget"));
+        assert_eq!(
+            app.pr_primary_action(),
+            Some(PrPrimaryAction::Merge(PullRequestMergeMethod::Squash))
+        );
+        assert_eq!(
+            app.pr_menu_items(),
+            vec![
+                PrMenuItem::Merge(PullRequestMergeMethod::Merge),
+                PrMenuItem::Merge(PullRequestMergeMethod::Rebase),
+                PrMenuItem::Close,
+                PrMenuItem::OpenInBrowser,
+            ]
+        );
+
+        app.preferred_merge_method = PullRequestMergeMethod::Rebase;
+        assert_eq!(
+            app.pr_primary_action(),
+            Some(PrPrimaryAction::Merge(PullRequestMergeMethod::Rebase))
+        );
+        assert_eq!(
+            app.pr_menu_items(),
+            vec![
+                PrMenuItem::Merge(PullRequestMergeMethod::Merge),
+                PrMenuItem::Merge(PullRequestMergeMethod::Squash),
+                PrMenuItem::Close,
+                PrMenuItem::OpenInBrowser,
+            ]
+        );
+
+        if let Some(pull_request) = app.pull_request.as_mut() {
+            pull_request.state = "CLOSED".to_owned();
+        }
+        assert_eq!(app.pr_primary_action(), Some(PrPrimaryAction::Reopen));
+        assert_eq!(app.pr_menu_items(), vec![PrMenuItem::OpenInBrowser]);
+
+        if let Some(pull_request) = app.pull_request.as_mut() {
+            pull_request.state = "MERGED".to_owned();
+        }
+        assert_eq!(
+            app.pr_primary_action(),
+            Some(PrPrimaryAction::OpenInBrowser)
+        );
+        assert_eq!(app.pr_menu_items(), Vec::new());
     }
 
     fn app_with_changes() -> App {

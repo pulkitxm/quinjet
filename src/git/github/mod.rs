@@ -268,6 +268,105 @@ impl PullRequestProgress {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum PullRequestMergeMethod {
+    Merge,
+    #[default]
+    Squash,
+    Rebase,
+}
+
+impl PullRequestMergeMethod {
+    pub(crate) const fn flag(self) -> &'static str {
+        match self {
+            Self::Merge => "--merge",
+            Self::Squash => "--squash",
+            Self::Rebase => "--rebase",
+        }
+    }
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Merge => "Create a merge commit",
+            Self::Squash => "Squash and merge",
+            Self::Rebase => "Rebase and merge",
+        }
+    }
+
+    pub(crate) const fn preview_verb(self) -> &'static str {
+        match self {
+            Self::Merge => "create a merge commit for",
+            Self::Squash => "squash and merge",
+            Self::Rebase => "rebase and merge",
+        }
+    }
+
+    pub(crate) const fn done_verb(self) -> &'static str {
+        match self {
+            Self::Merge => "Merged",
+            Self::Squash => "Squashed and merged",
+            Self::Rebase => "Rebased and merged",
+        }
+    }
+
+    pub(crate) const ALL: [Self; 3] = [Self::Merge, Self::Squash, Self::Rebase];
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PullRequestOperation {
+    Merge {
+        method: PullRequestMergeMethod,
+        delete_branch: bool,
+    },
+    Close,
+    Reopen,
+}
+
+impl PullRequestOperation {
+    pub(crate) const fn label(&self) -> &'static str {
+        match self {
+            Self::Merge { method, .. } => method.label(),
+            Self::Close => "Close pull request",
+            Self::Reopen => "Reopen pull request",
+        }
+    }
+
+    pub(crate) fn confirm_title(&self) -> String {
+        let mut title = self.label().to_owned();
+        title.push('?');
+        title
+    }
+
+    pub(crate) fn confirm_message(&self, pull_request: &PullRequest) -> String {
+        let mut message = match self {
+            Self::Merge { method, .. } => {
+                let mut text = String::from("Really ");
+                text.push_str(method.preview_verb());
+                text
+            }
+            Self::Close => String::from("Really close"),
+            Self::Reopen => String::from("Really reopen"),
+        };
+        message.push_str(" #");
+        message.push_str(&pull_request.number.to_string());
+        message.push_str(" (");
+        message.push_str(&pull_request.title);
+        message.push_str(")?");
+        message
+    }
+
+    pub(crate) fn success_message(&self, pull_request: &PullRequest) -> String {
+        let mut message = match self {
+            Self::Merge { method, .. } => method.done_verb().to_owned(),
+            Self::Close => String::from("Closed"),
+            Self::Reopen => String::from("Reopened"),
+        };
+        message.push_str(" #");
+        message.push_str(&pull_request.number.to_string());
+        message
+    }
+}
+
 enum PreparedRepository {
     Opened(PathBuf),
     Temporary(TemporaryBareRepository),
@@ -1008,6 +1107,42 @@ impl Repository {
             bail!("{error_context}: GitHub CLI output exceeded the metadata limit");
         }
         bail!("{}", bounded_command_error(error_context, &output));
+    }
+
+    pub(crate) fn perform_pull_request_operation(
+        &self,
+        pull_request: &PullRequest,
+        operation: &PullRequestOperation,
+    ) -> Result<String> {
+        let mut args = vec![
+            OsString::from("pr"),
+            OsString::from(match operation {
+                PullRequestOperation::Merge { .. } => "merge",
+                PullRequestOperation::Close => "close",
+                PullRequestOperation::Reopen => "reopen",
+            }),
+            OsString::from(pull_request.number.to_string()),
+            OsString::from("--repo"),
+            OsString::from(&pull_request.base_repository.url),
+        ];
+        if let PullRequestOperation::Merge {
+            method,
+            delete_branch,
+        } = operation
+        {
+            args.push(OsString::from(method.flag()));
+            if *delete_branch {
+                args.push(OsString::from("--delete-branch"));
+            }
+        }
+        let output = self.run_gh(args)?;
+        if !output.status.success() {
+            bail!(
+                "{}",
+                bounded_command_error("unable to update the pull request", &output)
+            );
+        }
+        Ok(operation.success_message(pull_request))
     }
 
     fn run_gh<I, S>(&self, args: I) -> Result<BoundedOutput>
@@ -2238,6 +2373,38 @@ mod tests {
             deletions: 0,
             changed_files: 1,
         }
+    }
+
+    #[test]
+    fn pull_request_operation_messages_name_the_number_and_title() {
+        let pull_request = pull_request(
+            repository(
+                "pulkitxm/quinjet",
+                "https://github.com/pulkitxm/quinjet",
+                &[],
+            ),
+            12,
+        );
+        let merge = PullRequestOperation::Merge {
+            method: PullRequestMergeMethod::Squash,
+            delete_branch: false,
+        };
+        assert_eq!(
+            merge.confirm_message(&pull_request),
+            "Really squash and merge #12 (Ship the rocket)?"
+        );
+        assert_eq!(
+            merge.success_message(&pull_request),
+            "Squashed and merged #12"
+        );
+        assert_eq!(
+            PullRequestOperation::Close.confirm_message(&pull_request),
+            "Really close #12 (Ship the rocket)?"
+        );
+        assert_eq!(
+            PullRequestOperation::Reopen.success_message(&pull_request),
+            "Reopened #12"
+        );
     }
 
     #[test]

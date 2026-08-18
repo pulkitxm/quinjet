@@ -12,7 +12,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{
     App, ChangeRow, ChangeSection, ContentFileHit, ContentStepHit, DiffLayout, Focus, HelpHit,
-    LinkHit, Modal, ModalAction, OpenTarget, PaletteCommand, PullRequestContentRow,
+    LinkHit, Modal, ModalAction, OpenTarget, PaletteCommand, PrMenuItem, PullRequestContentRow,
     PullRequestSection, PullRequestTreeEntry, ScmAction, ScmActionHit, ScmMenuItem, SidebarHit,
     SidebarHitArea, ToastLevel, UiGeometry, View,
 };
@@ -229,6 +229,10 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
     HelpRow::Shortcut {
         keys: "r",
         description: "Refetch this PR now, bypassing the cache",
+    },
+    HelpRow::Shortcut {
+        keys: "primary CTA / ▶",
+        description: "Merge, close, reopen, or open in browser (after confirm)",
     },
     HelpRow::Spacer,
     HelpRow::Section("Check Logs"),
@@ -796,10 +800,7 @@ fn draw_sidebar(
             draw_history_sidebar(frame, area, app, theme, link_hits),
             Vec::new(),
         ),
-        View::PullRequests => (
-            draw_pull_requests_sidebar(frame, area, app, theme, link_hits),
-            Vec::new(),
-        ),
+        View::PullRequests => draw_pull_requests_sidebar(frame, area, app, theme, link_hits),
     }
 }
 
@@ -1296,7 +1297,7 @@ fn draw_pull_requests_sidebar(
     app: &mut App,
     theme: &Theme,
     link_hits: &mut Vec<LinkHit>,
-) -> Vec<SidebarHitArea> {
+) -> (Vec<SidebarHitArea>, Vec<ScmActionHit>) {
     let warning = if app.pull_request_warnings.is_empty() {
         String::new()
     } else {
@@ -1342,10 +1343,12 @@ fn draw_pull_requests_sidebar(
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.height == 0 {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
 
-    let controls_height = inner.height.min(3);
+    let has_cta = app.selected_pull_request().is_some() && app.pr_primary_action().is_some();
+    let base_controls = if has_cta { 4_u16 } else { 3_u16 };
+    let controls_height = inner.height.min(base_controls);
     let body_area = Rect::new(
         inner.x,
         inner.y,
@@ -1353,6 +1356,7 @@ fn draw_pull_requests_sidebar(
         inner.height.saturating_sub(controls_height),
     );
     let mut hits = Vec::new();
+    let mut action_hits = Vec::new();
     if app.pull_request.is_some() && body_area.height > 0 {
         let overview_width = body_area.width.saturating_mul(3) / 5;
         let overview_tab = Rect::new(body_area.x, body_area.y, overview_width, 1);
@@ -1542,7 +1546,119 @@ fn draw_pull_requests_sidebar(
             Rect::new(inner.x, controls_y + 2, inner.width, 1),
         );
     }
-    hits
+    if has_cta && controls_height >= 4 {
+        let row = Rect::new(inner.x, controls_y + 3, inner.width, 1);
+        draw_pull_request_cta(frame, row, app, theme, &mut action_hits);
+    }
+    (hits, action_hits)
+}
+
+fn draw_pull_request_cta(
+    frame: &mut Frame<'_>,
+    row: Rect,
+    app: &App,
+    theme: &Theme,
+    action_hits: &mut Vec<ScmActionHit>,
+) {
+    let Some(primary) = app.pr_primary_action() else {
+        return;
+    };
+    let menu_items = app.pr_menu_items();
+    let show_menu = !menu_items.is_empty();
+    let arrow_width = if show_menu { 3.min(row.width) } else { 0 };
+    let label_width = row.width.saturating_sub(arrow_width);
+    let label_area = Rect::new(row.x, row.y, label_width, 1);
+    let arrow_area = Rect::new(row.x.saturating_add(label_width), row.y, arrow_width, 1);
+    frame.render_widget(
+        Paragraph::new("").style(Style::default().bg(theme.panel_alt)),
+        row,
+    );
+    frame.render_widget(
+        Paragraph::new(primary.label())
+            .alignment(Alignment::Center)
+            .style(
+                Style::default()
+                    .fg(theme.accent)
+                    .bg(theme.panel_alt)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        label_area,
+    );
+    action_hits.push(ScmActionHit {
+        area: label_area,
+        action: ScmAction::PrPrimary,
+    });
+    if show_menu {
+        frame.render_widget(
+            Paragraph::new("▶")
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(theme.muted).bg(theme.panel_alt)),
+            arrow_area,
+        );
+        action_hits.push(ScmActionHit {
+            area: arrow_area,
+            action: ScmAction::PrToggleMenu,
+        });
+        if app.pr_menu_open {
+            draw_pr_menu(
+                frame,
+                row,
+                &menu_items,
+                app.pr_menu_selected,
+                theme,
+                action_hits,
+            );
+        }
+    }
+}
+
+fn draw_pr_menu(
+    frame: &mut Frame<'_>,
+    anchor: Rect,
+    items: &[PrMenuItem],
+    selected: usize,
+    theme: &Theme,
+    action_hits: &mut Vec<ScmActionHit>,
+) {
+    let width = items
+        .iter()
+        .map(|item| item.label().width())
+        .max()
+        .unwrap_or(12)
+        .saturating_add(4);
+    let width = u16::try_from(width).unwrap_or(24).min(anchor.width.max(24));
+    let item_count = u16::try_from(items.len()).unwrap_or(1);
+    let area_height = item_count.saturating_add(2);
+    let y = anchor.y.saturating_sub(area_height);
+    let area = Rect::new(anchor.x, y, width, area_height);
+    frame.render_widget(Clear, area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.border_focus))
+        .style(Style::default().bg(theme.panel));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    for (index, item) in items.iter().enumerate() {
+        let active = index == selected;
+        let row = Rect::new(
+            inner.x,
+            inner.y.saturating_add(u16::try_from(index).unwrap_or(0)),
+            inner.width,
+            1,
+        );
+        frame.render_widget(
+            Paragraph::new(format!(" {} ", item.label())).style(if active {
+                Style::default().fg(theme.text).bg(theme.selected)
+            } else {
+                Style::default().fg(theme.text).bg(theme.panel)
+            }),
+            row,
+        );
+        action_hits.push(ScmActionHit {
+            area: row,
+            action: ScmAction::PrMenu(*item),
+        });
+    }
 }
 
 fn draw_recent_pull_requests(
