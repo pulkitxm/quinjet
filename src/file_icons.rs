@@ -768,8 +768,9 @@ fn lookup_icon(value: &str, catalog: &[IconMapping]) -> Option<FileIcon> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use unicode_width::UnicodeWidthStr;
+
+    use super::*;
 
     #[test]
     fn recognizes_exact_ecosystem_files_before_their_extensions() {
