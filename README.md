@@ -16,6 +16,7 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 - Scrollable staged, unstaged, untracked, renamed, deleted, and conflict groups
 - Visible, clickable per-file and per-group stage/unstage actions with immediate authoritative refresh
 - Syntax highlighting for TypeScript/TSX, Rust, Python, Go, JavaScript, and hundreds of other formats
+- Themed Font Awesome file icons for common languages, ecosystems, documents, media, and data formats
 - Twelve unified color themes, each with light and dark variants selected from the system appearance at startup
 - Unified and draggable side-by-side diff panes
 - Index-first, lazy per-file patches for changes, commits, branch comparisons, stashes, and PRs
@@ -102,7 +103,7 @@ cargo install --git https://github.com/pulkitxm/quinjet --locked
 
 The first invocation after a Cargo, cargo-binstall, package-manager, or copied-binary installation detects your shell, installs its completions, and adds a `q` launcher on `PATH`, beside the Quinjet executable when that directory is writable. Even when no shell can be detected, the first invocation still installs `q`. The launcher works in the current shell whenever the executable directory was already on `PATH`; no profile reload is needed for `q` itself. Later invocations refresh stale scripts without rewriting current ones. Persistent installed-once markers mean that deleting a generated script, marked completion block, or `q` launcher opts out permanently; updates do not restore what you removed.
 
-Git is required at runtime. A terminal with true-color support is recommended. The Pull Requests view additionally requires the [GitHub CLI](https://cli.github.com/) with an authenticated account (`gh auth login`). All non-GitHub features remain available without `gh`.
+Git is required at runtime. A terminal with true-color support and a current [Nerd Font](https://www.nerdfonts.com/) is recommended. The patched font renders the Font Awesome-compatible [file icons](docs/file-icons.md); filenames remain usable when the terminal font lacks a glyph. The Pull Requests view additionally requires the [GitHub CLI](https://cli.github.com/) with an authenticated account (`gh auth login`). All non-GitHub features remain available without `gh`.
 
 ## Usage
 
