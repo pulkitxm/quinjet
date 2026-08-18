@@ -25,11 +25,11 @@ const PYTHON: FileIcon = FileIcon {
     color: SyntaxColor::Yellow,
 };
 const JAVASCRIPT: FileIcon = FileIcon {
-    glyph: "\u{f2ee}",
+    glyph: "\u{e781}",
     color: SyntaxColor::Yellow,
 };
 const TYPESCRIPT: FileIcon = FileIcon {
-    glyph: "\u{f2ee}",
+    glyph: "\u{e8ca}",
     color: SyntaxColor::Blue,
 };
 const HTML: FileIcon = FileIcon {
@@ -112,6 +112,114 @@ const ELIXIR: FileIcon = FileIcon {
     glyph: "\u{e7cd}",
     color: SyntaxColor::Purple,
 };
+const C_LANGUAGE: FileIcon = FileIcon {
+    glyph: "\u{e771}",
+    color: SyntaxColor::Blue,
+};
+const CPP: FileIcon = FileIcon {
+    glyph: "\u{e7a3}",
+    color: SyntaxColor::Blue,
+};
+const C_SHARP: FileIcon = FileIcon {
+    glyph: "\u{e7b2}",
+    color: SyntaxColor::Purple,
+};
+const F_SHARP: FileIcon = FileIcon {
+    glyph: "\u{e7a7}",
+    color: SyntaxColor::Blue,
+};
+const KOTLIN: FileIcon = FileIcon {
+    glyph: "\u{e81b}",
+    color: SyntaxColor::Purple,
+};
+const SCALA: FileIcon = FileIcon {
+    glyph: "\u{e737}",
+    color: SyntaxColor::Red,
+};
+const CLOJURE: FileIcon = FileIcon {
+    glyph: "\u{e768}",
+    color: SyntaxColor::Green,
+};
+const ERLANG: FileIcon = FileIcon {
+    glyph: "\u{e7b1}",
+    color: SyntaxColor::Red,
+};
+const PERL: FileIcon = FileIcon {
+    glyph: "\u{e769}",
+    color: SyntaxColor::Blue,
+};
+const JULIA: FileIcon = FileIcon {
+    glyph: "\u{e80d}",
+    color: SyntaxColor::Purple,
+};
+const ZIG: FileIcon = FileIcon {
+    glyph: "\u{e8ef}",
+    color: SyntaxColor::Orange,
+};
+const NIM: FileIcon = FileIcon {
+    glyph: "\u{e841}",
+    color: SyntaxColor::Yellow,
+};
+const FORTRAN: FileIcon = FileIcon {
+    glyph: "\u{e7de}",
+    color: SyntaxColor::Purple,
+};
+const COBOL: FileIcon = FileIcon {
+    glyph: "\u{e900}",
+    color: SyntaxColor::Blue,
+};
+const OCAML: FileIcon = FileIcon {
+    glyph: "\u{e84e}",
+    color: SyntaxColor::Orange,
+};
+const PROLOG: FileIcon = FileIcon {
+    glyph: "\u{e7a1}",
+    color: SyntaxColor::Red,
+};
+const RACKET: FileIcon = FileIcon {
+    glyph: "\u{e93a}",
+    color: SyntaxColor::Red,
+};
+const SOLIDITY: FileIcon = FileIcon {
+    glyph: "\u{e8a6}",
+    color: SyntaxColor::Purple,
+};
+const GRAPHQL: FileIcon = FileIcon {
+    glyph: "\u{e7f4}",
+    color: SyntaxColor::Purple,
+};
+const NIXOS: FileIcon = FileIcon {
+    glyph: "\u{e843}",
+    color: SyntaxColor::Blue,
+};
+const TERRAFORM: FileIcon = FileIcon {
+    glyph: "\u{e8bd}",
+    color: SyntaxColor::Purple,
+};
+const JSON: FileIcon = FileIcon {
+    glyph: "\u{e80b}",
+    color: SyntaxColor::Yellow,
+};
+const YAML: FileIcon = FileIcon {
+    glyph: "\u{e8eb}",
+    color: SyntaxColor::Red,
+};
+const XML: FileIcon = FileIcon {
+    glyph: "\u{e8ea}",
+    color: SyntaxColor::Orange,
+};
+const POWERSHELL: FileIcon = FileIcon {
+    glyph: "\u{e86c}",
+    color: SyntaxColor::Blue,
+};
+const LATEX: FileIcon = FileIcon {
+    glyph: "\u{e81f}",
+    color: SyntaxColor::Green,
+};
+const BASH: FileIcon = FileIcon {
+    glyph: "\u{e760}",
+    color: SyntaxColor::Green,
+};
 const SHELL: FileIcon = FileIcon {
     glyph: "\u{f120}",
     color: SyntaxColor::Green,
@@ -139,10 +247,6 @@ const CONFIG: FileIcon = FileIcon {
 const PACKAGE: FileIcon = FileIcon {
     glyph: "\u{f1b2}",
     color: SyntaxColor::Brown,
-};
-const PACKAGES: FileIcon = FileIcon {
-    glyph: "\u{f1b3}",
-    color: SyntaxColor::Purple,
 };
 const LOCK: FileIcon = FileIcon {
     glyph: "\u{f023}",
@@ -308,10 +412,10 @@ fn special_name_icon(name: &str) -> FileIcon {
         "Taskfile.yaml" => CONFIG,
         "Vagrantfile" => CONFIG,
         "Procfile" => CONFIG,
-        "flake.nix" => PACKAGE,
+        "flake.nix" => NIXOS,
         "flake.lock" => LOCK,
-        "default.nix" => PACKAGE,
-        "shell.nix" => PACKAGE,
+        "default.nix" => NIXOS,
+        "shell.nix" => NIXOS,
         "terraform.lock.hcl" => LOCK,
         ".editorconfig" => CONFIG,
         ".prettierrc" => CONFIG,
@@ -368,29 +472,29 @@ fn extension_icon(extension: &str) -> FileIcon {
         "jar" => JAVA,
         "war" => JAVA,
         "ear" => JAVA,
-        "kt" => CODE,
-        "kts" => CODE,
-        "scala" => CODE,
-        "sc" => CODE,
-        "clj" => CODE,
-        "cljs" => CODE,
-        "cljc" => CODE,
-        "edn" => CODE,
-        "c" => CODE,
-        "h" => CODE,
-        "cc" => CODE,
-        "cpp" => CODE,
-        "cxx" => CODE,
-        "hh" => CODE,
-        "hpp" => CODE,
-        "hxx" => CODE,
+        "kt" => KOTLIN,
+        "kts" => KOTLIN,
+        "scala" => SCALA,
+        "sc" => SCALA,
+        "clj" => CLOJURE,
+        "cljs" => CLOJURE,
+        "cljc" => CLOJURE,
+        "edn" => CLOJURE,
+        "c" => C_LANGUAGE,
+        "h" => C_LANGUAGE,
+        "cc" => CPP,
+        "cpp" => CPP,
+        "cxx" => CPP,
+        "hh" => CPP,
+        "hpp" => CPP,
+        "hxx" => CPP,
         "m" => CODE,
         "mm" => CODE,
-        "cs" => CODE,
-        "csx" => CODE,
-        "fs" => CODE,
-        "fsi" => CODE,
-        "fsx" => CODE,
+        "cs" => C_SHARP,
+        "csx" => C_SHARP,
+        "fs" => F_SHARP,
+        "fsi" => F_SHARP,
+        "fsx" => F_SHARP,
         "go" => GO,
         "swift" => SWIFT,
         "php" => PHP,
@@ -405,39 +509,39 @@ fn extension_icon(extension: &str) -> FileIcon {
         "eex" => ELIXIR,
         "heex" => ELIXIR,
         "leex" => ELIXIR,
-        "erl" => CODE,
-        "hrl" => CODE,
-        "escript" => CODE,
+        "erl" => ERLANG,
+        "hrl" => ERLANG,
+        "escript" => ERLANG,
         "hs" => HASKELL,
         "lhs" => HASKELL,
         "lua" => LUA,
-        "pl" => CODE,
-        "pm" => CODE,
-        "t" => CODE,
+        "pl" => PERL,
+        "pm" => PERL,
+        "t" => PERL,
         "r" => R_PROJECT,
         "rmd" => R_PROJECT,
-        "jl" => CODE,
+        "jl" => JULIA,
         "dart" => DART,
-        "zig" => CODE,
-        "nim" => CODE,
-        "nims" => CODE,
+        "zig" => ZIG,
+        "nim" => NIM,
+        "nims" => NIM,
         "v" => CODE,
         "d" => CODE,
         "adb" => CODE,
         "ads" => CODE,
-        "f" => CODE,
-        "for" => CODE,
-        "f77" => CODE,
-        "f90" => CODE,
-        "f95" => CODE,
-        "f03" => CODE,
-        "f08" => CODE,
-        "cob" => CODE,
-        "cbl" => CODE,
+        "f" => FORTRAN,
+        "for" => FORTRAN,
+        "f77" => FORTRAN,
+        "f90" => FORTRAN,
+        "f95" => FORTRAN,
+        "f03" => FORTRAN,
+        "f08" => FORTRAN,
+        "cob" => COBOL,
+        "cbl" => COBOL,
         "pas" => CODE,
         "pp" => CODE,
-        "ml" => CODE,
-        "mli" => CODE,
+        "ml" => OCAML,
+        "mli" => OCAML,
         "re" => CODE,
         "rei" => CODE,
         "lisp" => CODE,
@@ -445,27 +549,27 @@ fn extension_icon(extension: &str) -> FileIcon {
         "cl" => CODE,
         "scm" => CODE,
         "ss" => CODE,
-        "rkt" => CODE,
-        "pro" => CODE,
-        "prolog" => CODE,
-        "sol" => CODE,
+        "rkt" => RACKET,
+        "pro" => PROLOG,
+        "prolog" => PROLOG,
+        "sol" => SOLIDITY,
         "vy" => CODE,
         "move" => CODE,
         "cairo" => CODE,
-        "graphql" => CODE,
-        "gql" => CODE,
+        "graphql" => GRAPHQL,
+        "gql" => GRAPHQL,
         "proto" => CODE,
         "thrift" => CODE,
         "wasm" => BINARY,
         "wat" => CODE,
-        "sh" => SHELL,
-        "bash" => SHELL,
+        "sh" => BASH,
+        "bash" => BASH,
         "zsh" => SHELL,
         "fish" => SHELL,
         "nu" => SHELL,
-        "ps1" => SHELL,
-        "psm1" => SHELL,
-        "psd1" => SHELL,
+        "ps1" => POWERSHELL,
+        "psm1" => POWERSHELL,
+        "psd1" => POWERSHELL,
         "bat" => SHELL,
         "cmd" => SHELL,
         "sql" => DATABASE,
@@ -473,28 +577,28 @@ fn extension_icon(extension: &str) -> FileIcon {
         "sqlite" => DATABASE,
         "sqlite3" => DATABASE,
         "mdb" => DATABASE,
-        "json" => CODE,
-        "jsonc" => CODE,
-        "json5" => CODE,
-        "jsonl" => CODE,
-        "ndjson" => CODE,
-        "xml" => CODE,
-        "xsd" => CODE,
-        "xsl" => CODE,
-        "xslt" => CODE,
-        "dtd" => CODE,
-        "yaml" => CONFIG,
-        "yml" => CONFIG,
+        "json" => JSON,
+        "jsonc" => JSON,
+        "json5" => JSON,
+        "jsonl" => JSON,
+        "ndjson" => JSON,
+        "xml" => XML,
+        "xsd" => XML,
+        "xsl" => XML,
+        "xslt" => XML,
+        "dtd" => XML,
+        "yaml" => YAML,
+        "yml" => YAML,
         "toml" => CONFIG,
         "ini" => CONFIG,
         "cfg" => CONFIG,
         "conf" => CONFIG,
         "config" => CONFIG,
         "properties" => CONFIG,
-        "hcl" => PACKAGES,
-        "tf" => PACKAGES,
-        "tfvars" => PACKAGES,
-        "nix" => PACKAGE,
+        "hcl" => TERRAFORM,
+        "tf" => TERRAFORM,
+        "tfvars" => TERRAFORM,
+        "nix" => NIXOS,
         "lock" => LOCK,
         "md" => MARKDOWN,
         "markdown" => MARKDOWN,
@@ -507,9 +611,9 @@ fn extension_icon(extension: &str) -> FileIcon {
         "org" => MARKDOWN,
         "txt" => FILE,
         "rtf" => WORD,
-        "tex" => FILE,
-        "latex" => FILE,
-        "bib" => FILE,
+        "tex" => LATEX,
+        "latex" => LATEX,
+        "bib" => LATEX,
         "csv" => SPREADSHEET,
         "tsv" => SPREADSHEET,
         "pdf" => PDF,
@@ -685,6 +789,15 @@ mod tests {
     }
 
     #[test]
+    fn uses_language_brand_glyphs_instead_of_generic_symbols() {
+        assert_eq!(for_path(Path::new("main.py")).glyph, "\u{ed1b}");
+        assert_eq!(for_path(Path::new("main.js")).glyph, "\u{e781}");
+        assert_eq!(for_path(Path::new("main.ts")).glyph, "\u{e8ca}");
+        assert_eq!(for_path(Path::new("main.rs")).glyph, "\u{e7a8}");
+        assert_eq!(for_path(Path::new("main.go")).glyph, "\u{e724}");
+    }
+
+    #[test]
     fn recognizes_environment_variants_and_falls_back_for_unknown_files() {
         assert_eq!(for_path(Path::new(".env.local")), KEY);
         assert_eq!(for_path(Path::new(".ENV")), KEY);
@@ -721,6 +834,33 @@ mod tests {
             RUBY,
             LUA,
             ELIXIR,
+            C_LANGUAGE,
+            CPP,
+            C_SHARP,
+            F_SHARP,
+            KOTLIN,
+            SCALA,
+            CLOJURE,
+            ERLANG,
+            PERL,
+            JULIA,
+            ZIG,
+            NIM,
+            FORTRAN,
+            COBOL,
+            OCAML,
+            PROLOG,
+            RACKET,
+            SOLIDITY,
+            GRAPHQL,
+            NIXOS,
+            TERRAFORM,
+            JSON,
+            YAML,
+            XML,
+            POWERSHELL,
+            LATEX,
+            BASH,
             SHELL,
             MARKDOWN,
             GIT,
@@ -728,7 +868,6 @@ mod tests {
             DATABASE,
             CONFIG,
             PACKAGE,
-            PACKAGES,
             LOCK,
             KEY,
             IMAGE,

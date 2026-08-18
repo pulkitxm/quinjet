@@ -16,7 +16,7 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 - Scrollable staged, unstaged, untracked, renamed, deleted, and conflict groups
 - Visible, clickable per-file and per-group stage/unstage actions with immediate authoritative refresh
 - Syntax highlighting for TypeScript/TSX, Rust, Python, Go, JavaScript, and hundreds of other formats
-- Themed Font Awesome file icons for common languages, ecosystems, documents, media, and data formats
+- Themed Font Awesome Brands and Devicons file logos for common languages, ecosystems, documents, media, and data formats
 - Twelve unified color themes, each with light and dark variants selected from the system appearance at startup
 - Unified and draggable side-by-side diff panes
 - Index-first, lazy per-file patches for changes, commits, branch comparisons, stashes, and PRs
