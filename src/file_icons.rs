@@ -199,22 +199,20 @@ const BINARY: FileIcon = FileIcon {
 
 #[derive(Debug, Clone, Copy)]
 struct IconMapping {
-    name: &'static str,
     hash: u64,
-    icon: FileIcon,
+    icon: &'static FileIcon,
 }
 
 macro_rules! hashed_icon {
-    ($value:expr, $default:expr, $capacity:literal, $($needle:literal => $icon:expr),+ $(,)?) => {{
-        const CATALOG: [Option<IconMapping>; $capacity] = build_catalog(&[
+    ($value:expr, $default:expr, $($needle:literal => $icon:expr),+ $(,)?) => {{
+        const CATALOG: &[IconMapping] = &sort_catalog([
             $(IconMapping {
-                name: $needle,
                 hash: ascii_hash($needle.as_bytes()),
-                icon: $icon,
+                icon: &$icon,
             },)+
         ]);
         let value = $value;
-        lookup_icon(value, &CATALOG).unwrap_or($default)
+        lookup_icon(value, CATALOG).unwrap_or($default)
     }};
 }
 
@@ -242,7 +240,6 @@ fn special_name_icon(name: &str) -> FileIcon {
     hashed_icon!(
         name,
         FILE,
-        128,
         "Cargo.toml" => RUST,
         "Cargo.lock" => RUST,
         "rust-toolchain" => RUST,
@@ -338,7 +335,6 @@ fn extension_icon(extension: &str) -> FileIcon {
     hashed_icon!(
         extension,
         FILE,
-        512,
         "rs" => RUST,
         "rlib" => RUST,
         "py" => PYTHON,
@@ -625,47 +621,45 @@ const fn ascii_hash(bytes: &[u8]) -> u64 {
 }
 
 #[expect(
-    clippy::cast_possible_truncation,
     clippy::indexing_slicing,
-    reason = "catalog capacities bound every modulo result before the index cast"
+    reason = "the insertion-sort loop proves both catalog indices are in bounds"
 )]
-const fn build_catalog<const N: usize>(mappings: &[IconMapping]) -> [Option<IconMapping>; N] {
-    let mut catalog = [None; N];
-    let mut mapping_index = 0;
-    while mapping_index < mappings.len() {
-        let mapping = mappings[mapping_index];
-        let mut slot = (mapping.hash % N as u64) as usize;
-        while catalog[slot].is_some() {
-            slot = (slot + 1) % N;
+const fn sort_catalog<const N: usize>(mut catalog: [IconMapping; N]) -> [IconMapping; N] {
+    let mut index = 1;
+    while index < N {
+        let mut cursor = index;
+        while cursor > 0 && catalog[cursor - 1].hash > catalog[cursor].hash {
+            let previous = catalog[cursor - 1];
+            catalog[cursor - 1] = catalog[cursor];
+            catalog[cursor] = previous;
+            cursor -= 1;
         }
-        catalog[slot] = Some(mapping);
-        mapping_index += 1;
+        index += 1;
     }
     catalog
 }
 
 #[expect(
-    clippy::cast_possible_truncation,
-    clippy::indexing_slicing,
-    reason = "catalog capacities bound every modulo result before the index cast"
+    clippy::integer_division,
+    reason = "binary search intentionally rounds the midpoint down"
 )]
-fn lookup_icon<const N: usize>(
-    value: &str,
-    catalog: &[Option<IconMapping>; N],
-) -> Option<FileIcon> {
+fn lookup_icon(value: &str, catalog: &[IconMapping]) -> Option<FileIcon> {
     let hash = ascii_hash(value.as_bytes());
-    let mut slot = (hash % N as u64) as usize;
-    let start = slot;
-    loop {
-        let mapping = catalog[slot]?;
-        if mapping.hash == hash && mapping.name.eq_ignore_ascii_case(value) {
-            return Some(mapping.icon);
-        }
-        slot = (slot + 1) % N;
-        if slot == start {
-            return None;
+    let mut low = 0;
+    let mut high = catalog.len();
+    while low < high {
+        let middle = low + (high - low) / 2;
+        let mapping = catalog.get(middle)?;
+        if mapping.hash < hash {
+            low = middle + 1;
+        } else {
+            high = middle;
         }
     }
+    catalog
+        .get(low)
+        .filter(|mapping| mapping.hash == hash)
+        .map(|mapping| *mapping.icon)
 }
 
 #[cfg(test)]

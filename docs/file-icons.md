@@ -15,8 +15,8 @@ characters, but filenames and every interaction remain available.
 SVGs and font files are deliberately not embedded. Terminal cells render text
 glyphs rather than vector images, so embedding those assets would increase the
 binary without improving the interface. Each lookup hashes the filename or
-extension once, probes a compile-time table without allocating, and returns a
-static glyph plus a semantic syntax color from the active theme.
+extension once, searches a compile-time sorted table without allocating, and
+returns a static glyph plus a semantic syntax color from the active theme.
 
 ## Coverage
 
@@ -47,8 +47,7 @@ Prefer the `fa-` entry when Font Awesome has the icon, then use `dev-` only for
 a missing language brand.
 
 Add the path to the table in lowercase or conventional casing. Lookup is ASCII
-case-insensitive. Keep each catalog below its declared capacity so probing
-always reaches an empty slot, then add a focused assertion to the module tests.
+case-insensitive. Add a focused assertion to the module tests for the new path.
 
 Font Awesome Free icons are available under the project's documented free
 licenses. Nerd Fonts relocates the glyphs into non-conflicting terminal code
