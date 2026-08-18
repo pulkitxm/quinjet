@@ -277,6 +277,8 @@ pub(crate) enum PullRequestMergeMethod {
 }
 
 impl PullRequestMergeMethod {
+    pub(crate) const ALL: [Self; 3] = [Self::Merge, Self::Squash, Self::Rebase];
+
     pub(crate) const fn flag(self) -> &'static str {
         match self {
             Self::Merge => "--merge",
@@ -308,8 +310,6 @@ impl PullRequestMergeMethod {
             Self::Rebase => "Rebased and merged",
         }
     }
-
-    pub(crate) const ALL: [Self; 3] = [Self::Merge, Self::Squash, Self::Rebase];
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
