@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use crossbeam_channel::{Receiver, tick};
+use crossterm::clipboard::CopyToClipboard;
 use crossterm::cursor::Show;
 use crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -111,7 +112,7 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
     let mut dirty = true;
     let mut running = true;
 
-    app.mouse_capture = !options.no_mouse;
+    app.configure_mouse_capture(!options.no_mouse);
     app.webhooks_listening = webhooks.is_some();
     running &= dispatch_effects(&worker, &mut terminal, app.initial_effects());
     while running {
@@ -213,6 +214,7 @@ fn dispatch_effects(
             AppEffect::Git(command) => {
                 running &= worker.send(*command);
             }
+            AppEffect::Copy(text) => terminal.copy_to_clipboard(&text),
             AppEffect::SetMouseCapture(enabled) => terminal.set_mouse_capture(enabled),
             AppEffect::Open(app::OpenTarget::Browser(url)) => drop(cli::open_url(&url)),
             AppEffect::Open(app::OpenTarget::Path(path)) => drop(cli::open_path(&path)),
@@ -240,6 +242,13 @@ impl Drop for TerminalRollback {
 }
 
 impl TerminalGuard {
+    fn copy_to_clipboard(&mut self, text: &str) {
+        drop(execute!(
+            self.terminal.backend_mut(),
+            CopyToClipboard::to_clipboard_from(text)
+        ));
+    }
+
     fn set_mouse_capture(&mut self, enabled: bool) {
         if self.mouse == enabled {
             return;

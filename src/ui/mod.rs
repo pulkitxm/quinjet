@@ -1,7 +1,9 @@
+use std::num::NonZeroU16;
 use std::ops::Range;
 use std::path::Path;
 
 use ratatui::Frame;
+use ratatui::buffer::{Buffer, CellDiffOption};
 use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
@@ -9,21 +11,23 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget, Wra
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{
-    App, ChangeRow, ChangeSection, ContentFileHit, ContentStepHit, DiffLayout, Focus, LinkHit,
-    Modal, OpenTarget, PaletteCommand, PullRequestContentRow, PullRequestSection,
-    PullRequestTreeEntry, ScmAction, ScmActionHit, SidebarHit, SidebarHitArea, ToastLevel,
-    UiGeometry, View,
+    App, ChangeRow, ChangeSection, ContentFileHit, ContentStepHit, DiffLayout, Focus, HelpHit,
+    LinkHit, Modal, ModalAction, OpenTarget, PaletteCommand, PullRequestContentRow,
+    PullRequestSection, PullRequestTreeEntry, ScmAction, ScmActionHit, ScmMenuItem, SidebarHit,
+    SidebarHitArea, ToastLevel, UiGeometry, View,
 };
 use crate::convert::cells;
 use crate::date_time::format_local_timestamp;
 use crate::file_icons;
-use crate::git::diff::{DiffDocument, DiffLine, DiffLineKind, HighlightSpan, PullRequestDetails};
+#[cfg(test)]
+use crate::git::diff::PullRequestDetails;
+use crate::git::diff::{DiffDocument, DiffLine, DiffLineKind, HighlightSpan};
 use crate::git::github::{
     CheckLogLine, CheckLogSeverity, CheckStep, ConversationEntry, ConversationKind,
     GitHubRepository, PullRequestCheckStatus, PullRequestFileStatus,
 };
 #[cfg(test)]
-use crate::git::github::{PullRequestCheck, PullRequestFile};
+use crate::git::github::{PullRequestCheck, PullRequestFile, RecentPullRequest};
 use crate::git::status::{Change, ChangeArea, ChangeStatus};
 use crate::git::{Branch, HistoryBranch, Stash};
 use crate::theme::{AppearanceChoice, Theme, ThemeName};
@@ -36,77 +40,356 @@ fn file_icon_span(path: &Path, theme: &Theme) -> Span<'static> {
     Span::styled(icon.glyph, Style::default().fg(theme.syntax(icon.color)))
 }
 
-const HELP_LINES: &[(&str, &str)] = &[
-    ("Navigation", ""),
-    ("j / k, ↑ / ↓", "Move selection or scroll preview"),
-    (
-        "Shift + drag",
-        "Select terminal text without activating controls",
-    ),
-    ("Double-click divider", "Restore that pane's default size"),
-    ("PgUp / PgDn", "Move by a page"),
-    ("gg / G", "Jump to first / last item"),
-    ("Tab", "Switch focus between sidebar and preview"),
-    ("Enter", "Toggle sidebar / preview focus"),
-    ("h / l, ← / →", "Scroll preview horizontally"),
-    ("[ / ]", "Previous / next diff hunk"),
-    ("e / E", "Collapse / expand multi-file diffs"),
-    ("Space in preview", "Toggle a file in a multi-file preview"),
-    ("z", "Hide / show sidebar"),
-    ("1 / 2 / 3", "Changes / commit history / pull requests"),
-    ("/", "Filter the active list"),
-    ("Esc", "Clear filter, close modal, or return focus"),
-    ("", ""),
-    ("Changes", ""),
-    ("s / u", "Stage / unstage selected file"),
-    ("[+] / [−]", "Click an individual file or group action"),
-    ("a / U", "Stage all / unstage all"),
-    ("x", "Discard selected change (asks first)"),
-    ("c", "Commit staged changes"),
-    ("S", "View and manage stashes"),
-    ("d", "Compare current branch with another branch"),
-    ("b / B", "Branch picker / checkout branch picker"),
-    ("", ""),
-    ("History", ""),
-    ("b", "View another local or remote branch (no checkout)"),
-    ("C / R", "Cherry-pick / revert selected commit"),
-    ("n", "Create branch at selected commit"),
-    ("", ""),
-    ("Pull Requests", ""),
-    ("3", "Open the on-demand PR view (no automatic fetch)"),
-    ("/", "Focus the numeric PR field; Enter opens it"),
-    ("o", "Discover or choose the base repository"),
-    (
-        "Shift+P / Shift+F",
-        "The PR and its checks / all changed files",
-    ),
-    (
-        "j / k",
-        "Select the conversation, a check, a file, or a folder",
-    ),
-    ("← / →, Enter", "Collapse / expand the selected folder"),
-    ("r", "Refetch this PR now, bypassing the cache"),
-    ("", ""),
-    ("Check Logs", ""),
-    ("j / k in the list", "Select a check to read its run log"),
-    ("Tab, then j / k", "Move through that run's steps"),
-    ("[ / ]", "Previous / next step"),
-    ("Space, Enter", "Fold or unfold the selected step"),
-    ("e / E", "Fold or unfold every step"),
-    (
-        "PgUp / PgDn, wheel",
-        "Scroll the output of an unfolded step",
-    ),
-    ("h / l, ← / →", "Read a log line past the right edge"),
-    ("", ""),
-    ("Repository", ""),
-    ("r / Ctrl+R", "Refresh"),
-    ("f / l / p / y", "Fetch / pull / push / sync"),
-    ("v", "Toggle unified / side-by-side diff"),
-    (": / Ctrl+P", "Open command palette"),
-    ("?", "Show this help"),
-    ("q", "Quit"),
+const fn disclosure_glyph(expanded: bool) -> &'static str {
+    if expanded { "⌄" } else { "›" }
+}
+
+const fn disclosure_prefix(expanded: bool) -> &'static str {
+    if expanded { " ⌄ " } else { " › " }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HelpRow {
+    Section(&'static str),
+    Shortcut {
+        keys: &'static str,
+        description: &'static str,
+    },
+    Spacer,
+}
+
+pub(crate) const HELP_ROWS: &[HelpRow] = &[
+    HelpRow::Section("Navigation"),
+    HelpRow::Shortcut {
+        keys: "j / k, ↑ / ↓",
+        description: "Move selection or scroll preview",
+    },
+    HelpRow::Shortcut {
+        keys: "Drag in preview",
+        description: "Select and copy text inside one diff pane",
+    },
+    HelpRow::Shortcut {
+        keys: "Double-click divider",
+        description: "Restore that pane's default size",
+    },
+    HelpRow::Shortcut {
+        keys: "PgUp / PgDn",
+        description: "Move by a page",
+    },
+    HelpRow::Shortcut {
+        keys: "Ctrl+D / Ctrl+U",
+        description: "Scroll the preview by half a page",
+    },
+    HelpRow::Shortcut {
+        keys: "gg / Home",
+        description: "Jump to the first item",
+    },
+    HelpRow::Shortcut {
+        keys: "G / End",
+        description: "Jump to the last item",
+    },
+    HelpRow::Shortcut {
+        keys: "Tab",
+        description: "Switch focus between sidebar and preview",
+    },
+    HelpRow::Shortcut {
+        keys: "Enter",
+        description: "Toggle sidebar / preview focus",
+    },
+    HelpRow::Shortcut {
+        keys: "h / l, ← / →, swipe",
+        description: "Scroll preview horizontally",
+    },
+    HelpRow::Shortcut {
+        keys: "[ / ]",
+        description: "Previous / next diff hunk",
+    },
+    HelpRow::Shortcut {
+        keys: "e / E",
+        description: "Collapse / expand multi-file diffs",
+    },
+    HelpRow::Shortcut {
+        keys: "t / T",
+        description: "Toggle expanded vs compact diff context",
+    },
+    HelpRow::Shortcut {
+        keys: "Space in preview",
+        description: "Toggle a file in a multi-file preview",
+    },
+    HelpRow::Shortcut {
+        keys: "z",
+        description: "Hide / show sidebar",
+    },
+    HelpRow::Shortcut {
+        keys: "m",
+        description: "Toggle mouse capture",
+    },
+    HelpRow::Shortcut {
+        keys: "1 / 2 / 3",
+        description: "Changes / commit history / pull requests",
+    },
+    HelpRow::Shortcut {
+        keys: "/",
+        description: "Filter the active list",
+    },
+    HelpRow::Shortcut {
+        keys: "Shift+O",
+        description: "Open the selected branch, commit, pull request, or check",
+    },
+    HelpRow::Shortcut {
+        keys: "Esc",
+        description: "Clear filter, close modal, or return focus",
+    },
+    HelpRow::Spacer,
+    HelpRow::Section("Changes"),
+    HelpRow::Shortcut {
+        keys: "s / Space",
+        description: "Stage or unstage the selected file",
+    },
+    HelpRow::Shortcut {
+        keys: "u",
+        description: "Unstage the selected file",
+    },
+    HelpRow::Shortcut {
+        keys: "[+] / [−]",
+        description: "Click an individual file or group action",
+    },
+    HelpRow::Shortcut {
+        keys: "Space / ← / →",
+        description: "Collapse or expand the selected Changes group",
+    },
+    HelpRow::Shortcut {
+        keys: "a / U",
+        description: "Stage all / unstage all",
+    },
+    HelpRow::Shortcut {
+        keys: "x",
+        description: "Discard selected change (asks first)",
+    },
+    HelpRow::Shortcut {
+        keys: "c",
+        description: "Commit staged changes, or stash when files are checked",
+    },
+    HelpRow::Shortcut {
+        keys: "*",
+        description: "Check / uncheck the selected file for stash",
+    },
+    HelpRow::Shortcut {
+        keys: "S",
+        description: "View and manage stashes",
+    },
+    HelpRow::Shortcut {
+        keys: "d",
+        description: "Compare current branch with another branch",
+    },
+    HelpRow::Shortcut {
+        keys: "b / B",
+        description: "Branch picker / checkout branch picker",
+    },
+    HelpRow::Spacer,
+    HelpRow::Section("Commits"),
+    HelpRow::Shortcut {
+        keys: "b",
+        description: "View another local or remote branch (no checkout)",
+    },
+    HelpRow::Shortcut {
+        keys: "C / R",
+        description: "Cherry-pick / revert selected commit",
+    },
+    HelpRow::Shortcut {
+        keys: "n",
+        description: "Create branch at selected commit",
+    },
+    HelpRow::Spacer,
+    HelpRow::Section("Pull Requests"),
+    HelpRow::Shortcut {
+        keys: "3",
+        description: "Open the on-demand PR view (no automatic fetch)",
+    },
+    HelpRow::Shortcut {
+        keys: "/",
+        description: "Focus the numeric PR field; Enter opens it",
+    },
+    HelpRow::Shortcut {
+        keys: "o",
+        description: "Discover or choose the base repository",
+    },
+    HelpRow::Shortcut {
+        keys: "Shift+P / Shift+F",
+        description: "The PR and its checks / all changed files",
+    },
+    HelpRow::Shortcut {
+        keys: "j / k",
+        description: "Select the conversation, a check, a file, or a folder",
+    },
+    HelpRow::Shortcut {
+        keys: "Space",
+        description: "Collapse / expand the selected folder, or open a recent PR",
+    },
+    HelpRow::Shortcut {
+        keys: "r",
+        description: "Refetch this PR now, bypassing the cache",
+    },
+    HelpRow::Spacer,
+    HelpRow::Section("Check Logs"),
+    HelpRow::Shortcut {
+        keys: "j / k in the list",
+        description: "Select a check to read its run log",
+    },
+    HelpRow::Shortcut {
+        keys: "Tab, then j / k",
+        description: "Move through that run's steps",
+    },
+    HelpRow::Shortcut {
+        keys: "[ / ]",
+        description: "Previous / next step",
+    },
+    HelpRow::Shortcut {
+        keys: "Space",
+        description: "Fold or unfold the selected step",
+    },
+    HelpRow::Shortcut {
+        keys: "e / E",
+        description: "Fold or unfold every step",
+    },
+    HelpRow::Shortcut {
+        keys: "PgUp / PgDn, wheel",
+        description: "Scroll the output of an unfolded step",
+    },
+    HelpRow::Shortcut {
+        keys: "h / l, ← / →",
+        description: "Read a log line past the right edge",
+    },
+    HelpRow::Spacer,
+    HelpRow::Section("Branches"),
+    HelpRow::Shortcut {
+        keys: "↑ / ↓",
+        description: "Move through matching branches",
+    },
+    HelpRow::Shortcut {
+        keys: "Enter",
+        description: "Check out the selected branch",
+    },
+    HelpRow::Shortcut {
+        keys: "Ctrl+N",
+        description: "Create a new branch",
+    },
+    HelpRow::Shortcut {
+        keys: "F2 / Ctrl+R",
+        description: "Rename the selected branch",
+    },
+    HelpRow::Shortcut {
+        keys: "Delete",
+        description: "Delete the selected branch (asks first)",
+    },
+    HelpRow::Spacer,
+    HelpRow::Section("Stashes"),
+    HelpRow::Shortcut {
+        keys: "↑ / ↓",
+        description: "Move through matching stashes",
+    },
+    HelpRow::Shortcut {
+        keys: "Enter",
+        description: "Preview the selected stash",
+    },
+    HelpRow::Shortcut {
+        keys: "Ctrl+N",
+        description: "Stash working tree changes",
+    },
+    HelpRow::Shortcut {
+        keys: "Ctrl+U",
+        description: "Stash including untracked files",
+    },
+    HelpRow::Shortcut {
+        keys: "Ctrl+S",
+        description: "Stash only staged changes",
+    },
+    HelpRow::Shortcut {
+        keys: "Alt+A",
+        description: "Apply the selected stash",
+    },
+    HelpRow::Shortcut {
+        keys: "Alt+P",
+        description: "Pop the selected stash",
+    },
+    HelpRow::Shortcut {
+        keys: "Delete",
+        description: "Drop the selected stash (asks first)",
+    },
+    HelpRow::Shortcut {
+        keys: "Ctrl+Delete",
+        description: "Clear every stash (asks first)",
+    },
+    HelpRow::Spacer,
+    HelpRow::Section("Conflict"),
+    HelpRow::Shortcut {
+        keys: "o",
+        description: "Keep our version",
+    },
+    HelpRow::Shortcut {
+        keys: "t",
+        description: "Keep their version",
+    },
+    HelpRow::Shortcut {
+        keys: "s / Enter",
+        description: "Stage the resolved file",
+    },
+    HelpRow::Spacer,
+    HelpRow::Section("Repository"),
+    HelpRow::Shortcut {
+        keys: "r / Ctrl+R",
+        description: "Refresh",
+    },
+    HelpRow::Shortcut {
+        keys: "f / l / p / y",
+        description: "Fetch / pull / push / sync",
+    },
+    HelpRow::Shortcut {
+        keys: "v",
+        description: "Toggle unified / side-by-side diff",
+    },
+    HelpRow::Shortcut {
+        keys: ": / Ctrl+P",
+        description: "Open command palette",
+    },
+    HelpRow::Shortcut {
+        keys: "?",
+        description: "Show this help",
+    },
+    HelpRow::Shortcut {
+        keys: "q",
+        description: "Quit",
+    },
 ];
+
+pub(crate) fn help_shortcut_count() -> usize {
+    HELP_ROWS
+        .iter()
+        .filter(|row| matches!(row, HelpRow::Shortcut { .. }))
+        .count()
+}
+
+pub(crate) fn help_display_index(selected: usize) -> usize {
+    HELP_ROWS
+        .iter()
+        .enumerate()
+        .filter_map(|(index, row)| matches!(row, HelpRow::Shortcut { .. }).then_some(index))
+        .nth(selected)
+        .unwrap_or(0)
+}
+
+pub(crate) fn help_shortcut_index_at(display: usize) -> Option<usize> {
+    if !matches!(HELP_ROWS.get(display), Some(HelpRow::Shortcut { .. })) {
+        return None;
+    }
+    Some(
+        HELP_ROWS
+            .iter()
+            .take(display)
+            .filter(|row| matches!(row, HelpRow::Shortcut { .. }))
+            .count(),
+    )
+}
 
 pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     frame.render_widget(
@@ -163,16 +446,106 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
         diff_divider,
         sidebar_hits,
         scm_action_hits,
+        modal_action_hits: Vec::new(),
         content_file_hits,
         content_step_hits,
         link_hits,
+        help_hits: Vec::new(),
     };
 
-    if let Some(modal) = app.modal.as_ref() {
-        draw_modal(frame, modal, app, theme);
+    let frame_area = frame.area();
+    app.rendered_cells = snapshot_cells(frame.buffer_mut(), frame_area);
+    if let Some(selection) = app.text_selection {
+        draw_text_selection(frame, selection, theme);
+    }
+    if app.modal.is_none() {
+        if !app.mouse_capture || app.link_hover.is_some() {
+            draw_terminal_links(
+                frame,
+                &app.geometry.link_hits,
+                app.mouse_capture.then_some(app.link_hover).flatten(),
+            );
+        }
+        draw_link_hover(frame, &app.geometry.link_hits, app.link_hover);
+    }
+
+    if app.modal.is_some() {
+        draw_modal(frame, app, theme);
     }
     if let Some(toast) = app.toast.as_ref() {
         draw_toast(frame, toast.message.as_str(), toast.level, theme);
+    }
+}
+
+fn snapshot_cells(buffer: &Buffer, area: Rect) -> Vec<Vec<char>> {
+    (area.y..area.bottom())
+        .map(|row| {
+            (area.x..area.right())
+                .map(|column| buffer[(column, row)].symbol().chars().next().unwrap_or(' '))
+                .collect()
+        })
+        .collect()
+}
+
+fn draw_text_selection(frame: &mut Frame<'_>, selection: crate::app::TextSelection, theme: &Theme) {
+    let ((start_x, start_y), (end_x, end_y)) = selection.ordered_endpoints();
+    for row in start_y..=end_y {
+        let first = if row == start_y {
+            start_x
+        } else {
+            selection.pane.x
+        };
+        let last = if row == end_y {
+            end_x
+        } else {
+            selection.pane.right().saturating_sub(1)
+        };
+        for column in first..=last {
+            if let Some(cell) = frame.buffer_mut().cell_mut((column, row)) {
+                cell.fg = theme.text;
+                cell.bg = theme.selected;
+            }
+        }
+    }
+}
+
+fn draw_terminal_links(frame: &mut Frame<'_>, hits: &[LinkHit], hover: Option<(u16, u16)>) {
+    for hit in hits {
+        if hover.is_some_and(|point| !hit.area.contains(point.into())) {
+            continue;
+        }
+        let OpenTarget::Browser(url) = &hit.target else {
+            continue;
+        };
+        if url.chars().any(char::is_control) {
+            continue;
+        }
+        for row in hit.area.y..hit.area.bottom() {
+            for column in hit.area.x..hit.area.right() {
+                let Some(cell) = frame.buffer_mut().cell_mut((column, row)) else {
+                    continue;
+                };
+                let symbol = cell.symbol().to_owned();
+                cell.set_symbol(&format!("\x1b]8;;{url}\x1b\\{symbol}\x1b]8;;\x1b\\"))
+                    .diff_option = CellDiffOption::ForcedWidth(NonZeroU16::MIN);
+            }
+        }
+    }
+}
+
+fn draw_link_hover(frame: &mut Frame<'_>, hits: &[LinkHit], hover: Option<(u16, u16)>) {
+    let Some(hover) = hover else {
+        return;
+    };
+    let Some(hit) = hits.iter().find(|hit| hit.area.contains(hover.into())) else {
+        return;
+    };
+    for row in hit.area.y..hit.area.bottom() {
+        for column in hit.area.x..hit.area.right() {
+            if let Some(cell) = frame.buffer_mut().cell_mut((column, row)) {
+                cell.modifier.insert(Modifier::UNDERLINED);
+            }
+        }
     }
 }
 
@@ -296,7 +669,7 @@ fn draw_tabs(
                 .fg(theme.accent)
                 .add_modifier(Modifier::BOLD),
         ),
-        interactive_span(
+        link_span(
             app.repository_name.clone(),
             app.repository_open_target(),
             repository_area,
@@ -309,7 +682,7 @@ fn draw_tabs(
             .saturating_add(cells(app.repository_name.width()))
             .saturating_add(2);
         title.push(Span::raw("  "));
-        title.push(interactive_span(
+        title.push(link_span(
             path.clone(),
             Some(app.workspace_open_target()),
             clipped_link_area(
@@ -355,7 +728,7 @@ fn draw_tabs(
             .to_owned();
         Line::from(vec![
             Span::raw(" "),
-            interactive_span(
+            link_span(
                 branch_name.clone(),
                 branch_target,
                 clipped_link_area(
@@ -424,7 +797,7 @@ fn draw_sidebar(
             Vec::new(),
         ),
         View::PullRequests => (
-            draw_pull_requests_sidebar(frame, area, app, theme),
+            draw_pull_requests_sidebar(frame, area, app, theme, link_hits),
             Vec::new(),
         ),
     }
@@ -455,7 +828,7 @@ fn draw_changes_sidebar(
         return (Vec::new(), Vec::new());
     }
 
-    let controls_height = inner.height.min(3);
+    let controls_height = u16::from(inner.height != 0);
     let list_area = Rect::new(
         inner.x,
         inner.y,
@@ -473,6 +846,7 @@ fn draw_changes_sidebar(
             ChangeRow::Change { cursor, .. } => {
                 app.selected_change_section.is_none() && *cursor == app.change_cursor
             }
+            ChangeRow::Spacer => false,
         })
         .unwrap_or_default();
     ensure_offset(&mut app.sidebar_offset, selected_row, height, row_count);
@@ -483,6 +857,12 @@ fn draw_changes_sidebar(
         (list_area.y..list_area.bottom()).zip(rows.iter().take(end).skip(app.sidebar_offset))
     {
         match row {
+            ChangeRow::Spacer => {
+                frame.render_widget(
+                    Paragraph::new(" ").style(Style::default().bg(theme.panel)),
+                    Rect::new(list_area.x, y, list_area.width, 1),
+                );
+            }
             ChangeRow::Section {
                 section,
                 count,
@@ -497,7 +877,7 @@ fn draw_changes_sidebar(
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![
                         Span::styled(
-                            if *collapsed { " ▸ " } else { " ▾ " },
+                            disclosure_prefix(!collapsed),
                             Style::default().fg(theme.muted),
                         ),
                         Span::styled(
@@ -542,17 +922,24 @@ fn draw_changes_sidebar(
                 } else {
                     Style::default().bg(theme.panel)
                 };
+                let checked = app.checked_change_paths.contains(&change.path);
                 let path = change.parent_path();
-                let available = list_area.width.saturating_sub(13) as usize;
+                let available = list_area.width.saturating_sub(17) as usize;
                 let name = truncate_middle(
                     &change.file_name(),
                     available.saturating_sub(path.width() + 1),
                 );
+                let check_label = if checked { "[x]" } else { "[ ]" };
                 let line = Line::from(vec![
                     Span::styled(
-                        if selected { " • " } else { "   " },
+                        if selected { "•" } else { " " },
                         Style::default().fg(theme.accent),
                     ),
+                    Span::styled(
+                        check_label,
+                        Style::default().fg(if checked { theme.accent } else { theme.muted }),
+                    ),
+                    Span::raw(" "),
                     file_icon_span(&change.path, theme),
                     Span::raw(" "),
                     Span::styled(
@@ -576,6 +963,10 @@ fn draw_changes_sidebar(
                     Paragraph::new(line).style(row_style),
                     Rect::new(list_area.x, y, list_area.width.saturating_sub(7), 1),
                 );
+                action_hits.push(ScmActionHit {
+                    area: Rect::new(list_area.x.saturating_add(1), y, 3, 1),
+                    action: ScmAction::ToggleCheck(*index),
+                });
                 let (action_label, action) = match change.area {
                     ChangeArea::Staged => ("[−]", ScmAction::Unstage(*index)),
                     ChangeArea::Conflict => ("[!]", ScmAction::Resolve(*index)),
@@ -645,62 +1036,103 @@ fn draw_changes_sidebar(
     let controls_y = list_area.bottom();
     if controls_height >= 1 {
         let row = Rect::new(inner.x, controls_y, inner.width, 1);
+        let primary_label = if app.primary_is_stash() {
+            "Stash"
+        } else {
+            "Commit"
+        };
+        let primary_color = if app.primary_is_stash() {
+            theme.modified
+        } else {
+            theme.accent
+        };
+        let arrow = "▶";
+        let arrow_width = 3.min(row.width);
+        let label_width = row.width.saturating_sub(arrow_width);
+        let label_area = Rect::new(row.x, row.y, label_width, 1);
+        let arrow_area = Rect::new(row.x.saturating_add(label_width), row.y, arrow_width, 1);
         frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(" [c] Commit", Style::default().fg(theme.accent)),
-                Span::styled("   [S] Stashes", Style::default().fg(theme.modified)),
-            ]))
-            .style(Style::default().bg(theme.panel_alt)),
+            Paragraph::new("").style(Style::default().bg(theme.panel_alt)),
             row,
         );
-        action_hits.push(ScmActionHit {
-            area: Rect::new(row.x, row.y, 12.min(row.width), 1),
-            action: ScmAction::Commit,
-        });
-        action_hits.push(ScmActionHit {
-            area: Rect::new(
-                row.x.saturating_add(12).min(row.right()),
-                row.y,
-                row.width.saturating_sub(12),
-                1,
-            ),
-            action: ScmAction::Stashes,
-        });
-    }
-    if controls_height >= 2 {
-        let row = Rect::new(inner.x, controls_y + 1, inner.width, 1);
         frame.render_widget(
-            Paragraph::new(" [a] Stage All")
-                .style(Style::default().fg(theme.added).bg(theme.panel_alt)),
+            Paragraph::new(primary_label)
+                .alignment(Alignment::Center)
+                .style(
+                    Style::default()
+                        .fg(primary_color)
+                        .bg(theme.panel_alt)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            label_area,
+        );
+        frame.render_widget(
+            Paragraph::new(arrow)
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(theme.muted).bg(theme.panel_alt)),
+            arrow_area,
+        );
+        action_hits.push(ScmActionHit {
+            area: label_area,
+            action: ScmAction::Primary,
+        });
+        action_hits.push(ScmActionHit {
+            area: arrow_area,
+            action: ScmAction::ToggleMenu,
+        });
+        if app.scm_menu_open {
+            draw_scm_menu(frame, row, app.scm_menu_selected, theme, &mut action_hits);
+        }
+    }
+    (hits, action_hits)
+}
+
+fn draw_scm_menu(
+    frame: &mut Frame<'_>,
+    anchor: Rect,
+    selected: usize,
+    theme: &Theme,
+    action_hits: &mut Vec<ScmActionHit>,
+) {
+    let width = ScmMenuItem::ALL
+        .iter()
+        .map(|item| item.label().width())
+        .max()
+        .unwrap_or(12)
+        .saturating_add(4);
+    let width = u16::try_from(width).unwrap_or(24).min(anchor.width.max(24));
+    let item_count = u16::try_from(ScmMenuItem::ALL.len()).unwrap_or(7);
+    let area_height = item_count.saturating_add(2);
+    let y = anchor.y.saturating_sub(area_height);
+    let area = Rect::new(anchor.x, y, width, area_height);
+    frame.render_widget(Clear, area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.border_focus))
+        .style(Style::default().bg(theme.panel));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    for (index, item) in ScmMenuItem::ALL.iter().enumerate() {
+        let active = index == selected;
+        let row = Rect::new(
+            inner.x,
+            inner.y.saturating_add(u16::try_from(index).unwrap_or(0)),
+            inner.width,
+            1,
+        );
+        frame.render_widget(
+            Paragraph::new(format!(" {} ", item.label())).style(if active {
+                Style::default().fg(theme.text).bg(theme.selected)
+            } else {
+                Style::default().fg(theme.text).bg(theme.panel)
+            }),
             row,
         );
         action_hits.push(ScmActionHit {
             area: row,
-            action: ScmAction::StageAll,
+            action: ScmAction::Menu(*item),
         });
     }
-    if controls_height >= 3 {
-        let row = Rect::new(inner.x, controls_y + 2, inner.width, 1);
-        frame.render_widget(
-            Paragraph::new(" [U] Unstage All   [d] Compare Branch")
-                .style(Style::default().fg(theme.muted).bg(theme.panel_alt)),
-            row,
-        );
-        action_hits.push(ScmActionHit {
-            area: Rect::new(row.x, row.y, 17.min(row.width), 1),
-            action: ScmAction::UnstageAll,
-        });
-        action_hits.push(ScmActionHit {
-            area: Rect::new(
-                row.x.saturating_add(17).min(row.right()),
-                row.y,
-                row.width.saturating_sub(17),
-                1,
-            ),
-            action: ScmAction::CompareBranch,
-        });
-    }
-    (hits, action_hits)
 }
 
 #[expect(
@@ -807,7 +1239,7 @@ fn draw_history_sidebar(
             1,
         );
         frame.render_widget(
-            Paragraph::new(Line::from(interactive_span(
+            Paragraph::new(Line::from(link_span(
                 commit.short_id.clone(),
                 app.commit_open_target(&commit.id),
                 sha_area,
@@ -863,6 +1295,7 @@ fn draw_pull_requests_sidebar(
     area: Rect,
     app: &mut App,
     theme: &Theme,
+    link_hits: &mut Vec<LinkHit>,
 ) -> Vec<SidebarHitArea> {
     let warning = if app.pull_request_warnings.is_empty() {
         String::new()
@@ -875,14 +1308,20 @@ fn draw_pull_requests_sidebar(
             format!("  · {}%", progress.percent())
         });
     let cache = if app.pull_request_refreshing() {
-        "  ⟳"
+        "  · refreshing"
     } else if app.pull_request_served_from_cache() {
         "  · cached"
     } else {
         ""
     };
     let title = app.selected_pull_request().map_or_else(
-        || format!(" Open Pull Request · on demand{loading}{warning} "),
+        || {
+            if app.recent_pull_requests.is_empty() {
+                format!(" Open Pull Request · on demand{loading}{warning} ")
+            } else {
+                format!(" Recent Pull Requests{loading}{warning} ")
+            }
+        },
         |pull_request| {
             let state = if pull_request.is_draft {
                 "DRAFT"
@@ -923,18 +1362,11 @@ fn draw_pull_requests_sidebar(
             body_area.width.saturating_sub(overview_width),
             1,
         );
-        let overview_label = format!(
-            "PR {}",
-            if app.pull_request_refreshing() {
-                "⟳"
-            } else {
-                "↻"
-            }
-        );
+        let overview_label = "PR".to_owned();
         draw_pull_request_section_tab(
             frame,
             overview_tab,
-            overview_label.clone(),
+            overview_label,
             app.pull_request_section == PullRequestSection::Overview,
             theme,
         );
@@ -945,15 +1377,6 @@ fn draw_pull_requests_sidebar(
             app.pull_request_section == PullRequestSection::Files,
             theme,
         );
-        let overview_label_x = overview_tab.x
-            + overview_tab
-                .width
-                .saturating_sub(cells(overview_label.width()))
-                / 2;
-        hits.push(SidebarHitArea {
-            area: Rect::new(overview_label_x.saturating_add(3), overview_tab.y, 1, 1),
-            target: SidebarHit::PullRequestRefresh,
-        });
         hits.push(SidebarHitArea {
             area: overview_tab,
             target: SidebarHit::PullRequestOverview,
@@ -991,20 +1414,46 @@ fn draw_pull_requests_sidebar(
                 Rect::new(body_area.x, y, body_area.width, 1),
             );
         }
+    } else if body_area.height > 0 {
+        hits.extend(draw_recent_pull_requests(
+            frame, body_area, app, theme, link_hits,
+        ));
     }
 
     let controls_y = body_area.bottom();
-    let repository_name = app.pull_request_repository.as_ref().map_or_else(
-        || "auto-detect from remotes".to_owned(),
-        GitHubRepository::display_name,
-    );
+    let repository_name = app
+        .pull_request_repository
+        .as_ref()
+        .or(app.local_github_repository.as_ref())
+        .map_or_else(
+            || "auto-detect from remotes".to_owned(),
+            GitHubRepository::display_name,
+        );
     if controls_height >= 1 {
         let repository_area = Rect::new(inner.x, controls_y, inner.width, 1);
+        let prefix = " repo ";
+        let suffix = "  [o choose]";
+        let visible_name = truncate_middle(
+            &repository_name,
+            usize::from(inner.width).saturating_sub(prefix.width() + suffix.width()),
+        );
         frame.render_widget(
-            Paragraph::new(truncate_middle(
-                &format!(" repo {repository_name}  [o choose]"),
-                inner.width as usize,
-            ))
+            Paragraph::new(Line::from(vec![
+                Span::raw(prefix),
+                link_span(
+                    visible_name.clone(),
+                    app.pull_request_repository_open_target(),
+                    clipped_link_area(
+                        repository_area.x.saturating_add(cells(prefix.width())),
+                        repository_area.y,
+                        visible_name.width(),
+                        repository_area,
+                    ),
+                    theme,
+                    link_hits,
+                ),
+                Span::raw(suffix),
+            ]))
             .style(Style::default().fg(theme.text).bg(theme.panel_alt)),
             repository_area,
         );
@@ -1059,6 +1508,10 @@ fn draw_pull_requests_sidebar(
     if controls_height >= 3 {
         let status = if let Some(progress) = app.pull_request_progress {
             format!("{}% {}", progress.percent(), progress.label())
+        } else if app.pull_request.is_none() && !app.recent_pull_requests.is_empty() {
+            "j/k select · Space open · / number".to_owned()
+        } else if app.pull_request.is_none() {
+            "enter a pull request number".to_owned()
         } else {
             match app.pull_request_section {
                 PullRequestSection::Files => {
@@ -1092,6 +1545,87 @@ fn draw_pull_requests_sidebar(
     hits
 }
 
+fn draw_recent_pull_requests(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &App,
+    theme: &Theme,
+    link_hits: &mut Vec<LinkHit>,
+) -> Vec<SidebarHitArea> {
+    if app.recent_pull_requests.is_empty() {
+        frame.render_widget(
+            Paragraph::new(" No recently opened pull requests")
+                .style(Style::default().fg(theme.muted).bg(theme.panel)),
+            area,
+        );
+        return Vec::new();
+    }
+
+    let heading = Rect::new(area.x, area.y, area.width, 1);
+    frame.render_widget(
+        Paragraph::new(" Recently opened").style(Style::default().fg(theme.muted).bg(theme.panel)),
+        heading,
+    );
+    let capacity = usize::from(area.height.saturating_sub(1));
+    if capacity == 0 {
+        return Vec::new();
+    }
+    let start = app
+        .recent_pull_request_cursor
+        .saturating_sub(capacity.saturating_sub(1));
+    app.recent_pull_requests
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(capacity)
+        .map(|(index, pull_request)| {
+            let selected = index == app.recent_pull_request_cursor;
+            let row = Rect::new(
+                area.x,
+                area.y + 1 + cells(index.saturating_sub(start)),
+                area.width,
+                1,
+            );
+            let number = format!("#{} ", pull_request.number);
+            let reserved = number.width() + 3;
+            let title = truncate_middle(
+                &pull_request.title,
+                usize::from(area.width).saturating_sub(reserved),
+            );
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(
+                        if selected { " › " } else { "   " },
+                        Style::default().fg(theme.accent),
+                    ),
+                    link_span(
+                        number.clone(),
+                        Some(OpenTarget::Browser(format!(
+                            "{}/pull/{}",
+                            pull_request.repository.url.trim_end_matches('/'),
+                            pull_request.number
+                        ))),
+                        clipped_link_area(row.x.saturating_add(3), row.y, number.width(), row),
+                        theme,
+                        link_hits,
+                    ),
+                    Span::styled(title, Style::default().fg(theme.text)),
+                ]))
+                .style(Style::default().bg(if selected {
+                    theme.selected
+                } else {
+                    theme.panel
+                })),
+                row,
+            );
+            SidebarHitArea {
+                area: row,
+                target: SidebarHit::RecentPullRequest(index),
+            }
+        })
+        .collect()
+}
+
 #[expect(
     clippy::needless_pass_by_value,
     reason = "the caller has no use for the value afterwards"
@@ -1110,9 +1644,9 @@ fn draw_pull_request_section_tab(
                 Style::default()
                     .fg(if selected { theme.text } else { theme.muted })
                     .bg(if selected {
-                        theme.selected
+                        theme.accent_soft
                     } else {
-                        theme.panel_alt
+                        theme.panel
                     })
                     .add_modifier(if selected {
                         Modifier::BOLD
@@ -1183,11 +1717,7 @@ fn draw_pull_request_file_tree(
                 let available = (area.width as usize)
                     .saturating_sub(indent_width)
                     .saturating_sub(5);
-                let icon = if app.pull_request_directory_collapsed(path) {
-                    "›"
-                } else {
-                    "⌄"
-                };
+                let icon = disclosure_glyph(!app.pull_request_directory_collapsed(path));
                 frame.render_widget(
                     Paragraph::new(format!(
                         " {}{icon} {}/",
@@ -1372,15 +1902,6 @@ fn draw_pull_request_check_list(
                 SidebarHit::PullRequestCheck(index),
             )
         };
-        if row == 0 {
-            let refresh_x = area.x.saturating_add(cells(line.width().saturating_sub(1)));
-            if refresh_x < area.right() {
-                hits.push(SidebarHitArea {
-                    area: Rect::new(refresh_x, y, 1, 1),
-                    target: SidebarHit::PullRequestConversationRefresh,
-                });
-            }
-        }
         frame.render_widget(
             Paragraph::new(line).style(Style::default().bg(background)),
             row_area,
@@ -1411,20 +1932,19 @@ fn draw_pull_request_check_list(
 }
 
 fn conversation_row_suffix(app: &App) -> String {
-    let refresh = if app.pull_request_conversation_loading {
-        "  ⟳"
-    } else {
-        "  ↻"
-    };
     if app.pull_request_conversation_error.is_some() {
-        return format!("  ⚠{refresh}");
+        return "  ⚠".to_owned();
     }
     let comments = app.pull_request_conversation.comment_count();
-    if comments == 0 {
-        refresh.to_owned()
+    let mut suffix = if comments == 0 {
+        String::new()
     } else {
-        format!("  {comments}{refresh}")
+        format!("  {comments}")
+    };
+    if app.pull_request_conversation_loading {
+        suffix.push_str("  · loading");
     }
+    suffix
 }
 
 const fn pull_request_check_icon(
@@ -1444,6 +1964,48 @@ const fn pull_request_check_icon(
 /// A pre-wrapped content row, optionally anchored to a check step so a click or
 /// the step cursor can find it after scrolling.
 type ContentRow = PullRequestContentRow;
+
+struct ContentLink {
+    row: usize,
+    start: usize,
+    width: usize,
+    link: Link,
+}
+
+#[derive(Clone)]
+struct Link {
+    target: OpenTarget,
+}
+
+impl Link {
+    const fn new(target: OpenTarget) -> Self {
+        Self { target }
+    }
+
+    fn register(&self, area: Rect, hits: &mut Vec<LinkHit>) {
+        if area.width > 0 && area.height > 0 {
+            hits.push(LinkHit {
+                area,
+                target: self.target.clone(),
+            });
+        }
+    }
+
+    fn style(theme: &Theme) -> Style {
+        link_style(theme)
+    }
+
+    fn span(
+        self,
+        text: String,
+        area: Rect,
+        theme: &Theme,
+        hits: &mut Vec<LinkHit>,
+    ) -> Span<'static> {
+        self.register(area, hits);
+        Span::styled(text, Self::style(theme))
+    }
+}
 
 impl PullRequestContentRow {
     const fn plain(line: Line<'static>) -> Self {
@@ -1508,6 +2070,7 @@ fn draw_pull_request_overview(
         app.pull_request_content_rows_key = Some(rows_key);
     }
     let rows = &app.pull_request_content_rows;
+    let row_links = pull_request_content_links(app, showing_check, rows);
     let content_width = rows
         .iter()
         .filter(|row| row.wide)
@@ -1552,6 +2115,7 @@ fn draw_pull_request_overview(
         .take(inner.height as usize)
         .enumerate()
     {
+        let source_row = app.content_scroll.saturating_add(offset);
         let row_area = Rect::new(inner.x, inner.y + cells(offset), inner.width, 1);
         let selected = showing_check && row.step == Some(app.pull_request_step_cursor);
         frame.render_widget(
@@ -1572,19 +2136,168 @@ fn draw_pull_request_overview(
                 area: row_area,
                 step,
             });
-        } else if app.content_scroll.saturating_add(offset) == 0
-            && let Some(pull_request) = app.selected_pull_request()
-            && let Some(target) = app.pull_request_open_target(pull_request.number)
-        {
-            let label = format!("#{}", pull_request.number);
-            let area = clipped_link_area(row_area.x, row_area.y, label.width(), row_area);
-            if area.width > 0 {
-                link_hits.push(LinkHit { area, target });
-            }
+        }
+        for link in row_links.iter().filter(|link| link.row == source_row) {
+            let area = horizontally_scrolled_link_area(
+                row_area,
+                app.horizontal_scroll,
+                link.start,
+                link.width,
+            );
+            link.link.register(area, link_hits);
         }
     }
     draw_scrollbar(frame, inner, app.content_scroll, rows.len(), theme);
     hits
+}
+
+fn pull_request_content_links(
+    app: &App,
+    showing_check: bool,
+    rows: &[ContentRow],
+) -> Vec<ContentLink> {
+    if showing_check {
+        let Some(check) = app
+            .selected_pull_request_check()
+            .filter(|check| !check.link.is_empty())
+        else {
+            return Vec::new();
+        };
+        let link = Link::new(OpenTarget::Browser(check.link.clone()));
+        let url_row = 2
+            + usize::from(!check.started_at.is_empty())
+            + usize::from(!check.description.is_empty());
+        return vec![
+            ContentLink {
+                row: 0,
+                start: 2,
+                width: check.name.width(),
+                link: link.clone(),
+            },
+            ContentLink {
+                row: url_row,
+                start: DETAIL_LABEL_WIDTH,
+                width: check.link.width(),
+                link,
+            },
+        ];
+    }
+    let Some(pull_request) = app.selected_pull_request() else {
+        return Vec::new();
+    };
+    let mut links = Vec::new();
+    let number = format!("#{}", pull_request.number);
+    if !pull_request.url.is_empty() {
+        let target = OpenTarget::Browser(pull_request.url.clone());
+        push_content_link(rows, &mut links, 0, &number, target.clone());
+        push_content_link(rows, &mut links, 0, &pull_request.title, target.clone());
+        push_content_link(rows, &mut links, 6, &pull_request.url, target);
+    }
+    let author = format!("@{}", pull_request.author);
+    if let Some(target) = app.account_open_target(&pull_request.author) {
+        push_content_link(rows, &mut links, 1, &author, target);
+    }
+    if let Some(target) = app.pull_request_head_branch_open_target() {
+        push_content_link(rows, &mut links, 2, &pull_request.head_label(), target);
+    }
+    if let Some(target) = app.pull_request_base_branch_open_target() {
+        push_content_link(rows, &mut links, 3, &pull_request.base_label(), target);
+    }
+
+    let mut conversation_row = rows
+        .iter()
+        .position(|row| content_row_text(row).contains("Conversation"))
+        .unwrap_or(7);
+    for entry in &app.pull_request_conversation.entries {
+        let actor = format!("@{}", entry.actor);
+        let actor_location = find_conversation_actor_link(rows, conversation_row, &actor);
+        if let Some((row, start, width)) = actor_location {
+            if let Some(target) = app.account_open_target(&entry.actor) {
+                links.push(ContentLink {
+                    row,
+                    start,
+                    width,
+                    link: Link::new(target),
+                });
+            }
+            conversation_row = row.saturating_add(1);
+            if !entry.url.is_empty() {
+                let action = rows.get(row).and_then(|content| {
+                    let action = content.line.spans.get(2)?;
+                    let action_start = content.line.spans.iter().take(2).map(Span::width).sum();
+                    Some((action_start, action.width()))
+                });
+                if let Some((action_start, action_width)) = action {
+                    links.push(ContentLink {
+                        row,
+                        start: action_start,
+                        width: action_width,
+                        link: Link::new(OpenTarget::Browser(entry.url.clone())),
+                    });
+                }
+            }
+        }
+    }
+    links
+}
+
+fn find_conversation_actor_link(
+    rows: &[ContentRow],
+    start_row: usize,
+    actor: &str,
+) -> Option<(usize, usize, usize)> {
+    rows.iter()
+        .enumerate()
+        .skip(start_row)
+        .find_map(|(row, content)| {
+            let actor_span = content.line.spans.get(1)?;
+            (actor_span.content == actor).then(|| {
+                let start = content.line.spans.first().map_or(0, Span::width);
+                (row, start, actor_span.width())
+            })
+        })
+}
+
+fn push_content_link(
+    rows: &[ContentRow],
+    links: &mut Vec<ContentLink>,
+    start_row: usize,
+    text: &str,
+    target: OpenTarget,
+) {
+    if let Some((row, start, width)) = find_content_link(rows, start_row, text) {
+        links.push(ContentLink {
+            row,
+            start,
+            width,
+            link: Link::new(target),
+        });
+    }
+}
+
+fn find_content_link(
+    rows: &[ContentRow],
+    start_row: usize,
+    needle: &str,
+) -> Option<(usize, usize, usize)> {
+    if needle.is_empty() {
+        return None;
+    }
+    rows.iter()
+        .enumerate()
+        .skip(start_row)
+        .find_map(|(row, content)| {
+            let text = content_row_text(content);
+            let byte_start = text.find(needle)?;
+            Some((row, text.get(..byte_start)?.width(), needle.width()))
+        })
+}
+
+fn content_row_text(row: &ContentRow) -> String {
+    row.line.spans.iter().fold(String::new(), |mut text, span| {
+        text.push_str(&span.content);
+        text
+    })
 }
 
 fn overview_title(app: &App, showing_check: bool) -> String {
@@ -1596,7 +2309,7 @@ fn overview_title(app: &App, showing_check: bool) -> String {
             .selected_pull_request_check()
             .map_or("Check", |check| check.name.as_str());
         let loading = if app.pull_request_check_log_loading {
-            "  ⟳"
+            "  · loading"
         } else {
             ""
         };
@@ -1608,7 +2321,7 @@ fn overview_title(app: &App, showing_check: bool) -> String {
         pull_request.state.as_str()
     };
     let loading = if app.pull_request_conversation_loading {
-        "  ⟳"
+        "  · loading"
     } else if app.pull_request_served_from_cache() {
         "  · cached"
     } else {
@@ -1662,45 +2375,61 @@ fn conversation_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> 
         pull_request.state.as_str()
     };
     rows.push(ContentRow::wide(Line::from(vec![
+        Span::styled(format!("#{}  ", pull_request.number), Link::style(theme)),
+        Span::styled(pull_request.title.clone(), Link::style(theme)),
+    ])));
+    rows.push(ContentRow::wide(Line::from(vec![
         Span::styled(
-            format!("#{}  ", pull_request.number),
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            format!("{:<DETAIL_LABEL_WIDTH$}", "State"),
+            Style::default().fg(theme.muted),
+        ),
+        Span::styled(format!("{state}  ·  "), Style::default().fg(theme.text)),
+        Span::styled(
+            format!("@{}", pull_request.author),
+            app.account_open_target(&pull_request.author).map_or_else(
+                || Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                |_| Link::style(theme),
+            ),
         ),
         Span::styled(
-            pull_request.title.clone(),
-            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+            format!(
+                "  ·  opened {}  ·  updated {}",
+                format_local_timestamp(&pull_request.created_at),
+                format_local_timestamp(&pull_request.updated_at)
+            ),
+            Style::default().fg(theme.text),
         ),
     ])));
-    rows.push(ContentRow::wide(detail_line(
-        "State",
-        format!(
-            "{state}  ·  @{}  ·  opened {}  ·  updated {}",
-            pull_request.author,
-            format_local_timestamp(&pull_request.created_at),
-            format_local_timestamp(&pull_request.updated_at)
+    rows.push(ContentRow::wide(Line::from(vec![
+        Span::styled(
+            format!("{:<DETAIL_LABEL_WIDTH$}", "Source"),
+            Style::default().fg(theme.muted),
         ),
-        theme,
-    )));
-    rows.push(ContentRow::wide(detail_line(
-        "Source",
-        format!(
-            "{}{}",
+        Span::styled(
             pull_request.head_label(),
+            app.pull_request_head_branch_open_target()
+                .map_or_else(|| Style::default().fg(theme.text), |_| Link::style(theme)),
+        ),
+        Span::styled(
             if pull_request.is_cross_repository {
                 "  ·  fork"
             } else {
                 ""
-            }
+            },
+            Style::default().fg(theme.text),
         ),
-        theme,
-    )));
-    rows.push(ContentRow::wide(detail_line(
-        "Destination",
-        pull_request.base_label(),
-        theme,
-    )));
+    ])));
+    rows.push(ContentRow::wide(Line::from(vec![
+        Span::styled(
+            format!("{:<DETAIL_LABEL_WIDTH$}", "Destination"),
+            Style::default().fg(theme.muted),
+        ),
+        Span::styled(
+            pull_request.base_label(),
+            app.pull_request_base_branch_open_target()
+                .map_or_else(|| Style::default().fg(theme.text), |_| Link::style(theme)),
+        ),
+    ])));
     rows.push(ContentRow::wide(Line::from(vec![
         Span::styled(
             format!("{:<DETAIL_LABEL_WIDTH$}", "Changes"),
@@ -1733,7 +2462,7 @@ fn conversation_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> 
         ),
     ])));
     rows.push(ContentRow::wide(check_summary_line(app, theme)));
-    rows.push(ContentRow::wide(detail_line(
+    rows.push(ContentRow::wide(link_detail_line(
         "URL",
         pull_request.url.clone(),
         theme,
@@ -1782,7 +2511,7 @@ fn conversation_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> 
     }
     for entry in &app.pull_request_conversation.entries {
         rows.push(ContentRow::blank());
-        push_conversation_entry(&mut rows, entry, width, theme);
+        push_conversation_entry(&mut rows, entry, width, app, theme);
     }
     rows
 }
@@ -1791,6 +2520,7 @@ fn push_conversation_entry(
     rows: &mut Vec<ContentRow>,
     entry: &ConversationEntry,
     width: usize,
+    app: &App,
     theme: &Theme,
 ) {
     let (icon, color, action) = conversation_marker(entry, theme);
@@ -1806,9 +2536,19 @@ fn push_conversation_entry(
         Span::styled(format!("{icon} "), Style::default().fg(color)),
         Span::styled(
             format!("@{}", entry.actor),
-            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+            app.account_open_target(&entry.actor).map_or_else(
+                || Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                |_| Link::style(theme),
+            ),
         ),
-        Span::styled(format!(" {action}"), Style::default().fg(theme.muted)),
+        Span::styled(
+            format!(" {action}"),
+            if entry.url.is_empty() {
+                Style::default().fg(theme.muted)
+            } else {
+                Link::style(theme)
+            },
+        ),
         Span::styled(stamp, Style::default().fg(theme.muted)),
     ])));
 
@@ -1860,7 +2600,7 @@ fn conversation_marker(entry: &ConversationEntry, theme: &Theme) -> (&'static st
         ),
         ConversationKind::Commit => ("●", theme.muted, format!("pushed {}", entry.detail)),
         ConversationKind::ForcePush => (
-            "↻",
+            "↑",
             theme.modified,
             format!(
                 "force-pushed{}",
@@ -1916,7 +2656,7 @@ fn conversation_marker(entry: &ConversationEntry, theme: &Theme) -> (&'static st
             ("⌫", theme.muted, "deleted the source branch".to_owned())
         }
         ConversationKind::HeadRefRestored => {
-            ("↺", theme.muted, "restored the source branch".to_owned())
+            ("◆", theme.muted, "restored the source branch".to_owned())
         }
         ConversationKind::BaseRefChanged => (
             "⇄",
@@ -1980,7 +2720,11 @@ fn check_run_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> {
         ),
         Span::styled(
             check.name.clone(),
-            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+            if check.link.is_empty() {
+                Style::default().fg(theme.text).add_modifier(Modifier::BOLD)
+            } else {
+                Link::style(theme)
+            },
         ),
     ])));
     rows.push(ContentRow::wide(detail_line(
@@ -2010,7 +2754,7 @@ fn check_run_rows(app: &App, width: usize, theme: &Theme) -> Vec<ContentRow> {
         )));
     }
     if !check.link.is_empty() {
-        rows.push(ContentRow::wide(detail_line(
+        rows.push(ContentRow::wide(link_detail_line(
             "URL",
             check.link.clone(),
             theme,
@@ -2106,7 +2850,7 @@ fn check_step_row(
     ContentRow {
         line: Line::from(vec![
             Span::styled(
-                if expanded { " ⌄ " } else { " › " },
+                disclosure_prefix(expanded),
                 Style::default().fg(theme.muted),
             ),
             Span::styled(format!("{icon} "), Style::default().fg(color)),
@@ -2360,12 +3104,12 @@ fn draw_content(
             if app.document_loading
                 && !(app.view == View::PullRequests && app.document.file_count() > 0)
             {
-                "  ⟳".to_owned()
+                "  · loading".to_owned()
             } else {
                 String::new()
             }
         },
-        |progress| format!("  ⟳ {}%", progress.percent()),
+        |progress| format!("  · {}%", progress.percent()),
     );
     let title_width = (area.width as usize)
         .saturating_sub(loading.width())
@@ -2390,7 +3134,7 @@ fn draw_content(
 
     let details_rows = if app.document.commit_details.is_some() {
         commit_details_row_count(inner.height)
-    } else if app.view != View::PullRequests && app.document.pull_request_details.is_some() {
+    } else if app.document.pull_request_details.is_some() {
         pull_request_details_row_count(inner.height)
     } else {
         0
@@ -2425,14 +3169,15 @@ fn draw_content(
                 theme,
                 link_hits,
             );
-        } else if let Some(details) = app.document.pull_request_details.as_ref() {
+        } else if app.document.pull_request_details.is_some() {
             draw_pull_request_details_scrolled(
                 frame,
                 details_area,
-                details,
+                app,
                 diff_scroll,
                 details_rows,
                 theme,
+                link_hits,
             );
         }
         diff_area = Rect::new(
@@ -2503,11 +3248,11 @@ fn draw_commit_details_scrolled(
         .unwrap_or_else(|| (document.addition_count(), document.deletion_count()));
     let block = Block::default()
         .title(" Commit details ")
-        .borders(Borders::ALL)
+        .borders(Borders::TOP | Borders::BOTTOM)
         .border_style(Style::default().fg(theme.border))
         .style(Style::default().bg(theme.panel_alt).fg(theme.text));
     let full_area = Rect::new(0, 0, area.width, cells(total_rows));
-    let mut buffer = ratatui::buffer::Buffer::empty(full_area);
+    let mut buffer = Buffer::empty(full_area);
     let inner = block.inner(full_area);
     block.render(full_area, &mut buffer);
     let file_count = document.file_count();
@@ -2533,7 +3278,7 @@ fn draw_commit_details_scrolled(
                         prefix,
                         Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
                     ),
-                    interactive_span(
+                    link_span(
                         reference.to_owned(),
                         Some(target),
                         scrolled_detail_link_area(
@@ -2580,7 +3325,7 @@ fn draw_commit_details_scrolled(
                 format!("{:<DETAIL_LABEL_WIDTH$}", "Commit"),
                 Style::default().fg(theme.muted),
             ),
-            interactive_span(
+            link_span(
                 details.id.clone(),
                 app.commit_open_target(&details.id),
                 scrolled_detail_link_area(
@@ -2645,21 +3390,29 @@ fn draw_commit_details_scrolled(
     clippy::too_many_lines,
     reason = "the draw pass reads better as one top-to-bottom pass"
 )]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "rendering and hit registration share the same scrolled coordinate space"
+)]
 fn draw_pull_request_details_scrolled(
     frame: &mut Frame<'_>,
     area: Rect,
-    details: &PullRequestDetails,
+    app: &App,
     scroll: usize,
     total_rows: usize,
     theme: &Theme,
+    link_hits: &mut Vec<LinkHit>,
 ) {
+    let Some(details) = app.document.pull_request_details.as_ref() else {
+        return;
+    };
     let block = Block::default()
         .title(format!(" Pull request #{} · details ", details.number))
-        .borders(Borders::ALL)
+        .borders(Borders::TOP | Borders::BOTTOM)
         .border_style(Style::default().fg(theme.border))
         .style(Style::default().bg(theme.panel_alt).fg(theme.text));
     let full_area = Rect::new(0, 0, area.width, cells(total_rows));
-    let mut buffer = ratatui::buffer::Buffer::empty(full_area);
+    let mut buffer = Buffer::empty(full_area);
     let inner = block.inner(full_area);
     block.render(full_area, &mut buffer);
     let state = if details.is_draft {
@@ -2668,21 +3421,34 @@ fn draw_pull_request_details_scrolled(
         details.state.as_str()
     };
     let head_repository = details.head_repository.as_deref().unwrap_or("deleted fork");
-    let mut lines = vec![
-        Line::from(Span::styled(
-            details.title.as_str(),
-            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
-        )),
-        detail_line(
-            "Status",
-            format!(
-                "{state}  ·  @{}  ·  updated {}",
-                details.author,
-                format_local_timestamp(&details.updated_at)
-            ),
-            theme,
+    let pull_request_target =
+        (!details.url.is_empty()).then(|| OpenTarget::Browser(details.url.clone()));
+    let title_width = details.title.width();
+    let mut lines = vec![Line::from(link_span(
+        details.title.clone(),
+        pull_request_target,
+        scrolled_detail_link_area(area, scroll, inner.y, inner.x, title_width),
+        theme,
+        link_hits,
+    ))];
+    let status_prefix = format!("{state}  ·  ");
+    let author = format!("@{}", details.author);
+    lines.push(scrolled_link_detail_line(
+        "Status",
+        status_prefix,
+        author,
+        format!(
+            "  ·  updated {}",
+            format_local_timestamp(&details.updated_at)
         ),
-    ];
+        app.account_open_target(&details.author),
+        area,
+        scroll,
+        inner,
+        1,
+        theme,
+        link_hits,
+    ));
     for (index, description) in description_preview_lines(
         &details.description,
         inner.width.saturating_sub(12) as usize,
@@ -2729,33 +3495,57 @@ fn draw_pull_request_details_scrolled(
                 .add_modifier(Modifier::BOLD),
         ),
     ]);
+    let source_row = lines.len();
+    lines.push(scrolled_link_detail_line(
+        "Source",
+        String::new(),
+        format!("{head_repository}:{}", details.head_ref),
+        format!(
+            "{}{}",
+            remote_suffix(&details.head_remotes),
+            if details.is_cross_repository {
+                "  ·  fork"
+            } else {
+                ""
+            }
+        ),
+        app.pull_request_head_branch_open_target(),
+        area,
+        scroll,
+        inner,
+        source_row,
+        theme,
+        link_hits,
+    ));
+    let destination_row = lines.len();
+    lines.push(scrolled_link_detail_line(
+        "Destination",
+        String::new(),
+        format!("{}:{}", details.base_repository, details.base_ref),
+        remote_suffix(&details.base_remotes),
+        app.pull_request_base_branch_open_target(),
+        area,
+        scroll,
+        inner,
+        destination_row,
+        theme,
+        link_hits,
+    ));
+    let url_row = lines.len();
+    lines.push(scrolled_link_detail_line(
+        "URL",
+        String::new(),
+        details.url.clone(),
+        String::new(),
+        (!details.url.is_empty()).then(|| OpenTarget::Browser(details.url.clone())),
+        area,
+        scroll,
+        inner,
+        url_row,
+        theme,
+        link_hits,
+    ));
     lines.extend([
-        detail_line(
-            "Source",
-            format!(
-                "{}:{}{}{}",
-                head_repository,
-                details.head_ref,
-                remote_suffix(&details.head_remotes),
-                if details.is_cross_repository {
-                    "  ·  fork"
-                } else {
-                    ""
-                }
-            ),
-            theme,
-        ),
-        detail_line(
-            "Destination",
-            format!(
-                "{}:{}{}",
-                details.base_repository,
-                details.base_ref,
-                remote_suffix(&details.base_remotes)
-            ),
-            theme,
-        ),
-        detail_line("URL", details.url.clone(), theme),
         Line::from(selected_file),
         Line::from(vec![
             Span::styled("PR total   ", Style::default().fg(theme.muted)),
@@ -2799,6 +3589,45 @@ fn draw_pull_request_details_scrolled(
             }
         }
     }
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the helper maps one linked detail value into a scrolled card"
+)]
+fn scrolled_link_detail_line(
+    label: &str,
+    prefix: String,
+    text: String,
+    suffix: String,
+    target: Option<OpenTarget>,
+    area: Rect,
+    scroll: usize,
+    inner: Rect,
+    row: usize,
+    theme: &Theme,
+    link_hits: &mut Vec<LinkHit>,
+) -> Line<'static> {
+    let link_x = inner
+        .x
+        .saturating_add(cells(DETAIL_LABEL_WIDTH))
+        .saturating_add(cells(prefix.width()));
+    let link_area = scrolled_detail_link_area(
+        area,
+        scroll,
+        inner.y.saturating_add(cells(row)),
+        link_x,
+        text.width(),
+    );
+    Line::from(vec![
+        Span::styled(
+            format!("{label:<DETAIL_LABEL_WIDTH$}"),
+            Style::default().fg(theme.muted),
+        ),
+        Span::styled(prefix, Style::default().fg(theme.text)),
+        link_span(text, target, link_area, theme, link_hits),
+        Span::styled(suffix, Style::default().fg(theme.text)),
+    ])
 }
 
 fn description_preview_lines(value: &str, width: usize, maximum_lines: usize) -> Vec<String> {
@@ -2923,25 +3752,36 @@ fn detail_line<'a>(label: &'a str, value: String, theme: &Theme) -> Line<'a> {
     ])
 }
 
-fn interactive_span(
+fn link_detail_line<'a>(label: &'a str, value: String, theme: &Theme) -> Line<'a> {
+    Line::from(vec![
+        Span::styled(
+            format!("{label:<DETAIL_LABEL_WIDTH$}"),
+            Style::default().fg(theme.muted),
+        ),
+        Span::styled(value, Link::style(theme)),
+    ])
+}
+
+fn link_style(theme: &Theme) -> Style {
+    Style::default()
+        .fg(theme.accent)
+        .add_modifier(Modifier::BOLD)
+}
+
+fn link_span(
     text: String,
     target: Option<OpenTarget>,
     area: Rect,
     theme: &Theme,
     hits: &mut Vec<LinkHit>,
 ) -> Span<'static> {
-    let style = target.map_or_else(
-        || Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
-        |target| {
-            if area.width > 0 && area.height > 0 {
-                hits.push(LinkHit { area, target });
-            }
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
-        },
-    );
-    Span::styled(text, style)
+    match target {
+        None => Span::styled(
+            text,
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+        ),
+        Some(target) => Link::new(target).span(text, area, theme, hits),
+    }
 }
 
 fn clipped_link_area(x: u16, y: u16, width: usize, container: Rect) -> Rect {
@@ -2953,6 +3793,27 @@ fn clipped_link_area(x: u16, y: u16, width: usize, container: Rect) -> Rect {
         y,
         cells(width).min(container.right().saturating_sub(x.max(container.x))),
         1,
+    )
+}
+
+fn horizontally_scrolled_link_area(
+    container: Rect,
+    scroll: usize,
+    start: usize,
+    width: usize,
+) -> Rect {
+    let end = start.saturating_add(width);
+    if end <= scroll {
+        return Rect::default();
+    }
+    let visible_start = start.max(scroll);
+    clipped_link_area(
+        container
+            .x
+            .saturating_add(cells(visible_start.saturating_sub(scroll))),
+        container.y,
+        end.saturating_sub(visible_start),
+        container,
     )
 }
 
@@ -3095,17 +3956,12 @@ fn draw_unified_line(
     frame: &mut Frame<'_>,
     area: Rect,
     line: &DiffLine,
-    boxed: bool,
+    _boxed: bool,
     horizontal_scroll: usize,
     emphasis: Option<&Range<usize>>,
     theme: &Theme,
 ) {
-    let content_area = if boxed {
-        draw_file_edges(frame, area, line.kind, theme);
-        Rect::new(area.x + 1, area.y, area.width.saturating_sub(2), 1)
-    } else {
-        area
-    };
+    let content_area = area;
     let old = line
         .old_line
         .map_or(String::new(), |number| number.to_string());
@@ -3171,27 +4027,22 @@ fn draw_file_header(frame: &mut Frame<'_>, area: Rect, line: &DiffLine, app: &Ap
         .first()
         .map(|span| span.text.as_str())
         .unwrap_or_default();
-    let disclosure = if !app.preview_files_collapsible() {
-        " "
-    } else if file_header_path(line).is_some_and(|path| app.preview_file_collapsed(path)) {
-        "›"
+    let disclosure = if app.preview_files_collapsible() {
+        disclosure_glyph(
+            file_header_path(line).is_none_or(|path| !app.preview_file_collapsed(path)),
+        )
     } else {
-        "⌄"
+        " "
     };
     let additions = line.spans.get(1).map_or("+0", |span| span.text.as_str());
     let deletions = line.spans.get(2).map_or("-0", |span| span.text.as_str());
     let icon = file_icon_span(Path::new(file_header_path(line).unwrap_or(label)), theme);
-    let reserved = 11_usize + additions.width() + deletions.width();
+    let reserved = 10_usize + additions.width() + deletions.width();
     let label = truncate_middle(label, (area.width as usize).saturating_sub(reserved));
     let fill = (area.width as usize)
         .saturating_sub(reserved)
         .saturating_sub(label.width());
     let selected = file_header_path(line).is_some_and(|path| app.preview_file_selected(path));
-    let border = if selected {
-        theme.border_focus
-    } else {
-        theme.border
-    };
     let background = if selected {
         theme.selected
     } else {
@@ -3199,7 +4050,7 @@ fn draw_file_header(frame: &mut Frame<'_>, area: Rect, line: &DiffLine, app: &Ap
     };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("┌─", Style::default().fg(border)),
+            Span::styled("─", Style::default().fg(theme.border)),
             Span::styled(format!(" {disclosure} "), Style::default().fg(theme.muted)),
             icon,
             Span::raw(" "),
@@ -3207,7 +4058,7 @@ fn draw_file_header(frame: &mut Frame<'_>, area: Rect, line: &DiffLine, app: &Ap
                 label,
                 Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
             ),
-            Span::styled("─".repeat(fill), Style::default().fg(border)),
+            Span::styled("─".repeat(fill), Style::default().fg(theme.border)),
             Span::styled(" ", Style::default()),
             Span::styled(
                 additions.to_owned(),
@@ -3222,7 +4073,7 @@ fn draw_file_header(frame: &mut Frame<'_>, area: Rect, line: &DiffLine, app: &Ap
                     .fg(theme.removed)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" ┐", Style::default().fg(border)),
+            Span::styled(" ─", Style::default().fg(theme.border)),
         ]))
         .style(Style::default().bg(background)),
         area,
@@ -3233,35 +4084,10 @@ fn draw_file_footer(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
     if area.width == 0 {
         return;
     }
-    let text = if area.width == 1 {
-        "└".to_owned()
-    } else {
-        format!("└{}┘", "─".repeat(area.width.saturating_sub(2) as usize))
-    };
     frame.render_widget(
-        Paragraph::new(text).style(Style::default().fg(theme.border).bg(theme.panel)),
+        Paragraph::new("─".repeat(area.width as usize))
+            .style(Style::default().fg(theme.border).bg(theme.panel)),
         area,
-    );
-}
-
-fn draw_file_edges(frame: &mut Frame<'_>, area: Rect, kind: DiffLineKind, theme: &Theme) {
-    if area.width < 2 {
-        return;
-    }
-    let background = match kind {
-        DiffLineKind::Added => theme.added_background,
-        DiffLineKind::Removed => theme.removed_background,
-        DiffLineKind::HunkHeader => theme.panel_alt,
-        _ => theme.panel,
-    };
-    let style = Style::default().fg(theme.border).bg(background);
-    frame.render_widget(
-        Paragraph::new("│").style(style),
-        Rect::new(area.x, area.y, 1, 1),
-    );
-    frame.render_widget(
-        Paragraph::new("│").style(style),
-        Rect::new(area.right().saturating_sub(1), area.y, 1, 1),
     );
 }
 
@@ -3274,12 +4100,7 @@ fn draw_side_by_side_diff(
     diff_scroll: usize,
     theme: &Theme,
 ) -> (Rect, Vec<ContentFileHit>) {
-    let content = Rect::new(
-        area.x + 1,
-        area.y,
-        area.width.saturating_sub(2),
-        area.height,
-    );
+    let content = area;
     let usable_width = content.width.saturating_sub(1);
     let left_width = usable_width.saturating_mul(app.diff_split_percent) / 100;
     let left = Rect::new(content.x, content.y, left_width, content.height);
@@ -3372,10 +4193,6 @@ fn draw_side_by_side_diff(
                     new_emphasis.as_ref(),
                     theme,
                 );
-                let edge_kind = old_line
-                    .or(*new_line)
-                    .map_or(DiffLineKind::Context, |line| line.kind);
-                draw_file_edges(frame, row_area, edge_kind, theme);
             }
         }
     }
@@ -3574,16 +4391,11 @@ fn draw_full_width_diff_line(
     frame: &mut Frame<'_>,
     area: Rect,
     line: &DiffLine,
-    boxed: bool,
+    _boxed: bool,
     horizontal_scroll: usize,
     theme: &Theme,
 ) {
-    let content_area = if boxed {
-        draw_file_edges(frame, area, line.kind, theme);
-        Rect::new(area.x + 1, area.y, area.width.saturating_sub(2), 1)
-    } else {
-        area
-    };
+    let content_area = area;
     let (marker, marker_style) = marker_for(line.kind, theme);
     let mut spans = vec![Span::styled(marker, marker_style)];
     spans.extend(highlight_spans(
@@ -3813,14 +4625,9 @@ fn draw_scrollbar(frame: &mut Frame<'_>, area: Rect, offset: usize, length: usiz
     let thumb_height = (height * height / length).max(1).min(height);
     let max_offset = length.saturating_sub(height).max(1);
     let thumb_start = offset.min(max_offset) * (height - thumb_height) / max_offset;
-    for row in 0..height {
-        let color = if (thumb_start..thumb_start + thumb_height).contains(&row) {
-            theme.accent_soft
-        } else {
-            theme.border
-        };
+    for row in thumb_start..thumb_start + thumb_height {
         frame.render_widget(
-            Paragraph::new("▐").style(Style::default().fg(color)),
+            Paragraph::new("▐").style(Style::default().fg(theme.accent_soft)),
             Rect::new(area.right().saturating_sub(1), area.y + cells(row), 1, 1),
         );
     }
@@ -3850,7 +4657,7 @@ fn draw_footer(
     } else if let Some(progress) = app.pull_request_progress {
         Line::from(vec![
             Span::styled(
-                " ⟳ ",
+                format!(" {} ", app.operation_spinner()),
                 Style::default()
                     .fg(theme.accent)
                     .add_modifier(Modifier::BOLD),
@@ -3869,10 +4676,10 @@ fn draw_footer(
             ),
         ])
     } else if app.refreshing {
-        Line::from(vec![
-            Span::styled(" ⟳ ", Style::default().fg(theme.accent)),
-            Span::styled("Refreshing repository…", Style::default().fg(theme.muted)),
-        ])
+        Line::from(Span::styled(
+            " Refreshing repository…",
+            Style::default().fg(theme.muted),
+        ))
     } else {
         let branch = if app.status.branch.head.is_empty() {
             "—".to_owned()
@@ -3881,7 +4688,7 @@ fn draw_footer(
         };
         Line::from(vec![
             Span::styled("  ", Style::default().fg(theme.accent)),
-            interactive_span(
+            link_span(
                 branch.clone(),
                 app.branch_open_target(&app.status.branch.head),
                 clipped_link_area(
@@ -3915,91 +4722,179 @@ fn draw_footer(
     );
 }
 
-fn draw_modal(frame: &mut Frame<'_>, modal: &Modal, app: &App, theme: &Theme) {
-    match modal {
-        Modal::Help { scroll } => draw_help(frame, *scroll, theme),
-        Modal::Commit { input, amend } => draw_commit(frame, input, *amend, theme),
-        Modal::Prompt { title, input, .. } => draw_prompt(frame, title, input, theme),
-        Modal::Confirm { title, message, .. } => draw_confirm(frame, title, message, theme),
-        Modal::Branches {
+fn draw_modal(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
+    if matches!(app.modal, Some(Modal::Help { .. })) {
+        draw_help(frame, app, theme);
+        return;
+    }
+    draw_modal_content(frame, app, theme);
+}
+
+fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
+    match app.modal.as_ref() {
+        None | Some(Modal::Help { .. }) => {}
+        Some(Modal::Commit { input, amend }) => {
+            let input = input.clone();
+            let amend = *amend;
+            draw_commit(
+                frame,
+                &mut app.geometry.modal_action_hits,
+                &input,
+                amend,
+                theme,
+            );
+        }
+        Some(Modal::Prompt { title, input, .. }) => {
+            draw_prompt(frame, title, input, theme);
+        }
+        Some(Modal::Confirm { title, message, .. }) => {
+            let title = title.clone();
+            let message = message.clone();
+            draw_confirm(
+                frame,
+                &mut app.geometry.modal_action_hits,
+                &title,
+                &message,
+                theme,
+            );
+        }
+        Some(Modal::Branches {
             items,
             selected,
             query,
             loading,
             ..
-        } => draw_branches(frame, items, *selected, query, *loading, theme),
-        Modal::HistoryBranches {
+        }) => draw_branches(frame, items, *selected, query, *loading, theme),
+        Some(Modal::HistoryBranches {
             items,
             selected,
             query,
             loading,
-        } => draw_history_branches(frame, items, *selected, query, *loading, theme),
-        Modal::CompareBranches {
+        }) => draw_history_branches(frame, items, *selected, query, *loading, theme),
+        Some(Modal::CompareBranches {
             items,
             selected,
             query,
             loading,
-        } => draw_compare_branches(frame, items, *selected, query, *loading, theme),
-        Modal::Stashes {
+        }) => draw_compare_branches(frame, items, *selected, query, *loading, theme),
+        Some(Modal::Stashes {
             items,
             selected,
             query,
             loading,
-        } => draw_stashes(frame, items, *selected, query, *loading, theme),
-        Modal::PullRequestRepositories {
+        }) => draw_stashes(frame, items, *selected, query, *loading, theme),
+        Some(Modal::PullRequestRepositories {
             items,
             selected,
             query,
             loading,
-        } => draw_pull_request_repositories(frame, items, *selected, query, *loading, theme),
-        Modal::CommandPalette { query, selected } => {
-            draw_palette(frame, app, query, *selected, theme);
+        }) => draw_pull_request_repositories(frame, items, *selected, query, *loading, theme),
+        Some(Modal::CommandPalette { query, selected }) => {
+            let query = query.clone();
+            let selected = *selected;
+            draw_palette(frame, app, &query, selected, theme);
         }
-        Modal::Themes { selected, .. } => {
+        Some(Modal::Themes { selected, .. }) => {
             draw_theme_picker(frame, *selected, app.theme_name, theme);
         }
-        Modal::Appearances { selected, .. } => {
+        Some(Modal::Appearances { selected, .. }) => {
             draw_appearance_picker(frame, *selected, app.appearance_choice, theme);
         }
-        Modal::Conflict { change } => draw_conflict(frame, change, theme),
+        Some(Modal::Conflict { change }) => draw_conflict(frame, change, theme),
     }
 }
 
-fn draw_help(frame: &mut Frame<'_>, scroll: usize, theme: &Theme) {
+fn draw_help(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
+    let (selected, mut scroll, hover) = match &app.modal {
+        Some(Modal::Help {
+            selected,
+            scroll,
+            hover,
+        }) => (*selected, *scroll, *hover),
+        _ => return,
+    };
     let area = centered_rect(
-        68,
-        31.min(frame.area().height.saturating_sub(4)),
+        72,
+        34.min(frame.area().height.saturating_sub(2)),
         frame.area(),
     );
     frame.render_widget(Clear, area);
     let block = modal_block(" Keyboard Shortcuts ", theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let lines = HELP_LINES
-        .iter()
-        .skip(scroll)
-        .take(inner.height.saturating_sub(1) as usize)
-        .map(|(key, description)| {
-            if description.is_empty() && !key.is_empty() {
-                Line::from(Span::styled(
-                    *key,
-                    Style::default()
-                        .fg(theme.accent)
-                        .add_modifier(Modifier::BOLD),
-                ))
-            } else {
-                Line::from(vec![
-                    Span::styled(format!("{key:<20}"), Style::default().fg(theme.modified)),
-                    Span::styled(*description, Style::default().fg(theme.text)),
-                ])
+    let list_height = inner.height.saturating_sub(1) as usize;
+    let display_selected = help_display_index(selected);
+    ensure_offset(&mut scroll, display_selected, list_height, HELP_ROWS.len());
+    let mut hits = Vec::new();
+    let end = (scroll + list_height).min(HELP_ROWS.len());
+    for (y, (display, row)) in (inner.y..inner.y.saturating_add(cells(list_height)))
+        .zip(HELP_ROWS.iter().enumerate().take(end).skip(scroll))
+    {
+        match row {
+            HelpRow::Section(title) => {
+                frame.render_widget(
+                    Paragraph::new(Line::from(Span::styled(
+                        (*title).to_owned(),
+                        Style::default()
+                            .fg(theme.accent)
+                            .add_modifier(Modifier::BOLD),
+                    )))
+                    .style(Style::default().bg(theme.panel_alt)),
+                    Rect::new(inner.x, y, inner.width, 1),
+                );
             }
-        })
-        .collect::<Vec<_>>();
-    frame.render_widget(Paragraph::new(lines), inner);
-    draw_modal_hint(frame, area, "Esc close", theme);
+            HelpRow::Spacer => {
+                frame.render_widget(
+                    Paragraph::new(" ").style(Style::default().bg(theme.panel)),
+                    Rect::new(inner.x, y, inner.width, 1),
+                );
+            }
+            HelpRow::Shortcut { keys, description } => {
+                let Some(index) = help_shortcut_index_at(display) else {
+                    continue;
+                };
+                let background = if index == selected {
+                    theme.selected
+                } else if hover == Some(index) {
+                    theme.panel_alt
+                } else {
+                    theme.panel
+                };
+                frame.render_widget(
+                    Paragraph::new(Line::from(vec![
+                        Span::styled(
+                            format!("{keys:<22}"),
+                            Style::default().fg(theme.modified).bg(background),
+                        ),
+                        Span::styled(
+                            (*description).to_owned(),
+                            Style::default().fg(theme.text).bg(background),
+                        ),
+                    ]))
+                    .style(Style::default().bg(background)),
+                    Rect::new(inner.x, y, inner.width, 1),
+                );
+                hits.push(HelpHit {
+                    area: Rect::new(inner.x, y, inner.width, 1),
+                    index,
+                });
+            }
+        }
+    }
+    if let Some(Modal::Help { scroll: stored, .. }) = &mut app.modal {
+        *stored = scroll;
+    }
+    app.geometry.help_hits = hits;
+    draw_modal_hint(frame, area, "j/k select · Esc close", theme);
 }
 
-fn draw_commit(frame: &mut Frame<'_>, input: &crate::app::TextBuffer, amend: bool, theme: &Theme) {
+fn draw_commit(
+    frame: &mut Frame<'_>,
+    hits: &mut Vec<(Rect, ModalAction)>,
+    input: &crate::app::TextBuffer,
+    amend: bool,
+    theme: &Theme,
+) {
     let width = frame.area().width.saturating_sub(12).min(76);
     let area = centered_rect(width, 12, frame.area());
     frame.render_widget(Clear, area);
@@ -4031,11 +4926,62 @@ fn draw_commit(frame: &mut Frame<'_>, input: &crate::app::TextBuffer, amend: boo
         input_area,
     );
     set_text_cursor(frame, input_area.inner(Margin::new(1, 1)), input, true);
-    frame.render_widget(
-        Paragraph::new("Ctrl+Enter commit   Enter newline   Esc cancel")
-            .style(Style::default().fg(theme.muted)),
-        Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1),
+    let buttons = Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
+    let primary_label = if amend { "Amend" } else { "Commit" };
+    let cancel_label = "Cancel";
+    let arrow = if amend { "◀" } else { "▶" };
+    let cancel_width = u16::try_from(cancel_label.width().saturating_add(2))
+        .unwrap_or(8)
+        .min(buttons.width.saturating_sub(3));
+    let arrow_width = 3.min(buttons.width.saturating_sub(cancel_width));
+    let label_width = buttons
+        .width
+        .saturating_sub(cancel_width.saturating_add(arrow_width));
+    let cancel_area = Rect::new(buttons.x, buttons.y, cancel_width, 1);
+    let label_area = Rect::new(
+        buttons.x.saturating_add(cancel_width),
+        buttons.y,
+        label_width,
+        1,
     );
+    let arrow_area = Rect::new(
+        buttons
+            .x
+            .saturating_add(cancel_width.saturating_add(label_width)),
+        buttons.y,
+        arrow_width,
+        1,
+    );
+    frame.render_widget(
+        Paragraph::new("").style(Style::default().bg(theme.panel_alt)),
+        buttons,
+    );
+    frame.render_widget(
+        Paragraph::new(cancel_label)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(theme.muted).bg(theme.panel_alt)),
+        cancel_area,
+    );
+    frame.render_widget(
+        Paragraph::new(primary_label)
+            .alignment(Alignment::Center)
+            .style(
+                Style::default()
+                    .fg(theme.accent)
+                    .bg(theme.panel_alt)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        label_area,
+    );
+    frame.render_widget(
+        Paragraph::new(arrow)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(theme.modified).bg(theme.panel_alt)),
+        arrow_area,
+    );
+    hits.push((cancel_area, ModalAction::CommitCancel));
+    hits.push((label_area, ModalAction::CommitSubmit));
+    hits.push((arrow_area, ModalAction::CommitToggleAmend));
 }
 
 fn draw_prompt(frame: &mut Frame<'_>, title: &str, input: &crate::app::TextBuffer, theme: &Theme) {
@@ -4058,10 +5004,20 @@ fn draw_prompt(frame: &mut Frame<'_>, title: &str, input: &crate::app::TextBuffe
     draw_modal_hint(frame, area, "Enter accept   Esc cancel", theme);
 }
 
-fn draw_confirm(frame: &mut Frame<'_>, title: &str, message: &str, theme: &Theme) {
+fn draw_confirm(
+    frame: &mut Frame<'_>,
+    hits: &mut Vec<(Rect, ModalAction)>,
+    title: &str,
+    message: &str,
+    theme: &Theme,
+) {
+    let line_count = message.lines().count().max(1);
+    let height = u16::try_from(line_count.saturating_add(6))
+        .unwrap_or(9)
+        .clamp(9, frame.area().height.saturating_sub(4).max(9));
     let area = centered_rect(
         frame.area().width.saturating_sub(14).min(72),
-        9,
+        height,
         frame.area(),
     );
     frame.render_widget(Clear, area);
@@ -4071,7 +5027,7 @@ fn draw_confirm(frame: &mut Frame<'_>, title: &str, message: &str, theme: &Theme
     frame.render_widget(
         Paragraph::new(message)
             .style(Style::default().fg(theme.text))
-            .wrap(Wrap { trim: true }),
+            .wrap(Wrap { trim: false }),
         Rect::new(
             inner.x,
             inner.y + 1,
@@ -4079,7 +5035,32 @@ fn draw_confirm(frame: &mut Frame<'_>, title: &str, message: &str, theme: &Theme
             inner.height.saturating_sub(3),
         ),
     );
-    draw_modal_hint(frame, area, "y / Enter confirm   n / Esc cancel", theme);
+    let buttons = Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
+    let no_width = 4.min(buttons.width);
+    let yes_width = buttons.width.saturating_sub(no_width);
+    let yes_area = Rect::new(buttons.x, buttons.y, yes_width, 1);
+    let no_area = Rect::new(buttons.x.saturating_add(yes_width), buttons.y, no_width, 1);
+    frame.render_widget(
+        Paragraph::new("").style(Style::default().bg(theme.panel_alt)),
+        buttons,
+    );
+    frame.render_widget(
+        Paragraph::new("Yes").alignment(Alignment::Center).style(
+            Style::default()
+                .fg(theme.accent)
+                .bg(theme.panel_alt)
+                .add_modifier(Modifier::BOLD),
+        ),
+        yes_area,
+    );
+    frame.render_widget(
+        Paragraph::new("No")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(theme.muted).bg(theme.panel_alt)),
+        no_area,
+    );
+    hits.push((yes_area, ModalAction::ConfirmYes));
+    hits.push((no_area, ModalAction::ConfirmNo));
 }
 
 fn draw_conflict(frame: &mut Frame<'_>, change: &Change, theme: &Theme) {
@@ -4939,7 +5920,7 @@ fn set_text_cursor(
 fn panel_block(title: String, focused: bool, theme: &Theme) -> Block<'static> {
     Block::default()
         .title(title)
-        .borders(Borders::ALL)
+        .borders(Borders::TOP | Borders::BOTTOM)
         .border_type(BorderType::Plain)
         .border_style(Style::default().fg(if focused {
             theme.border_focus
@@ -5095,6 +6076,154 @@ mod tests {
     use crate::git::diff::CommitDetails;
 
     #[test]
+    fn help_catalog_covers_sections_and_previously_missing_bindings() {
+        let sections = HELP_ROWS
+            .iter()
+            .filter_map(|row| match row {
+                HelpRow::Section(title) => Some(*title),
+                HelpRow::Shortcut { .. } | HelpRow::Spacer => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            sections,
+            [
+                "Navigation",
+                "Changes",
+                "Commits",
+                "Pull Requests",
+                "Check Logs",
+                "Branches",
+                "Stashes",
+                "Conflict",
+                "Repository",
+            ]
+        );
+
+        let keys = HELP_ROWS
+            .iter()
+            .filter_map(|row| match row {
+                HelpRow::Shortcut { keys, .. } => Some(*keys),
+                HelpRow::Section(_) | HelpRow::Spacer => None,
+            })
+            .collect::<Vec<_>>();
+        for expected in [
+            "t / T",
+            "m",
+            "*",
+            "Ctrl+D / Ctrl+U",
+            "Space / ← / →",
+            "gg / Home",
+            "Ctrl+N",
+            "Alt+A",
+            "Ctrl+Delete",
+        ] {
+            assert!(
+                keys.contains(&expected),
+                "help catalog should list {expected}"
+            );
+        }
+        assert!(keys.contains(&"o"));
+
+        assert_eq!(help_shortcut_count(), keys.len());
+        assert_eq!(help_display_index(0), 1);
+        assert_eq!(help_shortcut_index_at(1), Some(0));
+        assert_eq!(help_shortcut_index_at(0), None);
+    }
+
+    #[test]
+    fn help_modal_selects_rows_and_records_mouse_hits() {
+        use std::time::Instant;
+
+        use crossterm::event::{
+            KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+        };
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = App::new("/tmp/repo", "repo");
+        let now = Instant::now();
+        app.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE), now);
+        assert!(matches!(
+            app.modal,
+            Some(Modal::Help {
+                selected: 0,
+                hover: None,
+                ..
+            })
+        ));
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE), now);
+        assert!(matches!(
+            app.modal,
+            Some(Modal::Help {
+                selected: 1,
+                hover: None,
+                ..
+            })
+        ));
+
+        let backend = TestBackend::new(100, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+        assert!(!app.geometry.help_hits.is_empty());
+        let hit = app.geometry.help_hits[0].clone();
+
+        let effects = app.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Moved,
+                column: hit.area.x,
+                row: hit.area.y,
+                modifiers: KeyModifiers::NONE,
+            },
+            now,
+        );
+        assert!(effects.is_empty());
+        assert!(matches!(
+            app.modal,
+            Some(Modal::Help {
+                hover: Some(index),
+                ..
+            }) if index == hit.index
+        ));
+
+        app.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: hit.area.x,
+                row: hit.area.y,
+                modifiers: KeyModifiers::NONE,
+            },
+            now,
+        );
+        assert!(matches!(
+            app.modal,
+            Some(Modal::Help {
+                selected,
+                ..
+            }) if selected == hit.index
+        ));
+
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect();
+        assert!(rendered.contains("Keyboard Shortcuts"));
+        assert!(rendered.contains("Navigation"));
+        assert!(rendered.contains("Changes"));
+        assert!(rendered.contains("j/k select"));
+        assert!(rendered.contains("Ctrl+D / Ctrl+U"));
+        assert!(rendered.contains("t / T"));
+    }
+
+    #[test]
     fn three_tabs_fit_the_minimum_supported_terminal_width() {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
@@ -5112,6 +6241,63 @@ mod tests {
         assert!(app.geometry.history_tab.x > app.geometry.changes_tab.x);
         assert!(app.geometry.pull_requests_tab.x > app.geometry.history_tab.x);
         assert!(app.geometry.pull_requests_tab.right() <= 72);
+    }
+
+    #[test]
+    fn pull_request_section_tabs_distinguish_navigation_from_row_selection() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let theme = Theme::default();
+        let mut terminal = Terminal::new(TestBackend::new(20, 1)).unwrap();
+
+        terminal
+            .draw(|frame| {
+                draw_pull_request_section_tab(
+                    frame,
+                    Rect::new(0, 0, 10, 1),
+                    "PR".to_owned(),
+                    true,
+                    &theme,
+                );
+                draw_pull_request_section_tab(
+                    frame,
+                    Rect::new(10, 0, 10, 1),
+                    "Files".to_owned(),
+                    false,
+                    &theme,
+                );
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(5, 0)].bg, theme.accent_soft);
+        assert_eq!(buffer[(5, 0)].fg, theme.text);
+        assert_eq!(buffer[(15, 0)].bg, theme.panel);
+        assert_eq!(buffer[(15, 0)].fg, theme.muted);
+        assert_ne!(buffer[(5, 0)].bg, theme.selected);
+    }
+
+    #[test]
+    fn pane_frames_keep_titles_without_vertical_box_lines() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let theme = Theme::default();
+        let mut terminal = Terminal::new(TestBackend::new(20, 4)).unwrap();
+        terminal
+            .draw(|frame| {
+                frame.render_widget(
+                    panel_block(" Preview ".to_owned(), true, &theme),
+                    frame.area(),
+                );
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(0, 1)].symbol(), " ");
+        assert_eq!(buffer[(19, 1)].symbol(), " ");
+        assert!(buffer.content().iter().all(|cell| cell.symbol() != "│"));
     }
 
     #[test]
@@ -5241,6 +6427,108 @@ mod tests {
             &hit.target,
             OpenTarget::Path(path) if path == Path::new("/tmp/repo")
         )));
+        let repository_area = app
+            .geometry
+            .link_hits
+            .iter()
+            .find(|hit| {
+                matches!(
+                    &hit.target,
+                    OpenTarget::Browser(url) if url == "https://github.com/acme/repo"
+                )
+            })
+            .map(|hit| hit.area)
+            .unwrap();
+        assert!(
+            !terminal.backend().buffer()[(repository_area.x, repository_area.y)]
+                .modifier
+                .contains(Modifier::UNDERLINED)
+        );
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect::<String>();
+        assert!(!rendered.contains("\x1b]8;;"));
+
+        app.link_hover = Some((repository_area.x, repository_area.y));
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+        assert!(
+            terminal.backend().buffer()[(repository_area.x, repository_area.y)]
+                .modifier
+                .contains(Modifier::UNDERLINED)
+        );
+
+        app.configure_mouse_capture(false);
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect::<String>();
+        assert!(rendered.contains("\x1b]8;;https://github.com/acme/repo\x1b\\"));
+        assert!(rendered.contains("\x1b]8;;https://github.com/acme/repo/tree/feature/link\x1b\\"));
+
+        app.view = View::History;
+        app.link_hover = None;
+        app.history = vec![crate::git::history::Commit {
+            id: "abc123".to_owned(),
+            short_id: "abc123".to_owned(),
+            parent_ids: Vec::new(),
+            author: String::new(),
+            author_email: String::new(),
+            authored_at: String::new(),
+            committer: String::new(),
+            committer_email: String::new(),
+            committed_at: String::new(),
+            relative_date: "now".to_owned(),
+            subject: "Linked commit".to_owned(),
+            decorations: Vec::new(),
+        }];
+        terminal.clear().unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect::<String>();
+        assert!(rendered.contains("\x1b]8;;https://github.com/acme/repo/commit/abc123\x1b\\"));
+    }
+
+    #[test]
+    fn preview_selection_highlights_only_the_pane_where_it_started() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let theme = Theme::default();
+        let mut terminal = Terminal::new(TestBackend::new(20, 4)).unwrap();
+        let selection = crate::app::TextSelection {
+            pane: Rect::new(10, 0, 10, 4),
+            anchor: (12, 1),
+            head: (18, 2),
+        };
+
+        terminal
+            .draw(|frame| draw_text_selection(frame, selection, &theme))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(12, 1)].bg, theme.selected);
+        assert_eq!(buffer[(18, 2)].bg, theme.selected);
+        assert_ne!(buffer[(9, 1)].bg, theme.selected);
+        assert_ne!(buffer[(9, 2)].bg, theme.selected);
     }
 
     #[test]
@@ -5287,9 +6575,12 @@ mod tests {
 
         assert!(rendered.contains("[+]"));
         assert!(rendered.contains("[−]"));
-        assert!(rendered.contains("[c] Commit"));
-        assert!(rendered.contains("[S] Stashes"));
-        assert!(rendered.contains("[d] Compare Branch"));
+        assert!(rendered.contains("Commit"));
+        assert!(rendered.contains('▶'));
+        assert!(rendered.contains("[ ]"));
+        assert!(!rendered.contains("[c] Commit"));
+        assert!(!rendered.contains("[S] Stashes"));
+        assert!(!rendered.contains("[d] Compare Branch"));
         assert!(rendered.contains("UNTRACKED CHANGES"));
         assert!(rendered.contains("\u{e7a8} main.rs"));
         assert!(rendered.contains("\u{eeab} README.md"));
@@ -5305,6 +6596,18 @@ mod tests {
                 .scm_action_hits
                 .iter()
                 .any(|hit| matches!(hit.action, ScmAction::Unstage(1)))
+        );
+        assert!(
+            app.geometry
+                .scm_action_hits
+                .iter()
+                .any(|hit| matches!(hit.action, ScmAction::ToggleCheck(_)))
+        );
+        assert!(
+            app.geometry
+                .scm_action_hits
+                .iter()
+                .any(|hit| matches!(hit.action, ScmAction::Primary))
         );
     }
 
@@ -5659,6 +6962,20 @@ mod tests {
         assert!(!rendered.contains("Page"));
         assert!(!rendered.contains("files on page"));
         assert!(!rendered.contains("@@"));
+        for expected in [
+            "https://github.com/acme/widget",
+            "https://github.com/acme/widget/pull/42",
+            "https://github.com/octocat",
+            "https://github.com/octocat/widget/tree/feature/rocket",
+            "https://github.com/acme/widget/tree/main",
+        ] {
+            assert!(
+                app.geometry.link_hits.iter().any(|hit| {
+                    matches!(&hit.target, OpenTarget::Browser(url) if url == expected)
+                }),
+                "missing link target {expected}"
+            );
+        }
 
         app.pull_request_section = PullRequestSection::Overview;
         app.pull_request_checks = vec![PullRequestCheck {
@@ -5682,20 +6999,7 @@ mod tests {
             .map(ratatui::buffer::Cell::symbol)
             .collect();
         assert!(rendered.contains("Conversation"));
-        assert!(rendered.contains("PR ↻"));
-        assert!(rendered.contains("Conversation  ↻"));
-        assert!(
-            app.geometry
-                .sidebar_hits
-                .iter()
-                .any(|hit| matches!(hit.target, SidebarHit::PullRequestRefresh))
-        );
-        assert!(
-            app.geometry
-                .sidebar_hits
-                .iter()
-                .any(|hit| matches!(hit.target, SidebarHit::PullRequestConversationRefresh))
-        );
+        assert!(!rendered.contains(['⟳', '↻', '↺']));
         assert!(rendered.contains("CI / ubuntu"));
         assert!(rendered.contains("Ship the rocket"));
         assert!(rendered.contains("octocat/widget:feature/rocket"));
@@ -5707,30 +7011,7 @@ mod tests {
             "the pull-request body is part of the default view"
         );
 
-        let refresh_area = app
-            .geometry
-            .sidebar_hits
-            .iter()
-            .find(|hit| matches!(hit.target, SidebarHit::PullRequestConversationRefresh))
-            .expect("the conversation refresh control has a hit area")
-            .area;
-        let effects = app.handle_mouse(
-            crossterm::event::MouseEvent {
-                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
-                column: refresh_area.x,
-                row: refresh_area.y,
-                modifiers: crossterm::event::KeyModifiers::NONE,
-            },
-            std::time::Instant::now(),
-        );
-        assert!(effects.iter().any(|effect| matches!(
-            effect,
-            crate::app::AppEffect::Git(command)
-                if matches!(
-                    command.as_ref(),
-                    crate::git::worker::WorkerCommand::LoadPullRequestConversation { .. }
-                )
-        )));
+        app.pull_request_conversation_loading = true;
         terminal
             .draw(|frame| draw(frame, &mut app, &Theme::default()))
             .unwrap();
@@ -5741,8 +7022,8 @@ mod tests {
             .iter()
             .map(ratatui::buffer::Cell::symbol)
             .collect();
-        assert!(rendered.contains("PR ⟳"));
-        assert!(rendered.contains("Conversation  ⟳"));
+        assert!(rendered.contains("loading"));
+        assert!(!rendered.contains(['⟳', '↻', '↺']));
     }
 
     fn overview_app() -> App {
@@ -5786,6 +7067,125 @@ mod tests {
             completed_at: "2026-08-02T10:02:30Z".to_owned(),
         }];
         app
+    }
+
+    #[test]
+    fn pull_request_and_check_urls_share_clickable_link_hits() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = overview_app();
+        let conversation_url = "https://github.com/acme/widget/pull/42#issuecomment-123".to_owned();
+        app.pull_request_conversation.entries = vec![ConversationEntry {
+            kind: ConversationKind::Comment,
+            actor: "reviewer".to_owned(),
+            timestamp: "2026-08-02T11:00:00Z".to_owned(),
+            detail: String::new(),
+            body: "Looks good".to_owned(),
+            url: conversation_url.clone(),
+            reference: String::new(),
+            context: String::new(),
+        }];
+        let mut terminal = Terminal::new(TestBackend::new(140, 32)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+
+        let pull_request_url = "https://github.com/acme/widget/pull/42";
+        assert_eq!(
+            app.geometry
+                .link_hits
+                .iter()
+                .filter(|hit| matches!(
+                    &hit.target,
+                    OpenTarget::Browser(url) if url == pull_request_url
+                ))
+                .count(),
+            3
+        );
+        for expected in [
+            "https://github.com/octocat",
+            "https://github.com/reviewer",
+            "https://github.com/acme/widget/tree/feature/rocket",
+            "https://github.com/acme/widget/tree/main",
+            conversation_url.as_str(),
+        ] {
+            assert!(
+                app.geometry.link_hits.iter().any(|hit| {
+                    matches!(&hit.target, OpenTarget::Browser(url) if url == expected)
+                })
+            );
+        }
+        let pull_request_url_area = app
+            .geometry
+            .link_hits
+            .iter()
+            .filter(|hit| {
+                matches!(
+                    &hit.target,
+                    OpenTarget::Browser(url) if url == pull_request_url
+                )
+            })
+            .max_by_key(|hit| hit.area.width)
+            .map(|hit| hit.area)
+            .unwrap();
+        let effects = app.handle_mouse(
+            crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                column: pull_request_url_area.x,
+                row: pull_request_url_area.y,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+            std::time::Instant::now(),
+        );
+        assert!(matches!(
+            effects.as_slice(),
+            [crate::app::AppEffect::Open(OpenTarget::Browser(url))]
+                if url == pull_request_url
+        ));
+
+        app.pull_request_check_cursor = Some(0);
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+        let check_url = "https://github.com/acme/widget/actions/runs/9/job/12";
+        assert_eq!(
+            app.geometry
+                .link_hits
+                .iter()
+                .filter(|hit| matches!(
+                    &hit.target,
+                    OpenTarget::Browser(url) if url == check_url
+                ))
+                .count(),
+            2
+        );
+        let check_url_area = app
+            .geometry
+            .link_hits
+            .iter()
+            .filter(|hit| {
+                matches!(
+                    &hit.target,
+                    OpenTarget::Browser(url) if url == check_url
+                )
+            })
+            .max_by_key(|hit| hit.area.width)
+            .map(|hit| hit.area)
+            .unwrap();
+        let effects = app.handle_mouse(
+            crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                column: check_url_area.x,
+                row: check_url_area.y,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+            std::time::Instant::now(),
+        );
+        assert!(matches!(
+            effects.as_slice(),
+            [crate::app::AppEffect::Open(OpenTarget::Browser(url))] if url == check_url
+        ));
     }
 
     #[test]
@@ -6167,9 +7567,10 @@ terminal rows because that is what real pull-request comments look like in pract
         app.pull_request_conversation_loading = true;
         let refreshing = render(&mut app, &mut terminal);
         assert!(
-            refreshing.contains('⟳'),
-            "a read in flight shows a reload mark"
+            refreshing.contains("loading"),
+            "a read in flight says that it is loading"
         );
+        assert!(!refreshing.contains(['⟳', '↻', '↺']));
         assert!(!refreshing.contains("cached"));
 
         app.pull_request_conversation_loading = false;
@@ -6181,7 +7582,7 @@ terminal rows because that is what real pull-request comments look like in pract
             cached.contains("cached"),
             "an answer served from disk says so rather than pretending to be live"
         );
-        assert!(!cached.contains('⟳'));
+        assert!(!cached.contains(['⟳', '↻', '↺']));
 
         app.pull_request_checks_from_cache = false;
         let live_checks = render(&mut app, &mut terminal);
@@ -6193,7 +7594,7 @@ terminal rows because that is what real pull-request comments look like in pract
         app.pull_request_conversation.from_cache = false;
         let live = render(&mut app, &mut terminal);
         assert!(!live.contains("cached"));
-        assert!(!live.contains('⟳'));
+        assert!(!live.contains(['⟳', '↻', '↺']));
     }
 
     #[test]
@@ -6428,6 +7829,45 @@ terminal rows because that is what real pull-request comments look like in pract
     }
 
     #[test]
+    fn empty_pull_request_view_renders_recent_numbers_and_titles_as_rows() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = App::new("/tmp/repo", "repo");
+        app.view = View::PullRequests;
+        app.recent_pull_requests = vec![RecentPullRequest {
+            number: 39,
+            title: "Restore selectable previews".to_owned(),
+            repository: GitHubRepository {
+                name_with_owner: "acme/widget".to_owned(),
+                url: "https://github.com/acme/widget".to_owned(),
+                remotes: vec!["origin".to_owned()],
+            },
+        }];
+        let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect::<String>();
+
+        assert!(rendered.contains("Recent Pull Requests"));
+        assert!(rendered.contains("#39 Restore selectable previews"));
+        assert!(
+            app.geometry
+                .sidebar_hits
+                .iter()
+                .any(|hit| { matches!(hit.target, SidebarHit::RecentPullRequest(0)) })
+        );
+    }
+
+    #[test]
     fn file_header_right_aligns_colored_line_counts() {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
@@ -6456,12 +7896,34 @@ terminal rows because that is what real pull-request comments look like in pract
             .position(|character| character == '-')
             .unwrap();
 
-        assert!(rendered.ends_with("+12 -3 ┐"));
+        assert!(rendered.ends_with("+12 -3 ─"), "{rendered:?}");
+        assert!(rendered.contains('─'));
         assert!(rendered.contains("\u{e7a8} src/main.rs"));
+        assert!(!rendered.contains(['┌', '┐', '└', '┘', '│']));
         assert!(!rendered.contains('⌄'));
         assert!(!rendered.contains('›'));
         assert_eq!(buffer[(cells(addition_column), 0)].fg, theme.added);
         assert_eq!(buffer[(cells(deletion_column), 0)].fg, theme.removed);
+    }
+
+    #[test]
+    fn file_footer_draws_one_horizontal_separator_without_vertical_edges() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let theme = Theme::default();
+        let mut terminal = Terminal::new(TestBackend::new(12, 1)).unwrap();
+        terminal
+            .draw(|frame| draw_file_footer(frame, frame.area(), &theme))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        assert!(
+            buffer
+                .content()
+                .iter()
+                .all(|cell| cell.symbol() == "─" && cell.fg == theme.border)
+        );
     }
 
     #[test]

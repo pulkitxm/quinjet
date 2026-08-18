@@ -872,7 +872,7 @@ untimestamped trailing output\n";
             ],
         );
 
-        assert!(loose.is_empty());
+        assert_eq!(loose, []);
         assert_eq!(
             steps[0]
                 .lines

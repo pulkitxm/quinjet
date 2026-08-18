@@ -13,7 +13,7 @@ use std::time::{Duration, SystemTime};
 use std::{env, thread};
 
 use anyhow::{Context, Result, anyhow, bail};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub(crate) use self::checks::{
     CheckLogLine, CheckLogSeverity, CheckRunLog, CheckStep, PullRequestCheck,
@@ -53,11 +53,16 @@ const PULL_REQUEST_FIELDS: &str = "number,title,body,author,state,isDraft,create
 const PULL_REQUEST_VIEW_TSV_JQ: &str = r#"[(.number|tostring), .title, (.body // ""), (.author.login // "ghost"), .state, (.isDraft|tostring), .updatedAt, .url, .baseRefName, .headRefName, (.headRepository.nameWithOwner // ""), (.isCrossRepository|tostring), (.additions|tostring), (.deletions|tostring), (.changedFiles|tostring), .baseRefOid, .headRefOid, .createdAt] | @tsv"#;
 const REPOSITORY_TSV_TEMPLATE: &str = "{{.nameWithOwner}}{{\"\\t\"}}{{.url}}{{\"\\n\"}}";
 const PULL_REQUEST_TSV_FIELDS: usize = 18;
+#[cfg(not(test))]
+const RECENT_PULL_REQUESTS_CACHE_KEY: &str = "recent-pull-requests-v1";
+const MAX_RECENT_PULL_REQUESTS: usize = 20;
+const MAX_RECENT_CACHE_SCAN: usize = 256;
+const MAX_RECENT_CACHE_ENTRY_BYTES: u64 = 384 * 1024;
 
 static TEMPORARY_REPOSITORY_ID: AtomicU64 = AtomicU64::new(0);
 static CACHE_WRITE_ID: AtomicU64 = AtomicU64::new(0);
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GitHubRepository {
     pub name_with_owner: String,
@@ -107,6 +112,24 @@ pub(crate) struct PullRequest {
     pub additions: usize,
     pub deletions: usize,
     pub changed_files: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RecentPullRequest {
+    pub number: u64,
+    pub title: String,
+    pub repository: GitHubRepository,
+}
+
+impl From<&PullRequest> for RecentPullRequest {
+    fn from(pull_request: &PullRequest) -> Self {
+        Self {
+            number: pull_request.number,
+            title: pull_request.title.clone(),
+            repository: pull_request.base_repository.clone(),
+        }
+    }
 }
 
 impl PullRequest {
@@ -401,6 +424,51 @@ pub(crate) fn cache_write_bounded(key: &str, data: &[u8], limit: usize) {
     if let Some(cache) = CacheStore::discover() {
         drop(cache.write(key, data, limit));
     }
+}
+
+#[cfg(not(test))]
+pub(crate) fn recent_pull_requests() -> Vec<RecentPullRequest> {
+    let mut recent = cache_read(RECENT_PULL_REQUESTS_CACHE_KEY, CacheLife::Immutable)
+        .and_then(|data| serde_json::from_slice::<Vec<RecentPullRequest>>(&data).ok())
+        .unwrap_or_default();
+    if let Some(cache) = CacheStore::discover() {
+        for pull_request in cache.cached_pull_requests() {
+            if recent.iter().any(|existing| {
+                existing.number == pull_request.number
+                    && existing
+                        .repository
+                        .url
+                        .eq_ignore_ascii_case(&pull_request.repository.url)
+            }) {
+                continue;
+            }
+            recent.push(pull_request);
+            if recent.len() == MAX_RECENT_PULL_REQUESTS {
+                break;
+            }
+        }
+    }
+    recent.truncate(MAX_RECENT_PULL_REQUESTS);
+    recent
+}
+
+#[cfg(not(test))]
+pub(crate) fn record_recent_pull_request(pull_request: &PullRequest) -> Vec<RecentPullRequest> {
+    let current = RecentPullRequest::from(pull_request);
+    let mut recent = recent_pull_requests();
+    recent.retain(|existing| {
+        existing.number != current.number
+            || !existing
+                .repository
+                .url
+                .eq_ignore_ascii_case(&current.repository.url)
+    });
+    recent.insert(0, current);
+    recent.truncate(MAX_RECENT_PULL_REQUESTS);
+    if let Ok(data) = serde_json::to_vec(&recent) {
+        cache_write(RECENT_PULL_REQUESTS_CACHE_KEY, &data);
+    }
+    recent
 }
 
 /// A validated read: GitHub is asked whether the answer changed, and answers
@@ -1931,6 +1999,33 @@ impl CacheStore {
         self.root.join(format!("{left:016x}{right:016x}.cache"))
     }
 
+    fn cached_pull_requests(&self) -> Vec<RecentPullRequest> {
+        let Ok(entries) = fs::read_dir(&self.root) else {
+            return Vec::new();
+        };
+        let mut files = entries
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                let path = entry.path();
+                if path.extension().and_then(OsStr::to_str) != Some("cache") {
+                    return None;
+                }
+                let metadata = entry.metadata().ok()?;
+                if metadata.len() > MAX_RECENT_CACHE_ENTRY_BYTES {
+                    return None;
+                }
+                Some((metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH), path))
+            })
+            .collect::<Vec<_>>();
+        files.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
+        files
+            .into_iter()
+            .take(MAX_RECENT_CACHE_SCAN)
+            .filter_map(|(_, path)| cached_pull_request_at(&path))
+            .take(MAX_RECENT_PULL_REQUESTS)
+            .collect()
+    }
+
     fn prune(&self) {
         let Ok(entries) = fs::read_dir(&self.root) else {
             return;
@@ -1963,6 +2058,41 @@ impl CacheStore {
             }
         }
     }
+}
+
+fn cached_pull_request_at(path: &Path) -> Option<RecentPullRequest> {
+    let data = fs::read(path).ok()?;
+    let body = data.strip_prefix(CACHE_MAGIC)?;
+    let record = body
+        .split(|byte| *byte == b'\n')
+        .find(|record| !record.is_empty())?;
+    let fields = parse_tsv_record::<PULL_REQUEST_TSV_FIELDS>(record).ok()?;
+    let number = fields.first()?.parse::<u64>().ok()?;
+    let url = fields.get(7)?;
+    let repository = repository_from_pull_request_url(url, number)?;
+    Some(RecentPullRequest {
+        number,
+        title: bounded_text(fields.get(1)?, MAX_PULL_REQUEST_TITLE_BYTES),
+        repository,
+    })
+}
+
+fn repository_from_pull_request_url(url: &str, number: u64) -> Option<GitHubRepository> {
+    let suffix = format!("/pull/{number}");
+    let repository_url = url.strip_suffix(&suffix)?.trim_end_matches('/');
+    let (_, rest) = repository_url.split_once("://")?;
+    let (_, path) = rest.split_once('/')?;
+    let mut components = path.trim_matches('/').split('/');
+    let owner = components.next()?;
+    let name = components.next()?;
+    if owner.is_empty() || name.is_empty() || components.next().is_some() {
+        return None;
+    }
+    Some(GitHubRepository {
+        name_with_owner: format!("{owner}/{name}"),
+        url: repository_url.to_owned(),
+        remotes: Vec::new(),
+    })
 }
 
 fn cache_root() -> Option<PathBuf> {
@@ -2138,7 +2268,7 @@ mod tests {
 
         let (urls, warnings) = repository.remote_urls().unwrap();
 
-        assert!(warnings.is_empty());
+        assert_eq!(warnings, Vec::<String>::new());
         assert_eq!(urls.len(), 3);
         assert!(urls.iter().any(|entry| {
             entry.remote == "origin" && entry.url == "git@github.com:octocat/widget.git"
@@ -2239,7 +2369,7 @@ mod tests {
         assert_eq!(request.author, "ghost");
         assert_eq!(request.head_label(), "deleted fork:lost-branch");
         assert!(request.head_repository.is_none());
-        assert!(request.head_remotes.is_empty());
+        assert_eq!(request.head_remotes, Vec::<String>::new());
         assert_eq!(request.base_repository.host(), "github.example.com");
     }
 
@@ -2290,6 +2420,24 @@ mod tests {
                 0
             );
         }
+    }
+
+    #[test]
+    fn cached_pull_request_metadata_becomes_a_recent_entry() {
+        let directory = test_directory("recent-cache");
+        let cache = CacheStore::at(directory.0.clone());
+        let record = b"39\tRestore selectable previews\tDetails\toctocat\tOPEN\tfalse\t2026-08-18T05:35:58Z\thttps://github.com/acme/widget/pull/39\tmain\tfix/previews\tacme/widget\tfalse\t12\t3\t2\tbase\thead\t2026-08-17T16:35:45Z\n";
+        cache
+            .write("pull request", record, MAX_GH_METADATA_BYTES)
+            .unwrap();
+
+        let recent = cache.cached_pull_requests();
+
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].number, 39);
+        assert_eq!(recent[0].title, "Restore selectable previews");
+        assert_eq!(recent[0].repository.name_with_owner, "acme/widget");
+        assert_eq!(recent[0].repository.url, "https://github.com/acme/widget");
     }
 
     #[test]
