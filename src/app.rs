@@ -3386,17 +3386,14 @@ impl App {
                         if changes_history {
                             self.request_history(true, &mut effects);
                         }
-                        if refresh_pull_request {
-                            self.refresh_loaded_pull_request(&mut effects);
-                        }
                     }
                     Err(error) => {
                         self.show_toast(format!("{label}: {error}"), ToastLevel::Error, now);
                         self.request_refresh(&mut effects);
-                        if refresh_pull_request {
-                            self.refresh_loaded_pull_request(&mut effects);
-                        }
                     }
+                }
+                if refresh_pull_request {
+                    self.refresh_loaded_pull_request(&mut effects);
                 }
             }
         }
