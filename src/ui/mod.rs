@@ -3938,7 +3938,7 @@ fn draw_modal(frame: &mut Frame<'_>, modal: &Modal, app: &App, theme: &Theme) {
         Modal::Themes { selected, .. } => {
             draw_theme_picker(frame, *selected, app.theme_name, theme);
         }
-        Modal::Appearances { selected } => {
+        Modal::Appearances { selected, .. } => {
             draw_appearance_picker(frame, *selected, app.appearance_choice, theme);
         }
         Modal::Conflict { change } => draw_conflict(frame, change, theme),

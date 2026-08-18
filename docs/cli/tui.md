@@ -54,10 +54,11 @@ The palettes are `quinjet`, `catppuccin`, `dracula`, `everforest`, `gruvbox`,
 Inside the interface, open the command palette with `:` or `Ctrl+P`. `Change
 Theme…` opens all thirteen palettes and `Change Appearance…` opens the system,
 light, and dark choices. Moving through the theme list previews each palette
-immediately. `Enter` keeps the preview for the current run, while `Esc` closes
-the picker and restores the theme that was active when it opened. Picker lists
-wrap between their first and last entries. Use the launch flags to choose the
-initial settings for a later run.
+immediately. Moving through the appearance list likewise previews light, dark,
+or system mode. `Enter` keeps the preview for the current run, while `Esc`
+closes the picker and restores the theme or appearance that was active when it
+opened. Picker lists wrap between their first and last entries. Use the launch
+flags to choose the initial settings for a later run.
 
 `--appearance system` asks the operating system for its current preference once
 after Quinjet verifies that it owns an interactive terminal, and again when

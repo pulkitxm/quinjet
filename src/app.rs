@@ -542,6 +542,8 @@ pub(crate) enum Modal {
     },
     Appearances {
         selected: usize,
+        original_choice: AppearanceChoice,
+        original_appearance: Appearance,
     },
     Conflict {
         change: Change,
@@ -3445,14 +3447,29 @@ impl App {
                 }
                 self.modal = Some(modal);
             }
-            Modal::Appearances { selected } => {
+            Modal::Appearances {
+                selected,
+                original_choice,
+                original_appearance,
+            } => {
                 match key.code {
-                    KeyCode::Esc => return effects,
+                    KeyCode::Esc => {
+                        self.appearance_choice = *original_choice;
+                        self.appearance = *original_appearance;
+                        self.theme = Theme::new(self.theme_name, self.appearance);
+                        return effects;
+                    }
                     KeyCode::Up | KeyCode::Char('k') => {
                         *selected = previous_list_index(*selected, AppearanceChoice::ALL.len());
+                        if let Some(choice) = AppearanceChoice::ALL.get(*selected).copied() {
+                            self.set_theme_selection(self.theme_name, choice);
+                        }
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
                         *selected = next_list_index(*selected, AppearanceChoice::ALL.len());
+                        if let Some(choice) = AppearanceChoice::ALL.get(*selected).copied() {
+                            self.set_theme_selection(self.theme_name, choice);
+                        }
                     }
                     KeyCode::Enter => {
                         if let Some(choice) = AppearanceChoice::ALL.get(*selected).copied() {
@@ -3538,6 +3555,8 @@ impl App {
                         .iter()
                         .position(|choice| *choice == self.appearance_choice)
                         .unwrap_or_default(),
+                    original_choice: self.appearance_choice,
+                    original_appearance: self.appearance,
                 });
             }
             PaletteCommand::Help => self.modal = Some(Modal::Help { scroll: 0 }),
@@ -7932,8 +7951,22 @@ mod tests {
         app.execute_palette(PaletteCommand::ChangeAppearance, &mut Vec::new(), now);
         assert!(matches!(
             app.modal,
-            Some(Modal::Appearances { selected: 2 })
+            Some(Modal::Appearances {
+                selected: 2,
+                original_choice: AppearanceChoice::Dark,
+                original_appearance: Appearance::Dark,
+            })
         ));
+        app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), now);
+        assert_eq!(app.appearance_choice, AppearanceChoice::Light);
+        assert_eq!(app.appearance, Appearance::Light);
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), now);
+
+        assert_eq!(app.appearance_choice, AppearanceChoice::Dark);
+        assert_eq!(app.appearance, Appearance::Dark);
+        assert!(app.modal.is_none());
+
+        app.execute_palette(PaletteCommand::ChangeAppearance, &mut Vec::new(), now);
         app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), now);
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
 
