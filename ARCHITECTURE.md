@@ -49,9 +49,10 @@ metadata verb ──► generated references / verified updater ──► text o
 - `src/git/github/conversation.rs`: the pull-request timeline and inline review comments flattened into one ordered thread.
 - `src/git/diff.rs`: unified-diff model and syntax highlighting for working-tree, commit, and PR patches.
 - `src/git/worker.rs`: the non-blocking UI/command boundary. It performs no Git work of its own; it routes each request through `cli::Session` and labels the answer with the generation its caller asked under.
+- `src/theme.rs`: selectable light and dark palettes, system appearance detection, and semantic syntax color resolution.
 - `src/watch.rs`: repository watcher and event-storm coalescing.
 - `src/webhook.rs`: optional loopback listener that turns a forwarded GitHub delivery into a refresh signal.
-- `src/ui/`: viewport-only rendering, diff layouts, theme, and mouse hit map.
+- `src/ui/`: viewport-only rendering, diff layouts, and mouse hit map.
 
 ## Responsiveness Invariants
 

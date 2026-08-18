@@ -157,8 +157,8 @@ flattened, one entry per rendered line, in print order:
       "oldLine": null,
       "newLine": 1,
       "spans": [
-        { "text": "target", "foreground": [163, 190, 140], "bold": false, "italic": false },
-        { "text": "/", "foreground": [163, 190, 140], "bold": false, "italic": false }
+        { "text": "target", "foreground": "green", "bold": false, "italic": false },
+        { "text": "/", "foreground": "green", "bold": false, "italic": false }
       ]
     },
     {
@@ -186,8 +186,8 @@ The keys that are not obvious:
   `removed` and `context` with `+`, `-` and a space.
 - `spans` is the line split for syntax highlighting, so the line's real text is
   the concatenation of every `text`. Only `file-header` is joined with spaces
-  instead. `foreground` is `[r, g, b]` or `null`, which is why a plain diff line
-  arrives as several colored fragments.
+  instead. `foreground` is a semantic syntax color name or `null`, which is why
+  a plain diff line arrives as several colored fragments.
 - `oldLine` and `newLine` are the line numbers in the pre-image and post-image,
   `null` where the line has none.
 - `commitDetails` and `pullRequestDetails` are always `null` for a stash. They

@@ -3,6 +3,7 @@ mod cli;
 mod convert;
 mod date_time;
 mod git;
+mod theme;
 mod ui;
 mod watch;
 mod webhook;
@@ -102,6 +103,7 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
         .map(WebhookListener::bind)
         .transpose()?;
     let mut app = App::new(repository.root(), repository.name());
+    app.set_theme_selection(options.theme, options.appearance);
     let mut terminal = TerminalGuard::enter(!options.no_mouse)?;
     let render_tick = tick(Duration::from_millis(16));
     let periodic_refresh = tick(Duration::from_secs(10));
@@ -113,9 +115,10 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
     running &= dispatch_effects(&worker, &mut terminal, app.initial_effects());
     while running {
         if dirty {
+            let theme = app.theme;
             let _ = terminal
                 .terminal
-                .draw(|frame| ui::draw(frame, &mut app))
+                .draw(|frame| ui::draw(frame, &mut app, &theme))
                 .context("failed to render Quinjet")?;
             dirty = false;
         }

@@ -7,7 +7,7 @@ Usage:
 
 ```bash
 quinjet
-quinjet tui [PATH] [--no-mouse] [--webhook-listen <ADDRESS>]
+quinjet tui [PATH] [--theme <THEME>] [--appearance <APPEARANCE>] [--no-mouse] [--webhook-listen <ADDRESS>]
 ```
 
 Arguments:
@@ -20,6 +20,8 @@ Options:
 
 | Name | Type / values | Default | What it does |
 | --- | --- | --- | --- |
+| `--theme <THEME>` | `quinjet`, `catppuccin`, `dracula`, `everforest`, `gruvbox`, `nord`, `one`, `rose-pine`, `solarized`, `tokyo-night`, `ayu`, `monokai`, `github` | `quinjet` | Selects one unified palette for every surface, state, diff background, status color, and syntax token. |
+| `--appearance <APPEARANCE>` | `system`, `light`, `dark` | `system` | Selects the light or dark variant. `system` detects the operating-system preference once during startup. |
 | `--no-mouse` | flag | off | Starts with the mouse released, so the terminal keeps its own selection and copy behavior. Every feature stays reachable from the keyboard. |
 | `--webhook-listen <ADDRESS>` | port, or `host:port` | not listening | Binds a loopback HTTP listener. A forwarded GitHub delivery refreshes the open pull request immediately instead of waiting for the next poll. |
 | `-C, --path <DIR>` | path | `.` | Global and unused here. The positional `PATH` is what the interface opens. |
@@ -37,6 +39,41 @@ The no-argument form always opens the current directory. A path belongs to the
 explicit verb, as in `quinjet tui ~/code/project`. This keeps the root command
 unambiguous: `quinjet statsu` is an unknown verb with exit 2 rather than a request
 to open a directory named `statsu`.
+
+## Themes and appearance
+
+Every palette has a complete light and dark variant. The selected palette owns
+all colors in the interface, including the root background, panels, borders,
+selection, focus, status and feedback colors, diff rows, intraline emphasis,
+and syntax highlighting. No view keeps a separate fixed color scheme.
+
+The palettes are `quinjet`, `catppuccin`, `dracula`, `everforest`, `gruvbox`,
+`nord`, `one`, `rose-pine`, `solarized`, `tokyo-night`, `ayu`, `monokai`, and
+`github`. The last is labeled `GitHub` in the picker. The default is `quinjet`.
+
+Inside the interface, open the command palette with `:` or `Ctrl+P`. `Change
+Theme…` opens all thirteen palettes and `Change Appearance…` opens the system,
+light, and dark choices. Moving through the theme list previews each palette
+immediately. Moving through the appearance list likewise previews light, dark,
+or system mode. `Enter` keeps the preview for the current run, while `Esc`
+closes the picker and restores the theme or appearance that was active when it
+opened. Picker lists wrap between their first and last entries. Use the launch
+flags to choose the initial settings for a later run.
+
+`--appearance system` asks the operating system for its current preference once
+after Quinjet verifies that it owns an interactive terminal, and again when
+`System` is explicitly selected in the appearance picker. It does not watch for
+later changes. Explicit `light` and `dark` choices skip detection. A system that
+does not publish a preference, including a minimal or remote Linux session
+without an available desktop portal, safely uses the dark variant.
+
+Examples:
+
+```bash
+quinjet tui --theme solarized
+quinjet tui --theme nord --appearance light
+quinjet tui ~/code/project --theme gruvbox --appearance dark
+```
 
 ## What it refuses
 
@@ -189,6 +226,8 @@ Examples:
 quinjet
 quinjet tui ~/code/project
 quinjet tui --no-mouse
+quinjet tui --theme catppuccin
+quinjet tui --theme rose-pine --appearance light
 quinjet tui ~/code/project --webhook-listen 8787
 quinjet tui --help
 ```
@@ -205,6 +244,8 @@ Arguments:
 Options:
       --no-mouse                  Disable mouse capture
       --webhook-listen <ADDRESS>  Listen for forwarded GitHub webhooks on a port or host:port
+      --theme <THEME>             Color palette to use throughout the interface [default: quinjet]
+      --appearance <APPEARANCE>   Use the system, light, or dark variant of the palette [default: system]
   -C, --path <DIR>                Repository to run a subcommand against [default: .]
       --json                      Print one JSON document on stdout instead of text
   -h, --help                      Print help

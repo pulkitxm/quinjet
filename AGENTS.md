@@ -39,8 +39,9 @@ src/
     update.rs      verified release lookup and executable replacement
     watch.rs       the non-interactive refresh loop
   git/             argv construction, status, history, diff, worker, github/
-  ui/              viewport-only rendering, theme, mouse hit map
+  ui/              viewport-only rendering, mouse hit map
   app.rs           focus, selection, modal, command and generation state
+  theme.rs         selectable palettes and semantic syntax colors
 docs/cli/          one page per verb, generated into the wiki
 docs/practices/    how widely used Rust projects are engineered
 ```

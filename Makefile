@@ -2,12 +2,12 @@ CARGO ?= cargo
 NIGHTLY ?= nightly
 COVERAGE_MIN ?= 65
 
-.PHONY: ci ci-fast deep fmt fmt-check lint lint-nightly test doc deadlinks msrv build package \
+.PHONY: ci ci-fast deep fmt fmt-check lint lint-nightly test doc msrv build package \
 	install-check comments secrets typos spellcheck deny audit osv sbom unused sort hack wiki \
 	coverage shell actions yaml markdown toml editorconfig ruff miri careful sanitize mutants \
 	minimal-versions udeps bloat tools tools-deep
 
-ci: fmt-check lint test doc deadlinks comments secrets typos spellcheck deny audit osv unused sort hack \
+ci: fmt-check lint test doc comments secrets typos spellcheck deny audit osv unused sort hack \
 	shell actions yaml markdown toml editorconfig ruff wiki package
 
 ci-fast: fmt-check lint test comments secrets
@@ -107,9 +107,6 @@ minimal-versions:
 udeps:
 	$(CARGO) +$(NIGHTLY) udeps --all-targets --all-features
 
-deadlinks: doc
-	$(CARGO) deadlinks --dir target/doc/quinjet
-
 bloat:
 	$(CARGO) bloat --release --crates -n 30
 
@@ -151,7 +148,7 @@ wiki:
 
 tools:
 	$(CARGO) install cargo-deny cargo-audit cargo-machete cargo-shear cargo-hack cargo-llvm-cov \
-		cargo-nextest cargo-sort cargo-spellcheck cargo-deadlinks cargo-cyclonedx typos-cli taplo-cli
+		cargo-nextest cargo-sort cargo-spellcheck cargo-cyclonedx typos-cli taplo-cli
 
 tools-deep:
 	$(CARGO) install cargo-mutants cargo-careful cargo-minimal-versions cargo-udeps cargo-bloat \

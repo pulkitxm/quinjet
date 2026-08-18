@@ -9,6 +9,8 @@ use syntect::highlighting::{FontStyle, Theme, ThemeSet};
 use syntect::parsing::{SyntaxReference, SyntaxSet};
 use unicode_width::UnicodeWidthChar;
 
+use crate::theme::SyntaxColor;
+
 const TAB_WIDTH: usize = 4;
 const MAX_SYNTAX_HIGHLIGHT_PATCH_BYTES: usize = 512 * 1024;
 const MAX_SYNTAX_HIGHLIGHT_LINE_BYTES: usize = 32 * 1024;
@@ -29,7 +31,7 @@ pub(crate) enum DiffLineKind {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HighlightSpan {
     pub text: String,
-    pub foreground: Option<(u8, u8, u8)>,
+    pub foreground: Option<SyntaxColor>,
     pub bold: bool,
     pub italic: bool,
 }
@@ -872,12 +874,27 @@ fn highlight(
             .into_iter()
             .map(|(style, text)| HighlightSpan {
                 text: text.to_owned(),
-                foreground: Some((style.foreground.r, style.foreground.g, style.foreground.b)),
+                foreground: Some(syntax_color(style.foreground)),
                 bold: style.font_style.contains(FontStyle::BOLD),
                 italic: style.font_style.contains(FontStyle::ITALIC),
             })
             .collect(),
         Err(_) => vec![HighlightSpan::plain(line)],
+    }
+}
+
+const fn syntax_color(color: syntect::highlighting::Color) -> SyntaxColor {
+    match (color.r, color.g, color.b) {
+        (101, 115, 126) => SyntaxColor::Comment,
+        (191, 97, 106) => SyntaxColor::Red,
+        (208, 135, 112) => SyntaxColor::Orange,
+        (235, 203, 139) => SyntaxColor::Yellow,
+        (163, 190, 140) => SyntaxColor::Green,
+        (150, 181, 180) => SyntaxColor::Cyan,
+        (143, 161, 179) => SyntaxColor::Blue,
+        (180, 142, 173) => SyntaxColor::Purple,
+        (171, 121, 103) => SyntaxColor::Brown,
+        _ => SyntaxColor::Text,
     }
 }
 
@@ -1199,6 +1216,33 @@ mod tests {
                 > 1
         );
         assert_eq!(document.lines[4].kind, DiffLineKind::FileFooter);
+    }
+
+    #[test]
+    fn base16_syntax_colors_have_stable_semantic_roles() {
+        let colors = [
+            ((192, 197, 206), SyntaxColor::Text),
+            ((101, 115, 126), SyntaxColor::Comment),
+            ((191, 97, 106), SyntaxColor::Red),
+            ((208, 135, 112), SyntaxColor::Orange),
+            ((235, 203, 139), SyntaxColor::Yellow),
+            ((163, 190, 140), SyntaxColor::Green),
+            ((150, 181, 180), SyntaxColor::Cyan),
+            ((143, 161, 179), SyntaxColor::Blue),
+            ((180, 142, 173), SyntaxColor::Purple),
+            ((171, 121, 103), SyntaxColor::Brown),
+        ];
+        for ((red, green, blue), expected) in colors {
+            assert_eq!(
+                syntax_color(syntect::highlighting::Color {
+                    r: red,
+                    g: green,
+                    b: blue,
+                    a: 255,
+                }),
+                expected
+            );
+        }
     }
 
     #[test]

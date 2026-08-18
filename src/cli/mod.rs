@@ -27,6 +27,7 @@ use crate::git::github::{
 };
 use crate::git::status::{Change, ChangeArea};
 use crate::git::{ConflictChoice, GitOperation, LocalDiffRequest, Repository};
+use crate::theme::{AppearanceChoice, ThemeName};
 
 pub(crate) const EXIT_FAILURE: u8 = 1;
 pub(crate) const EXIT_NOT_FOUND: u8 = 3;
@@ -80,6 +81,8 @@ pub(crate) struct TerminalOptions {
     pub path: PathBuf,
     pub no_mouse: bool,
     pub webhook_listen: Option<String>,
+    pub theme: ThemeName,
+    pub appearance: AppearanceChoice,
 }
 
 #[expect(
@@ -253,6 +256,12 @@ struct TuiArgs {
     /// Listen for forwarded GitHub webhooks on a port or host:port
     #[arg(long, value_name = "ADDRESS")]
     webhook_listen: Option<String>,
+    /// Color palette to use throughout the interface
+    #[arg(long, value_enum, default_value_t)]
+    theme: ThemeName,
+    /// Use the system, light, or dark variant of the palette
+    #[arg(long, value_enum, default_value_t)]
+    appearance: AppearanceChoice,
 }
 
 #[derive(Debug, Args)]
@@ -612,6 +621,8 @@ pub(crate) fn dispatch() -> Result<Launch> {
                 path: PathBuf::from("."),
                 no_mouse: false,
                 webhook_listen: None,
+                theme: ThemeName::default(),
+                appearance: AppearanceChoice::default(),
             })));
         }
         Some(Verb::Tui(args)) => {
@@ -619,6 +630,8 @@ pub(crate) fn dispatch() -> Result<Launch> {
                 path: args.path,
                 no_mouse: args.no_mouse,
                 webhook_listen: args.webhook_listen,
+                theme: args.theme,
+                appearance: args.appearance,
             })));
         }
         Some(Verb::Completions(args)) => {
@@ -2067,6 +2080,39 @@ mod tests {
             cli.command,
             Some(Verb::Tui(TuiArgs { path, .. })) if path == Path::new("/tmp/somewhere")
         ));
+    }
+
+    #[test]
+    fn terminal_themes_default_to_quinjet_with_system_appearance() {
+        let cli = Cli::try_parse_from(["quinjet", "tui"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Verb::Tui(TuiArgs {
+                theme: ThemeName::Quinjet,
+                appearance: AppearanceChoice::System,
+                ..
+            }))
+        ));
+
+        let cli = Cli::try_parse_from([
+            "quinjet",
+            "tui",
+            "--theme",
+            "rose-pine",
+            "--appearance",
+            "light",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Verb::Tui(TuiArgs {
+                theme: ThemeName::RosePine,
+                appearance: AppearanceChoice::Light,
+                ..
+            }))
+        ));
+        drop(Cli::try_parse_from(["quinjet", "tui", "--theme", "unknown"]).unwrap_err());
+        drop(Cli::try_parse_from(["quinjet", "tui", "--appearance", "unknown"]).unwrap_err());
     }
 
     #[test]

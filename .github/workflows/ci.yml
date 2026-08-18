@@ -110,11 +110,6 @@ jobs:
             -D rustdoc::invalid_html_tags
             -D rustdoc::bare_urls
         run: cargo doc --no-deps --all-features --document-private-items --locked
-      - uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780 # v2
-        with:
-          tool: cargo-deadlinks
-      - name: No dead links in the generated docs
-        run: cargo deadlinks --dir target/doc/quinjet
 
   msrv:
     name: Minimum supported Rust

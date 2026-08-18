@@ -59,8 +59,8 @@ already implemented.
 ### The verification breadth exceeds every reference repository
 
 The Makefile `ci` target chains formatting, clippy, tests in two feature configurations,
-rustdoc with `-D warnings` and `--document-private-items`, cargo-deadlinks, comment and
-secret checkers, typos, cargo-spellcheck, cargo-deny, cargo-audit, osv-scanner, cargo-machete
+rustdoc with `-D warnings`, `--document-private-items`, and denied broken-link lints,
+comment and secret checkers, typos, cargo-spellcheck, cargo-deny, cargo-audit, osv-scanner, cargo-machete
 plus cargo-shear, cargo-sort, cargo-hack feature powerset, shellcheck plus shfmt, actionlint
 plus zizmor in pedantic persona, yamllint strict, markdownlint, taplo fmt plus lint,
 editorconfig-checker, ruff, the wiki drift check, and `cargo package`. The `deep` target and

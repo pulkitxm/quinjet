@@ -120,9 +120,9 @@ document and appends `[output reached Quinjet's size cap and was truncated]`.
       "oldLine": 18,
       "newLine": 18,
       "spans": [
-        { "text": "import", "foreground": [180, 142, 173], "bold": false, "italic": false },
-        { "text": " ", "foreground": [192, 197, 206], "bold": false, "italic": false },
-        { "text": "argparse", "foreground": [192, 197, 206], "bold": false, "italic": false }
+        { "text": "import", "foreground": "purple", "bold": false, "italic": false },
+        { "text": " ", "foreground": "text", "bold": false, "italic": false },
+        { "text": "argparse", "foreground": "text", "bold": false, "italic": false }
       ]
     }
   ],
@@ -143,7 +143,8 @@ selection is labeled by whichever area sorts first. `kind` is one of
 removed row only `oldLine`, a context row both. `spans` carry syntax
 highlighting, so the row's plain text is the concatenation of `spans[].text`,
 except on a `file-header` row, whose three spans (label, additions, deletions)
-join with a single space. `foreground` is an RGB triple or `null`.
+join with a single space. `foreground` is a semantic syntax color name or
+`null`. The terminal resolves that role through its active palette.
 `commitDetails` and `pullRequestDetails` are always `null` here; they are filled
 by [`quinjet show`](./show.md) and `quinjet pr diff`. `truncated` is true if the
 index or any file crossed a cap.
