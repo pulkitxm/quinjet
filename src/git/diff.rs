@@ -271,18 +271,15 @@ impl DiffIndex {
                 if let Some(document) = loaded_document {
                     lines.extend(document.lines.clone());
                 } else {
-                    lines.push(meta_line(
-                        DiffLineKind::Meta,
-                        "Diff loads only when this file is expanded",
-                    ));
+                    lines.push(meta_line(DiffLineKind::Meta, "Loading diff…"));
                 }
             } else {
                 lines.push(meta_line(
                     DiffLineKind::Meta,
                     if loaded_document.is_some() {
-                        "Diff loaded — expand this file to display it"
+                        "Diff loaded · expand this file to display it"
                     } else {
-                        "Diff loads only when this file is expanded"
+                        "Expand this file to load its diff"
                     },
                 ));
             }
@@ -1012,6 +1009,14 @@ mod tests {
         let skeleton = index.document(&loaded);
         assert_eq!(skeleton.file_count(), 2);
         assert!(skeleton.lines[0].text().contains("+?"));
+        assert_eq!(
+            skeleton
+                .lines
+                .iter()
+                .filter(|line| line.text() == "Loading diff…")
+                .count(),
+            2
+        );
 
         loaded.insert(
             PathBuf::from("src/first.rs"),
@@ -1040,6 +1045,18 @@ mod tests {
         assert_eq!(collapsed.addition_count(), 0);
         assert!(!collapsed.lines.iter().any(|line| line.text() == "new();"));
         assert!(collapsed.lines[0].text().contains("+1"));
+        assert!(
+            collapsed
+                .lines
+                .iter()
+                .any(|line| line.text() == "Diff loaded · expand this file to display it")
+        );
+        assert!(
+            collapsed
+                .lines
+                .iter()
+                .any(|line| line.text() == "Expand this file to load its diff")
+        );
     }
 
     #[test]

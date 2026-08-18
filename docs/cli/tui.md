@@ -124,27 +124,42 @@ wheel events to the application, so the terminal's own text selection never
 sees them. That is what makes rows clickable and dividers draggable, and it is
 also what stops a normal drag from selecting text.
 
-There are three ways out of that. `--no-mouse` starts with the mouse released.
-`m` toggles it at any time and says which way it went:
-`Mouse off · select and copy with the terminal, m to restore`. Holding `Shift`
-while dragging is the escape hatch most terminals implement themselves, and it
-selects text without activating a control.
+Dragging plain preview content selects and copies its text. In a side-by-side
+diff, the selection stays inside the half where the drag began, so unrelated
+text in the other half is not included. File headers and other controls remain
+clickable.
+
+`--no-mouse` starts with the mouse released. `m` changes the mouse setting at any
+time and says which way it went: `Mouse off · select and copy with the terminal,
+m to restore`. Holding `Shift` while dragging is the escape hatch most terminals
+implement themselves, and it uses the terminal's own selection without
+activating a control.
+
+Horizontal trackpad swipes scroll wide preview lines. Terminals that encode a
+horizontal gesture as `Shift` plus vertical wheel events are supported too.
 
 Releasing the mouse costs nothing else. Clickable rows, group actions and
 divider dragging are the only things that stop working, and every one of them
 has a key.
 
-Repository names, branches, commit IDs and pull-request numbers are underlined
-when Quinjet can resolve their GitHub destination. Clicking the underlined text
-opens it in the default browser. Clicking the worktree path opens it in the
-platform's default file viewer. The rest of a commit row keeps selecting that
-commit, so opening and selecting remain distinct targets.
+Repository names, branches, commit IDs, pull-request numbers, check names and
+visible URL fields share one link treatment. Links are not underlined by
+default. Holding Command or Control while hovering underlines the target. With
+mouse capture on, Quinjet owns those cells and a normal single click opens the
+target, including the pull-request and check URL fields. With mouse capture
+off, Cmd-click or Ctrl-click uses a terminal hyperlink instead. Holding that
+modifier while hovering also exposes the terminal hyperlink when capture is
+on, which lets a local terminal open the target even when Quinjet runs over
+SSH. A cmux SSH relay is used for ordinary browser clicks when its socket is
+available. Clicking the worktree path opens it in the platform's default file
+viewer. The rest of a commit row keeps selecting that commit, so opening and
+selecting remain distinct targets.
 
 Changes are divided into merge, staged, tracked and untracked sections. Click a
-section header, press `Enter` or press `Space` to collapse or expand it. Left and
-right arrows move between a section and its files. Pull-request file trees also
-compact directory chains with only one child, matching `apps/web/src/` rather
-than spending one row on each component.
+section header or press `Space` to collapse or expand it. Left and right arrows
+move between a section and its files without changing its folded state.
+Pull-request file trees also compact directory chains with only one child,
+matching `apps/web/src/` rather than spending one row on each component.
 
 ## `--webhook-listen`
 
@@ -302,6 +317,8 @@ The verbs in the right-hand column are documented in their groups:
 | `R` in History, then confirm | `quinjet revert <commit> --yes` |
 | `n` in History | `quinjet branch create <name> <commit>` |
 | `S` in Changes | `quinjet stash list` |
+| `*` or a file checkbox, then Commit becomes Stash | `quinjet stash push -- <paths>` after confirm and a message |
+| `▶` on the Changes toolbar | Stage All, Unstage All, Compare Branch, Manage Stashes, and the three stash-create variants |
 | Enter in the stash manager | `quinjet stash show <ref>` |
 | `Ctrl+N` in the stash manager | `quinjet stash push -m "<message>"` |
 | `Ctrl+U` in the stash manager | `quinjet stash push --include-untracked` |
@@ -318,13 +335,13 @@ The verbs in the right-hand column are documented in their groups:
 | selecting a check | `quinjet pr logs <n> "<check>"` |
 | selecting a check that is still running | `quinjet pr logs <n> "<check>" --watch` |
 | the pull-request poll itself | `quinjet pr checks <n> --watch` |
-| `Shift+O` | `quinjet pr open <n>`, or `quinjet pr open <n> --check <name>` when a check is selected |
+| `Shift+O` | Opens the selected branch or commit on GitHub. In Pull Requests it is `quinjet pr open <n>`, or `quinjet pr open <n> --check <name>` when a check is selected. |
 | `t` or `T` | `--expanded`, on `diff`, `show`, `branch compare` and `stash show`. `pr diff` has no `--expanded`: a pull-request patch is cached per file by its merge-base and head commits at three lines of context, and a second context width would need a second cache key |
 | `v` | no verb. The command line prints unified patches only |
 | `e` / `E` on a diff | no verb. A verb prints every file it was asked for |
 | `e` / `E` in a check log | no verb. `pr logs` prints every step unfolded |
 | `Space` on a file header in the preview | no verb |
-| `Space`, Enter, `[`, `]` in a check log | no verb. They fold and move between steps |
+| `Space`, `[`, `]` in a check log | no verb. They fold and move between steps |
 | `/` elsewhere | no verb. Filtering is a view over the list already read |
 | `z`, `Tab`, Enter, `gg`, `G`, `PgUp`, `PgDn`, `h`, `l`, `[`, `]`, arrows, wheel | no verb. Navigation and scrolling |
 | `Ctrl+D` / `Ctrl+U` | no verb. Half-page scroll |

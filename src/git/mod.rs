@@ -137,6 +137,7 @@ pub(crate) enum GitOperation {
         message: String,
         include_untracked: bool,
         staged: bool,
+        paths: Vec<PathBuf>,
     },
     StashApply(String),
     StashPop(Option<String>),
@@ -656,7 +657,8 @@ impl Repository {
             .run([
                 OsString::from("rev-parse"),
                 OsString::from("--verify"),
-                OsString::from(format!("{untracked_commit}^{{commit}}")),
+                OsString::from("--quiet"),
+                OsString::from(&untracked_commit),
             ])
             .is_ok_and(|result| result.status.success());
         if untracked_exists && !truncated {
@@ -967,6 +969,7 @@ impl Repository {
                 message,
                 include_untracked,
                 staged,
+                paths,
             } => {
                 let mut args = vec![OsString::from("stash"), OsString::from("push")];
                 if *include_untracked {
@@ -978,6 +981,12 @@ impl Repository {
                 if !message.trim().is_empty() {
                     args.push(OsString::from("--message"));
                     args.push(OsString::from(message.trim()));
+                }
+                if !paths.is_empty() {
+                    args.push(OsString::from("--"));
+                    for path in paths {
+                        args.push(path.into());
+                    }
                 }
                 drop(self.checked(args)?);
                 Ok("Changes stashed".to_owned())
@@ -1833,9 +1842,10 @@ mod tests {
                 message: "save launch work".to_owned(),
                 include_untracked: true,
                 staged: false,
+                paths: Vec::new(),
             })
             .unwrap();
-        assert!(repository.status().unwrap().changes.is_empty());
+        assert_eq!(repository.status().unwrap().changes, []);
 
         let stashes = repository.stashes().unwrap();
         assert_eq!(stashes.len(), 1);
@@ -1861,13 +1871,51 @@ mod tests {
         repository
             .perform(&GitOperation::StashApply(stashes[0].reference.clone()))
             .unwrap();
-        assert!(!repository.status().unwrap().changes.is_empty());
+        assert_ne!(repository.status().unwrap().changes, []);
         run_test_git(&test_repository.path, ["reset", "--hard", "HEAD"]);
         run_test_git(&test_repository.path, ["clean", "-fd"]);
         repository
             .perform(&GitOperation::StashDrop(stashes[0].reference.clone()))
             .unwrap();
-        assert!(repository.stashes().unwrap().is_empty());
+        assert_eq!(repository.stashes().unwrap(), []);
+    }
+
+    #[test]
+    fn tracked_only_stash_preview_does_not_require_an_untracked_parent() {
+        let test_repository = TestRepository::new();
+        let repository = test_repository.repository();
+        fs::write(
+            test_repository.path.join("index2.ts"),
+            "const name = \"Test\";\n\nconsole.log(name + \"!\")\n",
+        )
+        .unwrap();
+        run_test_git(&test_repository.path, ["add", "index2.ts"]);
+
+        repository
+            .perform(&GitOperation::StashPush {
+                message: "tracked addition".to_owned(),
+                include_untracked: false,
+                staged: false,
+                paths: Vec::new(),
+            })
+            .unwrap();
+        let stash = repository.stashes().unwrap().remove(0);
+        let prepared = repository
+            .prepare_local_diff(&LocalDiffRequest::Stash {
+                stash: Box::new(stash),
+                expanded: false,
+            })
+            .unwrap();
+        let index = prepared.index();
+        assert_eq!(index.files.len(), 1);
+
+        let document = prepared.diff_file(&index.files[0].path).unwrap();
+        assert!(
+            document
+                .lines
+                .iter()
+                .any(|line| line.text().contains("const name"))
+        );
     }
 
     #[test]
@@ -1896,6 +1944,7 @@ mod tests {
                 message: "index only".to_owned(),
                 include_untracked: false,
                 staged: true,
+                paths: Vec::new(),
             })
             .unwrap();
 
