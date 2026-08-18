@@ -1088,6 +1088,15 @@ fn draw_changes_sidebar(
     (hits, action_hits)
 }
 
+fn overflow_menu_area(anchor: Rect, width: usize, item_count: usize) -> Rect {
+    let width = u16::try_from(width).unwrap_or(24).min(anchor.width.max(1));
+    let item_count = u16::try_from(item_count).unwrap_or(1);
+    let height = item_count.saturating_add(2);
+    let x = anchor.x.saturating_add(anchor.width.saturating_sub(width));
+    let y = anchor.y.saturating_sub(height);
+    Rect::new(x, y, width, height)
+}
+
 fn draw_scm_menu(
     frame: &mut Frame<'_>,
     anchor: Rect,
@@ -1101,11 +1110,7 @@ fn draw_scm_menu(
         .max()
         .unwrap_or(12)
         .saturating_add(4);
-    let width = u16::try_from(width).unwrap_or(24).min(anchor.width.max(24));
-    let item_count = u16::try_from(ScmMenuItem::ALL.len()).unwrap_or(7);
-    let area_height = item_count.saturating_add(2);
-    let y = anchor.y.saturating_sub(area_height);
-    let area = Rect::new(anchor.x, y, width, area_height);
+    let area = overflow_menu_area(anchor, width, ScmMenuItem::ALL.len());
     frame.render_widget(Clear, area);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -1626,11 +1631,7 @@ fn draw_pr_menu(
         .max()
         .unwrap_or(12)
         .saturating_add(4);
-    let width = u16::try_from(width).unwrap_or(24).min(anchor.width.max(24));
-    let item_count = u16::try_from(items.len()).unwrap_or(1);
-    let area_height = item_count.saturating_add(2);
-    let y = anchor.y.saturating_sub(area_height);
-    let area = Rect::new(anchor.x, y, width, area_height);
+    let area = overflow_menu_area(anchor, width, items.len());
     frame.render_widget(Clear, area);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -6190,6 +6191,17 @@ fn suffix_width(value: &str, width: usize) -> String {
 mod tests {
     use super::*;
     use crate::git::diff::CommitDetails;
+
+    #[test]
+    fn overflow_menus_right_align_to_the_cta_arrow() {
+        let anchor = Rect::new(10, 20, 40, 1);
+        let area = overflow_menu_area(anchor, 18, 4);
+        assert_eq!(area.width, 18);
+        assert_eq!(area.height, 6);
+        assert_eq!(area.x, 32);
+        assert_eq!(area.right(), anchor.right());
+        assert_eq!(area.bottom(), anchor.y);
+    }
 
     #[test]
     fn help_catalog_covers_sections_and_previously_missing_bindings() {
