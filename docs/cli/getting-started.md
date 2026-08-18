@@ -7,6 +7,12 @@ opens the terminal interface; with a verb it answers one question on stdout and
 exits. Both faces are the same executable and the same command layer, so
 nothing you learn here is specific to one of them.
 
+The terminal interface starts with the `quinjet` color palette and checks the
+system light or dark preference once. No configuration file is needed. Use
+`quinjet tui --theme solarized` to select another palette, or add
+`--appearance light` or `--appearance dark` to override system detection for
+that run. Every available palette has both variants.
+
 Repository operations require `git` on `PATH`. Quinjet never links
 libgit2: every local operation is a real `git` subprocess with an argument
 array, which is why your hooks, your credential helper, your signing

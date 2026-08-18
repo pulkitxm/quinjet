@@ -16,6 +16,7 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 - Scrollable staged, unstaged, untracked, renamed, deleted, and conflict groups
 - Visible, clickable per-file and per-group stage/unstage actions with immediate authoritative refresh
 - Syntax highlighting for TypeScript/TSX, Rust, Python, Go, JavaScript, and hundreds of other formats
+- Twelve unified color themes, each with light and dark variants selected from the system appearance at startup
 - Unified and draggable side-by-side diff panes
 - Index-first, lazy per-file patches for changes, commits, branch comparisons, stashes, and PRs
 - Compact change hunks by default; `t` expands the selected file to full context
@@ -114,20 +115,31 @@ quinjet
 Quinjet asks Git for the top-level repository, so running it from `project/apps/web/src` still displays every change in `project`. You can also provide a path explicitly:
 
 ```bash
-quinjet /path/to/project
+quinjet tui /path/to/project
 ```
 
 Mouse capture can be disabled without losing functionality:
 
 ```bash
-quinjet --no-mouse
+quinjet tui --no-mouse
 ```
 
 An open pull request stays current on its own poll. To make it react the instant something happens instead, let the GitHub CLI forward deliveries to Quinjet:
 
 ```bash
-quinjet --webhook-listen 8787
+quinjet tui --webhook-listen 8787
 gh webhook forward --repo owner/name --events '*' --url http://127.0.0.1:8787
+```
+
+Quinjet uses its own palette and the system light or dark appearance by default.
+Open the command palette with `:` or `Ctrl+P`, then choose `Change Theme…` or
+`Change Appearance…` to switch either setting without leaving the interface.
+The launch flags choose the initial palette and appearance for this run:
+
+```bash
+quinjet tui --theme catppuccin
+quinjet tui --theme rose-pine --appearance light
+quinjet tui --theme tokyo-night --appearance dark
 ```
 
 Only loopback connections are accepted, and a delivery is treated purely as a signal to re-read the pull request through `gh`; nothing from the request body is trusted or displayed.
