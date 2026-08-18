@@ -1,4 +1,5 @@
 use std::ops::Range;
+use std::path::Path;
 
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
@@ -15,6 +16,7 @@ use crate::app::{
 };
 use crate::convert::cells;
 use crate::date_time::format_local_timestamp;
+use crate::file_icons;
 use crate::git::diff::{DiffDocument, DiffLine, DiffLineKind, HighlightSpan, PullRequestDetails};
 use crate::git::github::{
     CheckLogLine, CheckLogSeverity, CheckStep, ConversationEntry, ConversationKind,
@@ -28,6 +30,11 @@ use crate::theme::{AppearanceChoice, Theme, ThemeName};
 
 const DETAIL_LABEL_WIDTH: usize = 12;
 const MAX_INTRALINE_SOURCE_BYTES: usize = 32 * 1024;
+
+fn file_icon_span(path: &Path, theme: &Theme) -> Span<'static> {
+    let icon = file_icons::for_path(path);
+    Span::styled(icon.glyph, Style::default().fg(theme.syntax(icon.color)))
+}
 
 const HELP_LINES: &[(&str, &str)] = &[
     ("Navigation", ""),
@@ -536,7 +543,7 @@ fn draw_changes_sidebar(
                     Style::default().bg(theme.panel)
                 };
                 let path = change.parent_path();
-                let available = list_area.width.saturating_sub(11) as usize;
+                let available = list_area.width.saturating_sub(13) as usize;
                 let name = truncate_middle(
                     &change.file_name(),
                     available.saturating_sub(path.width() + 1),
@@ -546,6 +553,8 @@ fn draw_changes_sidebar(
                         if selected { " • " } else { "   " },
                         Style::default().fg(theme.accent),
                     ),
+                    file_icon_span(&change.path, theme),
+                    Span::raw(" "),
                     Span::styled(
                         name,
                         Style::default().fg(theme.text).add_modifier(if selected {
@@ -1213,24 +1222,26 @@ fn draw_pull_request_file_tree(
                 );
                 let available = (area.width as usize)
                     .saturating_sub(indent_width)
-                    .saturating_sub(7);
-                let line = format!(
-                    " {}{}{}",
-                    "  ".repeat((*depth).min(8)),
-                    if selected { "• " } else { "  " },
-                    truncate_end(&name, available),
-                );
-                frame.render_widget(
-                    Paragraph::new(line).style(
-                        Style::default()
-                            .fg(theme.text)
-                            .bg(background)
-                            .add_modifier(if selected {
-                                Modifier::BOLD
-                            } else {
-                                Modifier::empty()
-                            }),
+                    .saturating_sub(9);
+                let line = Line::from(vec![
+                    Span::raw(format!(
+                        " {}{}",
+                        "  ".repeat((*depth).min(8)),
+                        if selected { "• " } else { "  " },
+                    )),
+                    file_icon_span(&file.path, theme),
+                    Span::raw(" "),
+                    Span::styled(
+                        truncate_end(&name, available),
+                        Style::default().fg(theme.text).add_modifier(if selected {
+                            Modifier::BOLD
+                        } else {
+                            Modifier::empty()
+                        }),
                     ),
+                ]);
+                frame.render_widget(
+                    Paragraph::new(line).style(Style::default().bg(background)),
                     Rect::new(area.x, y, area.width.saturating_sub(3), 1),
                 );
                 frame.render_widget(
@@ -2686,6 +2697,38 @@ fn draw_pull_request_details_scrolled(
             theme,
         ));
     }
+    let mut selected_file = vec![Span::styled(
+        format!("{:<DETAIL_LABEL_WIDTH$}", "Selected"),
+        Style::default().fg(theme.muted),
+    )];
+    if let Some(path) = details.selected_file.as_deref() {
+        selected_file.extend([
+            file_icon_span(Path::new(path), theme),
+            Span::raw(" "),
+            Span::styled(path, Style::default().fg(theme.text)),
+        ]);
+    } else {
+        selected_file.push(Span::styled(
+            "Preparing files",
+            Style::default().fg(theme.text),
+        ));
+    }
+    selected_file.extend([
+        Span::raw("  "),
+        Span::styled(
+            format!("+{}", details.selected_file_additions),
+            Style::default()
+                .fg(theme.added)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            format!("-{}", details.selected_file_deletions),
+            Style::default()
+                .fg(theme.removed)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]);
     lines.extend([
         detail_line(
             "Source",
@@ -2713,33 +2756,7 @@ fn draw_pull_request_details_scrolled(
             theme,
         ),
         detail_line("URL", details.url.clone(), theme),
-        Line::from(vec![
-            Span::styled(
-                format!("{:<DETAIL_LABEL_WIDTH$}", "Selected"),
-                Style::default().fg(theme.muted),
-            ),
-            Span::styled(
-                details
-                    .selected_file
-                    .as_deref()
-                    .unwrap_or("Preparing files"),
-                Style::default().fg(theme.text),
-            ),
-            Span::styled("  ", Style::default()),
-            Span::styled(
-                format!("+{}", details.selected_file_additions),
-                Style::default()
-                    .fg(theme.added)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("  ", Style::default()),
-            Span::styled(
-                format!("-{}", details.selected_file_deletions),
-                Style::default()
-                    .fg(theme.removed)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
+        Line::from(selected_file),
         Line::from(vec![
             Span::styled("PR total   ", Style::default().fg(theme.muted)),
             Span::styled(
@@ -3163,7 +3180,8 @@ fn draw_file_header(frame: &mut Frame<'_>, area: Rect, line: &DiffLine, app: &Ap
     };
     let additions = line.spans.get(1).map_or("+0", |span| span.text.as_str());
     let deletions = line.spans.get(2).map_or("-0", |span| span.text.as_str());
-    let reserved = 9_usize + additions.width() + deletions.width();
+    let icon = file_icon_span(Path::new(file_header_path(line).unwrap_or(label)), theme);
+    let reserved = 11_usize + additions.width() + deletions.width();
     let label = truncate_middle(label, (area.width as usize).saturating_sub(reserved));
     let fill = (area.width as usize)
         .saturating_sub(reserved)
@@ -3183,6 +3201,8 @@ fn draw_file_header(frame: &mut Frame<'_>, area: Rect, line: &DiffLine, app: &Ap
         Paragraph::new(Line::from(vec![
             Span::styled("┌─", Style::default().fg(border)),
             Span::styled(format!(" {disclosure} "), Style::default().fg(theme.muted)),
+            icon,
+            Span::raw(" "),
             Span::styled(
                 label,
                 Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
@@ -4074,10 +4094,14 @@ fn draw_conflict(frame: &mut Frame<'_>, change: &Change, theme: &Theme) {
     frame.render_widget(block, area);
     frame.render_widget(
         Paragraph::new(vec![
-            Line::from(Span::styled(
-                change.display_path(),
-                Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
-            )),
+            Line::from(vec![
+                file_icon_span(&change.path, theme),
+                Span::raw(" "),
+                Span::styled(
+                    change.display_path(),
+                    Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                ),
+            ]),
             Line::from(""),
             Line::from(vec![
                 Span::styled(
@@ -5215,7 +5239,7 @@ mod tests {
         )));
         assert!(app.geometry.link_hits.iter().any(|hit| matches!(
             &hit.target,
-            OpenTarget::Path(path) if path == std::path::Path::new("/tmp/repo")
+            OpenTarget::Path(path) if path == Path::new("/tmp/repo")
         )));
     }
 
@@ -5267,6 +5291,8 @@ mod tests {
         assert!(rendered.contains("[S] Stashes"));
         assert!(rendered.contains("[d] Compare Branch"));
         assert!(rendered.contains("UNTRACKED CHANGES"));
+        assert!(rendered.contains("\u{e7a8} main.rs"));
+        assert!(rendered.contains("\u{eeab} README.md"));
         assert!(!rendered.contains('›'));
         assert!(
             app.geometry
@@ -5355,11 +5381,12 @@ mod tests {
             .map(ratatui::buffer::Cell::symbol)
             .collect();
         assert!(rendered.contains("⌄ src/"));
+        assert!(rendered.contains("\u{e7a8} app.rs"));
         assert!(rendered.contains("app.rs"));
         assert!(hits.iter().any(|hit| {
             matches!(
                 &hit.target,
-                SidebarHit::PullRequestDirectory(path) if path == std::path::Path::new("src")
+                SidebarHit::PullRequestDirectory(path) if path == Path::new("src")
             )
         }));
 
@@ -6430,6 +6457,7 @@ terminal rows because that is what real pull-request comments look like in pract
             .unwrap();
 
         assert!(rendered.ends_with("+12 -3 ┐"));
+        assert!(rendered.contains("\u{e7a8} src/main.rs"));
         assert!(!rendered.contains('⌄'));
         assert!(!rendered.contains('›'));
         assert_eq!(buffer[(cells(addition_column), 0)].fg, theme.added);

@@ -2,6 +2,7 @@ mod app;
 mod cli;
 mod convert;
 mod date_time;
+mod file_icons;
 mod git;
 mod theme;
 mod ui;
