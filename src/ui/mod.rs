@@ -11,10 +11,10 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget, Wra
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{
-    App, ChangeRow, ChangeSection, ContentFileHit, ContentStepHit, DiffLayout, Focus, HelpHit,
-    LinkHit, Modal, ModalAction, OpenTarget, PaletteCommand, PrMenuItem, PullRequestContentRow,
-    PullRequestSection, PullRequestTreeEntry, ScmAction, ScmActionHit, ScmMenuItem, SidebarHit,
-    SidebarHitArea, ToastLevel, UiGeometry, View,
+    App, ChangeRow, ChangeSection, CheckListRow, ContentFileHit, ContentStepHit, DiffLayout, Focus,
+    HelpHit, LinkHit, Modal, ModalAction, OpenTarget, PaletteCommand, PrMenuItem,
+    PullRequestContentRow, PullRequestSection, PullRequestTreeEntry, ScmAction, ScmActionHit,
+    ScmMenuItem, SidebarHit, SidebarHitArea, ToastLevel, UiGeometry, View,
 };
 use crate::convert::cells;
 use crate::date_time::format_local_timestamp;
@@ -1892,9 +1892,9 @@ const fn pull_request_file_status_color(status: PullRequestFileStatus, theme: &T
     }
 }
 
-/// The overview sidebar is the pull request itself on row zero followed by its
-/// checks, so one list carries both the way back to the conversation and the way
-/// into any run's log.
+/// The overview sidebar is the pull request itself on row zero, then status
+/// sections and their checks, so one list carries both the way back to the
+/// conversation and the way into any run's log.
 fn draw_pull_request_check_list(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -1904,84 +1904,71 @@ fn draw_pull_request_check_list(
     if area.height == 0 {
         return Vec::new();
     }
-    let rows = app.pull_request_checks.len() + 1;
-    let cursor_row = app
-        .pull_request_check_cursor
-        .map_or(0, |cursor| cursor.saturating_add(1));
+    let rows = app.check_list_rows();
+    let selected_row = rows
+        .iter()
+        .position(|row| check_list_row_selected(app, row))
+        .unwrap_or_default();
     ensure_offset(
         &mut app.sidebar_offset,
-        cursor_row,
+        selected_row,
         area.height as usize,
-        rows,
+        rows.len(),
     );
 
     let mut hits = Vec::new();
-    for (offset, row) in (app.sidebar_offset..rows)
-        .take(area.height as usize)
-        .enumerate()
-    {
-        let y = area.y + cells(offset);
+    let end = (app.sidebar_offset + area.height as usize).min(rows.len());
+    for (y, row) in (area.y..area.bottom()).zip(rows.iter().take(end).skip(app.sidebar_offset)) {
         let row_area = Rect::new(area.x, y, area.width, 1);
-        let selected = row == cursor_row;
-        let background = if selected {
-            theme.selected
-        } else {
-            theme.panel
-        };
-        let marker = Span::styled(
-            if selected { " › " } else { "   " },
-            Style::default().fg(theme.accent),
-        );
-        let (line, target) = if row == 0 {
-            (
-                Line::from(vec![
-                    marker,
-                    Span::styled(
-                        "Conversation",
-                        Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        conversation_row_suffix(app),
-                        Style::default().fg(theme.muted),
-                    ),
-                ]),
-                SidebarHit::PullRequestConversation,
-            )
-        } else {
-            let index = row - 1;
-            let Some(check) = app.pull_request_checks.get(index) else {
-                continue;
-            };
-            let (icon, color) = pull_request_check_icon(check.status, theme);
-            let workflow = if check.workflow.is_empty() {
-                String::new()
-            } else {
-                format!("  {}", check.workflow)
-            };
-            let reserved = 6 + workflow.width();
-            (
-                Line::from(vec![
-                    marker,
-                    Span::styled(format!("{icon} "), Style::default().fg(color)),
-                    Span::styled(
-                        truncate_end(&check.name, (area.width as usize).saturating_sub(reserved)),
-                        Style::default().fg(theme.text),
-                    ),
-                    Span::styled(workflow, Style::default().fg(theme.muted)),
-                ]),
-                SidebarHit::PullRequestCheck(index),
-            )
-        };
-        frame.render_widget(
-            Paragraph::new(line).style(Style::default().bg(background)),
-            row_area,
-        );
-        hits.push(SidebarHitArea {
-            area: row_area,
-            target,
-        });
+        match row {
+            CheckListRow::Spacer => {
+                frame.render_widget(
+                    Paragraph::new(" ").style(Style::default().bg(theme.panel)),
+                    row_area,
+                );
+            }
+            CheckListRow::Conversation => {
+                hits.push(draw_check_list_conversation(frame, row_area, app, theme));
+            }
+            CheckListRow::Section {
+                section,
+                count,
+                collapsed,
+            } => {
+                let selected = app.selected_check_section == Some(*section);
+                let background = if selected {
+                    theme.selected
+                } else {
+                    theme.panel_alt
+                };
+                frame.render_widget(
+                    Paragraph::new(Line::from(vec![
+                        Span::styled(
+                            disclosure_prefix(!*collapsed),
+                            Style::default().fg(theme.muted),
+                        ),
+                        Span::styled(
+                            section.label().to_uppercase(),
+                            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(format!("  {count}"), Style::default().fg(theme.muted)),
+                    ]))
+                    .style(Style::default().bg(background)),
+                    row_area,
+                );
+                hits.push(SidebarHitArea {
+                    area: row_area,
+                    target: SidebarHit::PullRequestCheckSection(*section),
+                });
+            }
+            CheckListRow::Check { index } => {
+                if let Some(hit) = draw_check_list_check(frame, row_area, app, theme, *index) {
+                    hits.push(hit);
+                }
+            }
+        }
     }
-    draw_scrollbar(frame, area, app.sidebar_offset, rows, theme);
+    draw_scrollbar(frame, area, app.sidebar_offset, rows.len(), theme);
 
     if app.pull_request_checks.is_empty() && area.height > 1 {
         let message = if app.pull_request_checks_loading {
@@ -1999,6 +1986,102 @@ fn draw_pull_request_check_list(
         );
     }
     hits
+}
+
+fn check_list_row_selected(app: &App, row: &CheckListRow) -> bool {
+    match row {
+        CheckListRow::Conversation => {
+            app.selected_check_section.is_none() && app.pull_request_check_cursor.is_none()
+        }
+        CheckListRow::Section { section, .. } => app.selected_check_section == Some(*section),
+        CheckListRow::Check { index } => {
+            app.selected_check_section.is_none() && app.pull_request_check_cursor == Some(*index)
+        }
+        CheckListRow::Spacer => false,
+    }
+}
+
+fn draw_check_list_conversation(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &App,
+    theme: &Theme,
+) -> SidebarHitArea {
+    let selected =
+        app.selected_check_section.is_none() && app.pull_request_check_cursor.is_none();
+    let background = if selected {
+        theme.selected
+    } else {
+        theme.panel
+    };
+    let marker = Span::styled(
+        if selected { " › " } else { "   " },
+        Style::default().fg(theme.accent),
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            marker,
+            Span::styled(
+                "Conversation",
+                Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                conversation_row_suffix(app),
+                Style::default().fg(theme.muted),
+            ),
+        ]))
+        .style(Style::default().bg(background)),
+        area,
+    );
+    SidebarHitArea {
+        area,
+        target: SidebarHit::PullRequestConversation,
+    }
+}
+
+fn draw_check_list_check(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &App,
+    theme: &Theme,
+    index: usize,
+) -> Option<SidebarHitArea> {
+    let check = app.pull_request_checks.get(index)?;
+    let selected =
+        app.selected_check_section.is_none() && app.pull_request_check_cursor == Some(index);
+    let background = if selected {
+        theme.selected
+    } else {
+        theme.panel
+    };
+    let marker = Span::styled(
+        if selected { " › " } else { "   " },
+        Style::default().fg(theme.accent),
+    );
+    let (icon, color) = pull_request_check_icon(check.status, theme);
+    let workflow = if check.workflow.is_empty() {
+        String::new()
+    } else {
+        format!("  {}", check.workflow)
+    };
+    let reserved = 6 + workflow.width();
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            marker,
+            Span::styled(format!("{icon} "), Style::default().fg(color)),
+            Span::styled(
+                truncate_end(&check.name, (area.width as usize).saturating_sub(reserved)),
+                Style::default().fg(theme.text),
+            ),
+            Span::styled(workflow, Style::default().fg(theme.muted)),
+        ]))
+        .style(Style::default().bg(background)),
+        area,
+    );
+    Some(SidebarHitArea {
+        area,
+        target: SidebarHit::PullRequestCheck(index),
+    })
 }
 
 fn conversation_row_suffix(app: &App) -> String {
