@@ -5153,8 +5153,9 @@ fn draw_confirm(
         ),
     );
     let buttons = Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
-    let no_width = 4.min(buttons.width);
-    let yes_width = buttons.width.saturating_sub(no_width);
+    #[expect(clippy::integer_division, reason = "layout maths works in whole cells")]
+    let yes_width = buttons.width / 2;
+    let no_width = buttons.width.saturating_sub(yes_width);
     let yes_area = Rect::new(buttons.x, buttons.y, yes_width, 1);
     let no_area = Rect::new(buttons.x.saturating_add(yes_width), buttons.y, no_width, 1);
     frame.render_widget(
@@ -6201,6 +6202,41 @@ mod tests {
         assert_eq!(area.x, 32);
         assert_eq!(area.right(), anchor.right());
         assert_eq!(area.bottom(), anchor.y);
+    }
+
+    #[test]
+    fn confirm_modal_gives_yes_and_no_equal_hit_targets() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = App::new("/tmp/repo", "repo");
+        app.modal = Some(Modal::Confirm {
+            title: "Squash and merge?".to_owned(),
+            message: "Really squash and merge #12 (Ship it)?".to_owned(),
+            action: crate::app::ConfirmAction::Operate(crate::git::GitOperation::Fetch),
+        });
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+        let yes = app
+            .geometry
+            .modal_action_hits
+            .iter()
+            .find(|(_, action)| *action == ModalAction::ConfirmYes)
+            .map(|(area, _)| *area)
+            .expect("yes button");
+        let no = app
+            .geometry
+            .modal_action_hits
+            .iter()
+            .find(|(_, action)| *action == ModalAction::ConfirmNo)
+            .map(|(area, _)| *area)
+            .expect("no button");
+        assert_eq!(yes.width, no.width);
+        assert_eq!(yes.y, no.y);
+        assert_eq!(yes.right(), no.x);
     }
 
     #[test]
