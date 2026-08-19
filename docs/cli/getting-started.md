@@ -121,8 +121,9 @@ quinjet update
 
 The original installation method is not persisted. Instead of guessing from
 `PATH`, Cargo defaults, or installer defaults, `update` replaces the executable
-that handled the command. This covers `cargo install`, cargo-binstall, both
-release scripts, custom Cargo roots, and custom installer directories. A later
+that handled the command, following the `q` launcher to the same file. This
+covers `cargo install`, cargo-binstall, both release scripts, custom Cargo
+roots, and custom installer directories. A later
 `cargo install --force` or cargo-binstall run can still replace that binary and
 update Cargo's own bookkeeping.
 

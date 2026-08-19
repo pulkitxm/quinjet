@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail, ensure};
@@ -20,8 +20,7 @@ const NETWORK_TIMEOUT_SECONDS: &str = "30";
 const USER_AGENT: &str = concat!("quinjet/", env!("CARGO_PKG_VERSION"));
 
 pub(super) fn run(out: &Emitter, check_only: bool) -> Result<u8> {
-    let executable = std::env::current_exe() // nosemgrep: rust.lang.security.current-exe.current-exe
-        .context("failed to locate the running Quinjet executable")?;
+    let executable = running_executable()?;
     let context = UpdateContext {
         current_version: env!("CARGO_PKG_VERSION"),
         os: std::env::consts::OS,
@@ -46,7 +45,7 @@ pub(super) fn run(out: &Emitter, check_only: bool) -> Result<u8> {
         },
         |staged| {
             out.set_progress("Installing verified update");
-            self_replace::self_replace(staged).context("failed to replace the running executable")
+            replace_executable(&executable, staged)
         },
     )?;
     if result.status == UpdateStatus::Updated {
@@ -55,6 +54,95 @@ pub(super) fn run(out: &Emitter, check_only: bool) -> Result<u8> {
     }
     out.emit(&result, || result.text())?;
     Ok(0)
+}
+
+fn running_executable() -> Result<PathBuf> {
+    let executable = std::env::current_exe() // nosemgrep: rust.lang.security.current-exe.current-exe
+        .context("failed to locate the running Quinjet executable")?;
+    resolve_executable(&executable)
+}
+
+fn resolve_executable(current: &Path) -> Result<PathBuf> {
+    #[cfg(unix)]
+    {
+        current.canonicalize().with_context(|| {
+            format!(
+                "failed to resolve the running executable {}",
+                current.display()
+            )
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        Ok(current.to_path_buf())
+    }
+}
+
+fn replace_executable(current: &Path, staged: &Path) -> Result<()> {
+    let executable = resolve_executable(current)?;
+    #[cfg(unix)]
+    {
+        replace_unix_executable(&executable, staged)
+    }
+    #[cfg(windows)]
+    {
+        self_replace::self_replace(staged).with_context(|| {
+            format!(
+                "failed to replace the running executable {}",
+                executable.display()
+            )
+        })
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        bail!(
+            "replacing {} is not supported on this platform",
+            executable.display()
+        )
+    }
+}
+
+#[cfg(unix)]
+fn replace_unix_executable(executable: &Path, staged: &Path) -> Result<()> {
+    let parent = executable
+        .parent()
+        .context("the Quinjet executable has no parent directory")?;
+    let permissions = executable
+        .metadata()
+        .with_context(|| format!("failed to read permissions for {}", executable.display()))?
+        .permissions();
+    let prefix = executable
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map_or_else(
+            || String::from(".__temp__"),
+            |stem| {
+                let mut prefix = String::from(".");
+                prefix.push_str(stem);
+                prefix.push_str(".__temp__");
+                prefix
+            },
+        );
+    let tmp = tempfile::Builder::new()
+        .prefix(&prefix)
+        .tempfile_in(parent)
+        .context("failed to stage the update beside the running executable")?;
+    let copied = fs::copy(staged, tmp.path()).context("failed to copy the staged update")?;
+    let staged_len = fs::metadata(staged)
+        .context("failed to inspect the staged update")?
+        .len();
+    ensure!(
+        copied == staged_len,
+        "the staged update was not copied in full"
+    );
+    fs::set_permissions(tmp.path(), permissions)
+        .context("failed to preserve executable permissions")?;
+    drop(
+        tmp.persist(executable)
+            .map_err(|error| error.error)
+            .context("failed to replace the running executable")?,
+    );
+    Ok(())
 }
 
 struct UpdateContext<'a> {
@@ -559,5 +647,60 @@ mod tests {
             api_url: "https://example.invalid/latest",
             releases_url: "https://example.invalid/releases",
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn relative_q_shortcut_replaces_the_resolved_binary() -> Result<()> {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+
+        let directory = tempfile::tempdir()?;
+        let executable = directory.path().join("quinjet");
+        let shortcut = directory.path().join("q");
+        let staged = directory.path().join("staged");
+        write_unix_executable(&executable, b"old")?;
+        symlink("quinjet", &shortcut)?;
+        fs::write(&staged, b"new")?;
+        replace_executable(&shortcut, &staged)?;
+        ensure!(fs::read(&executable)? == b"new");
+        ensure!(fs::symlink_metadata(&shortcut)?.file_type().is_symlink());
+        ensure!(fs::read_link(&shortcut)?.as_os_str() == "quinjet");
+        ensure!(fs::metadata(&executable)?.permissions().mode() & 0o777 == 0o755);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn chained_q_shortcut_replaces_the_canonical_binary() -> Result<()> {
+        use std::os::unix::fs::symlink;
+
+        let cargo = tempfile::tempdir()?;
+        let local = tempfile::tempdir()?;
+        let canonical = cargo.path().join("quinjet");
+        let linked = local.path().join("quinjet");
+        let shortcut = local.path().join("q");
+        let staged = local.path().join("staged");
+        write_unix_executable(&canonical, b"old")?;
+        symlink(&canonical, &linked)?;
+        symlink("quinjet", &shortcut)?;
+        fs::write(&staged, b"new")?;
+        replace_executable(&shortcut, &staged)?;
+        ensure!(fs::read(&canonical)? == b"new");
+        ensure!(fs::symlink_metadata(&linked)?.file_type().is_symlink());
+        ensure!(fs::symlink_metadata(&shortcut)?.file_type().is_symlink());
+        ensure!(fs::read_link(&shortcut)?.as_os_str() == "quinjet");
+        ensure!(fs::canonicalize(&shortcut)? == fs::canonicalize(&canonical)?);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    fn write_unix_executable(path: &Path, contents: &[u8]) -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+
+        fs::write(path, contents)?;
+        let mut permissions = fs::metadata(path)?.permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions)?;
+        Ok(())
     }
 }

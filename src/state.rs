@@ -167,6 +167,7 @@ mod tests {
     use std::process::Command;
 
     use super::*;
+    use crate::git::same_path;
 
     #[test]
     fn records_one_project_per_common_directory() {
@@ -180,7 +181,6 @@ mod tests {
             repo.path(),
             &["worktree", "add", "-b", "topic", &linked_display],
         );
-        let linked = fs::canonicalize(&linked).unwrap();
         record_recent_project(repo.path());
         record_recent_project(&linked);
         let entries = read_entries();
@@ -192,7 +192,7 @@ mod tests {
             groups[0]
                 .worktrees
                 .iter()
-                .any(|tree| tree.current && tree.path == linked)
+                .any(|tree| tree.current && same_path(&tree.path, &linked))
         );
         forget_recent_project(&entries[0].common_dir);
         assert_eq!(read_entries(), Vec::<RecentEntry>::new());
