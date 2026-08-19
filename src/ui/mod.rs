@@ -4877,22 +4877,24 @@ fn draw_footer(
             app.status.changes.len(),
             app.status.staged_count()
         );
-        let worktree_label = if app.worktrees.len() > 1 {
-            let mut label = String::from("   ");
+        let (worktree_gap, worktree_label) = if app.worktrees.len() > 1 {
+            let mut label = String::new();
             label.push_str(&app.worktrees.len().to_string());
             label.push_str(" worktrees");
+            let gap = "   ";
             let prefix_width = cells("  ".width())
                 .saturating_add(cells(branch.width()))
-                .saturating_add(cells(summary.width()));
+                .saturating_add(cells(summary.width()))
+                .saturating_add(cells(gap.width()));
             project_hits.push(clipped_link_area(
                 area.x.saturating_add(prefix_width),
                 area.y.saturating_add(1),
                 label.width(),
                 area,
             ));
-            label
+            (gap, label)
         } else {
-            String::new()
+            ("", String::new())
         };
         Line::from(vec![
             Span::styled("  ", Style::default().fg(theme.accent)),
@@ -4909,6 +4911,7 @@ fn draw_footer(
                 link_hits,
             ),
             Span::styled(summary, Style::default().fg(theme.muted)),
+            Span::raw(worktree_gap),
             Span::styled(
                 worktree_label,
                 Style::default()
@@ -6939,6 +6942,58 @@ mod tests {
             .map(ratatui::buffer::Cell::symbol)
             .collect::<String>();
         assert!(rendered.contains("\x1b]8;;https://github.com/acme/repo/commit/abc123\x1b\\"));
+    }
+
+    #[test]
+    fn footer_underlines_only_the_worktree_count() {
+        use std::path::PathBuf;
+
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = App::new("/tmp/repo", "repo");
+        app.status.branch.head = "main".to_owned();
+        let tree = |path: &str, current: bool| crate::git::Worktree {
+            path: PathBuf::from(path),
+            head: "abcdef0123456789".to_owned(),
+            branch: Some("main".to_owned()),
+            current,
+            bare: false,
+            detached: false,
+            locked: None,
+            prunable: None,
+        };
+        app.worktrees = vec![
+            tree("/tmp/repo", true),
+            tree("/tmp/repo-a", false),
+            tree("/tmp/repo-b", false),
+        ];
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+
+        let hit = app
+            .geometry
+            .project_hits
+            .iter()
+            .copied()
+            .max_by_key(|area| area.y)
+            .expect("footer worktree hit");
+        let buffer = terminal.backend().buffer();
+        let mut label = String::new();
+        for x in hit.x..hit.right() {
+            let cell = &buffer[(x, hit.y)];
+            label.push_str(cell.symbol());
+            assert!(
+                cell.modifier.contains(Modifier::UNDERLINED),
+                "worktree label should be underlined"
+            );
+        }
+        assert_eq!(label, "3 worktrees");
+        let before = &buffer[(hit.x.saturating_sub(1), hit.y)];
+        assert_eq!(before.symbol(), " ");
+        assert!(!before.modifier.contains(Modifier::UNDERLINED));
     }
 
     #[test]
