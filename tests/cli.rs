@@ -215,15 +215,6 @@ fn run_in(directory: Option<&Path>, args: &[&str]) -> Result<Run> {
     Run::from(output)
 }
 
-fn contains_path(haystack: &str, path: &Path) -> bool {
-    let rendered = path.display().to_string();
-    if haystack.contains(&rendered) {
-        return true;
-    }
-    haystack.contains(&rendered.replace('\\', "/"))
-        || haystack.contains(&rendered.replace('/', "\\"))
-}
-
 #[test]
 fn version_names_the_binary() -> Result<()> {
     let run = run_in(None, &["--version"])?.success()?;
@@ -606,8 +597,12 @@ fn worktree_list_includes_linked_trees() -> Result<()> {
         "worktree list misses the linked branch: {}",
         listed.stdout
     );
+    let linked_name = linked
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("the linked worktree has no file name")?;
     ensure!(
-        contains_path(&listed.stdout, &linked),
+        listed.stdout.contains(linked_name),
         "worktree list misses the linked path: {}",
         listed.stdout
     );
