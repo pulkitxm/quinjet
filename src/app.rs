@@ -20,7 +20,10 @@ use crate::git::github::{
 use crate::git::history::Commit;
 use crate::git::status::{Change, ChangeArea, ChangeStatus, RepoStatus};
 use crate::git::worker::{WorkerCommand, WorkerEvent};
-use crate::git::{Branch, ConflictChoice, GitOperation, HistoryBranch, LocalDiffRequest, Stash};
+use crate::git::{
+    Branch, ConflictChoice, GitOperation, HistoryBranch, LocalDiffRequest, ProjectGroup, Stash,
+    Worktree,
+};
 use crate::theme::{Appearance, AppearanceChoice, Theme, ThemeName};
 
 const PREVIEW_DEBOUNCE: Duration = Duration::from_millis(45);
@@ -130,23 +133,16 @@ pub(crate) enum ChangeSection {
     Conflict,
     Staged,
     Unstaged,
-    Untracked,
 }
 
 impl ChangeSection {
-    pub(crate) const ALL: [Self; 4] = [
-        Self::Conflict,
-        Self::Staged,
-        Self::Unstaged,
-        Self::Untracked,
-    ];
+    pub(crate) const ALL: [Self; 3] = [Self::Conflict, Self::Staged, Self::Unstaged];
 
     pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::Conflict => "Merge Changes",
             Self::Staged => "Staged Changes",
             Self::Unstaged => "Changes",
-            Self::Untracked => "Untracked Changes",
         }
     }
 
@@ -154,10 +150,7 @@ impl ChangeSection {
         match self {
             Self::Conflict => change.area == ChangeArea::Conflict,
             Self::Staged => change.area == ChangeArea::Staged,
-            Self::Unstaged => {
-                change.area == ChangeArea::Unstaged && change.status != ChangeStatus::Untracked
-            }
-            Self::Untracked => change.status == ChangeStatus::Untracked,
+            Self::Unstaged => change.area == ChangeArea::Unstaged,
         }
     }
 }
@@ -368,7 +361,6 @@ pub(crate) enum ToastLevel {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum OpenTarget {
     Browser(String),
-    Path(PathBuf),
 }
 
 #[derive(Debug, Clone)]
@@ -767,6 +759,12 @@ pub(crate) enum Modal {
         query: TextBuffer,
         loading: bool,
     },
+    Projects {
+        groups: Vec<ProjectGroup>,
+        selected: usize,
+        query: TextBuffer,
+        loading: bool,
+    },
     PullRequestRepositories {
         items: Vec<GitHubRepository>,
         selected: usize,
@@ -807,6 +805,7 @@ pub(crate) enum PaletteCommand {
     StashIncludeUntracked,
     StashPop,
     ManageStashes,
+    OpenProject,
     Branches,
     CompareBranch,
     RenameCurrentBranch,
@@ -822,7 +821,7 @@ pub(crate) enum PaletteCommand {
 }
 
 impl PaletteCommand {
-    pub(crate) const ALL: [Self; 26] = [
+    pub(crate) const ALL: [Self; 27] = [
         Self::Refresh,
         Self::StageAll,
         Self::UnstageAll,
@@ -837,6 +836,7 @@ impl PaletteCommand {
         Self::StashIncludeUntracked,
         Self::StashPop,
         Self::ManageStashes,
+        Self::OpenProject,
         Self::Branches,
         Self::CompareBranch,
         Self::RenameCurrentBranch,
@@ -867,6 +867,7 @@ impl PaletteCommand {
             Self::StashIncludeUntracked => "Stash Changes Including Untracked…",
             Self::StashPop => "Pop Latest Stash",
             Self::ManageStashes => "View and Manage Stashes…",
+            Self::OpenProject => "Open Project…",
             Self::Branches => "Switch Branch…",
             Self::CompareBranch => "Compare Current Branch With…",
             Self::RenameCurrentBranch => "Rename Current Branch…",
@@ -985,6 +986,7 @@ pub(crate) struct UiGeometry {
     pub content_step_hits: Vec<ContentStepHit>,
     pub link_hits: Vec<LinkHit>,
     pub help_hits: Vec<HelpHit>,
+    pub project_hits: Vec<Rect>,
 }
 
 #[derive(Debug)]
@@ -993,6 +995,7 @@ pub(crate) enum AppEffect {
     Copy(String),
     SetMouseCapture(bool),
     Open(OpenTarget),
+    OpenRepository(PathBuf),
     Quit,
 }
 
@@ -1012,6 +1015,8 @@ pub(crate) struct App {
     pub appearance: Appearance,
     pub status: RepoStatus,
     pub history: Vec<Commit>,
+    pub worktrees: Vec<Worktree>,
+    pub project_groups: Vec<ProjectGroup>,
     pub history_branch: Option<HistoryBranch>,
     pub pull_request: Option<PullRequest>,
     pub github_repositories: Vec<GitHubRepository>,
@@ -1150,6 +1155,8 @@ pub(crate) struct App {
     pub branch_generation: u64,
     pub history_branch_generation: u64,
     pub stash_generation: u64,
+    pub worktree_generation: u64,
+    pub project_generation: u64,
     pub operation_id: u64,
     pub refresh_again: bool,
     pub history_refresh_again: bool,
@@ -1180,6 +1187,8 @@ impl App {
             appearance: Appearance::Dark,
             status: RepoStatus::default(),
             history: Vec::new(),
+            worktrees: Vec::new(),
+            project_groups: Vec::new(),
             history_branch: None,
             pull_request: None,
             github_repositories: Vec::new(),
@@ -1301,6 +1310,8 @@ impl App {
             branch_generation: 0,
             history_branch_generation: 0,
             stash_generation: 0,
+            worktree_generation: 0,
+            project_generation: 0,
             operation_id: 0,
             refresh_again: false,
             history_refresh_again: false,
@@ -2083,6 +2094,31 @@ impl App {
             .collect()
     }
 
+    pub(crate) fn filtered_project_rows(
+        groups: &[ProjectGroup],
+        query: &str,
+    ) -> Vec<(usize, usize)> {
+        let query = query.to_lowercase();
+        let mut rows = Vec::new();
+        for (group_index, group) in groups.iter().enumerate() {
+            let group_matches = query.is_empty() || group.name.to_lowercase().contains(&query);
+            for (tree_index, tree) in group.worktrees.iter().enumerate() {
+                let tree_matches = tree.path.to_string_lossy().to_lowercase().contains(&query)
+                    || tree.branch_label().to_lowercase().contains(&query);
+                if group_matches || tree_matches {
+                    rows.push((group_index, tree_index));
+                }
+            }
+        }
+        rows
+    }
+
+    pub(crate) fn worktree_path_for_branch(&self, name: &str) -> Option<&Path> {
+        self.worktrees.iter().find_map(|tree| {
+            (tree.branch.as_deref() == Some(name) && !tree.current).then_some(tree.path.as_path())
+        })
+    }
+
     pub(crate) fn filtered_github_repositories(
         items: &[GitHubRepository],
         query: &str,
@@ -2223,6 +2259,7 @@ impl App {
                 self.pr_menu_open = false;
             }
             KeyCode::Char('S') if self.view == View::Changes => self.open_stashes(&mut effects),
+            KeyCode::Char('w') => self.open_projects(&mut effects),
             KeyCode::Char('o') if self.view == View::PullRequests => {
                 self.open_pull_request_repositories(&mut effects);
             }
@@ -2468,6 +2505,7 @@ impl App {
             | Modal::HistoryBranches { query: input, .. }
             | Modal::CompareBranches { query: input, .. }
             | Modal::Stashes { query: input, .. }
+            | Modal::Projects { query: input, .. }
             | Modal::PullRequestRepositories { query: input, .. },
         ) = self.modal.as_mut()
         {
@@ -2572,11 +2610,19 @@ impl App {
         match event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.text_selection = None;
-                if let Some(target) = self
+                let point = (event.column, event.row).into();
+                if self
+                    .geometry
+                    .project_hits
+                    .iter()
+                    .any(|area| area.contains(point))
+                {
+                    self.open_projects(&mut effects);
+                } else if let Some(target) = self
                     .geometry
                     .link_hits
                     .iter()
-                    .find(|hit| hit.area.contains((event.column, event.row).into()))
+                    .find(|hit| hit.area.contains(point))
                     .map(|hit| hit.target.clone())
                 {
                     effects.push(AppEffect::Open(target));
@@ -2753,25 +2799,23 @@ impl App {
                     None => self.update_text_selection(event.column, event.row),
                 }
             }
-            MouseEventKind::Up(MouseButton::Left) => {
-                if self.resize_target.take().is_none() {
-                    self.update_text_selection(event.column, event.row);
-                    let dragged = self
-                        .text_selection
-                        .is_some_and(|selection| selection.anchor != selection.head);
-                    if dragged {
-                        let text = self.selected_text();
-                        if !text.is_empty() {
-                            effects.push(AppEffect::Copy(text));
-                            self.show_toast(
-                                "Selection copied from this pane".to_owned(),
-                                ToastLevel::Success,
-                                now,
-                            );
-                        }
-                    } else {
-                        self.text_selection = None;
+            MouseEventKind::Up(MouseButton::Left) if self.resize_target.take().is_none() => {
+                self.update_text_selection(event.column, event.row);
+                let dragged = self
+                    .text_selection
+                    .is_some_and(|selection| selection.anchor != selection.head);
+                if dragged {
+                    let text = self.selected_text();
+                    if !text.is_empty() {
+                        effects.push(AppEffect::Copy(text));
+                        self.show_toast(
+                            "Selection copied from this pane".to_owned(),
+                            ToastLevel::Success,
+                            now,
+                        );
                     }
+                } else {
+                    self.text_selection = None;
                 }
             }
             MouseEventKind::ScrollDown => {
@@ -3584,6 +3628,48 @@ impl App {
                     }
                 }
             }
+            WorkerEvent::Worktrees { generation, result } => {
+                if generation != self.worktree_generation {
+                    return effects;
+                }
+                match result {
+                    Ok(items) => {
+                        self.worktrees = items;
+                    }
+                    Err(error) => {
+                        self.show_toast(error, ToastLevel::Error, now);
+                    }
+                }
+            }
+            WorkerEvent::RecentProjects { generation, result } => {
+                if generation != self.project_generation {
+                    return effects;
+                }
+                match result {
+                    Ok(groups) => {
+                        self.project_groups.clone_from(&groups);
+                        self.apply_current_worktrees(&groups);
+                        if let Some(Modal::Projects {
+                            groups: modal_groups,
+                            selected,
+                            query,
+                            loading,
+                        }) = self.modal.as_mut()
+                        {
+                            let visible = Self::filtered_project_rows(&groups, &query.value);
+                            *selected = (*selected).min(visible.len().saturating_sub(1));
+                            *modal_groups = groups;
+                            *loading = false;
+                        }
+                    }
+                    Err(error) => {
+                        if matches!(self.modal, Some(Modal::Projects { .. })) {
+                            self.modal = None;
+                        }
+                        self.show_toast(error, ToastLevel::Error, now);
+                    }
+                }
+            }
             WorkerEvent::OperationFinished {
                 id,
                 label,
@@ -4068,6 +4154,57 @@ impl App {
                 }
                 self.modal = Some(modal);
             }
+            Modal::Projects {
+                groups,
+                selected,
+                query,
+                loading,
+            } => {
+                if key.code == KeyCode::Esc {
+                    return effects;
+                }
+                let visible = Self::filtered_project_rows(groups, &query.value);
+                let selected_tree = visible
+                    .get(*selected)
+                    .and_then(|(group_index, tree_index)| {
+                        groups
+                            .get(*group_index)
+                            .and_then(|group| group.worktrees.get(*tree_index))
+                            .cloned()
+                    });
+                let selected_group = visible
+                    .get(*selected)
+                    .and_then(|(group_index, _)| groups.get(*group_index).cloned());
+                match key.code {
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        *selected = previous_list_index(*selected, visible.len());
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        *selected = next_list_index(*selected, visible.len());
+                    }
+                    KeyCode::Enter if !*loading => {
+                        if let Some(tree) = selected_tree.filter(|tree| !tree.current) {
+                            effects.push(AppEffect::OpenRepository(tree.path));
+                        }
+                        return effects;
+                    }
+                    KeyCode::Delete if !*loading => {
+                        if let Some(group) = selected_group
+                            .filter(|group| !group.worktrees.iter().any(|tree| tree.current))
+                        {
+                            crate::state::forget_recent_project(&group.common_dir);
+                            self.request_recent_projects(&mut effects);
+                        }
+                        self.modal = Some(modal);
+                        return effects;
+                    }
+                    _ => {
+                        edit_text(query, key, false);
+                        *selected = 0;
+                    }
+                }
+                self.modal = Some(modal);
+            }
             Modal::PullRequestRepositories {
                 items,
                 selected,
@@ -4236,6 +4373,7 @@ impl App {
             PaletteCommand::StashIncludeUntracked => self.prompt_stash(true, false),
             PaletteCommand::StashPop => self.queue_operation(GitOperation::StashPop(None), effects),
             PaletteCommand::ManageStashes => self.open_stashes(effects),
+            PaletteCommand::OpenProject => self.open_projects(effects),
             PaletteCommand::Branches => self.open_branches(effects),
             PaletteCommand::CompareBranch => self.open_compare_branches(effects),
             PaletteCommand::RenameCurrentBranch => {
@@ -4968,6 +5106,41 @@ impl App {
         effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadStashes {
             generation: self.stash_generation,
         })));
+    }
+
+    fn open_projects(&mut self, effects: &mut Vec<AppEffect>) {
+        self.modal = Some(Modal::Projects {
+            groups: self.project_groups.clone(),
+            selected: 0,
+            query: TextBuffer::default(),
+            loading: self.project_groups.is_empty(),
+        });
+        self.request_recent_projects(effects);
+    }
+
+    fn apply_current_worktrees(&mut self, groups: &[ProjectGroup]) {
+        if let Some(group) = groups
+            .iter()
+            .find(|group| group.worktrees.iter().any(|tree| tree.current))
+        {
+            self.worktrees.clone_from(&group.worktrees);
+        }
+    }
+
+    fn request_worktrees(&mut self, effects: &mut Vec<AppEffect>) {
+        self.worktree_generation = self.worktree_generation.wrapping_add(1);
+        effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadWorktrees {
+            generation: self.worktree_generation,
+        })));
+    }
+
+    fn request_recent_projects(&mut self, effects: &mut Vec<AppEffect>) {
+        self.project_generation = self.project_generation.wrapping_add(1);
+        effects.push(AppEffect::Git(Box::new(
+            WorkerCommand::LoadRecentProjects {
+                generation: self.project_generation,
+            },
+        )));
     }
 
     fn open_compare_branches(&mut self, effects: &mut Vec<AppEffect>) {
@@ -6034,6 +6207,11 @@ impl App {
         effects.push(AppEffect::Git(Box::new(WorkerCommand::Refresh {
             generation: self.status_generation,
         })));
+        if matches!(self.modal, Some(Modal::Projects { .. })) {
+            self.request_recent_projects(effects);
+        } else {
+            self.request_worktrees(effects);
+        }
     }
 
     /// A `silent` lookup is a background poll: it keeps the loaded pull request,
@@ -6326,18 +6504,14 @@ impl App {
             return;
         }
         if self.selected_change_target().is_none() {
-            let preferred = [ChangeSection::Unstaged, ChangeSection::Untracked]
-                .into_iter()
-                .find(|section| {
-                    visible.iter().any(|index| {
-                        self.status
-                            .changes
-                            .get(*index)
-                            .is_some_and(|change| section.matches(change))
-                    })
-                });
-            if let Some(section) = preferred {
-                self.selected_change_section = Some(section);
+            let has_changes = visible.iter().any(|index| {
+                self.status
+                    .changes
+                    .get(*index)
+                    .is_some_and(|change| ChangeSection::Unstaged.matches(change))
+            });
+            if has_changes {
+                self.selected_change_section = Some(ChangeSection::Unstaged);
             } else if let Some(target) = self.change_targets().first().copied() {
                 self.select_change_target(target);
             }
@@ -6500,13 +6674,9 @@ impl App {
                 .map(|url| OpenTarget::Browser(url.to_owned())),
         };
         match target {
-            Some(target) => {
-                let destination = match &target {
-                    OpenTarget::Browser(url) => url.clone(),
-                    OpenTarget::Path(path) => path.display().to_string(),
-                };
-                self.show_toast(format!("Opening {destination}"), ToastLevel::Info, now);
-                effects.push(AppEffect::Open(target));
+            Some(OpenTarget::Browser(url)) => {
+                self.show_toast(format!("Opening {url}"), ToastLevel::Info, now);
+                effects.push(AppEffect::Open(OpenTarget::Browser(url)));
             }
             None => self.show_toast(
                 "Nothing to open on GitHub for this selection".to_owned(),
@@ -6560,10 +6730,6 @@ impl App {
                 repository.trim_end_matches('/')
             ))
         })
-    }
-
-    pub(crate) fn workspace_open_target(&self) -> OpenTarget {
-        OpenTarget::Path(self.repository_root.clone())
     }
 
     pub(crate) fn account_open_target(&self, account: &str) -> Option<OpenTarget> {
@@ -6620,7 +6786,7 @@ impl App {
         })
     }
 
-    fn show_toast(&mut self, message: String, level: ToastLevel, now: Instant) {
+    pub(crate) fn show_toast(&mut self, message: String, level: ToastLevel, now: Instant) {
         self.toast = Some(Toast {
             message,
             level,
@@ -7343,7 +7509,13 @@ mod tests {
         assert_eq!(app.selected_change().unwrap().area, ChangeArea::Staged);
         app.navigate(1, now);
         assert_eq!(app.selected_change_section, Some(ChangeSection::Unstaged));
-        assert_eq!(app.selected_section_changes().len(), 1);
+        assert_eq!(app.selected_section_changes().len(), 2);
+        assert!(
+            app.selected_section_changes()
+                .iter()
+                .any(|change| change.path == Path::new("new.txt")
+                    && change.status == ChangeStatus::Untracked)
+        );
 
         assert!(app.toggle_selected_change_section());
         assert!(
@@ -7357,14 +7529,6 @@ mod tests {
                 ..
             }
         )));
-
-        app.navigate(1, now);
-        assert_eq!(app.selected_change_section, Some(ChangeSection::Untracked));
-        assert_eq!(app.selected_section_changes().len(), 1);
-        assert_eq!(
-            app.selected_section_changes()[0].path,
-            PathBuf::from("new.txt")
-        );
 
         let rows = app.change_rows();
         let section_count = rows
@@ -7566,10 +7730,12 @@ mod tests {
             app.collapsed_change_sections
                 .contains(&ChangeSection::Unstaged)
         );
-        assert!(
+        assert_eq!(
             app.selected_section_changes()
                 .iter()
-                .all(|change| change.status != ChangeStatus::Untracked)
+                .map(|change| change.path.as_path())
+                .collect::<Vec<_>>(),
+            vec![Path::new("src/main.rs")]
         );
     }
 
@@ -7736,10 +7902,12 @@ mod tests {
             effects.as_slice(),
             [
                 AppEffect::Git(refresh),
+                AppEffect::Git(worktrees),
                 AppEffect::Git(history),
                 AppEffect::Git(branches),
                 AppEffect::Git(repository),
             ] if matches!(refresh.as_ref(), WorkerCommand::Refresh { .. })
+                && matches!(worktrees.as_ref(), WorkerCommand::LoadWorktrees { .. })
                 && matches!(history.as_ref(), WorkerCommand::LoadHistory { .. })
                 && matches!(branches.as_ref(), WorkerCommand::LoadHistoryBranches { .. })
                 && matches!(repository.as_ref(), WorkerCommand::LoadLocalGitHubRepository)
@@ -8654,6 +8822,7 @@ mod tests {
                     AppEffect::Copy(_)
                     | AppEffect::SetMouseCapture(_)
                     | AppEffect::Open(_)
+                    | AppEffect::OpenRepository(_)
                     | AppEffect::Quit => false,
                 })
                 .count()
@@ -9768,5 +9937,91 @@ mod tests {
         assert_eq!(app.appearance_choice, AppearanceChoice::Light);
         assert_eq!(app.appearance, Appearance::Light);
         assert!(app.modal.is_none());
+    }
+
+    fn sample_worktree(path: &str, branch: &str, current: bool) -> Worktree {
+        Worktree {
+            path: PathBuf::from(path),
+            head: "abcdef0123456789".to_owned(),
+            branch: Some(branch.to_owned()),
+            current,
+            bare: false,
+            detached: false,
+            locked: None,
+            prunable: None,
+        }
+    }
+
+    #[test]
+    fn recent_projects_nest_worktrees_and_open_another_tree() {
+        let mut app = App::new("/tmp/repo", "repo");
+        let now = Instant::now();
+        let groups = vec![
+            ProjectGroup {
+                name: "repo".to_owned(),
+                common_dir: PathBuf::from("/tmp/repo/.git"),
+                worktrees: vec![
+                    sample_worktree("/tmp/repo", "main", true),
+                    sample_worktree("/tmp/repo-topic", "topic", false),
+                ],
+            },
+            ProjectGroup {
+                name: "helix".to_owned(),
+                common_dir: PathBuf::from("/src/helix/.git"),
+                worktrees: vec![sample_worktree("/src/helix", "master", false)],
+            },
+        ];
+        assert_eq!(
+            App::filtered_project_rows(&groups, ""),
+            vec![(0, 0), (0, 1), (1, 0)]
+        );
+        assert_eq!(App::filtered_project_rows(&groups, "helix"), vec![(1, 0)]);
+        assert_eq!(App::filtered_project_rows(&groups, "topic"), vec![(0, 1)]);
+
+        app.project_groups.clone_from(&groups);
+        app.modal = Some(Modal::Projects {
+            groups,
+            selected: 1,
+            query: TextBuffer::default(),
+            loading: false,
+        });
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::OpenRepository(path)] if path == Path::new("/tmp/repo-topic")
+        ));
+        assert!(app.modal.is_none());
+    }
+
+    #[test]
+    fn header_path_and_w_open_the_projects_picker() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        use ratatui::layout::Rect;
+
+        let mut app = App::new("/tmp/repo", "repo");
+        let now = Instant::now();
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE), now);
+        assert!(matches!(app.modal, Some(Modal::Projects { .. })));
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            AppEffect::Git(command) if matches!(command.as_ref(), WorkerCommand::LoadRecentProjects { .. })
+        )));
+
+        app.modal = None;
+        app.geometry.project_hits = vec![Rect::new(10, 0, 20, 1)];
+        let effects = app.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 12,
+                row: 0,
+                modifiers: KeyModifiers::NONE,
+            },
+            now,
+        );
+        assert!(matches!(app.modal, Some(Modal::Projects { .. })));
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            AppEffect::Git(command) if matches!(command.as_ref(), WorkerCommand::LoadRecentProjects { .. })
+        )));
     }
 }

@@ -10,7 +10,7 @@ pub(crate) struct RepoWatcher {
 }
 
 impl RepoWatcher {
-    pub(crate) fn new(root: &Path) -> Result<Self> {
+    pub(crate) fn with_extra(root: &Path, extra: Option<&Path>) -> Result<Self> {
         let (sender, receiver) = bounded(1);
         let mut watcher = notify::recommended_watcher(move |result: notify::Result<Event>| {
             let Ok(event) = result else {
@@ -22,6 +22,9 @@ impl RepoWatcher {
         watcher
             .watch(root, RecursiveMode::Recursive)
             .with_context(|| format!("failed to watch {}", root.display()))?;
+        if let Some(extra) = extra.filter(|path| path.exists() && !path.starts_with(root)) {
+            drop(watcher.watch(extra, RecursiveMode::Recursive));
+        }
 
         Ok(Self {
             receiver,
@@ -76,6 +79,9 @@ mod tests {
         assert!(is_noisy_git_path(Path::new("/repo/.git/index.lock")));
         assert!(!is_noisy_git_path(Path::new("/repo/.git/HEAD")));
         assert!(!is_noisy_git_path(Path::new("/repo/.git/refs/heads/main")));
+        assert!(!is_noisy_git_path(Path::new(
+            "/repo/.git/worktrees/topic/gitdir"
+        )));
         assert!(!is_noisy_git_path(Path::new("/repo/src/main.rs")));
     }
 }

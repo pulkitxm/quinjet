@@ -61,6 +61,48 @@ pub(crate) struct Stash {
     pub short_id: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Worktree {
+    pub path: PathBuf,
+    pub head: String,
+    pub branch: Option<String>,
+    pub current: bool,
+    pub bare: bool,
+    pub detached: bool,
+    pub locked: Option<String>,
+    pub prunable: Option<String>,
+}
+
+impl Worktree {
+    pub(crate) fn short_head(&self) -> &str {
+        self.head.get(..8).unwrap_or(&self.head)
+    }
+
+    pub(crate) fn branch_label(&self) -> String {
+        self.branch.as_deref().map_or_else(
+            || {
+                if self.bare {
+                    "bare".to_owned()
+                } else if self.detached {
+                    "detached".to_owned()
+                } else {
+                    "-".to_owned()
+                }
+            },
+            ToOwned::to_owned,
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProjectGroup {
+    pub name: String,
+    pub common_dir: PathBuf,
+    pub worktrees: Vec<Worktree>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum LocalDiffRequest {
     Changes {
@@ -864,6 +906,38 @@ impl Repository {
         Ok(stashes)
     }
 
+    pub(crate) fn worktrees(&self) -> Result<Vec<Worktree>> {
+        self.worktrees_relative_to(&self.root)
+    }
+
+    pub(crate) fn worktrees_relative_to(&self, session_root: &Path) -> Result<Vec<Worktree>> {
+        let output = self.checked([
+            OsString::from("worktree"),
+            OsString::from("list"),
+            OsString::from("--porcelain"),
+            OsString::from("-z"),
+        ])?;
+        Ok(parse_worktrees(&output, session_root))
+    }
+
+    pub(crate) fn git_common_dir(&self) -> Result<PathBuf> {
+        let output = self.checked([
+            OsString::from("rev-parse"),
+            OsString::from("--git-common-dir"),
+        ])?;
+        let raw = text(trim_ascii(&output));
+        if raw.is_empty() {
+            bail!("Git returned an empty common directory");
+        }
+        let path = Path::new(&raw);
+        let resolved = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.root.join(path)
+        };
+        Ok(fs::canonicalize(&resolved).unwrap_or(resolved))
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "the draw pass reads better as one top-to-bottom pass"
@@ -1344,6 +1418,84 @@ fn parse_stash_subject(subject: &str) -> (String, String) {
         }
     }
     (String::new(), subject.to_owned())
+}
+
+fn parse_worktrees(output: &[u8], session_root: &Path) -> Vec<Worktree> {
+    let mut worktrees = Vec::new();
+    let mut fields = Vec::new();
+    for field in output.split(|byte| *byte == 0) {
+        if field.is_empty() {
+            if !fields.is_empty() {
+                if let Some(worktree) = worktree_from_fields(&fields, session_root) {
+                    worktrees.push(worktree);
+                }
+                fields.clear();
+            }
+            continue;
+        }
+        fields.push(field);
+    }
+    if !fields.is_empty()
+        && let Some(worktree) = worktree_from_fields(&fields, session_root)
+    {
+        worktrees.push(worktree);
+    }
+    worktrees
+}
+
+fn worktree_from_fields(fields: &[&[u8]], session_root: &Path) -> Option<Worktree> {
+    let mut path = None;
+    let mut head = String::new();
+    let mut branch = None;
+    let mut bare = false;
+    let mut detached = false;
+    let mut locked = None;
+    let mut prunable = None;
+    for field in fields {
+        if let Some(value) = field.strip_prefix(b"worktree ") {
+            path = Some(PathBuf::from(text(value)));
+        } else if let Some(value) = field.strip_prefix(b"HEAD ") {
+            head = text(value);
+        } else if let Some(value) = field.strip_prefix(b"branch ") {
+            branch = Some(heads_branch_name(&text(value)));
+        } else if *field == b"detached" {
+            detached = true;
+        } else if *field == b"bare" {
+            bare = true;
+        } else if let Some(value) = field.strip_prefix(b"locked") {
+            locked = Some(text(value).trim().to_owned());
+        } else if let Some(value) = field.strip_prefix(b"prunable") {
+            prunable = Some(text(value).trim().to_owned());
+        }
+    }
+    let path = path?;
+    Some(Worktree {
+        current: same_path(&path, session_root),
+        path,
+        head,
+        branch,
+        bare,
+        detached,
+        locked,
+        prunable,
+    })
+}
+
+fn heads_branch_name(reference: &str) -> String {
+    reference
+        .strip_prefix("refs/heads/")
+        .unwrap_or(reference)
+        .to_owned()
+}
+
+fn same_path(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    match (fs::canonicalize(left), fs::canonicalize(right)) {
+        (Ok(first), Ok(second)) => first == second,
+        _ => false,
+    }
 }
 
 fn strings<const N: usize>(values: [&str; N]) -> [OsString; N] {
@@ -1989,5 +2141,50 @@ mod tests {
             run_test_git(&test_repository.path, ["branch", "--show-current"]),
             "main"
         );
+    }
+
+    #[test]
+    fn parses_porcelain_worktrees_and_marks_the_session_root() {
+        let output = b"worktree /tmp/repo\0HEAD abcdef0123456789\0branch refs/heads/main\0\0worktree /tmp/repo-topic\0HEAD fedcba9876543210\0branch refs/heads/topic\0locked busy\0\0worktree /tmp/repo-hot\0HEAD 0123456789abcdef\0detached\0prunable\0\0";
+        let trees = parse_worktrees(output, Path::new("/tmp/repo"));
+        assert_eq!(trees.len(), 3);
+        assert!(trees[0].current);
+        assert_eq!(trees[0].branch.as_deref(), Some("main"));
+        assert!(!trees[1].current);
+        assert_eq!(trees[1].branch.as_deref(), Some("topic"));
+        assert_eq!(trees[1].locked.as_deref(), Some("busy"));
+        assert!(trees[2].detached);
+        assert!(trees[2].branch.is_none());
+        assert_eq!(trees[2].prunable.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn lists_a_linked_worktree_without_changing_head() {
+        let test_repository = TestRepository::new();
+        let repository = test_repository.repository();
+        let linked_root = tempfile::tempdir().unwrap();
+        let linked = linked_root.path().join("topic");
+        let linked_display = linked.display().to_string();
+        run_test_git(
+            &test_repository.path,
+            ["worktree", "add", "-b", "topic", &linked_display],
+        );
+        let linked = fs::canonicalize(&linked).unwrap();
+        let trees = repository.worktrees().unwrap();
+        assert_eq!(trees.len(), 2);
+        assert!(
+            trees
+                .iter()
+                .any(|tree| tree.current && tree.branch.as_deref() == Some("main"))
+        );
+        assert!(trees.iter().any(|tree| {
+            !tree.current && tree.branch.as_deref() == Some("topic") && tree.path == linked
+        }));
+        assert_eq!(
+            run_test_git(&test_repository.path, ["branch", "--show-current"]),
+            "main"
+        );
+        drop(fs::remove_dir_all(&linked));
+        run_test_git(&test_repository.path, ["worktree", "prune"]);
     }
 }

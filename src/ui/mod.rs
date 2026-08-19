@@ -29,7 +29,7 @@ use crate::git::github::{
 #[cfg(test)]
 use crate::git::github::{PullRequestCheck, PullRequestFile, RecentPullRequest};
 use crate::git::status::{Change, ChangeArea, ChangeStatus};
-use crate::git::{Branch, HistoryBranch, Stash};
+use crate::git::{Branch, HistoryBranch, ProjectGroup, Stash};
 use crate::theme::{AppearanceChoice, Theme, ThemeName};
 
 const DETAIL_LABEL_WIDTH: usize = 12;
@@ -185,6 +185,10 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
     HelpRow::Shortcut {
         keys: "b / B",
         description: "Branch picker / checkout branch picker",
+    },
+    HelpRow::Shortcut {
+        keys: "w",
+        description: "Recent projects and their worktrees",
     },
     HelpRow::Spacer,
     HelpRow::Section("Commits"),
@@ -425,8 +429,9 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
         .areas(main)
     };
 
-    let (changes_tab, history_tab, pull_requests_tab, mut link_hits) =
+    let (changes_tab, history_tab, pull_requests_tab, mut link_hits, projects_hit) =
         draw_tabs(frame, tabs, app, theme);
+    let mut project_hits: Vec<Rect> = projects_hit.into_iter().collect();
     let (sidebar_hits, scm_action_hits) = if app.sidebar_hidden {
         (Vec::new(), Vec::new())
     } else {
@@ -437,7 +442,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     }
     let (diff_divider, content_file_hits, content_step_hits) =
         draw_content(frame, content_area, app, theme, &mut link_hits);
-    draw_footer(frame, footer, app, theme, &mut link_hits);
+    draw_footer(frame, footer, app, theme, &mut link_hits, &mut project_hits);
 
     app.geometry = UiGeometry {
         changes_tab,
@@ -455,6 +460,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
         content_step_hits,
         link_hits,
         help_hits: Vec::new(),
+        project_hits,
     };
 
     let frame_area = frame.area();
@@ -518,9 +524,7 @@ fn draw_terminal_links(frame: &mut Frame<'_>, hits: &[LinkHit], hover: Option<(u
         if hover.is_some_and(|point| !hit.area.contains(point.into())) {
             continue;
         }
-        let OpenTarget::Browser(url) = &hit.target else {
-            continue;
-        };
+        let OpenTarget::Browser(url) = &hit.target;
         if url.chars().any(char::is_control) {
             continue;
         }
@@ -604,7 +608,7 @@ fn draw_tabs(
     area: Rect,
     app: &App,
     theme: &Theme,
-) -> (Rect, Rect, Rect, Vec<LinkHit>) {
+) -> (Rect, Rect, Rect, Vec<LinkHit>, Option<Rect>) {
     let mut link_hits = Vec::new();
     let path = app.repository_root.display().to_string();
     let show_path = path != app.repository_name;
@@ -681,22 +685,24 @@ fn draw_tabs(
             &mut link_hits,
         ),
     ];
+    let mut projects_hit = None;
     if show_path {
         let path_x = repository_x
             .saturating_add(cells(app.repository_name.width()))
             .saturating_add(2);
         title.push(Span::raw("  "));
-        title.push(link_span(
-            path.clone(),
-            Some(app.workspace_open_target()),
-            clipped_link_area(
-                path_x,
-                title_area.y.saturating_add(1),
-                path.width(),
-                title_area,
-            ),
-            theme,
-            &mut link_hits,
+        let path_area = clipped_link_area(
+            path_x,
+            title_area.y.saturating_add(1),
+            path.width(),
+            title_area,
+        );
+        projects_hit = Some(path_area).filter(|area| area.width > 0 && area.height > 0);
+        title.push(Span::styled(
+            path,
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::UNDERLINED),
         ));
     }
     frame.render_widget(
@@ -758,7 +764,13 @@ fn draw_tabs(
             ),
         branch_area,
     );
-    (changes_tab, history_tab, pull_requests_tab, link_hits)
+    (
+        changes_tab,
+        history_tab,
+        pull_requests_tab,
+        link_hits,
+        projects_hit,
+    )
 }
 
 fn draw_tab(frame: &mut Frame<'_>, area: Rect, label: &str, active: bool, theme: &Theme) {
@@ -892,9 +904,9 @@ fn draw_changes_sidebar(
                 );
                 let (label, action) = match section {
                     ChangeSection::Staged => ("[−]", ScmAction::UnstageSection(*section)),
-                    ChangeSection::Conflict
-                    | ChangeSection::Unstaged
-                    | ChangeSection::Untracked => ("[+]", ScmAction::StageSection(*section)),
+                    ChangeSection::Conflict | ChangeSection::Unstaged => {
+                        ("[+]", ScmAction::StageSection(*section))
+                    }
                 };
                 let action_area = Rect::new(list_area.right().saturating_sub(4), y, 4, 1);
                 frame.render_widget(
@@ -4816,6 +4828,7 @@ fn draw_footer(
     app: &App,
     theme: &Theme,
     link_hits: &mut Vec<LinkHit>,
+    project_hits: &mut Vec<Rect>,
 ) {
     let left = if let Some(busy) = app.busy.as_deref() {
         Line::from(vec![
@@ -4859,6 +4872,30 @@ fn draw_footer(
         } else {
             app.status.branch.head.clone()
         };
+        let summary = format!(
+            "   {} changes   {} staged",
+            app.status.changes.len(),
+            app.status.staged_count()
+        );
+        let (worktree_gap, worktree_label) = if app.worktrees.len() > 1 {
+            let mut label = String::new();
+            label.push_str(&app.worktrees.len().to_string());
+            label.push_str(" worktrees");
+            let gap = "   ";
+            let prefix_width = cells("  ".width())
+                .saturating_add(cells(branch.width()))
+                .saturating_add(cells(summary.width()))
+                .saturating_add(cells(gap.width()));
+            project_hits.push(clipped_link_area(
+                area.x.saturating_add(prefix_width),
+                area.y.saturating_add(1),
+                label.width(),
+                area,
+            ));
+            (gap, label)
+        } else {
+            ("", String::new())
+        };
         Line::from(vec![
             Span::styled("  ", Style::default().fg(theme.accent)),
             link_span(
@@ -4873,13 +4910,13 @@ fn draw_footer(
                 theme,
                 link_hits,
             ),
+            Span::styled(summary, Style::default().fg(theme.muted)),
+            Span::raw(worktree_gap),
             Span::styled(
-                format!(
-                    "   {} changes   {} staged",
-                    app.status.changes.len(),
-                    app.status.staged_count()
-                ),
-                Style::default().fg(theme.muted),
+                worktree_label,
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::UNDERLINED),
             ),
         ])
     };
@@ -4937,7 +4974,7 @@ fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
             query,
             loading,
             ..
-        }) => draw_branches(frame, items, *selected, query, *loading, theme),
+        }) => draw_branches(frame, items, *selected, query, *loading, app, theme),
         Some(Modal::HistoryBranches {
             items,
             selected,
@@ -4956,6 +4993,12 @@ fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
             query,
             loading,
         }) => draw_stashes(frame, items, *selected, query, *loading, theme),
+        Some(Modal::Projects {
+            groups,
+            selected,
+            query,
+            loading,
+        }) => draw_projects(frame, groups, *selected, query, *loading, theme),
         Some(Modal::PullRequestRepositories {
             items,
             selected,
@@ -5292,12 +5335,17 @@ fn draw_conflict(frame: &mut Frame<'_>, change: &Change, theme: &Theme) {
     draw_modal_hint(frame, area, "Esc cancel", theme);
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the branch picker needs the live worktree list from the session"
+)]
 fn draw_branches(
     frame: &mut Frame<'_>,
     items: &[Branch],
     selected: usize,
     query: &crate::app::TextBuffer,
     loading: bool,
+    app: &App,
     theme: &Theme,
 ) {
     let height = frame.area().height.saturating_sub(8).min(25);
@@ -5377,11 +5425,18 @@ fn draw_branches(
                         style,
                     ),
                     Span::styled(
-                        format!(
-                            "  {}  {}",
-                            branch.short_id,
-                            format_local_timestamp(&branch.relative_date)
-                        ),
+                        {
+                            let mut meta = format!(
+                                "  {}  {}",
+                                branch.short_id,
+                                format_local_timestamp(&branch.relative_date)
+                            );
+                            if let Some(path) = app.worktree_path_for_branch(&branch.name) {
+                                meta.push_str("  ");
+                                meta.push_str(&truncate_middle(&path.display().to_string(), 24));
+                            }
+                            meta
+                        },
                         Style::default()
                             .fg(theme.muted)
                             .bg(style.bg.unwrap_or(theme.panel)),
@@ -5728,6 +5783,166 @@ fn draw_stashes(
         frame,
         area,
         "Enter preview  Ctrl+n new  Ctrl+u +untracked  Ctrl+s staged  Alt+a apply  Alt+p pop  Del drop",
+        theme,
+    );
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "the picker renders headings and worktree rows in one pass"
+)]
+fn draw_projects(
+    frame: &mut Frame<'_>,
+    groups: &[ProjectGroup],
+    selected: usize,
+    query: &crate::app::TextBuffer,
+    loading: bool,
+    theme: &Theme,
+) {
+    let height = frame.area().height.saturating_sub(6).min(28);
+    let area = centered_rect(
+        frame.area().width.saturating_sub(10).min(88),
+        height,
+        frame.area(),
+    );
+    frame.render_widget(Clear, area);
+    let block = modal_block(" Recent projects ", theme);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let query_area = Rect::new(inner.x, inner.y, inner.width, 1);
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(" / ", Style::default().fg(theme.accent)),
+            Span::styled(query.value.as_str(), Style::default().fg(theme.text)),
+        ]))
+        .style(Style::default().bg(theme.panel_alt)),
+        query_area,
+    );
+    set_text_cursor(
+        frame,
+        Rect::new(
+            query_area.x + 3,
+            query_area.y,
+            query_area.width.saturating_sub(3),
+            1,
+        ),
+        query,
+        false,
+    );
+    let list_area = Rect::new(
+        inner.x,
+        inner.y + 2,
+        inner.width,
+        inner.height.saturating_sub(5),
+    );
+    if loading {
+        frame.render_widget(
+            Paragraph::new("Loading projects…").style(Style::default().fg(theme.muted)),
+            list_area,
+        );
+    } else {
+        let visible = App::filtered_project_rows(groups, &query.value);
+        let mut lines = Vec::new();
+        let mut selectable = 0_usize;
+        let mut selected_line = 0_usize;
+        for (group_index, group) in groups.iter().enumerate() {
+            let trees: Vec<usize> = visible
+                .iter()
+                .filter_map(|(visible_group, tree_index)| {
+                    (*visible_group == group_index).then_some(*tree_index)
+                })
+                .collect();
+            if trees.is_empty() {
+                continue;
+            }
+            lines.push(Line::from(Span::styled(
+                format!(" {}", group.name),
+                Style::default()
+                    .fg(theme.muted)
+                    .add_modifier(Modifier::BOLD)
+                    .bg(theme.panel),
+            )));
+            for tree_index in trees {
+                let Some(tree) = group.worktrees.get(tree_index) else {
+                    continue;
+                };
+                let active = selectable == selected;
+                if active {
+                    selected_line = lines.len();
+                }
+                selectable = selectable.saturating_add(1);
+                let background = if active { theme.selected } else { theme.panel };
+                let mut flag = String::new();
+                if tree.current {
+                    flag.push_str("this session");
+                } else if tree.locked.is_some() {
+                    flag.push_str("locked");
+                } else if tree.prunable.is_some() {
+                    flag.push_str("prunable");
+                }
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        if tree.current { " ● " } else { "   " },
+                        Style::default()
+                            .fg(if tree.current {
+                                theme.success
+                            } else {
+                                theme.muted
+                            })
+                            .bg(background),
+                    ),
+                    Span::styled(
+                        format!("- {}", tree.branch_label()),
+                        Style::default()
+                            .fg(theme.text)
+                            .bg(background)
+                            .add_modifier(if active {
+                                Modifier::BOLD
+                            } else {
+                                Modifier::empty()
+                            }),
+                    ),
+                    Span::styled(
+                        format!(
+                            "  {}",
+                            truncate_middle(
+                                &tree.path.display().to_string(),
+                                list_area.width.saturating_sub(36) as usize
+                            )
+                        ),
+                        Style::default().fg(theme.muted).bg(background),
+                    ),
+                    Span::styled(
+                        if flag.is_empty() {
+                            String::new()
+                        } else {
+                            format!("  {flag}")
+                        },
+                        Style::default().fg(theme.muted).bg(background),
+                    ),
+                ]));
+            }
+        }
+        let offset = selected_line.saturating_sub(list_area.height.saturating_sub(1) as usize);
+        let visible_lines: Vec<Line<'_>> = lines
+            .into_iter()
+            .skip(offset)
+            .take(list_area.height as usize)
+            .collect();
+        if visible_lines.is_empty() {
+            frame.render_widget(
+                Paragraph::new("No projects match this filter")
+                    .style(Style::default().fg(theme.muted)),
+                list_area,
+            );
+        } else {
+            frame.render_widget(Paragraph::new(visible_lines), list_area);
+        }
+    }
+    draw_modal_hint(
+        frame,
+        area,
+        "Enter open   Delete forget project   Esc close",
         theme,
     );
 }
@@ -6643,10 +6858,12 @@ mod tests {
             OpenTarget::Browser(url)
                 if url == "https://github.com/acme/repo/tree/feature/link"
         )));
-        assert!(app.geometry.link_hits.iter().any(|hit| matches!(
-            &hit.target,
-            OpenTarget::Path(path) if path == Path::new("/tmp/repo")
-        )));
+        assert!(
+            app.geometry
+                .project_hits
+                .iter()
+                .any(|area| area.width > 0 && area.height > 0)
+        );
         let repository_area = app
             .geometry
             .link_hits
@@ -6728,6 +6945,58 @@ mod tests {
     }
 
     #[test]
+    fn footer_underlines_only_the_worktree_count() {
+        use std::path::PathBuf;
+
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = App::new("/tmp/repo", "repo");
+        app.status.branch.head = "main".to_owned();
+        let tree = |path: &str, current: bool| crate::git::Worktree {
+            path: PathBuf::from(path),
+            head: "abcdef0123456789".to_owned(),
+            branch: Some("main".to_owned()),
+            current,
+            bare: false,
+            detached: false,
+            locked: None,
+            prunable: None,
+        };
+        app.worktrees = vec![
+            tree("/tmp/repo", true),
+            tree("/tmp/repo-a", false),
+            tree("/tmp/repo-b", false),
+        ];
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+
+        let hit = app
+            .geometry
+            .project_hits
+            .iter()
+            .copied()
+            .max_by_key(|area| area.y)
+            .expect("footer worktree hit");
+        let buffer = terminal.backend().buffer();
+        let mut label = String::new();
+        for x in hit.x..hit.right() {
+            let cell = &buffer[(x, hit.y)];
+            label.push_str(cell.symbol());
+            assert!(
+                cell.modifier.contains(Modifier::UNDERLINED),
+                "worktree label should be underlined"
+            );
+        }
+        assert_eq!(label, "3 worktrees");
+        let before = &buffer[(hit.x.saturating_sub(1), hit.y)];
+        assert_eq!(before.symbol(), " ");
+        assert!(!before.modifier.contains(Modifier::UNDERLINED));
+    }
+
+    #[test]
     fn preview_selection_highlights_only_the_pane_where_it_started() {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
@@ -6801,7 +7070,9 @@ mod tests {
         assert!(!rendered.contains("[c] Commit"));
         assert!(!rendered.contains("[S] Stashes"));
         assert!(!rendered.contains("[d] Compare Branch"));
-        assert!(rendered.contains("UNTRACKED CHANGES"));
+        assert!(!rendered.contains("UNTRACKED CHANGES"));
+        assert!(rendered.contains("CHANGES"));
+        assert!(rendered.contains("notes.txt"));
         assert!(rendered.contains("\u{e7a8} main.rs"));
         assert!(rendered.contains("\u{eeab} README.md"));
         assert!(!rendered.contains('›'));
