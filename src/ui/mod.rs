@@ -1352,7 +1352,7 @@ fn draw_pull_requests_sidebar(
     }
 
     let has_cta = app.selected_pull_request().is_some() && app.pr_primary_action().is_some();
-    let base_controls = if has_cta { 4_u16 } else { 3_u16 };
+    let base_controls = if has_cta { 3_u16 } else { 2_u16 };
     let controls_height = inner.height.min(base_controls);
     let body_area = Rect::new(
         inner.x,
@@ -1441,10 +1441,9 @@ fn draw_pull_requests_sidebar(
     if controls_height >= 1 {
         let repository_area = Rect::new(inner.x, controls_y, inner.width, 1);
         let prefix = " repo ";
-        let suffix = "  [o choose]";
         let visible_name = truncate_middle(
             &repository_name,
-            usize::from(inner.width).saturating_sub(prefix.width() + suffix.width()),
+            usize::from(inner.width).saturating_sub(prefix.width()),
         );
         frame.render_widget(
             Paragraph::new(Line::from(vec![
@@ -1461,7 +1460,6 @@ fn draw_pull_requests_sidebar(
                     theme,
                     link_hits,
                 ),
-                Span::raw(suffix),
             ]))
             .style(Style::default().fg(theme.text).bg(theme.panel_alt)),
             repository_area,
@@ -1479,14 +1477,6 @@ fn draw_pull_requests_sidebar(
                 Span::styled(
                     app.pull_request_lookup.value.as_str(),
                     Style::default().fg(theme.text),
-                ),
-                Span::styled(
-                    if app.pull_request_lookup_active {
-                        "  Enter lookup"
-                    } else {
-                        "  [/ lookup]"
-                    },
-                    Style::default().fg(theme.muted),
                 ),
             ]))
             .style(Style::default().bg(if app.pull_request_lookup_active {
@@ -1514,45 +1504,8 @@ fn draw_pull_requests_sidebar(
             target: SidebarHit::PullRequestLookup,
         });
     }
-    if controls_height >= 3 {
-        let status = if let Some(progress) = app.pull_request_progress {
-            format!("{}% {}", progress.percent(), progress.label())
-        } else if app.pull_request.is_none() && !app.recent_pull_requests.is_empty() {
-            "j/k select · Space open · / number".to_owned()
-        } else if app.pull_request.is_none() {
-            "enter a pull request number".to_owned()
-        } else {
-            match app.pull_request_section {
-                PullRequestSection::Files => {
-                    let suffix = if app.pull_request_files_truncated {
-                        " · list bounded"
-                    } else {
-                        ""
-                    };
-                    format!(
-                        "j/k select · ←/→ folders · {} files{suffix}",
-                        app.pull_request_total_files
-                    )
-                }
-                PullRequestSection::Overview => {
-                    if app.pull_request_checks_error.is_some() {
-                        "checks unavailable · r retry".to_owned()
-                    } else if app.pull_request_check_cursor.is_some() {
-                        "[ / ] step · space fold · e all".to_owned()
-                    } else {
-                        format!("live · {}", app.live_refresh_label())
-                    }
-                }
-            }
-        };
-        frame.render_widget(
-            Paragraph::new(format!(" {status}"))
-                .style(Style::default().fg(theme.muted).bg(theme.panel_alt)),
-            Rect::new(inner.x, controls_y + 2, inner.width, 1),
-        );
-    }
-    if has_cta && controls_height >= 4 {
-        let row = Rect::new(inner.x, controls_y + 3, inner.width, 1);
+    if has_cta && controls_height >= 3 {
+        let row = Rect::new(inner.x, controls_y + 2, inner.width, 1);
         draw_pull_request_cta(frame, row, app, theme, &mut action_hits);
     }
     (hits, action_hits)

@@ -199,9 +199,8 @@ refresh they would each have asked for, and the mailbox holds 64 of them; when
 it is full the extra signal is dropped, because a refresh is already pending.
 
 A delivery bypasses every interval floor and re-reads the checks, the metadata,
-the conversation and a running log at once. The footer says so, showing
-`webhooks · every 20s`, where the interval is the fallback rather than the
-promise.
+the conversation and a running log at once. The panel title still shows when a
+pull request is refreshing or served from cache.
 
 ## How it stays live
 

@@ -2656,17 +2656,6 @@ impl App {
             && !self.pull_request_refreshing()
     }
 
-    /// A forwarded delivery bypasses every floor, so when one can arrive the
-    /// poll interval is the fallback rather than the promise.
-    pub(crate) fn live_refresh_label(&self) -> String {
-        let interval = self.pull_request_poll_interval().as_secs();
-        if self.webhooks_listening {
-            format!("webhooks · every {interval}s")
-        } else {
-            format!("every {interval}s")
-        }
-    }
-
     /// Watch a running pull request closely and a settled one loosely. The
     /// interval also stretches when the reader is somewhere else, so a loaded
     /// pull request stays fresh without spending requests on an unseen pane.
