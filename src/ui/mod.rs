@@ -2007,8 +2007,7 @@ fn draw_check_list_conversation(
     app: &App,
     theme: &Theme,
 ) -> SidebarHitArea {
-    let selected =
-        app.selected_check_section.is_none() && app.pull_request_check_cursor.is_none();
+    let selected = app.selected_check_section.is_none() && app.pull_request_check_cursor.is_none();
     let background = if selected {
         theme.selected
     } else {
