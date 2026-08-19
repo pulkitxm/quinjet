@@ -51,6 +51,8 @@ const COMMAND_PATHS: &[&[&str]] = &[
     &["stash", "drop"],
     &["stash", "clear"],
     &["stash", "show"],
+    &["worktree"],
+    &["worktree", "list"],
     &["cherry-pick"],
     &["revert"],
     &["resolve"],
@@ -579,6 +581,39 @@ fn stash_push_and_pop_round_trips() -> Result<()> {
 }
 
 #[test]
+fn worktree_list_includes_linked_trees() -> Result<()> {
+    let scratch = Scratch::repository()?;
+    let id = SCRATCH_ID.fetch_add(1, Ordering::Relaxed);
+    let linked = std::env::temp_dir().join(format!(
+        "quinjet-blackbox-linked-{}-{id}",
+        std::process::id()
+    ));
+    drop(fs::remove_dir_all(&linked));
+    let linked_display = linked.display().to_string();
+    drop(scratch.git(&["worktree", "add", "-b", "topic", &linked_display])?);
+    let listed = scratch.quinjet(&["worktree", "list"])?.success()?;
+    ensure!(
+        listed.stdout.contains("topic"),
+        "worktree list misses the linked branch: {}",
+        listed.stdout
+    );
+    ensure!(
+        listed.stdout.contains(&linked_display),
+        "worktree list misses the linked path: {}",
+        listed.stdout
+    );
+    let trees = scratch
+        .quinjet(&["worktree", "list", "--json"])?
+        .success()?
+        .json()?;
+    let trees = trees.as_array().context("worktree JSON was not an array")?;
+    ensure!(trees.len() == 2, "expected two worktrees, got {trees:?}");
+    drop(fs::remove_dir_all(&linked));
+    drop(scratch.git(&["worktree", "prune"])?);
+    Ok(())
+}
+
+#[test]
 fn json_output_is_one_document_per_invocation() -> Result<()> {
     let scratch = Scratch::repository()?;
     for args in [
@@ -586,6 +621,7 @@ fn json_output_is_one_document_per_invocation() -> Result<()> {
         vec!["log", "-n", "2", "--json"],
         vec!["branch", "list", "--json"],
         vec!["stash", "list", "--json"],
+        vec!["worktree", "list", "--json"],
         vec!["diff", "--json"],
     ] {
         let run = scratch.quinjet(&args)?.success()?;
