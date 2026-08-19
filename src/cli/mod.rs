@@ -23,7 +23,7 @@ use serde::Serialize;
 use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
     CheckRunLog, GitHubRepository, PullRequest, PullRequestCheck, PullRequestCheckStatus,
-    PullRequestDiffIndex, PullRequestSnapshot,
+    PullRequestDiffIndex, PullRequestMergeMethod, PullRequestOperation, PullRequestSnapshot,
 };
 use crate::git::status::{Change, ChangeArea};
 use crate::git::{ConflictChoice, GitOperation, LocalDiffRequest, Repository};
@@ -165,7 +165,7 @@ enum Verb {
     Resolve(ResolveArgs),
     /// List the GitHub repositories this checkout points at
     Repos(ReposArgs),
-    /// Read a pull request, its files, its conversation and its checks
+    /// Read or update a pull request
     Pr {
         #[command(subcommand)]
         command: PrVerb,
@@ -213,6 +213,9 @@ impl Verb {
             Self::Pr {
                 command: PrVerb::Logs(args),
             } if args.watch => None,
+            Self::Pr {
+                command: PrVerb::Merge(_) | PrVerb::Close(_) | PrVerb::Reopen(_),
+            } => Some("Updating pull request"),
             Self::Pr { .. } => Some("Loading pull request"),
             Self::Update(_) => Some("Checking for updates"),
         }
@@ -518,6 +521,12 @@ enum PrVerb {
     Logs(PrLogsArgs),
     /// Open a pull request in a browser
     Open(PrOpenArgs),
+    /// Merge a pull request
+    Merge(PrMergeArgs),
+    /// Close a pull request
+    Close(PrMutateArgs),
+    /// Reopen a closed pull request
+    Reopen(PrMutateArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -559,6 +568,55 @@ struct PrOpenArgs {
     /// Open a matching check run instead of the pull request
     #[arg(long, value_name = "NAME", value_hint = ValueHint::Other)]
     check: Option<String>,
+}
+
+#[derive(Debug, Args)]
+#[group(required = true, multiple = false)]
+struct PrMergeMethodArgs {
+    /// Create a merge commit
+    #[arg(long)]
+    merge: bool,
+    /// Squash commits into one and merge
+    #[arg(long)]
+    squash: bool,
+    /// Rebase commits onto the base branch and merge
+    #[arg(long)]
+    rebase: bool,
+}
+
+impl PrMergeMethodArgs {
+    const fn method(&self) -> PullRequestMergeMethod {
+        if self.merge {
+            PullRequestMergeMethod::Merge
+        } else if self.rebase {
+            PullRequestMergeMethod::Rebase
+        } else {
+            PullRequestMergeMethod::Squash
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct PrMergeArgs {
+    #[command(flatten)]
+    pull_request: PrArgs,
+    #[command(flatten)]
+    method: PrMergeMethodArgs,
+    /// Delete the head branch after merging
+    #[arg(long)]
+    delete_branch: bool,
+    /// Confirm; without it the command reports what it would do
+    #[arg(long)]
+    yes: bool,
+}
+
+#[derive(Debug, Args)]
+struct PrMutateArgs {
+    #[command(flatten)]
+    pull_request: PrArgs,
+    /// Confirm; without it the command reports what it would do
+    #[arg(long)]
+    yes: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1505,7 +1563,80 @@ fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb) -> Result
             out.message(&format!("Opened {url}"))?;
             Ok(0)
         }
+        PrVerb::Merge(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Merge {
+                method: args.method.method(),
+                delete_branch: args.delete_branch,
+            },
+        ),
+        PrVerb::Close(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Close,
+        ),
+        PrVerb::Reopen(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Reopen,
+        ),
     }
+}
+
+fn mutate_pull_request(
+    session: &mut Session,
+    out: &Emitter,
+    args: &PrArgs,
+    yes: bool,
+    operation: PullRequestOperation,
+) -> Result<u8> {
+    let pull_request = lookup(session, out, args)?;
+    if !yes {
+        out.message(&preview_pull_request_operation(&pull_request, &operation))?;
+        return Ok(0);
+    }
+    let message = session
+        .execute(Command::OperatePullRequest {
+            pull_request: Box::new(pull_request),
+            operation,
+        })?
+        .operation()?
+        .2;
+    out.message(&message)?;
+    Ok(0)
+}
+
+fn preview_pull_request_operation(
+    pull_request: &PullRequest,
+    operation: &PullRequestOperation,
+) -> String {
+    let mut message = match operation {
+        PullRequestOperation::Merge { method, .. } => {
+            let mut text = String::from("Would ");
+            text.push_str(method.preview_verb());
+            text
+        }
+        PullRequestOperation::Close => String::from("Would close"),
+        PullRequestOperation::Reopen => String::from("Would reopen"),
+    };
+    message.push_str(" #");
+    message.push_str(&pull_request.number.to_string());
+    message.push_str(" (");
+    message.push_str(&pull_request.title);
+    message.push_str("). Pass --yes to ");
+    match operation {
+        PullRequestOperation::Merge { .. } => message.push_str("merge it."),
+        PullRequestOperation::Close => message.push_str("close it."),
+        PullRequestOperation::Reopen => message.push_str("reopen it."),
+    }
+    message
 }
 
 fn watch_pull_request(session: &mut Session, out: &Emitter, args: &PrWatchArgs) -> Result<u8> {
@@ -2194,6 +2325,45 @@ mod tests {
                 })
             }) if name == "Clippy"
         ));
+
+        let merge = Cli::try_parse_from([
+            "quinjet",
+            "pr",
+            "merge",
+            "24",
+            "--squash",
+            "--delete-branch",
+            "--yes",
+        ])
+        .unwrap();
+        assert!(matches!(
+            merge.command,
+            Some(Verb::Pr {
+                command: PrVerb::Merge(PrMergeArgs {
+                    method: PrMergeMethodArgs {
+                        squash: true,
+                        merge: false,
+                        rebase: false,
+                    },
+                    delete_branch: true,
+                    yes: true,
+                    ..
+                })
+            })
+        ));
+
+        let close = Cli::try_parse_from(["quinjet", "pr", "close", "24"]).unwrap();
+        assert!(matches!(
+            close.command,
+            Some(Verb::Pr {
+                command: PrVerb::Close(PrMutateArgs { yes: false, .. })
+            })
+        ));
+
+        assert!(
+            Cli::try_parse_from(["quinjet", "pr", "merge", "24"]).is_err(),
+            "merge without a method must be rejected"
+        );
     }
 
     #[test]

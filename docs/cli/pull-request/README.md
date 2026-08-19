@@ -1,12 +1,13 @@
 # `quinjet pr`
 
-`quinjet pr` reads one pull request by number. Seven verbs cover the metadata,
-the changed files, the patch, the conversation, the checks, one check run's log,
-and handing the URL to a browser. There is no listing verb and no writing verb:
-Quinjet cannot open, comment on, review, edit, close or merge a pull request,
-and it never checks one out. Reach for this group when you want the answer in a
-pipe rather than on screen, and reach for the pull-request pane of
-[the terminal interface](../tui.md) when you want to move around inside it.
+`quinjet pr` reads one pull request by number, and can also merge, close, or
+reopen it. Ten verbs cover the metadata, the changed files, the patch, the
+conversation, the checks, one check run's log, handing the URL to a browser,
+and the three write actions. There is no listing verb and Quinjet never checks
+a pull request out, comments on it, or opens a new one. Reach for this group
+when you want the answer in a pipe rather than on screen, and reach for the
+pull-request pane of [the terminal interface](../tui.md) when you want to move
+around inside it.
 
 Every verb begins with the same lookup, so understanding that one step explains
 most of the group's behavior. Quinjet first works out which GitHub repositories
@@ -76,6 +77,9 @@ when their check state settles.
 | `quinjet pr checks` | Lists the checks, optionally blocking until they settle. |
 | `quinjet pr logs` | Prints one check run's steps and its GitHub Actions log. |
 | `quinjet pr open` | Hands the pull request URL, or one selected check URL, to the desktop browser. |
+| `quinjet pr merge` | Merges the pull request with `--merge`, `--squash`, or `--rebase` after `--yes`. |
+| `quinjet pr close` | Closes the pull request without merging, after `--yes`. |
+| `quinjet pr reopen` | Reopens a closed pull request that has not been merged, after `--yes`. |
 
 ## Commands
 
@@ -86,14 +90,17 @@ when their check state settles.
 - [`quinjet pr checks`](./checks.md)
 - [`quinjet pr logs`](./logs.md)
 - [`quinjet pr open`](./open.md)
+- [`quinjet pr merge`](./merge.md)
+- [`quinjet pr close`](./close.md)
+- [`quinjet pr reopen`](./reopen.md)
 
 ## Exit codes
 
 | Code | When this group produces it |
 | --- | --- |
-| 0 | The verb printed its answer. Also `pr checks --watch` when every check settled and none failed, `pr logs --watch` when the run finished without failing, and `--help` on the group or any verb. |
-| 1 | The lookup failed: `gh` is missing or unauthenticated, no configured fetch or push remote resolves to a GitHub repository, the number does not exist (`Could not resolve to a PullRequest with the number of 99999`), or the number was `0` (`Pull-request numbers must be positive integers`). Also `files` and `diff` when the merge base could not be found within 4,096 commits, `checks --exit-code` when any check failed or is pending, `checks --watch` when the settled result contains a failure, `logs --watch` when the run ended failed, and `open` when the desktop opener could not be spawned. |
-| 2 | clap rejected the command line: a missing `<NUMBER>`, a `<NUMBER>` that is not an unsigned integer, `quinjet pr` with no verb, or an unknown flag. |
+| 0 | The verb printed its answer. Also `pr checks --watch` when every check settled and none failed, `pr logs --watch` when the run finished without failing, `--help` on the group or any verb, and a merge/close/reopen preview that printed what it would do without `--yes`. |
+| 1 | The lookup failed: `gh` is missing or unauthenticated, no configured fetch or push remote resolves to a GitHub repository, the number does not exist (`Could not resolve to a PullRequest with the number of 99999`), or the number was `0` (`Pull-request numbers must be positive integers`). Also `files` and `diff` when the merge base could not be found within 4,096 commits, `checks --exit-code` when any check failed or is pending, `checks --watch` when the settled result contains a failure, `logs --watch` when the run ended failed, `open` when the desktop opener could not be spawned, and `merge` / `close` / `reopen` when `gh` rejected the write. |
+| 2 | clap rejected the command line: a missing `<NUMBER>`, a `<NUMBER>` that is not an unsigned integer, `quinjet pr` with no verb, `pr merge` without exactly one of `--merge` / `--squash` / `--rebase`, or an unknown flag. |
 | 3 | `--repo` matched none of the discovered repositories, `pr diff <n> <path>` named a path that is not part of the pull request, or a check name passed to `pr logs` or `pr open --check` matched zero checks or more than one. Every one of these prints a `hint:` listing the valid choices. |
 | 4 | `pr logs` found a check with no readable log, in either one-shot or watch mode, or `pr open --check` found a check with no browser URL. |
 
@@ -228,10 +235,13 @@ leaves stdout empty.
   Crossing a cap prints an explicit notice rather than looking complete.
 - Titles longer than 16 KiB and descriptions longer than 256 KiB are cut at a
   character boundary and end in `…`.
-- `pr open` is the only verb here with an effect outside the process, and the
-  only one that is platform-dependent: `open` on macOS, `explorer` on Windows,
-  `xdg-open` everywhere else. It spawns and does not wait, so a browser that
-  fails to start afterwards is invisible to the exit code.
+- `pr open` hands a URL to a platform opener (`open` on macOS, `explorer` on
+  Windows, `xdg-open` elsewhere) and does not wait on the child. `pr merge`,
+  `pr close`, and `pr reopen` are the write verbs: without `--yes` they only
+  print what they would do, and with `--yes` they run
+  `gh pr merge|close|reopen` against the same canonical `--repo <url>` the
+  lookup used. They do not offer admin merge, auto-merge, review, comment, or
+  checkout.
 - `pr open --check <name>` resolves the check by exact name first and then by a
   unique case-insensitive substring, using the same selection rule as
   `pr logs`. It opens the check's `link`; a selected check with no link exits 4.

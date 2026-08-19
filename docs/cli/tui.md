@@ -158,8 +158,10 @@ selecting remain distinct targets.
 Changes are divided into merge, staged, tracked and untracked sections. Click a
 section header or press `Space` to collapse or expand it. Left and right arrows
 move between a section and its files without changing its folded state.
-Pull-request file trees also compact directory chains with only one child,
-matching `apps/web/src/` rather than spending one row on each component.
+Pull-request Overview lists Conversation first, then a Checks heading above
+the failed, in-progress, successful, and skipped groups. Pull-request file
+trees also compact directory chains with only one child, matching
+`apps/web/src/` rather than spending one row on each component.
 
 ## `--webhook-listen`
 
@@ -199,9 +201,8 @@ refresh they would each have asked for, and the mailbox holds 64 of them; when
 it is full the extra signal is dropped, because a refresh is already pending.
 
 A delivery bypasses every interval floor and re-reads the checks, the metadata,
-the conversation and a running log at once. The footer says so, showing
-`webhooks · every 20s`, where the interval is the fallback rather than the
-promise.
+the conversation and a running log at once. The panel title still shows when a
+pull request is refreshing or served from cache.
 
 ## How it stays live
 
@@ -336,6 +337,8 @@ The verbs in the right-hand column are documented in their groups:
 | selecting a check that is still running | `quinjet pr logs <n> "<check>" --watch` |
 | the pull-request poll itself | `quinjet pr checks <n> --watch` |
 | `Shift+O` | Opens the selected branch or commit on GitHub. In Pull Requests it is `quinjet pr open <n>`, or `quinjet pr open <n> --check <name>` when a check is selected. |
+| primary CTA in Pull Requests | `quinjet pr merge <n> --squash\|--merge\|--rebase --yes`, `quinjet pr close <n> --yes`, `quinjet pr reopen <n> --yes`, or `quinjet pr open <n>`, depending on state and the last chosen merge method |
+| `▶` on the Pull Requests toolbar | the other merge methods, Close, and Open in browser (or only Open in browser when the PR is closed) |
 | `t` or `T` | `--expanded`, on `diff`, `show`, `branch compare` and `stash show`. `pr diff` has no `--expanded`: a pull-request patch is cached per file by its merge-base and head commits at three lines of context, and a second context width would need a second cache key |
 | `v` | no verb. The command line prints unified patches only |
 | `e` / `E` on a diff | no verb. A verb prints every file it was asked for |
