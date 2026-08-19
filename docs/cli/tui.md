@@ -101,12 +101,14 @@ window grows.
 ## What starts with it
 
 Opening the interface starts a Git worker thread, a recursive filesystem
-watcher on the worktree root, and, when asked for, the webhook listener. The
-first frame asks for the working-tree status, the current branch's history, the
-list of local and remote-tracking branches, and a repository link derived only
-from configured Git remotes. No GitHub request is made at startup, when the Pull
-Requests tab is opened, or when a tab is switched. Only typing a number and
-pressing Enter contacts GitHub.
+watcher on the worktree root plus the Git common directory so linked worktrees
+show up without waiting, and, when asked for, the webhook listener. The first
+frame asks for the working-tree status, the current branch's history, the list
+of local and remote-tracking branches, the worktrees attached to this
+repository, and a repository link derived only from configured Git remotes. No
+GitHub request is made at startup, when the Pull Requests tab is opened, or
+when a tab is switched. Only typing a number and pressing Enter contacts
+GitHub.
 
 The terminal is put into raw mode with the alternate screen, bracketed paste
 and, where the terminal supports them, the keyboard enhancement flags that let
@@ -309,6 +311,7 @@ The verbs in the right-hand column are documented in their groups:
 | `f` or `p` in Pull Requests | nothing. Both show a toast, because reading someone's pull request is not the place to push your branch |
 | `d` in Changes | `quinjet branch compare <ref>` |
 | `b` outside History, or `B` | `quinjet branch list`; Enter on a row is `quinjet branch switch <name>` |
+| `w`, clicking the header path, or clicking `N worktrees` in the footer | `quinjet worktree list` for this repository, plus the same listing for each recently opened project; Enter on a tree rebinds this session, the same as `quinjet tui <path>` |
 | `Ctrl+N` in the branch picker | `quinjet branch create <name>` |
 | `F2` or `Ctrl+R` in the branch picker | `quinjet branch rename <old> <new>` |
 | `Delete` in the branch picker, then confirm | `quinjet branch delete <name> --yes` |
@@ -362,6 +365,10 @@ The interface can do these, and no verb can:
   folding one step of a check log. A verb prints the whole thing, unified.
 - Filtering a list in place (`/`), the command palette, and the shortcut help.
 - Releasing the mouse (`m`) so the terminal can select text.
+- Remembering recently opened projects and rebinding this session onto one of
+  their worktrees. The command line can list this repository's trees with
+  `quinjet worktree list` and open another path with `quinjet tui <path>`, but
+  it does not keep a recents file.
 - Showing that an answer came from the cache, and showing which reads are in
   flight.
 

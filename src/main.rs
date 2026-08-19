@@ -34,7 +34,7 @@ use crossterm::terminal::{
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
-use crate::app::{App, AppEffect};
+use crate::app::{App, AppEffect, ToastLevel};
 use crate::cli::{Launch, TerminalOptions};
 use crate::git::Repository;
 use crate::git::worker::GitWorker;
@@ -98,8 +98,10 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
 
     install_panic_hook();
     let repository = Repository::discover(&options.path)?;
-    let worker = GitWorker::start(repository.clone());
-    let watcher = RepoWatcher::new(repository.root()).ok();
+    state::record_recent_project(repository.root());
+    let common_dir = repository.git_common_dir().ok();
+    let mut worker = GitWorker::start(repository.clone());
+    let mut watcher = RepoWatcher::with_extra(repository.root(), common_dir.as_deref()).ok();
     let webhooks = options
         .webhook_listen
         .as_deref()
@@ -115,7 +117,8 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
 
     app.configure_mouse_capture(!options.no_mouse);
     app.webhooks_listening = webhooks.is_some();
-    running &= dispatch_effects(&worker, &mut terminal, app.initial_effects());
+    let effects = app.initial_effects();
+    running &= dispatch_effects(&mut worker, &mut watcher, &mut app, &mut terminal, effects);
     while running {
         if dirty {
             let theme = app.theme;
@@ -128,35 +131,37 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
 
         while let Ok(worker_event) = worker.events().try_recv() {
             let effects = app.handle_worker_event(worker_event, Instant::now());
-            running &= dispatch_effects(&worker, &mut terminal, effects);
+            running &=
+                dispatch_effects(&mut worker, &mut watcher, &mut app, &mut terminal, effects);
             dirty = true;
         }
 
         if watcher_changed(watcher.as_ref().map(RepoWatcher::changes)) {
             let mut effects = Vec::new();
             app.filesystem_changed(&mut effects);
-            running &= dispatch_effects(&worker, &mut terminal, effects);
+            running &=
+                dispatch_effects(&mut worker, &mut watcher, &mut app, &mut terminal, effects);
             dirty = true;
         }
 
         if webhook_delivered(webhooks.as_ref()) {
-            running &= dispatch_effects(
-                &worker,
-                &mut terminal,
-                app.webhook_delivered(Instant::now()),
-            );
+            let effects = app.webhook_delivered(Instant::now());
+            running &=
+                dispatch_effects(&mut worker, &mut watcher, &mut app, &mut terminal, effects);
             dirty = true;
         }
 
         if render_tick.try_recv().is_ok() {
             let (effects, changed) = app.tick(Instant::now());
-            running &= dispatch_effects(&worker, &mut terminal, effects);
+            running &=
+                dispatch_effects(&mut worker, &mut watcher, &mut app, &mut terminal, effects);
             dirty |= changed;
         }
         if periodic_refresh.try_recv().is_ok() {
             let mut effects = Vec::new();
             app.periodic_refresh(&mut effects);
-            running &= dispatch_effects(&worker, &mut terminal, effects);
+            running &=
+                dispatch_effects(&mut worker, &mut watcher, &mut app, &mut terminal, effects);
             dirty = true;
         }
 
@@ -172,7 +177,8 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
                 }
                 _ => Vec::new(),
             };
-            running &= dispatch_effects(&worker, &mut terminal, effects);
+            running &=
+                dispatch_effects(&mut worker, &mut watcher, &mut app, &mut terminal, effects);
             dirty = true;
         }
     }
@@ -205,7 +211,9 @@ fn webhook_delivered(listener: Option<&WebhookListener>) -> bool {
 }
 
 fn dispatch_effects(
-    worker: &GitWorker,
+    worker: &mut GitWorker,
+    watcher: &mut Option<RepoWatcher>,
+    app: &mut App,
     terminal: &mut TerminalGuard,
     effects: Vec<AppEffect>,
 ) -> bool {
@@ -218,11 +226,46 @@ fn dispatch_effects(
             AppEffect::Copy(text) => terminal.copy_to_clipboard(&text),
             AppEffect::SetMouseCapture(enabled) => terminal.set_mouse_capture(enabled),
             AppEffect::Open(app::OpenTarget::Browser(url)) => drop(cli::open_url(&url)),
-            AppEffect::Open(app::OpenTarget::Path(path)) => drop(cli::open_path(&path)),
+            AppEffect::OpenRepository(path) => {
+                running &= bind_repository(worker, watcher, app, terminal, &path);
+            }
             AppEffect::Quit => running = false,
         }
     }
     running
+}
+
+fn bind_repository(
+    worker: &mut GitWorker,
+    watcher: &mut Option<RepoWatcher>,
+    app: &mut App,
+    terminal: &mut TerminalGuard,
+    path: &std::path::Path,
+) -> bool {
+    let repository = match Repository::discover(path) {
+        Ok(repository) => repository,
+        Err(error) => {
+            app.show_toast(error.to_string(), ToastLevel::Error, Instant::now());
+            return true;
+        }
+    };
+    if repository.root() == app.repository_root {
+        return true;
+    }
+    state::record_recent_project(repository.root());
+    let theme_name = app.theme_name;
+    let appearance_choice = app.appearance_choice;
+    let mouse = app.mouse_capture_preference;
+    let webhooks_listening = app.webhooks_listening;
+    let common_dir = repository.git_common_dir().ok();
+    *worker = GitWorker::start(repository.clone());
+    *watcher = RepoWatcher::with_extra(repository.root(), common_dir.as_deref()).ok();
+    *app = App::new(repository.root(), repository.name());
+    app.set_theme_selection(theme_name, appearance_choice);
+    app.configure_mouse_capture(mouse);
+    app.webhooks_listening = webhooks_listening;
+    let effects = app.initial_effects();
+    dispatch_effects(worker, watcher, app, terminal, effects)
 }
 
 struct TerminalGuard {
