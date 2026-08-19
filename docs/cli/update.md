@@ -21,9 +21,11 @@ Options:
 `update` does not try to infer whether the binary came from `cargo install`,
 cargo-binstall, `install.sh`, `install.ps1`, or a copied release artifact. Those
 methods can all use custom directories, and the existing installers do not
-persist provenance. The reliable identity is `std::env::current_exe()`, so the
-command replaces the binary that handled this invocation. This also means a
-custom Cargo root or installer directory needs no special flag.
+persist provenance. The reliable identity is `std::env::current_exe()`,
+canonicalized so a `q` launcher symlink is not the destination. `q update` and
+`quinjet update` therefore replace the same real executable and leave the
+launcher in place. A custom Cargo root or installer directory needs no special
+flag.
 
 The update sequence is fixed:
 
@@ -33,7 +35,7 @@ The update sequence is fixed:
 4. Build checksum and binary URLs from the resolved tag, never from a moving `latest/download` URL.
 5. Download the release's `SHA256SUMS`, require one exact valid entry for the selected asset, and download the binary with a 32 MiB ceiling.
 6. Verify SHA-256 before creating any staged executable.
-7. Replace the running binary through the cross-platform `self-replace` implementation, which stages beside the destination and preserves the original permissions.
+7. Resolve the running path through any `q` launcher symlink, stage beside the real destination, and replace that file while preserving its permissions. Unix replacement is a copy plus rename; Windows uses `self-replace`.
 8. Start the newly installed executable in automatic completion-maintenance mode so an active, still-installed shell script receives the new command tree before success is reported.
 
 Every network request has a 30 second timeout. Release metadata is limited to
