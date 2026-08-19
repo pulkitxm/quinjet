@@ -1453,7 +1453,7 @@ fn worktree_from_fields(fields: &[&[u8]], session_root: &Path) -> Option<Worktre
     let mut prunable = None;
     for field in fields {
         if let Some(value) = field.strip_prefix(b"worktree ") {
-            path = Some(PathBuf::from(text(value)));
+            path = Some(parse_worktree_path(value));
         } else if let Some(value) = field.strip_prefix(b"HEAD ") {
             head = text(value);
         } else if let Some(value) = field.strip_prefix(b"branch ") {
@@ -1488,7 +1488,19 @@ fn heads_branch_name(reference: &str) -> String {
         .to_owned()
 }
 
-fn same_path(left: &Path, right: &Path) -> bool {
+fn parse_worktree_path(value: &[u8]) -> PathBuf {
+    let rendered = text(value);
+    #[cfg(windows)]
+    {
+        PathBuf::from(rendered.replace('/', "\\"))
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from(rendered)
+    }
+}
+
+pub(crate) fn same_path(left: &Path, right: &Path) -> bool {
     if left == right {
         return true;
     }
@@ -2158,6 +2170,15 @@ mod tests {
         assert_eq!(trees[2].prunable.as_deref(), Some(""));
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn git_worktree_paths_use_native_separators() {
+        assert_eq!(
+            parse_worktree_path(br"C:/Users/runner/work"),
+            PathBuf::from(r"C:\Users\runner\work")
+        );
+    }
+
     #[test]
     fn lists_a_linked_worktree_without_changing_head() {
         let test_repository = TestRepository::new();
@@ -2169,7 +2190,6 @@ mod tests {
             &test_repository.path,
             ["worktree", "add", "-b", "topic", &linked_display],
         );
-        let linked = fs::canonicalize(&linked).unwrap();
         let trees = repository.worktrees().unwrap();
         assert_eq!(trees.len(), 2);
         assert!(
@@ -2178,7 +2198,9 @@ mod tests {
                 .any(|tree| tree.current && tree.branch.as_deref() == Some("main"))
         );
         assert!(trees.iter().any(|tree| {
-            !tree.current && tree.branch.as_deref() == Some("topic") && tree.path == linked
+            !tree.current
+                && tree.branch.as_deref() == Some("topic")
+                && same_path(&tree.path, &linked)
         }));
         assert_eq!(
             run_test_git(&test_repository.path, ["branch", "--show-current"]),

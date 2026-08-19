@@ -72,12 +72,13 @@ quinjet update --check
 quinjet update
 ```
 
-The updater replaces the executable that is actually running, so it works for
-script, Cargo, cargo-binstall, and custom-directory installations without
-guessing where the binary lives. It pins the download to one release, verifies
-the published SHA-256 checksum before replacing anything, and refreshes the
-installed shell completions with the new executable. It leaves a completion or
-`q` shortcut alone when you removed it after the first installation.
+The updater replaces the executable that is actually running, following the `q`
+shortcut to that same file, so it works for script, Cargo, cargo-binstall, and
+custom-directory installations without guessing where the binary lives. It pins
+the download to one release, verifies the published SHA-256 checksum before
+replacing anything, and refreshes the installed shell completions with the new
+executable. It leaves a completion or `q` shortcut alone when you removed it
+after the first installation.
 
 ### Cargo
 

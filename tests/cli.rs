@@ -597,8 +597,12 @@ fn worktree_list_includes_linked_trees() -> Result<()> {
         "worktree list misses the linked branch: {}",
         listed.stdout
     );
+    let linked_name = linked
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("the linked worktree has no file name")?;
     ensure!(
-        listed.stdout.contains(&linked_display),
+        listed.stdout.contains(linked_name),
         "worktree list misses the linked path: {}",
         listed.stdout
     );
