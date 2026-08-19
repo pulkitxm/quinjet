@@ -904,9 +904,9 @@ fn draw_changes_sidebar(
                 );
                 let (label, action) = match section {
                     ChangeSection::Staged => ("[−]", ScmAction::UnstageSection(*section)),
-                    ChangeSection::Conflict
-                    | ChangeSection::Unstaged
-                    | ChangeSection::Untracked => ("[+]", ScmAction::StageSection(*section)),
+                    ChangeSection::Conflict | ChangeSection::Unstaged => {
+                        ("[+]", ScmAction::StageSection(*section))
+                    }
                 };
                 let action_area = Rect::new(list_area.right().saturating_sub(4), y, 4, 1);
                 frame.render_widget(
@@ -7015,7 +7015,9 @@ mod tests {
         assert!(!rendered.contains("[c] Commit"));
         assert!(!rendered.contains("[S] Stashes"));
         assert!(!rendered.contains("[d] Compare Branch"));
-        assert!(rendered.contains("UNTRACKED CHANGES"));
+        assert!(!rendered.contains("UNTRACKED CHANGES"));
+        assert!(rendered.contains("CHANGES"));
+        assert!(rendered.contains("notes.txt"));
         assert!(rendered.contains("\u{e7a8} main.rs"));
         assert!(rendered.contains("\u{eeab} README.md"));
         assert!(!rendered.contains('›'));

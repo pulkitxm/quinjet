@@ -133,23 +133,16 @@ pub(crate) enum ChangeSection {
     Conflict,
     Staged,
     Unstaged,
-    Untracked,
 }
 
 impl ChangeSection {
-    pub(crate) const ALL: [Self; 4] = [
-        Self::Conflict,
-        Self::Staged,
-        Self::Unstaged,
-        Self::Untracked,
-    ];
+    pub(crate) const ALL: [Self; 3] = [Self::Conflict, Self::Staged, Self::Unstaged];
 
     pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::Conflict => "Merge Changes",
             Self::Staged => "Staged Changes",
             Self::Unstaged => "Changes",
-            Self::Untracked => "Untracked Changes",
         }
     }
 
@@ -157,10 +150,7 @@ impl ChangeSection {
         match self {
             Self::Conflict => change.area == ChangeArea::Conflict,
             Self::Staged => change.area == ChangeArea::Staged,
-            Self::Unstaged => {
-                change.area == ChangeArea::Unstaged && change.status != ChangeStatus::Untracked
-            }
-            Self::Untracked => change.status == ChangeStatus::Untracked,
+            Self::Unstaged => change.area == ChangeArea::Unstaged,
         }
     }
 }
@@ -6514,18 +6504,14 @@ impl App {
             return;
         }
         if self.selected_change_target().is_none() {
-            let preferred = [ChangeSection::Unstaged, ChangeSection::Untracked]
-                .into_iter()
-                .find(|section| {
-                    visible.iter().any(|index| {
-                        self.status
-                            .changes
-                            .get(*index)
-                            .is_some_and(|change| section.matches(change))
-                    })
-                });
-            if let Some(section) = preferred {
-                self.selected_change_section = Some(section);
+            let has_changes = visible.iter().any(|index| {
+                self.status
+                    .changes
+                    .get(*index)
+                    .is_some_and(|change| ChangeSection::Unstaged.matches(change))
+            });
+            if has_changes {
+                self.selected_change_section = Some(ChangeSection::Unstaged);
             } else if let Some(target) = self.change_targets().first().copied() {
                 self.select_change_target(target);
             }
@@ -7523,7 +7509,13 @@ mod tests {
         assert_eq!(app.selected_change().unwrap().area, ChangeArea::Staged);
         app.navigate(1, now);
         assert_eq!(app.selected_change_section, Some(ChangeSection::Unstaged));
-        assert_eq!(app.selected_section_changes().len(), 1);
+        assert_eq!(app.selected_section_changes().len(), 2);
+        assert!(
+            app.selected_section_changes()
+                .iter()
+                .any(|change| change.path == Path::new("new.txt")
+                    && change.status == ChangeStatus::Untracked)
+        );
 
         assert!(app.toggle_selected_change_section());
         assert!(
@@ -7537,14 +7529,6 @@ mod tests {
                 ..
             }
         )));
-
-        app.navigate(1, now);
-        assert_eq!(app.selected_change_section, Some(ChangeSection::Untracked));
-        assert_eq!(app.selected_section_changes().len(), 1);
-        assert_eq!(
-            app.selected_section_changes()[0].path,
-            PathBuf::from("new.txt")
-        );
 
         let rows = app.change_rows();
         let section_count = rows
@@ -7746,10 +7730,12 @@ mod tests {
             app.collapsed_change_sections
                 .contains(&ChangeSection::Unstaged)
         );
-        assert!(
+        assert_eq!(
             app.selected_section_changes()
                 .iter()
-                .all(|change| change.status != ChangeStatus::Untracked)
+                .map(|change| change.path.as_path())
+                .collect::<Vec<_>>(),
+            vec![Path::new("src/main.rs")]
         );
     }
 

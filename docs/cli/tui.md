@@ -153,13 +153,14 @@ off, Cmd-click or Ctrl-click uses a terminal hyperlink instead. Holding that
 modifier while hovering also exposes the terminal hyperlink when capture is
 on, which lets a local terminal open the target even when Quinjet runs over
 SSH. A cmux SSH relay is used for ordinary browser clicks when its socket is
-available. Clicking the worktree path opens it in the platform's default file
-viewer. The rest of a commit row keeps selecting that commit, so opening and
-selecting remain distinct targets.
+available. Clicking the worktree path opens Recent projects. The rest of a
+commit row keeps selecting that commit, so opening and selecting remain
+distinct targets.
 
-Changes are divided into merge, staged, tracked and untracked sections. Click a
-section header or press `Space` to collapse or expand it. Left and right arrows
-move between a section and its files without changing its folded state.
+Changes are divided into merge, staged, and unstaged sections. Untracked files
+sit in Changes with the other worktree edits. Click a section header or press
+`Space` to collapse or expand it. Left and right arrows move between a section
+and its files without changing its folded state.
 Pull-request Overview lists Conversation first, then a Checks heading above
 the failed, in-progress, successful, and skipped groups. Pull-request file
 trees also compact directory chains with only one child, matching
