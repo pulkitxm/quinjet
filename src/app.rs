@@ -235,6 +235,7 @@ impl CheckStatusSection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CheckListRow {
     Conversation,
+    Heading,
     Section {
         section: CheckStatusSection,
         count: usize,
@@ -1435,6 +1436,8 @@ impl App {
         if self.pull_request_checks.is_empty() {
             return rows;
         }
+        rows.push(CheckListRow::Spacer);
+        rows.push(CheckListRow::Heading);
         for section in CheckStatusSection::ALL {
             let members = self
                 .pull_request_checks
@@ -1446,7 +1449,6 @@ impl App {
             if members.is_empty() {
                 continue;
             }
-            rows.push(CheckListRow::Spacer);
             let collapsed = self.collapsed_check_sections.contains(&section);
             rows.push(CheckListRow::Section {
                 section,
@@ -1471,7 +1473,7 @@ impl App {
                 CheckListRow::Conversation => Some(CheckListTarget::Conversation),
                 CheckListRow::Section { section, .. } => Some(CheckListTarget::Section(section)),
                 CheckListRow::Check { index } => Some(CheckListTarget::Check(index)),
-                CheckListRow::Spacer => None,
+                CheckListRow::Heading | CheckListRow::Spacer => None,
             })
             .collect()
     }
@@ -8793,6 +8795,7 @@ mod tests {
 
         let rows = app.check_list_rows();
         assert!(matches!(rows.first(), Some(CheckListRow::Conversation)));
+        assert!(rows.iter().any(|row| matches!(row, CheckListRow::Heading)));
         assert!(rows.iter().any(|row| matches!(
             row,
             CheckListRow::Section {

@@ -158,10 +158,10 @@ selecting remain distinct targets.
 Changes are divided into merge, staged, tracked and untracked sections. Click a
 section header or press `Space` to collapse or expand it. Left and right arrows
 move between a section and its files without changing its folded state.
-Pull-request Overview groups checks the same way by status: failed, in
-progress, successful, and skipped. Pull-request file trees also compact
-directory chains with only one child, matching `apps/web/src/` rather than
-spending one row on each component.
+Pull-request Overview lists Conversation first, then a Checks heading above
+the failed, in-progress, successful, and skipped groups. Pull-request file
+trees also compact directory chains with only one child, matching
+`apps/web/src/` rather than spending one row on each component.
 
 ## `--webhook-listen`
 

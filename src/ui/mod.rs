@@ -1922,13 +1922,34 @@ fn draw_pull_request_check_list(
         let row_area = Rect::new(area.x, y, area.width, 1);
         match row {
             CheckListRow::Spacer => {
+                let rule = "─".repeat((area.width as usize).saturating_sub(4));
                 frame.render_widget(
-                    Paragraph::new(" ").style(Style::default().bg(theme.panel)),
+                    Paragraph::new(format!("  {rule}"))
+                        .style(Style::default().fg(theme.border).bg(theme.panel)),
                     row_area,
                 );
             }
             CheckListRow::Conversation => {
                 hits.push(draw_check_list_conversation(frame, row_area, app, theme));
+            }
+            CheckListRow::Heading => {
+                frame.render_widget(
+                    Paragraph::new(Line::from(vec![
+                        Span::styled("  ", Style::default()),
+                        Span::styled(
+                            "CHECKS",
+                            Style::default()
+                                .fg(theme.accent)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("  {}", app.pull_request_checks.len()),
+                            Style::default().fg(theme.muted),
+                        ),
+                    ]))
+                    .style(Style::default().bg(theme.panel_alt)),
+                    row_area,
+                );
             }
             CheckListRow::Section {
                 section,
@@ -1997,7 +2018,7 @@ fn check_list_row_selected(app: &App, row: &CheckListRow) -> bool {
         CheckListRow::Check { index } => {
             app.selected_check_section.is_none() && app.pull_request_check_cursor == Some(*index)
         }
-        CheckListRow::Spacer => false,
+        CheckListRow::Heading | CheckListRow::Spacer => false,
     }
 }
 
