@@ -13,7 +13,10 @@ use super::github::{
 };
 use super::history::Commit;
 use super::status::RepoStatus;
-use super::{Branch, GitOperation, HistoryBranch, LocalDiffRequest, Repository, Stash};
+use super::{
+    Branch, GitOperation, HistoryBranch, LocalDiffRequest, ProjectGroup, Repository, Stash,
+    Worktree,
+};
 use crate::cli::{Command, Outcome, Session};
 
 #[derive(Debug)]
@@ -93,6 +96,12 @@ pub(crate) enum WorkerCommand {
         generation: u64,
     },
     LoadStashes {
+        generation: u64,
+    },
+    LoadWorktrees {
+        generation: u64,
+    },
+    LoadRecentProjects {
         generation: u64,
     },
     Operate {
@@ -180,6 +189,14 @@ pub(crate) enum WorkerEvent {
         generation: u64,
         result: Result<Vec<Stash>, String>,
     },
+    Worktrees {
+        generation: u64,
+        result: Result<Vec<Worktree>, String>,
+    },
+    RecentProjects {
+        generation: u64,
+        result: Result<Vec<ProjectGroup>, String>,
+    },
     OperationFinished {
         id: u64,
         label: String,
@@ -193,6 +210,7 @@ pub(crate) enum WorkerEvent {
 struct Mailbox {
     operations: VecDeque<WorkerCommand>,
     branches: Option<WorkerCommand>,
+    projects: Option<WorkerCommand>,
     refresh: Option<WorkerCommand>,
     preview: Option<WorkerCommand>,
     history: Option<WorkerCommand>,
@@ -216,6 +234,8 @@ impl Mailbox {
             command @ (WorkerCommand::LoadBranches { .. }
             | WorkerCommand::LoadHistoryBranches { .. }
             | WorkerCommand::LoadStashes { .. }) => self.branches = Some(command),
+            command @ (WorkerCommand::LoadWorktrees { .. }
+            | WorkerCommand::LoadRecentProjects { .. }) => self.projects = Some(command),
             command @ WorkerCommand::Refresh { .. } => self.refresh = Some(command),
             command @ (WorkerCommand::PrepareLocalDiff { .. }
             | WorkerCommand::LoadLocalDiffFile { .. }
@@ -250,6 +270,7 @@ impl Mailbox {
         self.operations
             .pop_front()
             .or_else(|| self.branches.take())
+            .or_else(|| self.projects.take())
             .or_else(|| self.preview.take())
             .or_else(|| self.repositories.take())
             .or_else(|| self.pull_request.take())
@@ -728,6 +749,22 @@ fn run_worker(repository: &Repository, mailbox: &Arc<SharedMailbox>, events: &Se
                 generation,
                 result: answer(session.execute(Command::Stashes).and_then(Outcome::stashes)),
             },
+            WorkerCommand::LoadWorktrees { generation } => WorkerEvent::Worktrees {
+                generation,
+                result: answer(
+                    session
+                        .execute(Command::Worktrees)
+                        .and_then(Outcome::worktrees),
+                ),
+            },
+            WorkerCommand::LoadRecentProjects { generation } => WorkerEvent::RecentProjects {
+                generation,
+                result: answer(
+                    session
+                        .execute(Command::RecentProjects)
+                        .and_then(Outcome::recent_projects),
+                ),
+            },
             WorkerCommand::Operate { id, operation } => {
                 let label = operation.label().to_owned();
                 let changes_history = operation.changes_history();
@@ -875,6 +912,21 @@ mod tests {
             Some(WorkerCommand::Refresh { generation: 2 })
         ));
         assert!(mailbox.pop().is_none());
+    }
+
+    #[test]
+    fn mailbox_keeps_worktree_reads_off_the_branch_slot() {
+        let mut mailbox = Mailbox::default();
+        mailbox.push(WorkerCommand::LoadStashes { generation: 1 });
+        mailbox.push(WorkerCommand::LoadWorktrees { generation: 2 });
+        assert!(matches!(
+            mailbox.pop(),
+            Some(WorkerCommand::LoadStashes { generation: 1 })
+        ));
+        assert!(matches!(
+            mailbox.pop(),
+            Some(WorkerCommand::LoadWorktrees { generation: 2 })
+        ));
     }
 
     #[test]

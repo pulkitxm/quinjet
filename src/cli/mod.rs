@@ -157,6 +157,11 @@ enum Verb {
         #[command(subcommand)]
         command: StashVerb,
     },
+    /// List linked worktrees
+    Worktree {
+        #[command(subcommand)]
+        command: WorktreeVerb,
+    },
     /// Apply a commit onto the current branch
     CherryPick(RevisionArgs),
     /// Record a commit that undoes another
@@ -200,6 +205,7 @@ impl Verb {
             Self::Show(_) => Some("Loading commit patch"),
             Self::Branch { .. } => Some("Reading branch state"),
             Self::Stash { .. } => Some("Reading stash state"),
+            Self::Worktree { .. } => Some("Reading worktrees"),
             Self::CherryPick(_) => Some("Resolving commit to cherry-pick"),
             Self::Revert(_) => Some("Resolving commit to revert"),
             Self::Resolve(_) => Some("Resolving conflict"),
@@ -446,6 +452,12 @@ struct BranchListArgs {
     /// Include remote-tracking branches
     #[arg(long)]
     all: bool,
+}
+
+#[derive(Debug, Clone, Copy, Subcommand)]
+enum WorktreeVerb {
+    /// List this repository's worktrees
+    List,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1151,6 +1163,7 @@ fn run(session: &mut Session, out: &Emitter, verb: Verb) -> Result<u8> {
         Verb::Show(args) => show(session, out, &args),
         Verb::Branch { command } => branch(session, out, command),
         Verb::Stash { command } => stash(session, out, command),
+        Verb::Worktree { command } => worktree(session, out, command),
         Verb::CherryPick(args) => {
             revision_operation(session, out, &args, "cherry-pick", GitOperation::CherryPick)
         }
@@ -1340,6 +1353,16 @@ fn compare(session: &mut Session, out: &Emitter, reference: &str, expanded: bool
     )?;
     out.emit(&document, || render::diff(&document))?;
     Ok(0)
+}
+
+fn worktree(session: &mut Session, out: &Emitter, command: WorktreeVerb) -> Result<u8> {
+    match command {
+        WorktreeVerb::List => {
+            let worktrees = session.execute(Command::Worktrees)?.worktrees()?;
+            out.emit(&worktrees, || render::worktrees(&worktrees))?;
+            Ok(0)
+        }
+    }
 }
 
 fn stash(session: &mut Session, out: &Emitter, command: StashVerb) -> Result<u8> {
@@ -2029,6 +2052,10 @@ pub(crate) fn open_url(url: &str) -> Result<()> {
     open_target(OsStr::new(url), url)
 }
 
+#[expect(
+    dead_code,
+    reason = "filesystem counterpart to open_url, kept for path links"
+)]
 pub(crate) fn open_path(path: &Path) -> Result<()> {
     open_target(path.as_os_str(), &path.display().to_string())
 }
@@ -2664,6 +2691,7 @@ mod tests {
             ["branch", "compare"].as_slice(),
             ["stash", "list"].as_slice(),
             ["stash", "show"].as_slice(),
+            ["worktree", "list"].as_slice(),
             ["repos"].as_slice(),
             ["pr", "view"].as_slice(),
             ["pr", "files"].as_slice(),

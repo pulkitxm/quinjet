@@ -41,6 +41,7 @@ src/
   git/             argv construction, status, history, diff, worker, github/
   ui/              viewport-only rendering, mouse hit map
   app.rs           focus, selection, modal, command and generation state
+  state.rs         recently opened project paths
   theme.rs         selectable palettes and semantic syntax colors
 docs/cli/          one page per verb, generated into the wiki
 docs/practices/    how widely used Rust projects are engineered

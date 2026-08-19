@@ -7,7 +7,7 @@ use crate::git::github::{
 };
 use crate::git::history::Commit;
 use crate::git::status::{ChangeArea, RepoStatus};
-use crate::git::{Branch, HistoryBranch, Stash};
+use crate::git::{Branch, HistoryBranch, Stash, Worktree};
 
 fn ahead_label(count: usize) -> String {
     format!(" ahead {count}")
@@ -205,6 +205,32 @@ pub(crate) fn stashes(stashes: &[Stash]) -> String {
             format_local_timestamp(&stash.relative_date),
             stash.branch,
             stash.message
+        ));
+    }
+    out.finish()
+}
+
+pub(crate) fn worktrees(worktrees: &[Worktree]) -> String {
+    let mut out = Report::default();
+    for worktree in worktrees {
+        let branch = worktree.branch_label();
+        let head = if worktree.head.is_empty() {
+            "-"
+        } else {
+            worktree.short_head()
+        };
+        let mut flags = String::new();
+        if worktree.locked.is_some() {
+            flags.push_str("  locked");
+        }
+        if worktree.prunable.is_some() {
+            flags.push_str("  prunable");
+        }
+        out.line(&format!(
+            "{} {}  {:<16}  {head}{flags}",
+            if worktree.current { "*" } else { " " },
+            worktree.path.display(),
+            branch
         ));
     }
     out.finish()

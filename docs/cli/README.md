@@ -40,6 +40,7 @@ quinjet update --check           check the latest stable release
 | [`quinjet status`, `diff`, `log`, `show`](./repository/README.md) | The working tree, the patch, the history, one commit |
 | [`quinjet branch`](./branch/README.md) | Listing, switching, creating, renaming, deleting, and comparing without a checkout |
 | [`quinjet stash`](./stash/README.md) | The whole stash workflow, including previewing one as a patch |
+| [`quinjet worktree list`](./worktree/README.md) | Linked checkouts of the same repository |
 
 ## Changing a repository
 

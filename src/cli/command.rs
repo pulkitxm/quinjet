@@ -11,7 +11,8 @@ use crate::git::github::{
 use crate::git::history::Commit;
 use crate::git::status::RepoStatus;
 use crate::git::{
-    Branch, GitOperation, HistoryBranch, LocalDiffRequest, PreparedLocalDiff, Repository, Stash,
+    Branch, GitOperation, HistoryBranch, LocalDiffRequest, PreparedLocalDiff, ProjectGroup,
+    Repository, Stash, Worktree,
 };
 
 #[derive(Debug)]
@@ -25,6 +26,8 @@ pub(crate) enum Command {
     Branches,
     HistoryBranches,
     Stashes,
+    Worktrees,
+    RecentProjects,
     PrepareLocalDiff {
         workspace: u64,
         request: Box<LocalDiffRequest>,
@@ -84,6 +87,7 @@ impl Command {
             Self::History { .. } => "Reading commit history",
             Self::Branches | Self::HistoryBranches => "Reading branches",
             Self::Stashes => "Reading stashes",
+            Self::Worktrees | Self::RecentProjects => "Reading worktrees",
             Self::PrepareLocalDiff { .. } => "Preparing local diff",
             Self::LocalDiffFile { .. } => "Loading file patch",
             Self::GitHubRepositories { .. } => "Discovering GitHub repositories",
@@ -110,6 +114,8 @@ pub(crate) enum Outcome {
     Branches(Vec<Branch>),
     HistoryBranches(Vec<HistoryBranch>),
     Stashes(Vec<Stash>),
+    Worktrees(Vec<Worktree>),
+    RecentProjects(Vec<ProjectGroup>),
     LocalDiffIndex(Box<DiffIndex>),
     LocalDiffFile {
         path: PathBuf,
@@ -156,6 +162,8 @@ answers! {
     branches, Branches -> Vec<Branch>, |value| value;
     history_branches, HistoryBranches -> Vec<HistoryBranch>, |value| value;
     stashes, Stashes -> Vec<Stash>, |value| value;
+    worktrees, Worktrees -> Vec<Worktree>, |value| value;
+    recent_projects, RecentProjects -> Vec<ProjectGroup>, |value| value;
     local_diff_index, LocalDiffIndex -> DiffIndex, |value: Box<DiffIndex>| *value;
     pull_request, PullRequest -> PullRequestSnapshot, |value: Box<PullRequestSnapshot>| *value;
     pull_request_index, PullRequestIndex -> PullRequestDiffIndex,
@@ -251,6 +259,10 @@ impl Session {
                 self.repository.history_branches()?,
             )),
             Command::Stashes => Ok(Outcome::Stashes(self.repository.stashes()?)),
+            Command::Worktrees => Ok(Outcome::Worktrees(self.repository.worktrees()?)),
+            Command::RecentProjects => Ok(Outcome::RecentProjects(
+                crate::state::load_recent_projects(self.repository.root()),
+            )),
             Command::PrepareLocalDiff { workspace, request } => {
                 let prepared = self.repository.prepare_local_diff(&request)?;
                 let index = prepared.index();
