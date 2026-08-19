@@ -13,9 +13,9 @@ use ratatui::text::Line;
 use crate::convert::{count, offset};
 use crate::git::diff::{DiffDocument, DiffIndex, DiffLineKind, PullRequestDetails};
 use crate::git::github::{
-    CheckRunLog, GitHubRepository, PullRequest, PullRequestCheck, PullRequestConversation,
-    PullRequestDiffIndex, PullRequestFile, PullRequestFileStatus, PullRequestProgress,
-    RecentPullRequest,
+    CheckRunLog, GitHubRepository, PullRequest, PullRequestCheck, PullRequestCheckStatus,
+    PullRequestConversation, PullRequestDiffIndex, PullRequestFile, PullRequestFileStatus,
+    PullRequestMergeMethod, PullRequestOperation, PullRequestProgress, RecentPullRequest,
 };
 use crate::git::history::Commit;
 use crate::git::status::{Change, ChangeArea, ChangeStatus, RepoStatus};
@@ -190,6 +190,72 @@ pub(crate) enum DiffLayout {
 pub(crate) enum PullRequestSection {
     Overview,
     Files,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum CheckStatusSection {
+    Failed,
+    InProgress,
+    Successful,
+    Skipped,
+}
+
+impl CheckStatusSection {
+    pub(crate) const ALL: [Self; 4] = [
+        Self::Failed,
+        Self::InProgress,
+        Self::Successful,
+        Self::Skipped,
+    ];
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Failed => "Failed",
+            Self::InProgress => "In progress",
+            Self::Successful => "Successful",
+            Self::Skipped => "Skipped",
+        }
+    }
+
+    pub(crate) const fn matches(self, status: PullRequestCheckStatus) -> bool {
+        match self {
+            Self::Failed => matches!(status, PullRequestCheckStatus::Failed),
+            Self::InProgress => matches!(status, PullRequestCheckStatus::Pending),
+            Self::Successful => matches!(status, PullRequestCheckStatus::Passed),
+            Self::Skipped => matches!(
+                status,
+                PullRequestCheckStatus::Skipped
+                    | PullRequestCheckStatus::Cancelled
+                    | PullRequestCheckStatus::Unknown
+            ),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CheckListRow {
+    Conversation,
+    Heading,
+    Section {
+        section: CheckStatusSection,
+        count: usize,
+        collapsed: bool,
+    },
+    Check {
+        index: usize,
+    },
+    Spacer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[expect(
+    variant_size_differences,
+    reason = "check indices are pointer-sized and boxing would cost an allocation per row"
+)]
+enum CheckListTarget {
+    Conversation,
+    Section(CheckStatusSection),
+    Check(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -568,7 +634,14 @@ pub(crate) enum PromptKind {
 #[derive(Debug, Clone)]
 pub(crate) enum ConfirmAction {
     Operate(GitOperation),
-    OpenPrompt { title: String, kind: PromptKind },
+    OpenPrompt {
+        title: String,
+        kind: PromptKind,
+    },
+    PullRequest {
+        pull_request: Box<PullRequest>,
+        operation: PullRequestOperation,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -602,6 +675,40 @@ impl ScmMenuItem {
             Self::StashAll => "Stash All Changes",
             Self::StashIncludeUntracked => "Stash Including Untracked",
             Self::StashStagedOnly => "Stash Staged Only",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PrMenuItem {
+    Merge(PullRequestMergeMethod),
+    Close,
+    OpenInBrowser,
+}
+
+impl PrMenuItem {
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Merge(method) => method.label(),
+            Self::Close => "Close pull request",
+            Self::OpenInBrowser => "Open in browser",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PrPrimaryAction {
+    Merge(PullRequestMergeMethod),
+    Reopen,
+    OpenInBrowser,
+}
+
+impl PrPrimaryAction {
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Merge(method) => method.label(),
+            Self::Reopen => "Reopen pull request",
+            Self::OpenInBrowser => "Open in browser",
         }
     }
 }
@@ -789,6 +896,7 @@ pub(crate) enum SidebarHit {
     RecentPullRequest(usize),
     PullRequestDirectory(PathBuf),
     PullRequestFile(usize),
+    PullRequestCheckSection(CheckStatusSection),
     PullRequestCheck(usize),
 }
 
@@ -827,6 +935,9 @@ pub(crate) enum ScmAction {
     Primary,
     ToggleMenu,
     Menu(ScmMenuItem),
+    PrPrimary,
+    PrToggleMenu,
+    PrMenu(PrMenuItem),
 }
 
 #[derive(Debug, Clone)]
@@ -933,6 +1044,8 @@ pub(crate) struct App {
     /// `None` keeps the content pane on the pull request itself; selecting a
     /// check replaces it with that run's steps and log.
     pub pull_request_check_cursor: Option<usize>,
+    pub selected_check_section: Option<CheckStatusSection>,
+    pub collapsed_check_sections: HashSet<CheckStatusSection>,
     pub pull_request_checks_loading: bool,
     pub pull_request_checks_error: Option<String>,
     pub pull_request_checks_from_cache: bool,
@@ -965,6 +1078,9 @@ pub(crate) struct App {
     pub checked_change_paths: HashSet<PathBuf>,
     pub scm_menu_open: bool,
     pub scm_menu_selected: usize,
+    pub pr_menu_open: bool,
+    pub pr_menu_selected: usize,
+    pub preferred_merge_method: PullRequestMergeMethod,
     pub selected_preview_file: Option<PathBuf>,
     pub preview_file_cursor: usize,
     pub collapsed_preview_files: HashSet<PathBuf>,
@@ -1091,6 +1207,8 @@ impl App {
             collapsed_pull_request_directories: HashSet::new(),
             pull_request_checks: Vec::new(),
             pull_request_check_cursor: None,
+            selected_check_section: None,
+            collapsed_check_sections: HashSet::new(),
             pull_request_checks_loading: false,
             pull_request_checks_error: None,
             pull_request_checks_from_cache: false,
@@ -1117,6 +1235,9 @@ impl App {
             checked_change_paths: HashSet::new(),
             scm_menu_open: false,
             scm_menu_selected: 0,
+            pr_menu_open: false,
+            pr_menu_selected: 0,
+            preferred_merge_method: PullRequestMergeMethod::default(),
             selected_preview_file: None,
             preview_file_cursor: 0,
             collapsed_preview_files: HashSet::new(),
@@ -1308,6 +1429,135 @@ impl App {
     pub(crate) fn selected_pull_request_check(&self) -> Option<&PullRequestCheck> {
         self.pull_request_check_cursor
             .and_then(|cursor| self.pull_request_checks.get(cursor))
+    }
+
+    pub(crate) fn check_list_rows(&self) -> Vec<CheckListRow> {
+        let mut rows = vec![CheckListRow::Conversation];
+        if self.pull_request_checks.is_empty() {
+            return rows;
+        }
+        rows.push(CheckListRow::Spacer);
+        rows.push(CheckListRow::Heading);
+        for section in CheckStatusSection::ALL {
+            let members = self
+                .pull_request_checks
+                .iter()
+                .enumerate()
+                .filter(|(_, check)| section.matches(check.status))
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>();
+            if members.is_empty() {
+                continue;
+            }
+            let collapsed = self.collapsed_check_sections.contains(&section);
+            rows.push(CheckListRow::Section {
+                section,
+                count: members.len(),
+                collapsed,
+            });
+            if !collapsed {
+                rows.extend(
+                    members
+                        .into_iter()
+                        .map(|index| CheckListRow::Check { index }),
+                );
+            }
+        }
+        rows
+    }
+
+    fn check_list_targets(&self) -> Vec<CheckListTarget> {
+        self.check_list_rows()
+            .into_iter()
+            .filter_map(|row| match row {
+                CheckListRow::Conversation => Some(CheckListTarget::Conversation),
+                CheckListRow::Section { section, .. } => Some(CheckListTarget::Section(section)),
+                CheckListRow::Check { index } => Some(CheckListTarget::Check(index)),
+                CheckListRow::Heading | CheckListRow::Spacer => None,
+            })
+            .collect()
+    }
+
+    fn selected_check_list_target(&self) -> CheckListTarget {
+        self.selected_check_section.map_or_else(
+            || {
+                self.pull_request_check_cursor
+                    .map_or(CheckListTarget::Conversation, CheckListTarget::Check)
+            },
+            CheckListTarget::Section,
+        )
+    }
+
+    fn select_check_list_target(&mut self, target: CheckListTarget) {
+        match target {
+            CheckListTarget::Conversation => {
+                self.selected_check_section = None;
+                let _ = self.set_check_cursor(None);
+            }
+            CheckListTarget::Section(section) => {
+                self.selected_check_section = Some(section);
+                let _ = self.set_check_cursor(None);
+            }
+            CheckListTarget::Check(index) => {
+                let _ = self.set_check_cursor(Some(index));
+            }
+        }
+    }
+
+    fn toggle_check_section(&mut self, section: CheckStatusSection) {
+        toggle_membership(&mut self.collapsed_check_sections, section);
+        self.selected_check_section = Some(section);
+        if self.collapsed_check_sections.contains(&section)
+            && self
+                .selected_pull_request_check()
+                .is_some_and(|check| section.matches(check.status))
+        {
+            let _ = self.set_check_cursor(None);
+        }
+    }
+
+    fn toggle_selected_check_section(&mut self) -> bool {
+        let Some(section) = self.selected_check_section else {
+            return false;
+        };
+        self.toggle_check_section(section);
+        true
+    }
+
+    fn navigate_check_section_horizontal(&mut self, expand: bool, now: Instant) {
+        match self.selected_check_list_target() {
+            CheckListTarget::Section(section) => {
+                let collapsed = self.collapsed_check_sections.contains(&section);
+                if expand && !collapsed {
+                    let targets = self.check_list_targets();
+                    let current = CheckListTarget::Section(section);
+                    if let Some(target) = targets
+                        .iter()
+                        .position(|candidate| *candidate == current)
+                        .and_then(|index| targets.get(index.saturating_add(1)))
+                        .copied()
+                        .filter(|candidate| matches!(candidate, CheckListTarget::Check(_)))
+                    {
+                        self.select_check_list_target(target);
+                        self.schedule_preview(now);
+                    }
+                }
+            }
+            CheckListTarget::Check(_) if !expand => {
+                let Some(check) = self.selected_pull_request_check() else {
+                    return;
+                };
+                if let Some(section) = CheckStatusSection::ALL
+                    .into_iter()
+                    .find(|section| section.matches(check.status))
+                {
+                    self.selected_check_section = Some(section);
+                    let _ = self.set_check_cursor(None);
+                    self.schedule_preview(now);
+                }
+            }
+            CheckListTarget::Conversation | CheckListTarget::Check(_) => {}
+        }
     }
 
     fn rebuild_pull_request_tree(&mut self) {
@@ -1949,8 +2199,28 @@ impl App {
                     self.handle_scm_menu_item(item, &mut effects);
                 }
             }
-            KeyCode::Esc if self.scm_menu_open => {
+            KeyCode::Up if self.pr_menu_open && self.view == View::PullRequests => {
+                let items = self.pr_menu_items();
+                if !items.is_empty() {
+                    self.pr_menu_selected = previous_list_index(self.pr_menu_selected, items.len());
+                }
+            }
+            KeyCode::Down if self.pr_menu_open && self.view == View::PullRequests => {
+                let items = self.pr_menu_items();
+                if !items.is_empty() {
+                    self.pr_menu_selected = next_list_index(self.pr_menu_selected, items.len());
+                }
+            }
+            KeyCode::Enter if self.pr_menu_open && self.view == View::PullRequests => {
+                let items = self.pr_menu_items();
+                if let Some(item) = items.get(self.pr_menu_selected).copied() {
+                    self.pr_menu_open = false;
+                    self.handle_pr_menu_item(item, &mut effects);
+                }
+            }
+            KeyCode::Esc if self.scm_menu_open || self.pr_menu_open => {
                 self.scm_menu_open = false;
+                self.pr_menu_open = false;
             }
             KeyCode::Char('S') if self.view == View::Changes => self.open_stashes(&mut effects),
             KeyCode::Char('o') if self.view == View::PullRequests => {
@@ -2004,6 +2274,14 @@ impl App {
                     && self.focus == Focus::Sidebar =>
             {
                 let _ = self.toggle_selected_pull_request_directory();
+            }
+            KeyCode::Char(' ')
+                if self.view == View::PullRequests
+                    && self.pull_request_section == PullRequestSection::Overview
+                    && self.focus == Focus::Sidebar
+                    && self.selected_check_section.is_some() =>
+            {
+                let _ = self.toggle_selected_check_section();
             }
             KeyCode::Char(' ') if self.check_log_visible() => {
                 self.toggle_check_step(self.pull_request_step_cursor);
@@ -2144,6 +2422,20 @@ impl App {
             }
             KeyCode::Right if self.focus == Focus::Sidebar && self.view == View::Changes => {
                 self.navigate_change_section_horizontal(true, now);
+            }
+            KeyCode::Left
+                if self.focus == Focus::Sidebar
+                    && self.view == View::PullRequests
+                    && self.pull_request_section == PullRequestSection::Overview =>
+            {
+                self.navigate_check_section_horizontal(false, now);
+            }
+            KeyCode::Right
+                if self.focus == Focus::Sidebar
+                    && self.view == View::PullRequests
+                    && self.pull_request_section == PullRequestSection::Overview =>
+            {
+                self.navigate_check_section_horizontal(true, now);
             }
             KeyCode::Left | KeyCode::Char('h') if self.focus == Focus::Content => {
                 self.horizontal_scroll = self.horizontal_scroll.saturating_sub(4);
@@ -2328,8 +2620,9 @@ impl App {
                         .map(|hit| hit.action.clone())
                     {
                         self.handle_scm_action(action, &mut effects);
-                    } else if self.scm_menu_open {
+                    } else if self.scm_menu_open || self.pr_menu_open {
                         self.scm_menu_open = false;
+                        self.pr_menu_open = false;
                     } else if self
                         .geometry
                         .sidebar
@@ -2381,7 +2674,12 @@ impl App {
                                         &mut effects,
                                     ),
                                 SidebarHit::PullRequestConversation => {
+                                    self.selected_check_section = None;
                                     self.select_pull_request_check(None, &mut effects);
+                                }
+                                SidebarHit::PullRequestCheckSection(section) => {
+                                    self.toggle_check_section(section);
+                                    self.schedule_preview(now);
                                 }
                                 SidebarHit::PullRequestChooseRepository => {
                                     self.open_pull_request_repositories(&mut effects);
@@ -2583,17 +2881,6 @@ impl App {
             && self.pull_request_from_cache
             && self.pull_request_conversation.from_cache
             && !self.pull_request_refreshing()
-    }
-
-    /// A forwarded delivery bypasses every floor, so when one can arrive the
-    /// poll interval is the fallback rather than the promise.
-    pub(crate) fn live_refresh_label(&self) -> String {
-        let interval = self.pull_request_poll_interval().as_secs();
-        if self.webhooks_listening {
-            format!("webhooks · every {interval}s")
-        } else {
-            format!("every {interval}s")
-        }
     }
 
     /// Watch a running pull request closely and a settled one loosely. The
@@ -3301,6 +3588,7 @@ impl App {
                 id,
                 label,
                 changes_history,
+                refresh_pull_request,
                 result,
             } => {
                 if id != self.operation_id {
@@ -3319,6 +3607,9 @@ impl App {
                         self.show_toast(format!("{label}: {error}"), ToastLevel::Error, now);
                         self.request_refresh(&mut effects);
                     }
+                }
+                if refresh_pull_request {
+                    self.refresh_loaded_pull_request(&mut effects);
                 }
             }
         }
@@ -3484,6 +3775,16 @@ impl App {
                             kind: kind.clone(),
                         });
                         return effects;
+                    }
+                    ConfirmAction::PullRequest {
+                        pull_request,
+                        operation,
+                    } => {
+                        self.queue_pull_request_operation(
+                            *pull_request.clone(),
+                            operation.clone(),
+                            &mut effects,
+                        );
                     }
                 },
                 KeyCode::Esc | KeyCode::Char('n' | 'N') => {}
@@ -4069,6 +4370,8 @@ impl App {
         }
         self.view = view;
         self.auxiliary_preview = None;
+        self.scm_menu_open = false;
+        self.pr_menu_open = false;
         self.reset_local_diff_runtime();
         self.selected_preview_file = None;
         self.collapsed_preview_files.clear();
@@ -4285,10 +4588,15 @@ impl App {
                         self.select_pull_request_tree_entry(cursor, now);
                     }
                     PullRequestSection::Overview => {
-                        let cursor = end
-                            .then(|| self.pull_request_checks.len().checked_sub(1))
-                            .flatten();
-                        let _ = self.set_check_cursor(cursor);
+                        let targets = self.check_list_targets();
+                        let Some(target) = (if end {
+                            targets.last().copied()
+                        } else {
+                            targets.first().copied()
+                        }) else {
+                            return;
+                        };
+                        self.select_check_list_target(target);
                         self.schedule_preview(now);
                     }
                 }
@@ -4421,6 +4729,27 @@ impl App {
             ScmAction::Menu(item) => {
                 self.scm_menu_open = false;
                 self.handle_scm_menu_item(item, effects);
+            }
+            ScmAction::PrPrimary => {
+                self.pr_menu_open = false;
+                if let Some(action) = self.pr_primary_action() {
+                    self.handle_pr_primary(action, effects);
+                }
+            }
+            ScmAction::PrToggleMenu => {
+                let items = self.pr_menu_items();
+                if items.is_empty() {
+                    self.pr_menu_open = false;
+                    return;
+                }
+                self.pr_menu_open = !self.pr_menu_open;
+                if self.pr_menu_open {
+                    self.pr_menu_selected = 0;
+                }
+            }
+            ScmAction::PrMenu(item) => {
+                self.pr_menu_open = false;
+                self.handle_pr_menu_item(item, effects);
             }
         }
     }
@@ -4616,6 +4945,12 @@ impl App {
                             input: TextBuffer::default(),
                             kind,
                         });
+                    }
+                    ConfirmAction::PullRequest {
+                        pull_request,
+                        operation,
+                    } => {
+                        self.queue_pull_request_operation(*pull_request, operation, effects);
                     }
                 }
             }
@@ -5005,6 +5340,8 @@ impl App {
         self.collapsed_pull_request_directories.clear();
         self.pull_request_checks.clear();
         self.pull_request_check_cursor = None;
+        self.selected_check_section = None;
+        self.collapsed_check_sections.clear();
         self.pull_request_checks_loading = false;
         self.pull_request_checks_error = None;
         self.pull_request_checks_generation = self.pull_request_checks_generation.wrapping_add(1);
@@ -5310,32 +5647,39 @@ impl App {
         )));
     }
 
-    /// The overview sidebar is the pull request itself followed by its checks, so
-    /// the cursor walks one row above index zero and stops there.
+    /// The overview sidebar is the pull request itself, then status sections and
+    /// their checks, so the cursor walks that composed list.
     fn move_check_cursor(&mut self, amount: isize) {
-        if self.pull_request_checks.is_empty() {
-            let _ = self.set_check_cursor(None);
+        let targets = self.check_list_targets();
+        if targets.is_empty() {
             return;
         }
-        let last = self.pull_request_checks.len() - 1;
-        let row = self
-            .pull_request_check_cursor
-            .map_or(0, |cursor| cursor.saturating_add(1));
+        let current = self.selected_check_list_target();
+        let index = targets
+            .iter()
+            .position(|target| *target == current)
+            .unwrap_or(0);
         let next = if amount < 0 {
-            row.saturating_sub(amount.unsigned_abs())
+            index.saturating_sub(amount.unsigned_abs())
         } else {
-            row.saturating_add(count(amount)).min(last + 1)
+            index.saturating_add(count(amount)).min(targets.len() - 1)
         };
-        let _ = self.set_check_cursor(next.checked_sub(1));
+        if let Some(target) = targets.get(next).copied() {
+            self.select_check_list_target(target);
+        }
     }
 
     /// Every row in the overview sidebar shows a different document on the right,
     /// so a new selection always starts at the top of it.
     fn set_check_cursor(&mut self, cursor: Option<usize>) -> bool {
-        if self.pull_request_check_cursor == cursor {
+        let next = cursor.filter(|index| *index < self.pull_request_checks.len());
+        if next.is_some() {
+            self.selected_check_section = None;
+        }
+        if self.pull_request_check_cursor == next {
             return false;
         }
-        self.pull_request_check_cursor = cursor;
+        self.pull_request_check_cursor = next;
         self.content_scroll = 0;
         self.horizontal_scroll = 0;
         self.invalidate_check_run_log();
@@ -5540,6 +5884,125 @@ impl App {
             id: self.operation_id,
             operation,
         })));
+    }
+
+    fn queue_pull_request_operation(
+        &mut self,
+        pull_request: PullRequest,
+        operation: PullRequestOperation,
+        effects: &mut Vec<AppEffect>,
+    ) {
+        if self.busy.is_some() {
+            return;
+        }
+        if let PullRequestOperation::Merge { method, .. } = &operation {
+            self.preferred_merge_method = *method;
+        }
+        self.operation_id = self.operation_id.wrapping_add(1);
+        self.busy = Some(operation.label().to_owned());
+        self.operation_frame = 0;
+        effects.push(AppEffect::Git(Box::new(
+            WorkerCommand::OperatePullRequest {
+                id: self.operation_id,
+                pull_request: Box::new(pull_request),
+                operation,
+            },
+        )));
+    }
+
+    fn refresh_loaded_pull_request(&mut self, effects: &mut Vec<AppEffect>) {
+        let Some(number) = self.pull_request_exact_number.or_else(|| {
+            self.pull_request
+                .as_ref()
+                .map(|pull_request| pull_request.number)
+        }) else {
+            return;
+        };
+        self.request_pull_request_lookup(number, true, true, effects);
+    }
+
+    pub(crate) fn pr_primary_action(&self) -> Option<PrPrimaryAction> {
+        let pull_request = self.selected_pull_request()?;
+        Some(match pull_request.state.as_str() {
+            "MERGED" => PrPrimaryAction::OpenInBrowser,
+            "CLOSED" => PrPrimaryAction::Reopen,
+            _ => PrPrimaryAction::Merge(self.preferred_merge_method),
+        })
+    }
+
+    pub(crate) fn pr_menu_items(&self) -> Vec<PrMenuItem> {
+        let Some(pull_request) = self.selected_pull_request() else {
+            return Vec::new();
+        };
+        match pull_request.state.as_str() {
+            "MERGED" => Vec::new(),
+            "CLOSED" => vec![PrMenuItem::OpenInBrowser],
+            _ => {
+                let mut items = PullRequestMergeMethod::ALL
+                    .into_iter()
+                    .filter(|method| *method != self.preferred_merge_method)
+                    .map(PrMenuItem::Merge)
+                    .collect::<Vec<_>>();
+                items.push(PrMenuItem::Close);
+                items.push(PrMenuItem::OpenInBrowser);
+                items
+            }
+        }
+    }
+
+    fn handle_pr_primary(&mut self, action: PrPrimaryAction, effects: &mut Vec<AppEffect>) {
+        match action {
+            PrPrimaryAction::OpenInBrowser => self.open_selected_pull_request_in_browser(effects),
+            PrPrimaryAction::Merge(method) => {
+                self.confirm_pull_request_operation(PullRequestOperation::Merge {
+                    method,
+                    delete_branch: false,
+                });
+            }
+            PrPrimaryAction::Reopen => {
+                self.confirm_pull_request_operation(PullRequestOperation::Reopen);
+            }
+        }
+    }
+
+    fn handle_pr_menu_item(&mut self, item: PrMenuItem, effects: &mut Vec<AppEffect>) {
+        match item {
+            PrMenuItem::OpenInBrowser => self.open_selected_pull_request_in_browser(effects),
+            PrMenuItem::Merge(method) => {
+                self.preferred_merge_method = method;
+                self.confirm_pull_request_operation(PullRequestOperation::Merge {
+                    method,
+                    delete_branch: false,
+                });
+            }
+            PrMenuItem::Close => {
+                self.confirm_pull_request_operation(PullRequestOperation::Close);
+            }
+        }
+    }
+
+    fn confirm_pull_request_operation(&mut self, operation: PullRequestOperation) {
+        let Some(pull_request) = self.selected_pull_request().cloned() else {
+            return;
+        };
+        self.modal = Some(Modal::Confirm {
+            title: operation.confirm_title(),
+            message: operation.confirm_message(&pull_request),
+            action: ConfirmAction::PullRequest {
+                pull_request: Box::new(pull_request),
+                operation,
+            },
+        });
+    }
+
+    fn open_selected_pull_request_in_browser(&self, effects: &mut Vec<AppEffect>) {
+        let Some(url) = self
+            .selected_pull_request()
+            .map(|pull_request| pull_request.url.clone())
+        else {
+            return;
+        };
+        effects.push(AppEffect::Open(OpenTarget::Browser(url)));
     }
 
     fn request_active_refresh(&mut self, effects: &mut Vec<AppEffect>) {
@@ -6400,6 +6863,58 @@ mod tests {
             deletions: 1,
             changed_files: 2,
         }
+    }
+
+    #[test]
+    fn pull_request_cta_actions_follow_state_and_remembered_merge_method() {
+        let mut app = App::new("/tmp/repo", "repo");
+        assert_eq!(app.pr_primary_action(), None);
+        assert_eq!(app.pr_menu_items(), Vec::new());
+
+        app.pull_request = Some(pull_request(12, "Ship it", "acme/widget"));
+        assert_eq!(
+            app.pr_primary_action(),
+            Some(PrPrimaryAction::Merge(PullRequestMergeMethod::Squash))
+        );
+        assert_eq!(
+            app.pr_menu_items(),
+            vec![
+                PrMenuItem::Merge(PullRequestMergeMethod::Merge),
+                PrMenuItem::Merge(PullRequestMergeMethod::Rebase),
+                PrMenuItem::Close,
+                PrMenuItem::OpenInBrowser,
+            ]
+        );
+
+        app.preferred_merge_method = PullRequestMergeMethod::Rebase;
+        assert_eq!(
+            app.pr_primary_action(),
+            Some(PrPrimaryAction::Merge(PullRequestMergeMethod::Rebase))
+        );
+        assert_eq!(
+            app.pr_menu_items(),
+            vec![
+                PrMenuItem::Merge(PullRequestMergeMethod::Merge),
+                PrMenuItem::Merge(PullRequestMergeMethod::Squash),
+                PrMenuItem::Close,
+                PrMenuItem::OpenInBrowser,
+            ]
+        );
+
+        if let Some(pull_request) = app.pull_request.as_mut() {
+            pull_request.state = "CLOSED".to_owned();
+        }
+        assert_eq!(app.pr_primary_action(), Some(PrPrimaryAction::Reopen));
+        assert_eq!(app.pr_menu_items(), vec![PrMenuItem::OpenInBrowser]);
+
+        if let Some(pull_request) = app.pull_request.as_mut() {
+            pull_request.state = "MERGED".to_owned();
+        }
+        assert_eq!(
+            app.pr_primary_action(),
+            Some(PrPrimaryAction::OpenInBrowser)
+        );
+        assert_eq!(app.pr_menu_items(), Vec::new());
     }
 
     fn app_with_changes() -> App {
@@ -8262,6 +8777,97 @@ mod tests {
             app.pull_request_check_log_generation, stale,
             "a reply already in flight for the previous run is invalidated"
         );
+    }
+
+    #[test]
+    fn check_status_sections_group_fold_and_navigate() {
+        let mut app = App::new("/tmp/repo", "repo");
+        let now = Instant::now();
+        app.view = View::PullRequests;
+        app.focus = Focus::Sidebar;
+        app.pull_request = Some(pull_request(8, "Grouped checks", "acme/widget"));
+        app.pull_request_checks = vec![
+            check("pending", PullRequestCheckStatus::Pending),
+            check("broken", PullRequestCheckStatus::Failed),
+            check("green", PullRequestCheckStatus::Passed),
+            check("skipped", PullRequestCheckStatus::Skipped),
+        ];
+
+        let rows = app.check_list_rows();
+        assert!(matches!(rows.first(), Some(CheckListRow::Conversation)));
+        assert!(rows.iter().any(|row| matches!(row, CheckListRow::Heading)));
+        assert!(rows.iter().any(|row| matches!(
+            row,
+            CheckListRow::Section {
+                section: CheckStatusSection::Failed,
+                count: 1,
+                collapsed: false,
+            }
+        )));
+        assert!(rows.iter().any(|row| matches!(
+            row,
+            CheckListRow::Section {
+                section: CheckStatusSection::InProgress,
+                count: 1,
+                collapsed: false,
+            }
+        )));
+        assert!(rows.iter().any(|row| matches!(
+            row,
+            CheckListRow::Section {
+                section: CheckStatusSection::Successful,
+                count: 1,
+                collapsed: false,
+            }
+        )));
+        assert!(rows.iter().any(|row| matches!(
+            row,
+            CheckListRow::Section {
+                section: CheckStatusSection::Skipped,
+                count: 1,
+                collapsed: false,
+            }
+        )));
+
+        app.navigate(1, now);
+        assert_eq!(app.selected_check_section, Some(CheckStatusSection::Failed));
+        assert!(app.pull_request_check_cursor.is_none());
+
+        assert!(app.toggle_selected_check_section());
+        assert!(
+            app.collapsed_check_sections
+                .contains(&CheckStatusSection::Failed)
+        );
+        assert!(
+            !app.check_list_rows()
+                .iter()
+                .any(|row| matches!(row, CheckListRow::Check { index: 1 }))
+        );
+
+        app.navigate(1, now);
+        assert_eq!(
+            app.selected_check_section,
+            Some(CheckStatusSection::InProgress)
+        );
+        app.navigate(1, now);
+        assert_eq!(app.pull_request_check_cursor, Some(0));
+        assert!(app.selected_check_section.is_none());
+
+        app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), now);
+        assert_eq!(
+            app.selected_check_section,
+            Some(CheckStatusSection::InProgress)
+        );
+        assert!(app.pull_request_check_cursor.is_none());
+
+        app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), now);
+        assert_eq!(app.pull_request_check_cursor, Some(0));
+
+        app.go_to_edge(true, now);
+        assert_eq!(app.pull_request_check_cursor, Some(3));
+        app.go_to_edge(false, now);
+        assert!(app.pull_request_check_cursor.is_none());
+        assert!(app.selected_check_section.is_none());
     }
 
     #[test]

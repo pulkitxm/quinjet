@@ -11,10 +11,10 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget, Wra
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{
-    App, ChangeRow, ChangeSection, ContentFileHit, ContentStepHit, DiffLayout, Focus, HelpHit,
-    LinkHit, Modal, ModalAction, OpenTarget, PaletteCommand, PullRequestContentRow,
-    PullRequestSection, PullRequestTreeEntry, ScmAction, ScmActionHit, ScmMenuItem, SidebarHit,
-    SidebarHitArea, ToastLevel, UiGeometry, View,
+    App, ChangeRow, ChangeSection, CheckListRow, ContentFileHit, ContentStepHit, DiffLayout, Focus,
+    HelpHit, LinkHit, Modal, ModalAction, OpenTarget, PaletteCommand, PrMenuItem,
+    PullRequestContentRow, PullRequestSection, PullRequestTreeEntry, ScmAction, ScmActionHit,
+    ScmMenuItem, SidebarHit, SidebarHitArea, ToastLevel, UiGeometry, View,
 };
 use crate::convert::cells;
 use crate::date_time::format_local_timestamp;
@@ -229,6 +229,10 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
     HelpRow::Shortcut {
         keys: "r",
         description: "Refetch this PR now, bypassing the cache",
+    },
+    HelpRow::Shortcut {
+        keys: "primary CTA / ▶",
+        description: "Merge, close, reopen, or open in browser (after confirm)",
     },
     HelpRow::Spacer,
     HelpRow::Section("Check Logs"),
@@ -796,10 +800,7 @@ fn draw_sidebar(
             draw_history_sidebar(frame, area, app, theme, link_hits),
             Vec::new(),
         ),
-        View::PullRequests => (
-            draw_pull_requests_sidebar(frame, area, app, theme, link_hits),
-            Vec::new(),
-        ),
+        View::PullRequests => draw_pull_requests_sidebar(frame, area, app, theme, link_hits),
     }
 }
 
@@ -1087,6 +1088,15 @@ fn draw_changes_sidebar(
     (hits, action_hits)
 }
 
+fn overflow_menu_area(anchor: Rect, width: usize, item_count: usize) -> Rect {
+    let width = u16::try_from(width).unwrap_or(24).min(anchor.width.max(1));
+    let item_count = u16::try_from(item_count).unwrap_or(1);
+    let height = item_count.saturating_add(2);
+    let x = anchor.x.saturating_add(anchor.width.saturating_sub(width));
+    let y = anchor.y.saturating_sub(height);
+    Rect::new(x, y, width, height)
+}
+
 fn draw_scm_menu(
     frame: &mut Frame<'_>,
     anchor: Rect,
@@ -1100,11 +1110,7 @@ fn draw_scm_menu(
         .max()
         .unwrap_or(12)
         .saturating_add(4);
-    let width = u16::try_from(width).unwrap_or(24).min(anchor.width.max(24));
-    let item_count = u16::try_from(ScmMenuItem::ALL.len()).unwrap_or(7);
-    let area_height = item_count.saturating_add(2);
-    let y = anchor.y.saturating_sub(area_height);
-    let area = Rect::new(anchor.x, y, width, area_height);
+    let area = overflow_menu_area(anchor, width, ScmMenuItem::ALL.len());
     frame.render_widget(Clear, area);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -1296,7 +1302,7 @@ fn draw_pull_requests_sidebar(
     app: &mut App,
     theme: &Theme,
     link_hits: &mut Vec<LinkHit>,
-) -> Vec<SidebarHitArea> {
+) -> (Vec<SidebarHitArea>, Vec<ScmActionHit>) {
     let warning = if app.pull_request_warnings.is_empty() {
         String::new()
     } else {
@@ -1342,10 +1348,12 @@ fn draw_pull_requests_sidebar(
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.height == 0 {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
 
-    let controls_height = inner.height.min(3);
+    let has_cta = app.selected_pull_request().is_some() && app.pr_primary_action().is_some();
+    let base_controls = if has_cta { 3_u16 } else { 2_u16 };
+    let controls_height = inner.height.min(base_controls);
     let body_area = Rect::new(
         inner.x,
         inner.y,
@@ -1353,6 +1361,7 @@ fn draw_pull_requests_sidebar(
         inner.height.saturating_sub(controls_height),
     );
     let mut hits = Vec::new();
+    let mut action_hits = Vec::new();
     if app.pull_request.is_some() && body_area.height > 0 {
         let overview_width = body_area.width.saturating_mul(3) / 5;
         let overview_tab = Rect::new(body_area.x, body_area.y, overview_width, 1);
@@ -1432,10 +1441,9 @@ fn draw_pull_requests_sidebar(
     if controls_height >= 1 {
         let repository_area = Rect::new(inner.x, controls_y, inner.width, 1);
         let prefix = " repo ";
-        let suffix = "  [o choose]";
         let visible_name = truncate_middle(
             &repository_name,
-            usize::from(inner.width).saturating_sub(prefix.width() + suffix.width()),
+            usize::from(inner.width).saturating_sub(prefix.width()),
         );
         frame.render_widget(
             Paragraph::new(Line::from(vec![
@@ -1452,7 +1460,6 @@ fn draw_pull_requests_sidebar(
                     theme,
                     link_hits,
                 ),
-                Span::raw(suffix),
             ]))
             .style(Style::default().fg(theme.text).bg(theme.panel_alt)),
             repository_area,
@@ -1470,14 +1477,6 @@ fn draw_pull_requests_sidebar(
                 Span::styled(
                     app.pull_request_lookup.value.as_str(),
                     Style::default().fg(theme.text),
-                ),
-                Span::styled(
-                    if app.pull_request_lookup_active {
-                        "  Enter lookup"
-                    } else {
-                        "  [/ lookup]"
-                    },
-                    Style::default().fg(theme.muted),
                 ),
             ]))
             .style(Style::default().bg(if app.pull_request_lookup_active {
@@ -1505,44 +1504,115 @@ fn draw_pull_requests_sidebar(
             target: SidebarHit::PullRequestLookup,
         });
     }
-    if controls_height >= 3 {
-        let status = if let Some(progress) = app.pull_request_progress {
-            format!("{}% {}", progress.percent(), progress.label())
-        } else if app.pull_request.is_none() && !app.recent_pull_requests.is_empty() {
-            "j/k select · Space open · / number".to_owned()
-        } else if app.pull_request.is_none() {
-            "enter a pull request number".to_owned()
-        } else {
-            match app.pull_request_section {
-                PullRequestSection::Files => {
-                    let suffix = if app.pull_request_files_truncated {
-                        " · list bounded"
-                    } else {
-                        ""
-                    };
-                    format!(
-                        "j/k select · ←/→ folders · {} files{suffix}",
-                        app.pull_request_total_files
-                    )
-                }
-                PullRequestSection::Overview => {
-                    if app.pull_request_checks_error.is_some() {
-                        "checks unavailable · r retry".to_owned()
-                    } else if app.pull_request_check_cursor.is_some() {
-                        "[ / ] step · space fold · e all".to_owned()
-                    } else {
-                        format!("live · {}", app.live_refresh_label())
-                    }
-                }
-            }
-        };
-        frame.render_widget(
-            Paragraph::new(format!(" {status}"))
-                .style(Style::default().fg(theme.muted).bg(theme.panel_alt)),
-            Rect::new(inner.x, controls_y + 2, inner.width, 1),
-        );
+    if has_cta && controls_height >= 3 {
+        let row = Rect::new(inner.x, controls_y + 2, inner.width, 1);
+        draw_pull_request_cta(frame, row, app, theme, &mut action_hits);
     }
-    hits
+    (hits, action_hits)
+}
+
+fn draw_pull_request_cta(
+    frame: &mut Frame<'_>,
+    row: Rect,
+    app: &App,
+    theme: &Theme,
+    action_hits: &mut Vec<ScmActionHit>,
+) {
+    let Some(primary) = app.pr_primary_action() else {
+        return;
+    };
+    let menu_items = app.pr_menu_items();
+    let show_menu = !menu_items.is_empty();
+    let arrow_width = if show_menu { 3.min(row.width) } else { 0 };
+    let label_width = row.width.saturating_sub(arrow_width);
+    let label_area = Rect::new(row.x, row.y, label_width, 1);
+    let arrow_area = Rect::new(row.x.saturating_add(label_width), row.y, arrow_width, 1);
+    frame.render_widget(
+        Paragraph::new("").style(Style::default().bg(theme.panel_alt)),
+        row,
+    );
+    frame.render_widget(
+        Paragraph::new(primary.label())
+            .alignment(Alignment::Center)
+            .style(
+                Style::default()
+                    .fg(theme.accent)
+                    .bg(theme.panel_alt)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        label_area,
+    );
+    action_hits.push(ScmActionHit {
+        area: label_area,
+        action: ScmAction::PrPrimary,
+    });
+    if show_menu {
+        frame.render_widget(
+            Paragraph::new("▶")
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(theme.muted).bg(theme.panel_alt)),
+            arrow_area,
+        );
+        action_hits.push(ScmActionHit {
+            area: arrow_area,
+            action: ScmAction::PrToggleMenu,
+        });
+        if app.pr_menu_open {
+            draw_pr_menu(
+                frame,
+                row,
+                &menu_items,
+                app.pr_menu_selected,
+                theme,
+                action_hits,
+            );
+        }
+    }
+}
+
+fn draw_pr_menu(
+    frame: &mut Frame<'_>,
+    anchor: Rect,
+    items: &[PrMenuItem],
+    selected: usize,
+    theme: &Theme,
+    action_hits: &mut Vec<ScmActionHit>,
+) {
+    let width = items
+        .iter()
+        .map(|item| item.label().width())
+        .max()
+        .unwrap_or(12)
+        .saturating_add(4);
+    let area = overflow_menu_area(anchor, width, items.len());
+    frame.render_widget(Clear, area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.border_focus))
+        .style(Style::default().bg(theme.panel));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    for (index, item) in items.iter().enumerate() {
+        let active = index == selected;
+        let row = Rect::new(
+            inner.x,
+            inner.y.saturating_add(u16::try_from(index).unwrap_or(0)),
+            inner.width,
+            1,
+        );
+        frame.render_widget(
+            Paragraph::new(format!(" {} ", item.label())).style(if active {
+                Style::default().fg(theme.text).bg(theme.selected)
+            } else {
+                Style::default().fg(theme.text).bg(theme.panel)
+            }),
+            row,
+        );
+        action_hits.push(ScmActionHit {
+            area: row,
+            action: ScmAction::PrMenu(*item),
+        });
+    }
 }
 
 fn draw_recent_pull_requests(
@@ -1822,9 +1892,9 @@ const fn pull_request_file_status_color(status: PullRequestFileStatus, theme: &T
     }
 }
 
-/// The overview sidebar is the pull request itself on row zero followed by its
-/// checks, so one list carries both the way back to the conversation and the way
-/// into any run's log.
+/// The overview sidebar is the pull request itself on row zero, then status
+/// sections and their checks, so one list carries both the way back to the
+/// conversation and the way into any run's log.
 fn draw_pull_request_check_list(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -1834,84 +1904,92 @@ fn draw_pull_request_check_list(
     if area.height == 0 {
         return Vec::new();
     }
-    let rows = app.pull_request_checks.len() + 1;
-    let cursor_row = app
-        .pull_request_check_cursor
-        .map_or(0, |cursor| cursor.saturating_add(1));
+    let rows = app.check_list_rows();
+    let selected_row = rows
+        .iter()
+        .position(|row| check_list_row_selected(app, row))
+        .unwrap_or_default();
     ensure_offset(
         &mut app.sidebar_offset,
-        cursor_row,
+        selected_row,
         area.height as usize,
-        rows,
+        rows.len(),
     );
 
     let mut hits = Vec::new();
-    for (offset, row) in (app.sidebar_offset..rows)
-        .take(area.height as usize)
-        .enumerate()
-    {
-        let y = area.y + cells(offset);
+    let end = (app.sidebar_offset + area.height as usize).min(rows.len());
+    for (y, row) in (area.y..area.bottom()).zip(rows.iter().take(end).skip(app.sidebar_offset)) {
         let row_area = Rect::new(area.x, y, area.width, 1);
-        let selected = row == cursor_row;
-        let background = if selected {
-            theme.selected
-        } else {
-            theme.panel
-        };
-        let marker = Span::styled(
-            if selected { " › " } else { "   " },
-            Style::default().fg(theme.accent),
-        );
-        let (line, target) = if row == 0 {
-            (
-                Line::from(vec![
-                    marker,
-                    Span::styled(
-                        "Conversation",
-                        Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        conversation_row_suffix(app),
-                        Style::default().fg(theme.muted),
-                    ),
-                ]),
-                SidebarHit::PullRequestConversation,
-            )
-        } else {
-            let index = row - 1;
-            let Some(check) = app.pull_request_checks.get(index) else {
-                continue;
-            };
-            let (icon, color) = pull_request_check_icon(check.status, theme);
-            let workflow = if check.workflow.is_empty() {
-                String::new()
-            } else {
-                format!("  {}", check.workflow)
-            };
-            let reserved = 6 + workflow.width();
-            (
-                Line::from(vec![
-                    marker,
-                    Span::styled(format!("{icon} "), Style::default().fg(color)),
-                    Span::styled(
-                        truncate_end(&check.name, (area.width as usize).saturating_sub(reserved)),
-                        Style::default().fg(theme.text),
-                    ),
-                    Span::styled(workflow, Style::default().fg(theme.muted)),
-                ]),
-                SidebarHit::PullRequestCheck(index),
-            )
-        };
-        frame.render_widget(
-            Paragraph::new(line).style(Style::default().bg(background)),
-            row_area,
-        );
-        hits.push(SidebarHitArea {
-            area: row_area,
-            target,
-        });
+        match row {
+            CheckListRow::Spacer => {
+                let rule = "─".repeat((area.width as usize).saturating_sub(4));
+                frame.render_widget(
+                    Paragraph::new(format!("  {rule}"))
+                        .style(Style::default().fg(theme.border).bg(theme.panel)),
+                    row_area,
+                );
+            }
+            CheckListRow::Conversation => {
+                hits.push(draw_check_list_conversation(frame, row_area, app, theme));
+            }
+            CheckListRow::Heading => {
+                frame.render_widget(
+                    Paragraph::new(Line::from(vec![
+                        Span::styled("  ", Style::default()),
+                        Span::styled(
+                            "CHECKS",
+                            Style::default()
+                                .fg(theme.accent)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("  {}", app.pull_request_checks.len()),
+                            Style::default().fg(theme.muted),
+                        ),
+                    ]))
+                    .style(Style::default().bg(theme.panel_alt)),
+                    row_area,
+                );
+            }
+            CheckListRow::Section {
+                section,
+                count,
+                collapsed,
+            } => {
+                let selected = app.selected_check_section == Some(*section);
+                let background = if selected {
+                    theme.selected
+                } else {
+                    theme.panel_alt
+                };
+                frame.render_widget(
+                    Paragraph::new(Line::from(vec![
+                        Span::styled(
+                            disclosure_prefix(!*collapsed),
+                            Style::default().fg(theme.muted),
+                        ),
+                        Span::styled(
+                            section.label().to_uppercase(),
+                            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(format!("  {count}"), Style::default().fg(theme.muted)),
+                    ]))
+                    .style(Style::default().bg(background)),
+                    row_area,
+                );
+                hits.push(SidebarHitArea {
+                    area: row_area,
+                    target: SidebarHit::PullRequestCheckSection(*section),
+                });
+            }
+            CheckListRow::Check { index } => {
+                if let Some(hit) = draw_check_list_check(frame, row_area, app, theme, *index) {
+                    hits.push(hit);
+                }
+            }
+        }
     }
-    draw_scrollbar(frame, area, app.sidebar_offset, rows, theme);
+    draw_scrollbar(frame, area, app.sidebar_offset, rows.len(), theme);
 
     if app.pull_request_checks.is_empty() && area.height > 1 {
         let message = if app.pull_request_checks_loading {
@@ -1929,6 +2007,101 @@ fn draw_pull_request_check_list(
         );
     }
     hits
+}
+
+fn check_list_row_selected(app: &App, row: &CheckListRow) -> bool {
+    match row {
+        CheckListRow::Conversation => {
+            app.selected_check_section.is_none() && app.pull_request_check_cursor.is_none()
+        }
+        CheckListRow::Section { section, .. } => app.selected_check_section == Some(*section),
+        CheckListRow::Check { index } => {
+            app.selected_check_section.is_none() && app.pull_request_check_cursor == Some(*index)
+        }
+        CheckListRow::Heading | CheckListRow::Spacer => false,
+    }
+}
+
+fn draw_check_list_conversation(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &App,
+    theme: &Theme,
+) -> SidebarHitArea {
+    let selected = app.selected_check_section.is_none() && app.pull_request_check_cursor.is_none();
+    let background = if selected {
+        theme.selected
+    } else {
+        theme.panel
+    };
+    let marker = Span::styled(
+        if selected { " › " } else { "   " },
+        Style::default().fg(theme.accent),
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            marker,
+            Span::styled(
+                "Conversation",
+                Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                conversation_row_suffix(app),
+                Style::default().fg(theme.muted),
+            ),
+        ]))
+        .style(Style::default().bg(background)),
+        area,
+    );
+    SidebarHitArea {
+        area,
+        target: SidebarHit::PullRequestConversation,
+    }
+}
+
+fn draw_check_list_check(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &App,
+    theme: &Theme,
+    index: usize,
+) -> Option<SidebarHitArea> {
+    let check = app.pull_request_checks.get(index)?;
+    let selected =
+        app.selected_check_section.is_none() && app.pull_request_check_cursor == Some(index);
+    let background = if selected {
+        theme.selected
+    } else {
+        theme.panel
+    };
+    let marker = Span::styled(
+        if selected { " › " } else { "   " },
+        Style::default().fg(theme.accent),
+    );
+    let (icon, color) = pull_request_check_icon(check.status, theme);
+    let workflow = if check.workflow.is_empty() {
+        String::new()
+    } else {
+        format!("  {}", check.workflow)
+    };
+    let reserved = 6 + workflow.width();
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            marker,
+            Span::styled(format!("{icon} "), Style::default().fg(color)),
+            Span::styled(
+                truncate_end(&check.name, (area.width as usize).saturating_sub(reserved)),
+                Style::default().fg(theme.text),
+            ),
+            Span::styled(workflow, Style::default().fg(theme.muted)),
+        ]))
+        .style(Style::default().bg(background)),
+        area,
+    );
+    Some(SidebarHitArea {
+        area,
+        target: SidebarHit::PullRequestCheck(index),
+    })
 }
 
 fn conversation_row_suffix(app: &App) -> String {
@@ -5036,8 +5209,9 @@ fn draw_confirm(
         ),
     );
     let buttons = Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
-    let no_width = 4.min(buttons.width);
-    let yes_width = buttons.width.saturating_sub(no_width);
+    #[expect(clippy::integer_division, reason = "layout maths works in whole cells")]
+    let yes_width = buttons.width / 2;
+    let no_width = buttons.width.saturating_sub(yes_width);
     let yes_area = Rect::new(buttons.x, buttons.y, yes_width, 1);
     let no_area = Rect::new(buttons.x.saturating_add(yes_width), buttons.y, no_width, 1);
     frame.render_widget(
@@ -6074,6 +6248,52 @@ fn suffix_width(value: &str, width: usize) -> String {
 mod tests {
     use super::*;
     use crate::git::diff::CommitDetails;
+
+    #[test]
+    fn overflow_menus_right_align_to_the_cta_arrow() {
+        let anchor = Rect::new(10, 20, 40, 1);
+        let area = overflow_menu_area(anchor, 18, 4);
+        assert_eq!(area.width, 18);
+        assert_eq!(area.height, 6);
+        assert_eq!(area.x, 32);
+        assert_eq!(area.right(), anchor.right());
+        assert_eq!(area.bottom(), anchor.y);
+    }
+
+    #[test]
+    fn confirm_modal_gives_yes_and_no_equal_hit_targets() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = App::new("/tmp/repo", "repo");
+        app.modal = Some(Modal::Confirm {
+            title: "Squash and merge?".to_owned(),
+            message: "Really squash and merge #12 (Ship it)?".to_owned(),
+            action: crate::app::ConfirmAction::Operate(crate::git::GitOperation::Fetch),
+        });
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+        let yes = app
+            .geometry
+            .modal_action_hits
+            .iter()
+            .find(|(_, action)| *action == ModalAction::ConfirmYes)
+            .map(|(area, _)| *area)
+            .expect("yes button");
+        let no = app
+            .geometry
+            .modal_action_hits
+            .iter()
+            .find(|(_, action)| *action == ModalAction::ConfirmNo)
+            .map(|(area, _)| *area)
+            .expect("no button");
+        assert_eq!(yes.width, no.width);
+        assert_eq!(yes.y, no.y);
+        assert_eq!(yes.right(), no.x);
+    }
 
     #[test]
     fn help_catalog_covers_sections_and_previously_missing_bindings() {

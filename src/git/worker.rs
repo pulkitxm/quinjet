@@ -9,7 +9,7 @@ use crossbeam_channel::{Receiver, Sender, unbounded};
 use super::diff::DiffDocument;
 use super::github::{
     CheckRunLog, PullRequest, PullRequestCheck, PullRequestChecks, PullRequestConversation,
-    PullRequestDiffIndex, PullRequestProgress, PullRequestSnapshot,
+    PullRequestDiffIndex, PullRequestOperation, PullRequestProgress, PullRequestSnapshot,
 };
 use super::history::Commit;
 use super::status::RepoStatus;
@@ -99,6 +99,11 @@ pub(crate) enum WorkerCommand {
         id: u64,
         operation: GitOperation,
     },
+    OperatePullRequest {
+        id: u64,
+        pull_request: Box<PullRequest>,
+        operation: PullRequestOperation,
+    },
     Shutdown,
 }
 
@@ -179,6 +184,7 @@ pub(crate) enum WorkerEvent {
         id: u64,
         label: String,
         changes_history: bool,
+        refresh_pull_request: bool,
         result: Result<String, String>,
     },
 }
@@ -203,7 +209,10 @@ struct Mailbox {
 impl Mailbox {
     fn push(&mut self, command: WorkerCommand) {
         match command {
-            command @ WorkerCommand::Operate { .. } => self.operations.push_back(command),
+            command
+            @ (WorkerCommand::Operate { .. } | WorkerCommand::OperatePullRequest { .. }) => {
+                self.operations.push_back(command);
+            }
             command @ (WorkerCommand::LoadBranches { .. }
             | WorkerCommand::LoadHistoryBranches { .. }
             | WorkerCommand::LoadStashes { .. }) => self.branches = Some(command),
@@ -726,9 +735,32 @@ fn run_worker(repository: &Repository, mailbox: &Arc<SharedMailbox>, events: &Se
                     id,
                     label,
                     changes_history,
+                    refresh_pull_request: false,
                     result: answer(
                         session
                             .execute(Command::Operate(operation))
+                            .and_then(Outcome::operation)
+                            .map(|(_, _, message)| message),
+                    ),
+                }
+            }
+            WorkerCommand::OperatePullRequest {
+                id,
+                pull_request,
+                operation,
+            } => {
+                let label = operation.label().to_owned();
+                WorkerEvent::OperationFinished {
+                    id,
+                    label,
+                    changes_history: false,
+                    refresh_pull_request: true,
+                    result: answer(
+                        session
+                            .execute(Command::OperatePullRequest {
+                                pull_request,
+                                operation,
+                            })
                             .and_then(Outcome::operation)
                             .map(|(_, _, message)| message),
                     ),

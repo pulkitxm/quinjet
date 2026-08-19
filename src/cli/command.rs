@@ -5,8 +5,8 @@ use anyhow::Result;
 use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
     CheckRunLog, GitHubRepository, PreparedPullRequest, PullRequest, PullRequestCheck,
-    PullRequestChecks, PullRequestConversation, PullRequestDiffIndex, PullRequestProgress,
-    PullRequestSnapshot,
+    PullRequestChecks, PullRequestConversation, PullRequestDiffIndex, PullRequestOperation,
+    PullRequestProgress, PullRequestSnapshot,
 };
 use crate::git::history::Commit;
 use crate::git::status::RepoStatus;
@@ -71,6 +71,10 @@ pub(crate) enum Command {
         checks: Vec<PullRequestCheck>,
     },
     Operate(GitOperation),
+    OperatePullRequest {
+        pull_request: Box<PullRequest>,
+        operation: PullRequestOperation,
+    },
 }
 
 impl Command {
@@ -94,6 +98,7 @@ impl Command {
             Self::CheckRunLog { .. } => "Fetching check-run log",
             Self::WarmCheckRunLogs { .. } => "Caching check-run logs",
             Self::Operate(operation) => operation.label(),
+            Self::OperatePullRequest { operation, .. } => operation.label(),
         }
     }
 }
@@ -222,6 +227,10 @@ impl Session {
         self.repository.resolve_revision(revision)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the command match is the whole session vocabulary and reads better as one table"
+    )]
     pub(crate) fn execute_with(
         &mut self,
         command: Command,
@@ -333,6 +342,20 @@ impl Session {
                 Ok(Outcome::Operation {
                     label,
                     changes_history,
+                    message,
+                })
+            }
+            Command::OperatePullRequest {
+                pull_request,
+                operation,
+            } => {
+                let label = operation.label().to_owned();
+                let message = self
+                    .repository
+                    .perform_pull_request_operation(&pull_request, &operation)?;
+                Ok(Outcome::Operation {
+                    label,
+                    changes_history: false,
                     message,
                 })
             }
