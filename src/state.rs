@@ -1,6 +1,5 @@
-use std::env;
-use std::fs;
 use std::path::{Path, PathBuf};
+use std::{env, fs};
 
 use serde::{Deserialize, Serialize};
 
@@ -165,24 +164,24 @@ fn state_root() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::env;
     use std::process::Command;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    static TEST_ID: AtomicUsize = AtomicUsize::new(0);
+    use super::*;
 
     #[test]
     fn records_one_project_per_common_directory() {
-        let state = unique_dir("state");
-        drop(STATE_ROOT_OVERRIDE.with(|cell| cell.replace(Some(state.clone()))));
-        let repo = git_repo("recent-a");
-        let linked = unique_dir("recent-linked");
-        drop(fs::remove_dir_all(&linked));
+        let state = tempfile::tempdir().unwrap();
+        drop(STATE_ROOT_OVERRIDE.with(|cell| cell.replace(Some(state.path().to_path_buf()))));
+        let repo = git_repo();
+        let linked_root = tempfile::tempdir().unwrap();
+        let linked = linked_root.path().join("topic");
         let linked_display = linked.display().to_string();
-        run_git(&repo, &["worktree", "add", "-b", "topic", &linked_display]);
+        run_git(
+            repo.path(),
+            &["worktree", "add", "-b", "topic", &linked_display],
+        );
         let linked = fs::canonicalize(&linked).unwrap();
-        record_recent_project(&repo);
+        record_recent_project(repo.path());
         record_recent_project(&linked);
         let entries = read_entries();
         assert_eq!(entries.len(), 1);
@@ -196,29 +195,17 @@ mod tests {
                 .any(|tree| tree.current && tree.path == linked)
         );
         forget_recent_project(&entries[0].common_dir);
-        assert!(read_entries().is_empty());
+        assert_eq!(read_entries(), Vec::<RecentEntry>::new());
         drop(STATE_ROOT_OVERRIDE.with(|cell| cell.replace(None)));
-        drop(fs::remove_dir_all(&state));
-        drop(fs::remove_dir_all(&repo));
-        drop(fs::remove_dir_all(&linked));
     }
 
-    fn unique_dir(label: &str) -> PathBuf {
-        let id = TEST_ID.fetch_add(1, Ordering::Relaxed);
-        let path =
-            env::temp_dir().join(format!("quinjet-state-{label}-{}-{id}", std::process::id()));
-        drop(fs::remove_dir_all(&path));
-        drop(fs::create_dir_all(&path));
-        path
-    }
-
-    fn git_repo(label: &str) -> PathBuf {
-        let path = unique_dir(label);
-        run_git(&path, &["init", "--initial-branch=main"]);
-        fs::write(path.join("README.md"), "test\n").unwrap();
-        run_git(&path, &["add", "README.md"]);
+    fn git_repo() -> tempfile::TempDir {
+        let path = tempfile::tempdir().unwrap();
+        run_git(path.path(), &["init", "--initial-branch=main"]);
+        fs::write(path.path().join("README.md"), "test\n").unwrap();
+        run_git(path.path(), &["add", "README.md"]);
         run_git(
-            &path,
+            path.path(),
             &[
                 "-c",
                 "user.name=Quinjet Test",

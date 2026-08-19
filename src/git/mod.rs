@@ -2162,10 +2162,8 @@ mod tests {
     fn lists_a_linked_worktree_without_changing_head() {
         let test_repository = TestRepository::new();
         let repository = test_repository.repository();
-        let id = TEST_REPOSITORY_ID.fetch_add(1, Ordering::Relaxed);
-        let linked =
-            std::env::temp_dir().join(format!("quinjet-git-linked-{}-{id}", std::process::id()));
-        drop(fs::remove_dir_all(&linked));
+        let linked_root = tempfile::tempdir().unwrap();
+        let linked = linked_root.path().join("topic");
         let linked_display = linked.display().to_string();
         run_test_git(
             &test_repository.path,
