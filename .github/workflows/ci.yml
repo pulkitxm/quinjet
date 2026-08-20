@@ -279,8 +279,13 @@ jobs:
           python3 scripts/homebrew_formula.py --version "${version}" \
             --checksums "${RUNNER_TEMP}/SHA256SUMS" \
             --output "${RUNNER_TEMP}/quinjet.rb"
+      - name: Stage the formula in a test tap
+        run: |
+          brew tap-new pulkitxm/tap
+          cp "${RUNNER_TEMP}/quinjet.rb" \
+            "$(brew --repository pulkitxm/tap)/Formula/quinjet.rb"
       - name: Install the formula
-        run: brew install --formula "${RUNNER_TEMP}/quinjet.rb"
+        run: brew install pulkitxm/tap/quinjet
       - name: Verify the installation
         run: |
           set -euo pipefail
