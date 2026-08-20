@@ -1,11 +1,10 @@
 use std::ffi::OsString;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use serde::Serialize;
 
 use super::{
-    CacheLife, PullRequest, Repository, bounded_command_error, bounded_text, cache_read,
-    cache_write, has_next_page, last_page, parse_tsv_record, split_http_response,
+    CacheLife, PullRequest, Repository, bounded_text, cache_read, cache_write, parse_tsv_record,
 };
 
 /// The renderer wraps every entry to the pane width on each redraw, so this cap
@@ -109,13 +108,6 @@ struct ConversationStream {
     endpoint: String,
     jq: String,
     paging: ConversationPaging,
-}
-
-struct ConversationPage {
-    data: Vec<u8>,
-    truncated: bool,
-    has_next: bool,
-    last_page: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -284,7 +276,7 @@ impl Repository {
         let (first_data, first_last_page, has_more) = if let Some(read) = first {
             (read.data, read.last_page, true)
         } else {
-            let read = self.conversation_page(&stream.endpoint, &stream.jq, 1, error_context)?;
+            let read = self.api_page(&stream.endpoint, &stream.jq, 1, error_context)?;
             pipe_truncated |= read.truncated;
             (read.data, read.last_page, read.has_next)
         };
@@ -295,8 +287,7 @@ impl Repository {
                         complete = false;
                         break;
                     }
-                    let read =
-                        self.conversation_page(&stream.endpoint, &stream.jq, page, error_context)?;
+                    let read = self.api_page(&stream.endpoint, &stream.jq, page, error_context)?;
                     pipe_truncated |= read.truncated;
                     append_records(&mut collected, &mut lines, &read.data);
                 }
@@ -312,8 +303,7 @@ impl Repository {
                         complete = false;
                         break;
                     }
-                    let read =
-                        self.conversation_page(&stream.endpoint, &stream.jq, page, error_context)?;
+                    let read = self.api_page(&stream.endpoint, &stream.jq, page, error_context)?;
                     pipe_truncated |= read.truncated;
                     append_records(&mut collected, &mut lines, &read.data);
                     next = read.has_next.then(|| page.saturating_add(1));
@@ -332,39 +322,6 @@ impl Repository {
             entries,
             truncated: pipe_truncated || !complete,
             from_cache: false,
-        })
-    }
-
-    fn conversation_page(
-        &self,
-        endpoint: &str,
-        jq: &str,
-        page: usize,
-        error_context: &str,
-    ) -> Result<ConversationPage> {
-        let output = self.run_gh([
-            OsString::from("api"),
-            OsString::from("-i"),
-            OsString::from(format!("{endpoint}&page={page}")),
-            OsString::from("--jq"),
-            OsString::from(jq),
-        ])?;
-        if !output.status.success() && !output.stdout_truncated {
-            bail!("{}", bounded_command_error(error_context, &output));
-        }
-        let (head, body) = split_http_response(&output.stdout);
-        let has_next = has_next_page(head.as_ref());
-        let mut data = body.to_vec();
-        if output.stdout_truncated {
-            while data.last().is_some_and(|byte| *byte != b'\n') {
-                let _ = data.pop();
-            }
-        }
-        Ok(ConversationPage {
-            data,
-            truncated: output.stdout_truncated,
-            has_next,
-            last_page: last_page(head.as_ref()),
         })
     }
 }
