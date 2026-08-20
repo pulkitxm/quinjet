@@ -786,6 +786,7 @@ impl Repository {
                 let merge_base_hint = self.merge_base_from_api(pull_request);
                 let api_counts = self.pull_request_file_counts_from_api(pull_request);
                 let temporary = TemporaryBareRepository::new()?;
+                temporary.borrow_local_objects(self);
                 let (merge_base, head) = fetch_pull_request(
                     &temporary.path,
                     pull_request,
@@ -1245,7 +1246,7 @@ impl Repository {
             return None;
         }
         let key = format!(
-            "pr-file-counts-v2\n{}\n{}\n{base}\n{head}",
+            "pr-file-counts-v3\n{}\n{}\n{base}\n{head}",
             repository.url.trim_end_matches('/'),
             pull_request.number
         );
@@ -1256,7 +1257,7 @@ impl Repository {
             "repos/{}/pulls/{}/files?per_page=100",
             repository.name_with_owner, pull_request.number
         );
-        let jq = ".[] | [.filename, (.additions|tostring), (.deletions|tostring)] | @tsv";
+        let jq = ".[] | [.filename, (.additions|tostring), (.deletions|tostring), .status] | @tsv";
         let mut collected: Vec<u8> = Vec::new();
         let mut complete = false;
         for page in 1..=MAX_FILE_COUNT_PAGES {
@@ -1723,6 +1724,25 @@ impl TemporaryBareRepository {
         }
         bail!("unable to allocate a unique disposable Git repository")
     }
+
+    /// Let the disposable workspace read the opened repository's objects. A
+    /// merged or locally built pull request usually already has most of its
+    /// blobs on disk under other refs, so lazy blob reads resolve from the
+    /// local store instead of the network. The opened repository is only read.
+    fn borrow_local_objects(&self, repository: &Repository) {
+        let Ok(common) = repository.git_common_dir() else {
+            return;
+        };
+        let objects = common.join("objects");
+        if !objects.is_dir() {
+            return;
+        }
+        let info = self.path.join("objects").join("info");
+        drop(fs::write(
+            info.join("alternates"),
+            format!("{}\n", objects.display()),
+        ));
+    }
 }
 
 impl Drop for TemporaryBareRepository {
@@ -1901,13 +1921,13 @@ fn parse_api_file_counts(data: &[u8]) -> HashMap<PathBuf, DiffLineCounts> {
         if record.is_empty() {
             continue;
         }
-        let Ok([path, additions, deletions]) = parse_tsv_record::<3>(record) else {
+        let Ok([path, additions, deletions, status]) = parse_tsv_record::<4>(record) else {
             continue;
         };
         let (Ok(additions), Ok(deletions)) = (additions.parse(), deletions.parse()) else {
             continue;
         };
-        if additions == 0 && deletions == 0 {
+        if additions == 0 && deletions == 0 && status != "renamed" {
             continue;
         }
         let _ = counts.insert(
@@ -3155,13 +3175,22 @@ mod tests {
 
     #[test]
     fn api_file_counts_parse_and_skip_malformed_records() {
-        let data = b"src/main.rs\t12\t3\nREADME.md\t1\t0\nbroken record\nassets/logo.png\tnot\tnumbers\nassets/icon.png\t0\t0\n";
+        let data = b"src/main.rs\t12\t3\tmodified\nREADME.md\t1\t0\tmodified\nbroken record\nassets/logo.png\tnot\tnumbers\tadded\nassets/icon.png\t0\t0\tadded\nsrc/old_name.rs\t0\t0\trenamed\n";
         let counts = parse_api_file_counts(data);
 
         assert_eq!(
             counts.len(),
-            2,
-            "malformed and countless records are skipped"
+            3,
+            "malformed and countless records are skipped, pure renames are kept"
+        );
+        assert_eq!(
+            counts.get(Path::new("src/old_name.rs")),
+            Some(&DiffLineCounts {
+                additions: 0,
+                deletions: 0,
+                binary: false,
+            }),
+            "a pure rename really has zero changed lines"
         );
         assert_eq!(
             counts.get(Path::new("src/main.rs")),
