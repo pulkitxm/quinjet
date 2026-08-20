@@ -6460,6 +6460,17 @@ impl App {
         self.operation_id = self.operation_id.wrapping_add(1);
         self.busy = Some(operation.label().to_owned());
         self.operation_frame = 0;
+        match &operation {
+            GitOperation::Remove(paths) => {
+                self.checked_change_paths
+                    .retain(|path| !paths.contains(path));
+            }
+            GitOperation::Discard(changes) => {
+                self.checked_change_paths
+                    .retain(|path| !changes.iter().any(|change| &change.path == path));
+            }
+            _ => {}
+        }
         effects.push(AppEffect::Git(Box::new(WorkerCommand::Operate {
             id: self.operation_id,
             operation,
