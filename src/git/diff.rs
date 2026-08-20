@@ -130,7 +130,7 @@ impl DiffFileIndexEntry {
 
     fn count_spans(&self) -> (String, String) {
         self.counts.map_or_else(
-            || ("+?".to_owned(), "-?".to_owned()),
+            || ("+··".to_owned(), "-··".to_owned()),
             |counts| {
                 (
                     format!("+{}", counts.additions),
@@ -1008,7 +1008,7 @@ mod tests {
         let mut loaded = HashMap::new();
         let skeleton = index.document(&loaded);
         assert_eq!(skeleton.file_count(), 2);
-        assert!(skeleton.lines[0].text().contains("+?"));
+        assert!(skeleton.lines[0].text().contains("+··"));
         assert_eq!(
             skeleton
                 .lines
@@ -1037,7 +1037,7 @@ mod tests {
             document
                 .lines
                 .iter()
-                .any(|line| line.text().contains("src/second.rs") && line.text().contains("+?"))
+                .any(|line| line.text().contains("src/second.rs") && line.text().contains("+··"))
         );
 
         let collapsed = index.document_with_visibility(&loaded, |_| false);
@@ -1164,7 +1164,12 @@ mod tests {
                 "README.md  · modified +12 -3",
             ]
         );
-        assert!(!skeleton.lines.iter().any(|line| line.text().contains("+?")));
+        assert!(
+            !skeleton
+                .lines
+                .iter()
+                .any(|line| line.text().contains("+··"))
+        );
     }
 
     #[test]
