@@ -746,9 +746,14 @@ impl Repository {
                 )
             } else {
                 progress(PullRequestProgress::PreparingRepository);
+                let merge_base_hint = self.merge_base_from_api(pull_request);
                 let temporary = TemporaryBareRepository::new()?;
-                let (merge_base, head) =
-                    fetch_pull_request(&temporary.path, pull_request, &mut progress)?;
+                let (merge_base, head) = fetch_pull_request(
+                    &temporary.path,
+                    pull_request,
+                    merge_base_hint.as_deref(),
+                    &mut progress,
+                )?;
                 (PreparedRepository::Temporary(temporary), merge_base, head)
             };
         progress(PullRequestProgress::EnumeratingFiles);
@@ -1146,6 +1151,48 @@ impl Repository {
             );
         }
         Ok(operation.success_message(pull_request))
+    }
+
+    /// Ask the GitHub compare API for the merge base of the two immutable PR
+    /// commits. One metadata request replaces the deepening fetch ladder, which
+    /// cannot reach a merge base thousands of commits behind either tip.
+    fn merge_base_from_api(&self, pull_request: &PullRequest) -> Option<String> {
+        let base = pull_request.base_oid.trim();
+        let head = pull_request.head_oid.trim();
+        let repository = &pull_request.base_repository;
+        if !is_commit_oid(base) || !is_commit_oid(head) || repository.name_with_owner.is_empty() {
+            return None;
+        }
+        let key = format!(
+            "pr-merge-base-v1\n{}\n{base}\n{head}",
+            repository.url.trim_end_matches('/')
+        );
+        if let Some(cached) = cache_read(&key, CacheLife::Immutable) {
+            let cached = String::from_utf8_lossy(trim_ascii(&cached)).into_owned();
+            if is_commit_oid(&cached) {
+                return Some(cached);
+            }
+        }
+        let output = self
+            .run_gh([
+                OsString::from("api"),
+                OsString::from(format!(
+                    "repos/{}/compare/{base}...{head}",
+                    repository.name_with_owner
+                )),
+                OsString::from("--jq"),
+                OsString::from(".merge_base_commit.sha"),
+            ])
+            .ok()?;
+        if !output.status.success() || output.stdout_truncated {
+            return None;
+        }
+        let sha = String::from_utf8_lossy(trim_ascii(&output.stdout)).into_owned();
+        if !is_commit_oid(&sha) {
+            return None;
+        }
+        cache_write(&key, sha.as_bytes());
+        Some(sha)
     }
 
     fn run_gh<I, S>(&self, args: I) -> Result<BoundedOutput>
@@ -1586,6 +1633,7 @@ fn remove_stale_temporary_repositories(parent: &Path) {
 fn fetch_pull_request(
     temporary: &Path,
     pull_request: &PullRequest,
+    merge_base_hint: Option<&str>,
     progress: &mut dyn FnMut(PullRequestProgress),
 ) -> Result<(String, String)> {
     if pull_request.base_ref.is_empty() || pull_request.head_ref.is_empty() {
@@ -1604,8 +1652,6 @@ fn fetch_pull_request(
     let base_refspec = format!("+refs/heads/{}:refs/quinjet/base", pull_request.base_ref);
     let pull_refspec = format!("+refs/pull/{}/head:refs/quinjet/head", pull_request.number);
 
-    progress(PullRequestProgress::FetchingBase);
-    fetch_ref(temporary, "origin", &base_refspec, 64)?;
     progress(PullRequestProgress::FetchingHead);
     let (head_remote, head_refspec) = match fetch_ref(temporary, "origin", &pull_refspec, 64) {
         Ok(()) => ("origin".to_owned(), pull_refspec),
@@ -1638,7 +1684,18 @@ fn fetch_pull_request(
     };
 
     progress(PullRequestProgress::FindingMergeBase);
-    for depth in [64_usize, 256, 1_024, 4_096] {
+    if let Some(hint) = merge_base_hint {
+        let hint_refspec = format!("+{hint}:refs/quinjet/merge-base");
+        if fetch_ref(temporary, "origin", &hint_refspec, 1).is_ok() {
+            let head =
+                preferred_fetched_commit(temporary, &pull_request.head_oid, "refs/quinjet/head")?;
+            return Ok((hint.to_owned(), head));
+        }
+    }
+
+    progress(PullRequestProgress::FetchingBase);
+    fetch_ref(temporary, "origin", &base_refspec, 64)?;
+    for depth in [64_usize, 256, 1_024, 4_096, 16_384] {
         if depth != 64 {
             fetch_ref(temporary, "origin", &base_refspec, depth)?;
             fetch_ref(temporary, &head_remote, &head_refspec, depth)?;
@@ -1652,7 +1709,7 @@ fn fetch_pull_request(
         }
     }
     bail!(
-        "Unable to find the PR merge base within 4,096 commits; refusing an unbounded history fetch"
+        "Unable to find the PR merge base within 16,384 commits; refusing an unbounded history fetch"
     )
 }
 
@@ -1701,8 +1758,12 @@ fn fetch_ref(temporary: &Path, remote: &str, refspec: &str, depth: usize) -> Res
     Ok(())
 }
 
+fn is_commit_oid(oid: &str) -> bool {
+    (oid.len() == 40 || oid.len() == 64) && oid.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 fn preferred_fetched_commit(temporary: &Path, oid: &str, fallback: &str) -> Result<String> {
-    if (oid.len() == 40 || oid.len() == 64) && oid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+    if is_commit_oid(oid) {
         let args = [
             OsString::from("rev-parse"),
             OsString::from("--verify"),
