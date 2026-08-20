@@ -434,7 +434,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     let (changes_tab, history_tab, pull_requests_tab, mut link_hits, projects_hit) =
         draw_tabs(frame, tabs, app, theme);
     let mut project_hits: Vec<Rect> = projects_hit.into_iter().collect();
-    let (sidebar_hits, scm_action_hits) = if app.sidebar_hidden {
+    let (sidebar_hits, mut scm_action_hits) = if app.sidebar_hidden {
         (Vec::new(), Vec::new())
     } else {
         draw_sidebar(frame, sidebar_area, app, theme, &mut link_hits)
@@ -444,6 +444,9 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     }
     let (diff_divider, content_file_hits, content_step_hits) =
         draw_content(frame, content_area, app, theme, &mut link_hits);
+    if let Some(hit) = draw_jump_to_bottom(frame, content_area, app, theme) {
+        scm_action_hits.push(hit);
+    }
     draw_footer(frame, footer, app, theme, &mut link_hits, &mut project_hits);
 
     app.geometry = UiGeometry {
@@ -3337,6 +3340,7 @@ fn draw_content(
     let visual_length = details_rows + diff_rows;
     let max_scroll = visual_length.saturating_sub(inner.height as usize);
     app.content_scroll = app.content_scroll.min(max_scroll);
+    app.content_at_bottom = app.content_scroll >= max_scroll;
 
     let mut diff_area = inner;
     let mut diff_scroll = app.content_scroll;
@@ -3407,6 +3411,44 @@ fn draw_content(
     };
     draw_scrollbar(frame, inner, app.content_scroll, visual_length, theme);
     (divider, content_file_hits, Vec::new())
+}
+
+/// A clickable shortcut to the end of whatever the content pane holds, shown on
+/// its bottom border whenever the reader is not already there. On a huge diff
+/// or conversation it replaces paging through thousands of rows.
+fn draw_jump_to_bottom(
+    frame: &mut Frame<'_>,
+    content: Rect,
+    app: &App,
+    theme: &Theme,
+) -> Option<ScmActionHit> {
+    if app.content_at_bottom || app.modal.is_some() || content.width < 20 || content.height < 3 {
+        return None;
+    }
+    let label = " ↓ Bottom ";
+    let width = cells(label.width());
+    let area = Rect::new(
+        content
+            .right()
+            .saturating_sub(width.saturating_add(3))
+            .max(content.x),
+        content.bottom().saturating_sub(1),
+        width,
+        1,
+    );
+    frame.render_widget(
+        Paragraph::new(label).style(
+            Style::default()
+                .fg(theme.accent)
+                .bg(theme.panel)
+                .add_modifier(Modifier::BOLD),
+        ),
+        area,
+    );
+    Some(ScmActionHit {
+        area,
+        action: ScmAction::JumpToBottom,
+    })
 }
 
 fn commit_details_row_count(available_height: u16) -> usize {
@@ -7183,6 +7225,46 @@ mod tests {
         assert!(result.width() <= 14);
         assert!(result.contains('…'));
         assert!(result.ends_with("me.rs"));
+    }
+
+    #[test]
+    fn a_scrollable_content_pane_offers_a_jump_to_bottom_control() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = App::new("/tmp/repo", "repo");
+        app.set_document(DiffDocument {
+            title: "Changes".to_owned(),
+            truncated: false,
+            commit_details: None,
+            pull_request_details: None,
+            lines: (0..200)
+                .map(|index| test_line(DiffLineKind::Context, &format!("line {index}")))
+                .collect(),
+        });
+        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+        assert!(
+            app.geometry
+                .scm_action_hits
+                .iter()
+                .any(|hit| hit.action == ScmAction::JumpToBottom),
+            "a long document offers the control"
+        );
+
+        app.content_scroll = usize::MAX;
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+        assert!(
+            !app.geometry
+                .scm_action_hits
+                .iter()
+                .any(|hit| hit.action == ScmAction::JumpToBottom),
+            "the control disappears once the reader is at the bottom"
+        );
     }
 
     #[test]
