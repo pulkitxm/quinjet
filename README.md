@@ -250,6 +250,12 @@ Text fields support Unicode-safe editing plus familiar terminal and macOS motion
 
 ## Performance and Safety
 
+The [optimization reference](docs/optimization/techniques.md) explains the
+complete performance model in depth. Its 23 chapters cover Git storage and
+history, diff algorithms and parsing, isolated pull-request workspaces, API and
+cache strategy, byte-budgeted prefetch, progressive viewport rendering,
+concurrency, benchmarking, failure modes, and regression review.
+
 - Rendering and key handling never invoke Git directly.
 - Fixed, coalescing mailboxes replace obsolete reads; local previews, PR/network previews, and background metadata run independently so one slow request cannot block tab switching.
 - Filesystem event storms collapse into authoritative status snapshots.
@@ -263,8 +269,8 @@ Text fields support Unicode-safe editing plus familiar terminal and macOS motion
 - On-demand repository discovery inspects at most 32 Git remotes, 64 configured fetch/push URL entries (32 distinct URLs), and 16 GitHub repositories.
 - PR file indexes are capped at 16,384 paths / 8 MiB. Each selected file has an independent 8 MiB patch cap; the full PR patch is never materialized. Potentially large subprocess output is streamed and the child is terminated at the cap.
 - The changed-file tree is virtualized: render cost follows terminal height rather than PR size. Rapid file selections coalesce into the newest per-file Git diff with no loading-layout replacement.
-- PR previews use locally available immutable OIDs first. Missing Git history deepens only to 4,096 commits in one reusable disposable bare repository. No checkout, worktree mutation, or persistent source-repository ref is used.
-- Cached `gh` metadata is bounded to 32 MiB and 256 entries; exact PR entries live for five minutes.
+- PR previews use locally available immutable OIDs first. Missing Git history uses the compare API's merge base when available and otherwise deepens through a bounded ladder ending at 16,384 commits in one reusable disposable bare repository. No checkout, worktree mutation, or persistent source-repository ref is used.
+- The private persistent cache is bounded to 128 MiB and 2,048 entries, with a 1 MiB ceiling for one file patch. Immutable content is keyed by its object identities; exact PR metadata lives for five minutes.
 - Git and `gh` receive argument arrays directly, never shell-concatenated commands; embedded remote credentials are stripped before URLs become `gh` arguments.
 - Destructive operations are confirmed where appropriate.
 - Hooks, credentials, signing, filters, and repository semantics remain delegated to the installed Git CLI.

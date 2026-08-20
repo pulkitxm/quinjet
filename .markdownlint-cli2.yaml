@@ -5,6 +5,7 @@ config:
     siblings_only: true
   MD033:
     allowed_elements: [img, br, details, summary, kbd, div, p]
+  MD038: false
   MD041: false
   MD060: false
 

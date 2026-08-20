@@ -57,6 +57,11 @@ metadata verb ──► generated references / verified updater ──► text o
 
 ## Responsiveness Invariants
 
+The [optimization reference](docs/optimization/techniques.md) expands these
+invariants into Git internals, implementation walkthroughs, measured behavior,
+failure analysis, and review guidance. This file remains the concise contract;
+the wiki section is the deep operational record.
+
 1. The UI thread mutates only in-memory state and renders visible rows.
 1a. There is one command vocabulary for user-visible repository and GitHub operations. The terminal and subcommands execute `cli::Command` through `cli::Session`; presentation state such as focus, scrolling, folding, filtering, and mouse capture stays in the app. The worker adds only a generation tag and a lane; it constructs no argument list. One macro declaration generates the exhaustive route match and one fixture per `GitOperation` variant. Subcommand dispatch happens before the interactive-terminal check and before any terminal mode is entered, so metadata verbs such as `completions`, `man`, and `update` run without repository discovery and a piped invocation never claims the terminal.
 1b. File icons are static glyphs resolved by allocation-free, compile-time sorted hash catalogs in the render layer. Rendering never reads SVGs, font files, configuration, or the filesystem, and unknown paths use one generic glyph.

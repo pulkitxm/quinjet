@@ -41,6 +41,7 @@ class Section:
 SECTIONS = (
     Section("docs/cli", "CLI", "CLI reference"),
     Section("docs/guides", "Guides", "Guides", files_only=True),
+    Section("docs/optimization", "Optimization", "Optimization"),
     Section("docs/practices", "Practices", "Rust practices"),
 )
 
@@ -55,6 +56,12 @@ READING_ORDER = (
     "stash",
     "pull-request",
     "generated",
+    "git-internals",
+    "diff",
+    "github",
+    "rendering",
+    "benchmarking",
+    "techniques",
     "studies",
     "patterns",
     "gap-analysis",

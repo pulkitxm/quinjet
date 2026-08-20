@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
+      - 'scripts/check_optimization_docs.py'
       - 'scripts/sync_wiki.py'
       - '.github/workflows/wiki.yml'
   workflow_dispatch:
@@ -32,6 +33,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Verify optimization reference
+        run: python3 scripts/check_optimization_docs.py --check
       - name: Build and push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
