@@ -14,8 +14,9 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use crate::app::{
     App, ChangeRow, ChangeSection, CheckListRow, ContentFileHit, ContentStepHit, DiffLayout, Focus,
     HelpHit, LinkHit, Modal, ModalAction, OpenTarget, PaletteCommand, PrMenuItem,
-    PullRequestContentRow, PullRequestSection, PullRequestTreeEntry, ScmAction, ScmActionHit,
-    ScmMenuItem, SideBySideRow, SidebarHit, SidebarHitArea, ToastLevel, UiGeometry, View,
+    PullRequestContentLink, PullRequestContentRow, PullRequestSection, PullRequestTreeEntry,
+    ScmAction, ScmActionHit, ScmMenuItem, SideBySideRow, SidebarHit, SidebarHitArea, ToastLevel,
+    UiGeometry, View,
 };
 use crate::convert::cells;
 use crate::date_time::format_local_timestamp;
@@ -2151,12 +2152,7 @@ const fn pull_request_check_icon(
 /// the step cursor can find it after scrolling.
 type ContentRow = PullRequestContentRow;
 
-struct ContentLink {
-    row: usize,
-    start: usize,
-    width: usize,
-    link: Link,
-}
+type ContentLink = PullRequestContentLink;
 
 #[derive(Clone)]
 struct Link {
@@ -2238,31 +2234,27 @@ fn draw_pull_request_overview(
     }
 
     let width = inner.width as usize;
-    let rows_key = (
-        showing_check,
-        width,
-        app.pull_request_generation,
-        app.pull_request_checks_generation,
-        app.pull_request_conversation_generation,
-        app.pull_request_check_log_generation,
-        app.pull_request_content_generation,
-    );
+    let rows_key = (showing_check, width, app.pull_request_content_generation);
     if app.pull_request_content_rows_key != Some(rows_key) {
         app.pull_request_content_rows = if showing_check {
             check_run_rows(app, width, theme)
         } else {
             conversation_rows(app, width, theme)
         };
+        app.pull_request_content_width = app
+            .pull_request_content_rows
+            .iter()
+            .filter(|row| row.wide)
+            .map(|row| row.line.width())
+            .max()
+            .unwrap_or_default();
+        app.pull_request_content_links =
+            pull_request_content_links(app, showing_check, &app.pull_request_content_rows);
         app.pull_request_content_rows_key = Some(rows_key);
     }
     let rows = &app.pull_request_content_rows;
-    let row_links = pull_request_content_links(app, showing_check, rows);
-    let content_width = rows
-        .iter()
-        .filter(|row| row.wide)
-        .map(|row| row.line.width())
-        .max()
-        .unwrap_or_default();
+    let row_links = &app.pull_request_content_links;
+    let content_width = app.pull_request_content_width;
     let overflow = content_width.saturating_sub(width);
     app.horizontal_scroll = app.horizontal_scroll.min(overflow);
 
@@ -2330,7 +2322,7 @@ fn draw_pull_request_overview(
                 link.start,
                 link.width,
             );
-            link.link.register(area, link_hits);
+            Link::new(link.target.clone()).register(area, link_hits);
         }
     }
     draw_scrollbar(frame, inner, app.content_scroll, rows.len(), theme);
@@ -2349,7 +2341,7 @@ fn pull_request_content_links(
         else {
             return Vec::new();
         };
-        let link = Link::new(OpenTarget::Browser(check.link.clone()));
+        let target = OpenTarget::Browser(check.link.clone());
         let url_row = 2
             + usize::from(!check.started_at.is_empty())
             + usize::from(!check.description.is_empty());
@@ -2358,13 +2350,13 @@ fn pull_request_content_links(
                 row: 0,
                 start: 2,
                 width: check.name.width(),
-                link: link.clone(),
+                target: target.clone(),
             },
             ContentLink {
                 row: url_row,
                 start: DETAIL_LABEL_WIDTH,
                 width: check.link.width(),
-                link,
+                target,
             },
         ];
     }
@@ -2403,7 +2395,7 @@ fn pull_request_content_links(
                     row,
                     start,
                     width,
-                    link: Link::new(target),
+                    target,
                 });
             }
             conversation_row = row.saturating_add(1);
@@ -2418,7 +2410,7 @@ fn pull_request_content_links(
                         row,
                         start: action_start,
                         width: action_width,
-                        link: Link::new(OpenTarget::Browser(entry.url.clone())),
+                        target: OpenTarget::Browser(entry.url.clone()),
                     });
                 }
             }
@@ -2456,7 +2448,7 @@ fn push_content_link(
             row,
             start,
             width,
-            link: Link::new(target),
+            target,
         });
     }
 }

@@ -925,6 +925,14 @@ pub(crate) struct PullRequestContentRow {
     pub wide: bool,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct PullRequestContentLink {
+    pub row: usize,
+    pub start: usize,
+    pub width: usize,
+    pub target: OpenTarget,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SideBySideRow {
     FileHeader(usize),
@@ -1077,7 +1085,9 @@ pub(crate) struct App {
     /// the pane to the selected step and make its own output unreadable.
     pub pull_request_step_reveal: bool,
     pub pull_request_content_rows: Vec<PullRequestContentRow>,
-    pub pull_request_content_rows_key: Option<(bool, usize, u64, u64, u64, u64, u64)>,
+    pub pull_request_content_rows_key: Option<(bool, usize, u64)>,
+    pub pull_request_content_width: usize,
+    pub pull_request_content_links: Vec<PullRequestContentLink>,
     pub pull_request_content_generation: u64,
     /// Whether the last draw left the content pane scrolled to its end. The
     /// renderer owns the row count, so it reports this back for the one decision
@@ -1246,6 +1256,8 @@ impl App {
             pull_request_step_reveal: false,
             pull_request_content_rows: Vec::new(),
             pull_request_content_rows_key: None,
+            pull_request_content_width: 0,
+            pull_request_content_links: Vec::new(),
             pull_request_content_generation: 0,
             content_at_bottom: true,
             pull_request_progress: None,
@@ -3304,9 +3316,15 @@ impl App {
                         let was_running = self
                             .selected_pull_request_check()
                             .is_some_and(|check| check.status.is_running());
+                        let changed = self.pull_request_checks_error.is_some()
+                            || self.pull_request_checks_from_cache != snapshot.from_cache
+                            || self.pull_request_checks != snapshot.checks
+                            || snapshot.checks.is_empty();
                         self.pull_request_checks_from_cache = snapshot.from_cache;
                         self.pull_request_checks = snapshot.checks;
-                        self.invalidate_pull_request_content_rows();
+                        if changed {
+                            self.invalidate_pull_request_content_rows();
+                        }
                         let cursor = selected.and_then(|selected| {
                             self.pull_request_checks
                                 .iter()
@@ -3320,8 +3338,10 @@ impl App {
                         self.request_check_log_prefetch(&mut effects);
                     }
                     Err(error) => {
-                        self.pull_request_checks_error = Some(error);
-                        self.invalidate_pull_request_content_rows();
+                        if self.pull_request_checks_error.as_ref() != Some(&error) {
+                            self.pull_request_checks_error = Some(error);
+                            self.invalidate_pull_request_content_rows();
+                        }
                     }
                 }
             }
@@ -3349,17 +3369,24 @@ impl App {
                             let number = step.number;
                             self.reveal_check_step(number);
                         }
+                        let changed = self.pull_request_check_log_error.is_some()
+                            || self.pull_request_check_log.as_ref() != Some(&log);
                         self.pull_request_check_log = Some(log);
-                        self.invalidate_pull_request_content_rows();
+                        if changed {
+                            self.invalidate_pull_request_content_rows();
+                        }
                         self.pull_request_check_log_error = None;
                         if following {
                             self.content_scroll = usize::MAX;
                         }
                     }
                     Err(error) => {
-                        self.pull_request_check_log = None;
+                        let changed = self.pull_request_check_log.take().is_some()
+                            || self.pull_request_check_log_error.as_ref() != Some(&error);
                         self.pull_request_check_log_error = Some(error);
-                        self.invalidate_pull_request_content_rows();
+                        if changed {
+                            self.invalidate_pull_request_content_rows();
+                        }
                     }
                 }
             }
@@ -3370,13 +3397,20 @@ impl App {
                 self.pull_request_conversation_loading = false;
                 match result {
                     Ok(conversation) => {
-                        self.pull_request_conversation = conversation;
-                        self.pull_request_conversation_error = None;
-                        self.invalidate_pull_request_content_rows();
+                        if self.pull_request_conversation_error.is_some()
+                            || conversation.entries.is_empty()
+                            || self.pull_request_conversation != conversation
+                        {
+                            self.pull_request_conversation = conversation;
+                            self.pull_request_conversation_error = None;
+                            self.invalidate_pull_request_content_rows();
+                        }
                     }
                     Err(error) => {
-                        self.pull_request_conversation_error = Some(error);
-                        self.invalidate_pull_request_content_rows();
+                        if self.pull_request_conversation_error.as_ref() != Some(&error) {
+                            self.pull_request_conversation_error = Some(error);
+                            self.invalidate_pull_request_content_rows();
+                        }
                     }
                 }
                 if self.pull_request_conversation_refresh_again {
@@ -3486,7 +3520,9 @@ impl App {
                         }
                         let newly_opened = self.pull_request.is_none();
                         let previous = self.pull_request.replace(snapshot.pull_request);
-                        self.invalidate_pull_request_content_rows();
+                        if previous.as_ref() != self.pull_request.as_ref() {
+                            self.invalidate_pull_request_content_rows();
+                        }
                         let current = self.pull_request.as_ref().expect("just assigned");
                         let same = previous.as_ref().is_some_and(|previous| {
                             previous.number == current.number
@@ -5555,6 +5591,8 @@ impl App {
         self.pull_request_step_cursor = 0;
         self.pull_request_content_rows.clear();
         self.pull_request_content_rows_key = None;
+        self.pull_request_content_width = 0;
+        self.pull_request_content_links.clear();
         self.pull_request_content_generation = self.pull_request_content_generation.wrapping_add(1);
         self.pull_request_checks_read_at = None;
         self.pull_request_detail_read_at = None;
@@ -5832,6 +5870,9 @@ impl App {
         };
         self.pull_request_checks_generation = self.pull_request_checks_generation.wrapping_add(1);
         self.pull_request_checks_loading = true;
+        if self.pull_request_checks.is_empty() {
+            self.invalidate_pull_request_content_rows();
+        }
         effects.push(AppEffect::Git(Box::new(
             WorkerCommand::LoadPullRequestChecks {
                 generation: self.pull_request_checks_generation,
@@ -6015,6 +6056,9 @@ impl App {
         self.pull_request_check_log_generation =
             self.pull_request_check_log_generation.wrapping_add(1);
         self.pull_request_check_log_loading = true;
+        if self.pull_request_check_log.is_none() {
+            self.invalidate_pull_request_content_rows();
+        }
         effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadCheckRunLog {
             generation: self.pull_request_check_log_generation,
             pull_request: Box::new(pull_request),
@@ -6069,6 +6113,9 @@ impl App {
         self.pull_request_conversation_generation =
             self.pull_request_conversation_generation.wrapping_add(1);
         self.pull_request_conversation_loading = true;
+        if self.pull_request_conversation.entries.is_empty() {
+            self.invalidate_pull_request_content_rows();
+        }
         effects.push(AppEffect::Git(Box::new(
             WorkerCommand::LoadPullRequestConversation {
                 generation: self.pull_request_conversation_generation,
