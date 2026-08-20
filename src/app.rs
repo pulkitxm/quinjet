@@ -1359,6 +1359,7 @@ impl App {
         self.theme_name = name;
         self.appearance_choice = choice;
         self.appearance = appearance;
+        self.invalidate_pull_request_content_rows();
     }
 
     pub(crate) fn initial_effects(&mut self) -> Vec<AppEffect> {
@@ -3338,7 +3339,9 @@ impl App {
                         self.request_check_log_prefetch(&mut effects);
                     }
                     Err(error) => {
-                        if self.pull_request_checks_error.as_ref() != Some(&error) {
+                        if self.pull_request_checks.is_empty()
+                            || self.pull_request_checks_error.as_ref() != Some(&error)
+                        {
                             self.pull_request_checks_error = Some(error);
                             self.invalidate_pull_request_content_rows();
                         }
@@ -3356,20 +3359,25 @@ impl App {
                         .is_some_and(|check| check.status.is_running());
                 match result {
                     Ok(log) => {
-                        if self.expanded_check_steps.is_empty()
+                        let auto_expanded = if self.expanded_check_steps.is_empty()
                             && let Some(step) = log.failed_step().or_else(|| log.running_step())
                         {
                             let number = step.number;
                             let _ = self.expanded_check_steps.insert(number);
                             self.reveal_check_step(number);
-                        }
+                            true
+                        } else {
+                            false
+                        };
                         if self.pull_request_step_cursor == 0
                             && let Some(step) = log.steps.first()
                         {
                             let number = step.number;
                             self.reveal_check_step(number);
                         }
-                        let changed = self.pull_request_check_log_error.is_some()
+                        let changed = auto_expanded
+                            || log.running_step().is_some()
+                            || self.pull_request_check_log_error.is_some()
                             || self.pull_request_check_log.as_ref() != Some(&log);
                         self.pull_request_check_log = Some(log);
                         if changed {
@@ -3560,6 +3568,7 @@ impl App {
                     Err(error) => {
                         self.pull_request_progress = None;
                         self.pull_request_error = Some(error.clone());
+                        self.invalidate_pull_request_content_rows();
                         self.set_document(DiffDocument::empty("Pull Requests", error.clone()));
                         self.show_toast(error, ToastLevel::Error, now);
                     }
@@ -4485,6 +4494,7 @@ impl App {
     fn apply_theme(&mut self, name: ThemeName) {
         self.theme_name = name;
         self.theme = Theme::new(name, self.appearance);
+        self.invalidate_pull_request_content_rows();
     }
 
     fn apply_live_modal_filter(&mut self) {
