@@ -32,6 +32,8 @@ const TOAST_DURATION: Duration = Duration::from_secs(4);
 const HISTORY_PAGE_SIZE: usize = 300;
 const PULL_REQUEST_PREFETCH_BATCH: usize = 32;
 const PULL_REQUEST_PREFETCH_BYTE_BUDGET: usize = 6 * 1024 * 1024;
+const HUGE_PULL_REQUEST_LINES: usize = 100_000;
+const HUGE_PULL_REQUEST_FILES: usize = 1_000;
 const PULL_REQUEST_PATCH_FALLBACK_ESTIMATE: usize = 512 * 1024;
 const PULL_REQUEST_PATCH_LINE_ESTIMATE: usize = 80;
 const MAX_PREFETCHED_PULL_REQUEST_FILES: usize = 400;
@@ -5863,9 +5865,19 @@ impl App {
         let remaining = MAX_PREFETCHED_PULL_REQUEST_FILES
             .saturating_sub(self.pull_request_prefetched_paths.len());
         let limit = PULL_REQUEST_PREFETCH_BATCH.min(remaining);
+        let huge = self.pull_request.as_ref().is_some_and(|pull_request| {
+            pull_request
+                .additions
+                .saturating_add(pull_request.deletions)
+                >= HUGE_PULL_REQUEST_LINES
+        }) || self.pull_request_files.len() >= HUGE_PULL_REQUEST_FILES;
+        let mut candidates: Vec<&PullRequestFile> = self.pull_request_files.iter().collect();
+        if huge {
+            candidates.sort_by_key(|file| estimated_patch_bytes(file.counts));
+        }
         let mut batch_bytes = 0_usize;
         let mut paths: Vec<PathBuf> = Vec::new();
-        for file in &self.pull_request_files {
+        for file in candidates {
             if paths.len() >= limit {
                 break;
             }
@@ -8824,6 +8836,51 @@ mod tests {
                 )
             ),
             "small files share the next batch"
+        );
+    }
+
+    #[test]
+    fn huge_pull_requests_prefetch_their_smallest_files_first() {
+        let counts = |additions: usize| {
+            Some(DiffLineCounts {
+                additions,
+                deletions: 0,
+                binary: false,
+            })
+        };
+        let file = |path: &str, additions: usize| PullRequestFile {
+            path: PathBuf::from(path),
+            old_path: None,
+            status: PullRequestFileStatus::Modified,
+            counts: counts(additions),
+        };
+        let mut app = App::new("/tmp/repo", "repo");
+        app.pull_request_workspace_generation = Some(10);
+        let mut huge = pull_request(7, "Rewrite", "acme/widget");
+        huge.additions = 1_000_000;
+        app.pull_request = Some(huge);
+        app.pull_request_files = vec![
+            file("src/big.rs", 50_000),
+            file("src/small.rs", 5),
+            file("src/medium.rs", 500),
+        ];
+
+        let mut effects = Vec::new();
+        app.request_pull_request_prefetch(&mut effects);
+        assert!(
+            matches!(
+                effects.as_slice(),
+                [AppEffect::Git(command)] if matches!(
+                    command.as_ref(),
+                    WorkerCommand::LoadPullRequestFileBatch { workspace_generation: 10, paths }
+                        if paths == &[
+                            PathBuf::from("src/small.rs"),
+                            PathBuf::from("src/medium.rs"),
+                            PathBuf::from("src/big.rs"),
+                        ]
+                )
+            ),
+            "a huge pull request fills its budget with the smallest files first"
         );
     }
 
