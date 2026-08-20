@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::num::NonZeroU16;
 use std::ops::Range;
 use std::path::Path;
@@ -4073,7 +4074,13 @@ fn draw_unified_diff(
 ) -> Vec<ContentFileHit> {
     let first_index = rows.get(diff_scroll).copied().unwrap_or_default();
     let mut in_file = inside_file_before(&app.document, first_index);
-    let emphasis = intraline_emphasis(&app.document.lines);
+    let emphasis = visible_intraline_emphasis(
+        &app.document.lines,
+        rows.iter()
+            .copied()
+            .skip(diff_scroll)
+            .take(area.height as usize),
+    );
     let sticky = app
         .document
         .lines
@@ -4125,7 +4132,7 @@ fn draw_unified_diff(
                 line,
                 in_file,
                 app.horizontal_scroll,
-                emphasis.get(line_index).and_then(Option::as_ref),
+                emphasis.get(&line_index),
                 theme,
             ),
         }
@@ -4480,40 +4487,105 @@ fn optional_side_by_side_rows<'a>(
     enabled.then(|| side_by_side_rows(document, app))
 }
 
-fn intraline_emphasis(lines: &[DiffLine]) -> Vec<Option<Range<usize>>> {
-    let mut emphasis = vec![None; lines.len()];
-    let mut index = 0;
-    while let Some(line) = lines.get(index) {
-        if line.kind != DiffLineKind::Removed {
-            index += 1;
+struct EmphasisBlock {
+    removed_start: usize,
+    added_start: usize,
+    added_end: usize,
+}
+
+impl EmphasisBlock {
+    const fn contains(&self, index: usize) -> bool {
+        self.removed_start <= index && index < self.added_end
+    }
+}
+
+fn emphasis_run_start(lines: &[DiffLine], mut start: usize, kind: DiffLineKind) -> usize {
+    while start > 0
+        && lines
+            .get(start.saturating_sub(1))
+            .is_some_and(|line| line.kind == kind)
+    {
+        start = start.saturating_sub(1);
+    }
+    start
+}
+
+fn emphasis_run_end(lines: &[DiffLine], mut end: usize, kind: DiffLineKind) -> usize {
+    while lines.get(end).is_some_and(|line| line.kind == kind) {
+        end = end.saturating_add(1);
+    }
+    end
+}
+
+fn emphasis_block(lines: &[DiffLine], index: usize) -> Option<EmphasisBlock> {
+    match lines.get(index)?.kind {
+        DiffLineKind::Removed => {
+            let removed_start = emphasis_run_start(lines, index, DiffLineKind::Removed);
+            let added_start =
+                emphasis_run_end(lines, index.saturating_add(1), DiffLineKind::Removed);
+            let added_end = emphasis_run_end(lines, added_start, DiffLineKind::Added);
+            Some(EmphasisBlock {
+                removed_start,
+                added_start,
+                added_end,
+            })
+        }
+        DiffLineKind::Added => {
+            let added_start = emphasis_run_start(lines, index, DiffLineKind::Added);
+            let removed_start = emphasis_run_start(lines, added_start, DiffLineKind::Removed);
+            let added_end = emphasis_run_end(lines, index.saturating_add(1), DiffLineKind::Added);
+            Some(EmphasisBlock {
+                removed_start,
+                added_start,
+                added_end,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn visible_intraline_emphasis(
+    lines: &[DiffLine],
+    visible: impl Iterator<Item = usize>,
+) -> HashMap<usize, Range<usize>> {
+    let mut emphasis = HashMap::new();
+    let mut block: Option<EmphasisBlock> = None;
+    for index in visible {
+        let Some(kind) = lines.get(index).map(|line| line.kind) else {
+            continue;
+        };
+        if kind != DiffLineKind::Removed && kind != DiffLineKind::Added {
             continue;
         }
-        let removed_start = index;
-        while lines
-            .get(index)
-            .is_some_and(|line| line.kind == DiffLineKind::Removed)
-        {
-            index += 1;
+        if !block.as_ref().is_some_and(|block| block.contains(index)) {
+            block = emphasis_block(lines, index);
         }
-        let added_start = index;
-        while lines
-            .get(index)
-            .is_some_and(|line| line.kind == DiffLineKind::Added)
-        {
-            index += 1;
+        let Some(current) = block.as_ref() else {
+            continue;
+        };
+        let pair_count = current
+            .added_start
+            .saturating_sub(current.removed_start)
+            .min(current.added_end.saturating_sub(current.added_start));
+        let pair_index = if kind == DiffLineKind::Removed {
+            index.saturating_sub(current.removed_start)
+        } else {
+            index.saturating_sub(current.added_start)
+        };
+        if pair_index >= pair_count {
+            continue;
         }
-        let pair_count = (added_start - removed_start).min(index - added_start);
-        for pair_index in 0..pair_count {
-            let old_index = removed_start + pair_index;
-            let new_index = added_start + pair_index;
-            let (old_range, new_range) =
-                paired_intraline_emphasis(lines.get(old_index), lines.get(new_index));
-            if let Some(slot) = emphasis.get_mut(old_index) {
-                *slot = old_range;
-            }
-            if let Some(slot) = emphasis.get_mut(new_index) {
-                *slot = new_range;
-            }
+        let (old_range, new_range) = paired_intraline_emphasis(
+            lines.get(current.removed_start.saturating_add(pair_index)),
+            lines.get(current.added_start.saturating_add(pair_index)),
+        );
+        let range = if kind == DiffLineKind::Removed {
+            old_range
+        } else {
+            new_range
+        };
+        if let Some(range) = range {
+            let _ = emphasis.insert(index, range);
         }
     }
     emphasis
@@ -8431,6 +8503,34 @@ terminal rows because that is what real pull-request comments look like in pract
         assert_eq!(
             paired_intraline_emphasis(Some(&old), Some(&new)),
             (None, None)
+        );
+    }
+
+    #[test]
+    fn visible_intraline_emphasis_matches_block_pairing() {
+        let lines = vec![
+            test_line(DiffLineKind::Context, "same"),
+            test_line(DiffLineKind::Removed, "value = 1"),
+            test_line(DiffLineKind::Removed, "gone"),
+            test_line(DiffLineKind::Added, "value = 2"),
+            test_line(DiffLineKind::Context, "same"),
+            test_line(DiffLineKind::Added, "standalone"),
+        ];
+
+        let emphasis = visible_intraline_emphasis(&lines, 0..lines.len());
+        assert_eq!(emphasis.get(&1), Some(&(8..9)), "removed side of the pair");
+        assert_eq!(emphasis.get(&3), Some(&(8..9)), "added side of the pair");
+        assert!(!emphasis.contains_key(&2), "unpaired removed line");
+        assert!(
+            !emphasis.contains_key(&5),
+            "added run without a removed partner"
+        );
+
+        let only_added = visible_intraline_emphasis(&lines, [3_usize].into_iter());
+        assert_eq!(
+            only_added.get(&3),
+            Some(&(8..9)),
+            "partner is found outside the viewport"
         );
     }
 
