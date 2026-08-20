@@ -36,6 +36,7 @@ const MAX_PULL_REQUEST_BODY_BYTES: usize = 256 * 1024;
 const MAX_GH_ERROR_BYTES: usize = 256 * 1024;
 const MAX_PR_PATH_BYTES: usize = 8 * 1024 * 1024;
 const MAX_PR_PATHS: usize = 16_384;
+const MAX_FILE_COUNT_PAGES: usize = 64;
 /// A single file's patch is cached only if it is small enough that one file
 /// cannot crowd out the rest of a pull request.
 const MAX_CACHED_PATCH_BYTES: usize = 1024 * 1024;
@@ -771,17 +772,19 @@ impl Repository {
     where
         F: FnMut(PullRequestProgress),
     {
-        let (repository, merge_base, head) =
+        let (repository, merge_base, head, api_counts) =
             if self.has_commit(&pull_request.base_oid) && self.has_commit(&pull_request.head_oid) {
                 progress(PullRequestProgress::FindingMergeBase);
                 (
                     PreparedRepository::Opened(self.root().to_path_buf()),
                     self.merge_base(&pull_request.base_oid, &pull_request.head_oid)?,
                     pull_request.head_oid.clone(),
+                    None,
                 )
             } else {
                 progress(PullRequestProgress::PreparingRepository);
                 let merge_base_hint = self.merge_base_from_api(pull_request);
+                let api_counts = self.pull_request_file_counts_from_api(pull_request);
                 let temporary = TemporaryBareRepository::new()?;
                 let (merge_base, head) = fetch_pull_request(
                     &temporary.path,
@@ -789,11 +792,16 @@ impl Repository {
                     merge_base_hint.as_deref(),
                     &mut progress,
                 )?;
-                (PreparedRepository::Temporary(temporary), merge_base, head)
+                (
+                    PreparedRepository::Temporary(temporary),
+                    merge_base,
+                    head,
+                    api_counts,
+                )
             };
         progress(PullRequestProgress::EnumeratingFiles);
         let (files, truncated) =
-            changed_files_in_repository(repository.path(), &merge_base, &head)?;
+            changed_files_in_repository(repository.path(), &merge_base, &head, api_counts)?;
         let total_files = if truncated {
             pull_request.changed_files.max(files.len())
         } else {
@@ -1186,6 +1194,90 @@ impl Repository {
             );
         }
         Ok(operation.success_message(pull_request))
+    }
+
+    /// One bounded page of a listing endpoint: its body trimmed to whole
+    /// records, plus whether GitHub advertises another page after it.
+    fn api_page(
+        &self,
+        endpoint: &str,
+        jq: &str,
+        page: usize,
+        error_context: &str,
+    ) -> Result<ApiPage> {
+        let output = self.run_gh([
+            OsString::from("api"),
+            OsString::from("-i"),
+            OsString::from(format!("{endpoint}&page={page}")),
+            OsString::from("--jq"),
+            OsString::from(jq),
+        ])?;
+        if !output.status.success() && !output.stdout_truncated {
+            bail!("{}", bounded_command_error(error_context, &output));
+        }
+        let (head, body) = split_http_response(&output.stdout);
+        let has_next = has_next_page(head.as_ref());
+        let mut data = body.to_vec();
+        if output.stdout_truncated {
+            while data.last().is_some_and(|byte| *byte != b'\n') {
+                let _ = data.pop();
+            }
+        }
+        Ok(ApiPage {
+            data,
+            truncated: output.stdout_truncated,
+            has_next,
+            last_page: last_page(head.as_ref()),
+        })
+    }
+
+    /// Per-file additions and deletions from the pull-request files endpoint.
+    /// In the blob-less disposable workspace a local `--numstat` would download
+    /// every changed blob just to count lines; GitHub already knows the totals.
+    fn pull_request_file_counts_from_api(
+        &self,
+        pull_request: &PullRequest,
+    ) -> Option<HashMap<PathBuf, DiffLineCounts>> {
+        let head = pull_request.head_oid.trim();
+        let repository = &pull_request.base_repository;
+        if !is_commit_oid(head) || repository.name_with_owner.is_empty() {
+            return None;
+        }
+        let key = format!(
+            "pr-file-counts-v1\n{}\n{}\n{head}",
+            repository.url.trim_end_matches('/'),
+            pull_request.number
+        );
+        if let Some(data) = cache_read_bounded(&key, CacheLife::Immutable, MAX_PR_PATH_BYTES) {
+            return Some(parse_api_file_counts(&data));
+        }
+        let endpoint = format!(
+            "repos/{}/pulls/{}/files?per_page=100",
+            repository.name_with_owner, pull_request.number
+        );
+        let jq = ".[] | [.filename, (.additions|tostring), (.deletions|tostring)] | @tsv";
+        let mut collected: Vec<u8> = Vec::new();
+        let mut complete = false;
+        for page in 1..=MAX_FILE_COUNT_PAGES {
+            let read = self
+                .api_page(&endpoint, jq, page, "unable to list pull-request files")
+                .ok()?;
+            if read.truncated {
+                return None;
+            }
+            collected.extend_from_slice(&read.data);
+            if collected.last().is_some_and(|byte| *byte != b'\n') {
+                collected.push(b'\n');
+            }
+            if !read.has_next {
+                complete = true;
+                break;
+            }
+        }
+        if complete && collected.len() <= MAX_PR_PATH_BYTES {
+            cache_write_bounded(&key, &collected, MAX_PR_PATH_BYTES);
+        }
+        Some(parse_api_file_counts(&collected))
     }
 
     /// Ask the GitHub compare API for the merge base of the two immutable PR
@@ -1795,6 +1887,37 @@ fn fetch_ref(temporary: &Path, remote: &str, refspec: &str, depth: usize) -> Res
     Ok(())
 }
 
+struct ApiPage {
+    data: Vec<u8>,
+    truncated: bool,
+    has_next: bool,
+    last_page: Option<usize>,
+}
+
+fn parse_api_file_counts(data: &[u8]) -> HashMap<PathBuf, DiffLineCounts> {
+    let mut counts = HashMap::new();
+    for record in data.split(|byte| *byte == b'\n') {
+        if record.is_empty() {
+            continue;
+        }
+        let Ok([path, additions, deletions]) = parse_tsv_record::<3>(record) else {
+            continue;
+        };
+        let (Ok(additions), Ok(deletions)) = (additions.parse(), deletions.parse()) else {
+            continue;
+        };
+        let _ = counts.insert(
+            PathBuf::from(path),
+            DiffLineCounts {
+                additions,
+                deletions,
+                binary: false,
+            },
+        );
+    }
+    counts
+}
+
 fn is_commit_oid(oid: &str) -> bool {
     (oid.len() == 40 || oid.len() == 64) && oid.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
@@ -1835,6 +1958,7 @@ fn changed_files_in_repository(
     repository: &Path,
     merge_base: &str,
     head: &str,
+    api_counts: Option<HashMap<PathBuf, DiffLineCounts>>,
 ) -> Result<(Vec<PullRequestFile>, bool)> {
     let args = [
         OsString::from("diff"),
@@ -1845,7 +1969,7 @@ fn changed_files_in_repository(
         OsString::from(head),
         OsString::from("--"),
     ];
-    let counts = numstat_counts(repository, merge_base, head);
+    let counts = api_counts.unwrap_or_else(|| numstat_counts(repository, merge_base, head));
     let key = format!("pr-files-v1\n{merge_base}\n{head}");
     let cached = cache_read_bounded(&key, CacheLife::Immutable, MAX_PR_PATH_BYTES);
     let output = if let Some(data) = cached {
@@ -2754,7 +2878,8 @@ mod tests {
         repository.git(&["commit", "--message=changes"]);
         let head = repository.git(&["rev-parse", "HEAD"]);
 
-        let (files, truncated) = changed_files_in_repository(&repository.0, &base, &head).unwrap();
+        let (files, truncated) =
+            changed_files_in_repository(&repository.0, &base, &head, None).unwrap();
 
         assert!(!truncated);
         assert!(files.iter().any(|file| {
@@ -3022,6 +3147,23 @@ mod tests {
         assert!(has_next_page(paged));
         assert!(!has_next_page(last));
         assert!(!has_next_page("HTTP/2.0 200 OK"));
+    }
+
+    #[test]
+    fn api_file_counts_parse_and_skip_malformed_records() {
+        let data =
+            b"src/main.rs\t12\t3\nREADME.md\t1\t0\nbroken record\nassets/logo.png\tnot\tnumbers\n";
+        let counts = parse_api_file_counts(data);
+
+        assert_eq!(counts.len(), 2, "malformed records are skipped");
+        assert_eq!(
+            counts.get(Path::new("src/main.rs")),
+            Some(&DiffLineCounts {
+                additions: 12,
+                deletions: 3,
+                binary: false,
+            })
+        );
     }
 
     #[test]
