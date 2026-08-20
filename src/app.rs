@@ -11,7 +11,7 @@ use ratatui::layout::Rect;
 use ratatui::text::Line;
 
 use crate::convert::{count, offset};
-use crate::git::diff::{DiffDocument, DiffIndex, DiffLineKind, PullRequestDetails};
+use crate::git::diff::{DiffDocument, DiffIndex, DiffLineCounts, DiffLineKind, PullRequestDetails};
 use crate::git::github::{
     CheckRunLog, GitHubRepository, PullRequest, PullRequestCheck, PullRequestCheckStatus,
     PullRequestConversation, PullRequestDiffIndex, PullRequestFile, PullRequestFileStatus,
@@ -30,7 +30,10 @@ const PREVIEW_DEBOUNCE: Duration = Duration::from_millis(45);
 const RESIZE_DOUBLE_TAP_INTERVAL: Duration = Duration::from_millis(450);
 const TOAST_DURATION: Duration = Duration::from_secs(4);
 const HISTORY_PAGE_SIZE: usize = 300;
-const PULL_REQUEST_PREFETCH_BATCH: usize = 12;
+const PULL_REQUEST_PREFETCH_BATCH: usize = 32;
+const PULL_REQUEST_PREFETCH_BYTE_BUDGET: usize = 6 * 1024 * 1024;
+const PULL_REQUEST_PATCH_FALLBACK_ESTIMATE: usize = 512 * 1024;
+const PULL_REQUEST_PATCH_LINE_ESTIMATE: usize = 80;
 const MAX_PREFETCHED_PULL_REQUEST_FILES: usize = 400;
 const MAX_PULL_REQUEST_DOCUMENT_BYTES: usize = 32 * 1024 * 1024;
 /// Poll cadences for an open pull request. A run in progress changes state in
@@ -3285,12 +3288,17 @@ impl App {
                 match result {
                     Ok(documents) => {
                         self.pull_request_prefetch_retrying = false;
+                        let mut arrived_visible = false;
                         for (path, document) in documents {
                             if !self.pull_request_documents.contains_key(&path) {
+                                arrived_visible = arrived_visible
+                                    || !self.preview_file_collapsed(&path.to_string_lossy());
                                 self.cache_pull_request_document(path, document);
                             }
                         }
-                        if self.pull_request_file_view == PullRequestFileView::AllFiles {
+                        if arrived_visible
+                            && self.pull_request_file_view == PullRequestFileView::AllFiles
+                        {
                             self.rebuild_pull_request_all_files_document();
                         }
                         self.request_pull_request_prefetch(&mut effects);
@@ -5849,14 +5857,27 @@ impl App {
         }
         let remaining = MAX_PREFETCHED_PULL_REQUEST_FILES
             .saturating_sub(self.pull_request_prefetched_paths.len());
-        let paths: Vec<PathBuf> = self
-            .pull_request_files
-            .iter()
-            .map(|file| file.path.clone())
-            .filter(|path| self.pull_request_file_needs_patch(path))
-            .filter(|path| !self.pull_request_prefetched_paths.contains(path))
-            .take(PULL_REQUEST_PREFETCH_BATCH.min(remaining))
-            .collect();
+        let limit = PULL_REQUEST_PREFETCH_BATCH.min(remaining);
+        let mut batch_bytes = 0_usize;
+        let mut paths: Vec<PathBuf> = Vec::new();
+        for file in &self.pull_request_files {
+            if paths.len() >= limit {
+                break;
+            }
+            if !self.pull_request_file_needs_patch(&file.path)
+                || self.pull_request_prefetched_paths.contains(&file.path)
+            {
+                continue;
+            }
+            let estimate = estimated_patch_bytes(file.counts);
+            if !paths.is_empty()
+                && batch_bytes.saturating_add(estimate) > PULL_REQUEST_PREFETCH_BYTE_BUDGET
+            {
+                break;
+            }
+            batch_bytes = batch_bytes.saturating_add(estimate);
+            paths.push(file.path.clone());
+        }
         if paths.is_empty() {
             return;
         }
@@ -6912,6 +6933,16 @@ const fn next_list_index(selected: usize, length: usize) -> usize {
     } else {
         selected.saturating_add(1)
     }
+}
+
+fn estimated_patch_bytes(counts: Option<DiffLineCounts>) -> usize {
+    counts.map_or(PULL_REQUEST_PATCH_FALLBACK_ESTIMATE, |counts| {
+        counts
+            .additions
+            .saturating_add(counts.deletions)
+            .saturating_mul(PULL_REQUEST_PATCH_LINE_ESTIMATE)
+            .saturating_add(4_096)
+    })
 }
 
 fn diff_document_size(document: &DiffDocument) -> usize {
@@ -8729,6 +8760,66 @@ mod tests {
         assert_eq!(app.pull_request_file_view, PullRequestFileView::AllFiles);
         assert_eq!(app.document.file_count(), 2);
         assert!(app.preview_files_all_collapsed());
+    }
+
+    #[test]
+    fn pull_request_prefetch_batches_by_estimated_patch_size() {
+        let counts = |additions: usize| {
+            Some(DiffLineCounts {
+                additions,
+                deletions: 0,
+                binary: false,
+            })
+        };
+        let file = |path: &str, additions: usize| PullRequestFile {
+            path: PathBuf::from(path),
+            old_path: None,
+            status: PullRequestFileStatus::Modified,
+            counts: counts(additions),
+        };
+        let mut app = App::new("/tmp/repo", "repo");
+        app.pull_request_workspace_generation = Some(10);
+        app.pull_request_files = vec![
+            file("src/huge.rs", 200_000),
+            file("src/small.rs", 10),
+            file("src/tiny.rs", 5),
+        ];
+
+        let mut effects = Vec::new();
+        app.request_pull_request_prefetch(&mut effects);
+        assert!(
+            matches!(
+                effects.as_slice(),
+                [AppEffect::Git(command)] if matches!(
+                    command.as_ref(),
+                    WorkerCommand::LoadPullRequestFileBatch { workspace_generation: 10, paths }
+                        if paths == &[PathBuf::from("src/huge.rs")]
+                )
+            ),
+            "a file estimated past the byte budget travels alone"
+        );
+
+        let effects = app.handle_worker_event(
+            WorkerEvent::PullRequestDiffBatch {
+                workspace_generation: 10,
+                result: Ok(vec![(
+                    PathBuf::from("src/huge.rs"),
+                    indexed_document(&["src/huge.rs"]),
+                )]),
+            },
+            Instant::now(),
+        );
+        assert!(
+            matches!(
+                effects.as_slice(),
+                [AppEffect::Git(command)] if matches!(
+                    command.as_ref(),
+                    WorkerCommand::LoadPullRequestFileBatch { workspace_generation: 10, paths }
+                        if paths == &[PathBuf::from("src/small.rs"), PathBuf::from("src/tiny.rs")]
+                )
+            ),
+            "small files share the next batch"
+        );
     }
 
     #[test]
