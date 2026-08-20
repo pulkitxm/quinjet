@@ -178,7 +178,7 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
     },
     HelpRow::Shortcut {
         keys: "*",
-        description: "Check / uncheck the selected file for stash, revert, or removal",
+        description: "Check / uncheck the selected file; a group header checkbox does its whole group",
     },
     HelpRow::Shortcut {
         keys: "S",
@@ -850,7 +850,14 @@ fn draw_changes_sidebar(
         return (Vec::new(), Vec::new());
     }
 
-    let controls_height = u16::from(inner.height != 0);
+    let checked_count = app.checked_change_count();
+    let controls_height = if inner.height == 0 {
+        0
+    } else if checked_count == 0 || inner.height == 1 {
+        1
+    } else {
+        2
+    };
     let list_area = Rect::new(
         inner.x,
         inner.y,
@@ -896,12 +903,22 @@ fn draw_changes_sidebar(
                 } else {
                     theme.panel_alt
                 };
+                let check_label = app.section_check_label(*section);
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![
                         Span::styled(
                             disclosure_prefix(!collapsed),
                             Style::default().fg(theme.muted),
                         ),
+                        Span::styled(
+                            check_label,
+                            Style::default().fg(if check_label == "[ ]" {
+                                theme.muted
+                            } else {
+                                theme.accent
+                            }),
+                        ),
+                        Span::raw(" "),
                         Span::styled(
                             section.label().to_uppercase(),
                             Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
@@ -911,6 +928,10 @@ fn draw_changes_sidebar(
                     .style(Style::default().bg(background)),
                     Rect::new(list_area.x, y, list_area.width, 1),
                 );
+                action_hits.push(ScmActionHit {
+                    area: Rect::new(list_area.x.saturating_add(3), y, 3, 1),
+                    action: ScmAction::ToggleCheckSection(*section),
+                });
                 let (label, action) = match section {
                     ChangeSection::Staged => ("[−]", ScmAction::UnstageSection(*section)),
                     ChangeSection::Conflict | ChangeSection::Unstaged => {
@@ -1056,12 +1077,34 @@ fn draw_changes_sidebar(
     }
 
     let controls_y = list_area.bottom();
+    let revert_row = (controls_height == 2).then(|| Rect::new(inner.x, controls_y, inner.width, 1));
+    if let Some(revert_row) = revert_row {
+        let label = format!("Revert ({checked_count})");
+        frame.render_widget(
+            Paragraph::new(label).alignment(Alignment::Center).style(
+                Style::default()
+                    .fg(theme.error)
+                    .bg(theme.panel_alt)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            revert_row,
+        );
+        action_hits.push(ScmActionHit {
+            area: revert_row,
+            action: ScmAction::RevertChecked,
+        });
+    }
     if controls_height >= 1 {
-        let row = Rect::new(inner.x, controls_y, inner.width, 1);
+        let row = Rect::new(
+            inner.x,
+            controls_y.saturating_add(controls_height.saturating_sub(1)),
+            inner.width,
+            1,
+        );
         let primary_label = if app.primary_is_stash() {
-            "Stash"
+            format!("Stash ({checked_count})")
         } else {
-            "Commit"
+            "Commit".to_owned()
         };
         let primary_color = if app.primary_is_stash() {
             theme.modified
@@ -1113,7 +1156,7 @@ fn draw_changes_sidebar(
                 .collect::<Vec<_>>();
             draw_scm_menu(
                 frame,
-                row,
+                revert_row.unwrap_or(row),
                 app.scm_menu_selected,
                 &items,
                 theme,

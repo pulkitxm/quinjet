@@ -954,7 +954,9 @@ pub(crate) enum ScmAction {
     StageSection(ChangeSection),
     UnstageSection(ChangeSection),
     ToggleCheck(usize),
+    ToggleCheckSection(ChangeSection),
     Primary,
+    RevertChecked,
     ToggleMenu,
     Menu(ScmMenuItem),
     PrPrimary,
@@ -4959,6 +4961,11 @@ impl App {
                     self.checked_change_paths.extend([change.path.clone()]);
                 }
             }
+            ScmAction::ToggleCheckSection(section) => self.toggle_section_check(section),
+            ScmAction::RevertChecked => {
+                self.scm_menu_open = false;
+                self.confirm_discard_checked();
+            }
             ScmAction::Primary => {
                 self.scm_menu_open = false;
                 if self.checked_change_paths.is_empty() {
@@ -5141,6 +5148,55 @@ impl App {
                 paths: Vec::new(),
             },
         });
+    }
+
+    fn toggle_section_check(&mut self, section: ChangeSection) {
+        let paths = self
+            .status
+            .changes
+            .iter()
+            .filter(|change| section.matches(change))
+            .map(|change| change.path.clone())
+            .collect::<Vec<_>>();
+        if paths.is_empty() {
+            return;
+        }
+        if paths
+            .iter()
+            .all(|path| self.checked_change_paths.contains(path))
+        {
+            self.checked_change_paths
+                .retain(|path| !paths.contains(path));
+        } else {
+            self.checked_change_paths.extend(paths);
+        }
+    }
+
+    pub(crate) fn section_check_label(&self, section: ChangeSection) -> &'static str {
+        let mut total = 0_usize;
+        let mut checked = 0_usize;
+        for change in self
+            .status
+            .changes
+            .iter()
+            .filter(|change| section.matches(change))
+        {
+            total = total.saturating_add(1);
+            if self.checked_change_paths.contains(&change.path) {
+                checked = checked.saturating_add(1);
+            }
+        }
+        if total == 0 || checked == 0 {
+            "[ ]"
+        } else if checked == total {
+            "[x]"
+        } else {
+            "[-]"
+        }
+    }
+
+    pub(crate) fn checked_change_count(&self) -> usize {
+        self.checked_change_paths.len()
     }
 
     fn toggle_checked_selected(&mut self) {
@@ -7681,6 +7737,70 @@ mod tests {
 
         assert!(effects.is_empty());
         assert!(matches!(app.modal, Some(Modal::Conflict { .. })));
+    }
+
+    #[test]
+    fn a_section_checkbox_checks_and_clears_its_whole_group() {
+        let mut app = app_with_changes();
+        let mut effects = Vec::new();
+
+        app.handle_scm_action(
+            ScmAction::ToggleCheckSection(ChangeSection::Unstaged),
+            &mut effects,
+        );
+        assert_eq!(app.checked_change_count(), 1);
+        assert_eq!(app.section_check_label(ChangeSection::Unstaged), "[x]");
+        assert_eq!(app.section_check_label(ChangeSection::Staged), "[ ]");
+
+        app.handle_scm_action(
+            ScmAction::ToggleCheckSection(ChangeSection::Staged),
+            &mut effects,
+        );
+        app.status.changes.push(Change {
+            path: PathBuf::from("docs/notes.md"),
+            original_path: None,
+            area: ChangeArea::Staged,
+            status: ChangeStatus::Modified,
+        });
+        assert_eq!(app.section_check_label(ChangeSection::Staged), "[-]");
+
+        app.handle_scm_action(
+            ScmAction::ToggleCheckSection(ChangeSection::Staged),
+            &mut effects,
+        );
+        assert_eq!(app.section_check_label(ChangeSection::Staged), "[x]");
+        assert_eq!(app.checked_change_count(), 3);
+
+        app.handle_scm_action(
+            ScmAction::ToggleCheckSection(ChangeSection::Staged),
+            &mut effects,
+        );
+        assert_eq!(app.section_check_label(ChangeSection::Staged), "[ ]");
+        assert_eq!(app.checked_change_count(), 1);
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn the_revert_button_asks_about_the_checked_files() {
+        let mut app = app_with_changes();
+        let mut effects = Vec::new();
+        app.handle_scm_action(
+            ScmAction::ToggleCheckSection(ChangeSection::Unstaged),
+            &mut effects,
+        );
+
+        app.handle_scm_action(ScmAction::RevertChecked, &mut effects);
+
+        let Some(Modal::Confirm { title, action, .. }) = app.modal else {
+            panic!("the revert button must ask first");
+        };
+        assert_eq!(title, "Revert Checked Files?");
+        let ConfirmAction::Operate(GitOperation::Discard(changes)) = action else {
+            panic!("the confirmation must carry a discard operation");
+        };
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].path, PathBuf::from("src/main.rs"));
+        assert!(effects.is_empty());
     }
 
     #[test]

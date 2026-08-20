@@ -302,6 +302,9 @@ The verbs in the right-hand column are documented in their groups:
 | `U` | `quinjet unstage --all` |
 | `x` on a normal change, then `y` or Enter | `quinjet discard <path> --yes` |
 | `x` with files checked, then `y` or Enter | `quinjet discard <paths> --yes` |
+| `Revert (n)` in the toolbar, then `y` or Enter | `quinjet discard <paths> --yes` |
+| `Stash (n)` in the toolbar | `quinjet stash push -- <paths>` |
+| the checkbox on a group header | checks or clears every file in that group; selection state, not an operation |
 | `X` on a file row, then `y` or Enter | `quinjet remove <path> --yes` |
 | Remove Checked Files in the dropdown, then `y` or Enter | `quinjet remove <paths> --yes` |
 | Revert Unstaged Changes / Revert All Changes in the dropdown, then `y` or Enter | `quinjet discard <paths> --yes` |
