@@ -358,6 +358,18 @@ fn clap_rejects_incomplete_and_inert_arguments() -> Result<()> {
 }
 
 #[test]
+fn the_pr_launch_flag_is_refused_alongside_a_verb() -> Result<()> {
+    let run = run_in(None, &["--pr", "12", "status"])?;
+    ensure!(run.code == 1, "expected exit 1, got {}", run.code);
+    ensure!(
+        run.stderr.contains("terminal interface"),
+        "the error does not explain where --pr applies: {}",
+        run.stderr
+    );
+    Ok(())
+}
+
+#[test]
 fn unknown_flags_are_usage_errors() -> Result<()> {
     let run = run_in(None, &["status", "--no-such-flag"])?;
     ensure!(run.code == 2, "expected exit 2, got {}", run.code);
