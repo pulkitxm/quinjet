@@ -30,6 +30,17 @@ than repeating them.
 
 ## Installing
 
+On macOS or Linux, Homebrew is one command and keeps the installation under
+`brew --prefix`:
+
+```bash
+brew install pulkitxm/tap/quinjet
+```
+
+Homebrew owns what it installs, so a Homebrew installation is upgraded with
+`brew upgrade quinjet` and not with `quinjet update`; see
+[the Homebrew guide](../guides/homebrew.md).
+
 The installers download a prebuilt binary from GitHub Releases, verify its
 SHA-256 checksum against the release's `SHA256SUMS`, place it somewhere on your
 `PATH`, install completions for your configured shell, and add `q` as a
