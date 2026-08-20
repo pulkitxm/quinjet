@@ -284,8 +284,8 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
           brew tap-new pulkitxm/tap
-          cp "${RUNNER_TEMP}/quinjet.rb" \
-            "$(brew --repository pulkitxm/tap)/Formula/quinjet.rb"
+          sh scripts/update_homebrew_tap.sh "${RUNNER_TEMP}/quinjet.rb" \
+            "$(brew --repository pulkitxm/tap)" test-release
       - name: Install the formula
         run: brew install pulkitxm/tap/quinjet
       - name: Verify the installation
