@@ -1121,6 +1121,8 @@ pub(crate) struct App {
     pub change_cursor: usize,
     pub history_cursor: usize,
     pub sidebar_offset: usize,
+    pub sidebar_free_scroll: bool,
+    pub sidebar_last_cursor: Option<usize>,
     pub content_scroll: usize,
     pub horizontal_scroll: usize,
     pub sidebar_width: u16,
@@ -1288,6 +1290,8 @@ impl App {
             change_cursor: 0,
             history_cursor: 0,
             sidebar_offset: 0,
+            sidebar_free_scroll: false,
+            sidebar_last_cursor: None,
             content_scroll: 0,
             horizontal_scroll: 0,
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
@@ -2873,7 +2877,8 @@ impl App {
                     .contains((event.column, event.row).into())
                 {
                     self.focus = Focus::Sidebar;
-                    self.navigate(1, now);
+                    self.sidebar_free_scroll = true;
+                    self.sidebar_offset = self.sidebar_offset.saturating_add(2);
                 } else {
                     self.focus = Focus::Content;
                     self.content_scroll = self.content_scroll.saturating_add(2);
@@ -2886,7 +2891,8 @@ impl App {
                     .contains((event.column, event.row).into())
                 {
                     self.focus = Focus::Sidebar;
-                    self.navigate(-1, now);
+                    self.sidebar_free_scroll = true;
+                    self.sidebar_offset = self.sidebar_offset.saturating_sub(2);
                 } else {
                     self.focus = Focus::Content;
                     self.content_scroll = self.content_scroll.saturating_sub(2);
@@ -3236,7 +3242,7 @@ impl App {
                     Ok(index) => {
                         self.apply_pull_request_index(index);
                         self.pull_request_workspace_generation = Some(generation);
-                        self.sidebar_offset = 0;
+                        self.reset_sidebar_scroll();
                         self.content_scroll = 0;
                         self.horizontal_scroll = 0;
                         self.document_loading = false;
@@ -4601,7 +4607,7 @@ impl App {
         self.collapsed_preview_files.clear();
         self.expanded_preview_files.clear();
         self.set_focus(Focus::Sidebar, effects);
-        self.sidebar_offset = 0;
+        self.reset_sidebar_scroll();
         self.content_scroll = 0;
         self.horizontal_scroll = 0;
         self.invalidate_preview();
@@ -5387,7 +5393,7 @@ impl App {
         self.history_branch = (!branch.current).then_some(branch);
         self.history.clear();
         self.history_cursor = 0;
-        self.sidebar_offset = 0;
+        self.reset_sidebar_scroll();
         self.history_complete = false;
         self.history_refresh_again = false;
         self.history_generation = self.history_generation.wrapping_add(1);
@@ -5632,7 +5638,7 @@ impl App {
         self.pull_request_checks_read_at = None;
         self.pull_request_detail_read_at = None;
         self.pull_request_log_read_at = None;
-        self.sidebar_offset = 0;
+        self.reset_sidebar_scroll();
     }
 
     fn apply_pull_request_index(&mut self, index: PullRequestDiffIndex) {
@@ -5789,7 +5795,7 @@ impl App {
             }
             self.invalidate_preview();
             self.pull_request_section = PullRequestSection::Files;
-            self.sidebar_offset = 0;
+            self.reset_sidebar_scroll();
             self.content_scroll = 0;
             self.horizontal_scroll = 0;
             self.show_pull_request_all_files();
@@ -5801,7 +5807,7 @@ impl App {
         }
         self.invalidate_preview();
         self.pull_request_section = section;
-        self.sidebar_offset = 0;
+        self.reset_sidebar_scroll();
         self.content_scroll = 0;
         self.horizontal_scroll = 0;
         self.request_pull_request_checks(false, effects);
@@ -5978,6 +5984,34 @@ impl App {
         self.invalidate_check_run_log();
         self.invalidate_pull_request_content_rows();
         true
+    }
+
+    /// The sidebar viewport for this frame. Wheel scrolling detaches the
+    /// window from the selection so the list can be browsed without changing
+    /// the preview; any selection movement reattaches it.
+    pub(crate) fn sidebar_viewport(&mut self, cursor: usize, height: usize, length: usize) {
+        if self.sidebar_last_cursor != Some(cursor) {
+            self.sidebar_last_cursor = Some(cursor);
+            self.sidebar_free_scroll = false;
+        }
+        if height == 0 || length == 0 {
+            self.sidebar_offset = 0;
+            return;
+        }
+        if !self.sidebar_free_scroll {
+            if cursor < self.sidebar_offset {
+                self.sidebar_offset = cursor;
+            } else if cursor >= self.sidebar_offset.saturating_add(height) {
+                self.sidebar_offset = cursor.saturating_add(1).saturating_sub(height);
+            }
+        }
+        self.sidebar_offset = self.sidebar_offset.min(length.saturating_sub(height));
+    }
+
+    pub(crate) const fn reset_sidebar_scroll(&mut self) {
+        self.sidebar_offset = 0;
+        self.sidebar_free_scroll = false;
+        self.sidebar_last_cursor = None;
     }
 
     pub(crate) fn set_document(&mut self, document: DiffDocument) {
@@ -6623,7 +6657,7 @@ impl App {
         self.history_cursor = self
             .history_cursor
             .min(self.visible_commit_indices().len().saturating_sub(1));
-        self.sidebar_offset = 0;
+        self.reset_sidebar_scroll();
     }
 
     fn restore_change_selection(&mut self, selected: Option<&Change>) {
@@ -8787,6 +8821,38 @@ mod tests {
         assert_eq!(app.pull_request_file_view, PullRequestFileView::AllFiles);
         assert_eq!(app.document.file_count(), 2);
         assert!(app.preview_files_all_collapsed());
+    }
+
+    #[test]
+    fn sidebar_wheel_scroll_pans_without_moving_the_selection() {
+        let mut app = App::new("/tmp/repo", "repo");
+        app.geometry.sidebar = Rect::new(0, 0, 30, 10);
+        app.sidebar_viewport(0, 5, 40);
+        let cursor_before = app.history_cursor;
+
+        let effects = app.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: 2,
+                row: 2,
+                modifiers: KeyModifiers::NONE,
+            },
+            Instant::now(),
+        );
+        assert!(effects.is_empty(), "panning requests no preview");
+        assert_eq!(app.history_cursor, cursor_before, "the selection stays put");
+        assert_eq!(app.sidebar_offset, 2, "the viewport pans");
+        assert!(app.sidebar_free_scroll, "the window detaches");
+
+        app.sidebar_viewport(0, 5, 40);
+        assert_eq!(
+            app.sidebar_offset, 2,
+            "an unmoved selection does not snap the window back"
+        );
+
+        app.sidebar_viewport(1, 5, 40);
+        assert!(!app.sidebar_free_scroll, "a selection change reattaches");
+        assert_eq!(app.sidebar_offset, 1, "the window follows the selection");
     }
 
     #[test]
