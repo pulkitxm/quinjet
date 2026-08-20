@@ -119,6 +119,10 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
     app.webhooks_listening = webhooks.is_some();
     let effects = app.initial_effects();
     running &= dispatch_effects(&mut worker, &mut watcher, &mut app, &mut terminal, effects);
+    if let Some(number) = options.pull_request {
+        let effects = app.open_pull_request_on_launch(number);
+        running &= dispatch_effects(&mut worker, &mut watcher, &mut app, &mut terminal, effects);
+    }
     while running {
         if dirty {
             let theme = app.theme;

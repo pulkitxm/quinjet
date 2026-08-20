@@ -83,6 +83,7 @@ pub(crate) struct TerminalOptions {
     pub webhook_listen: Option<String>,
     pub theme: ThemeName,
     pub appearance: AppearanceChoice,
+    pub pull_request: Option<u64>,
 }
 
 #[expect(
@@ -117,6 +118,10 @@ struct Cli {
     /// Print one JSON document on stdout instead of text
     #[arg(long, global = true)]
     json: bool,
+
+    /// Open the terminal interface focused on this pull request
+    #[arg(long = "pr", value_name = "NUMBER")]
+    pull_request: Option<u64>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -271,6 +276,9 @@ struct TuiArgs {
     /// Use the system, light, or dark variant of the palette
     #[arg(long, value_enum, default_value_t)]
     appearance: AppearanceChoice,
+    /// Open the interface focused on this pull request
+    #[arg(long = "pr", value_name = "NUMBER")]
+    pull_request: Option<u64>,
 }
 
 #[derive(Debug, Args)]
@@ -696,6 +704,7 @@ pub(crate) fn dispatch() -> Result<Launch> {
                 webhook_listen: None,
                 theme: ThemeName::default(),
                 appearance: AppearanceChoice::default(),
+                pull_request: cli.pull_request,
             })));
         }
         Some(Verb::Tui(args)) => {
@@ -705,6 +714,7 @@ pub(crate) fn dispatch() -> Result<Launch> {
                 webhook_listen: args.webhook_listen,
                 theme: args.theme,
                 appearance: args.appearance,
+                pull_request: args.pull_request.or(cli.pull_request),
             })));
         }
         Some(Verb::Completions(args)) => {
@@ -720,6 +730,13 @@ pub(crate) fn dispatch() -> Result<Launch> {
         }
         Some(other) => other,
     };
+    if cli.pull_request.is_some() {
+        return Err(Failure::new(
+            EXIT_FAILURE,
+            "--pr only applies to the terminal interface; use `quinjet pr view <number>` instead",
+        )
+        .into());
+    }
     if let Some(label) = verb.progress_label() {
         out.start_progress(label)?;
     }
