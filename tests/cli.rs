@@ -501,6 +501,43 @@ fn discard_previews_without_yes_and_acts_with_it() -> Result<()> {
 }
 
 #[test]
+fn remove_previews_without_yes_and_deletes_with_it() -> Result<()> {
+    let scratch = Scratch::repository()?;
+    scratch.write("untracked.txt", "scratch\n")?;
+    let preview = scratch
+        .quinjet(&["remove", "README.md", "untracked.txt"])?
+        .success()?;
+    ensure!(
+        preview.stdout.contains("Pass --yes"),
+        "preview did not explain confirmation: {}",
+        preview.stdout
+    );
+    ensure!(
+        scratch.path.join("README.md").exists() && scratch.path.join("untracked.txt").exists(),
+        "a preview removed files"
+    );
+    let removed = scratch
+        .quinjet(&["remove", "README.md", "untracked.txt", "--yes"])?
+        .success()?;
+    ensure!(
+        removed.stdout.contains("2 files removed"),
+        "remove reported: {}",
+        removed.stdout
+    );
+    ensure!(
+        !scratch.path.join("README.md").exists() && !scratch.path.join("untracked.txt").exists(),
+        "remove left the files in the working tree"
+    );
+    ensure!(
+        scratch
+            .git(&["status", "--porcelain"])?
+            .contains("D  README.md"),
+        "remove did not stage the deletion"
+    );
+    Ok(())
+}
+
+#[test]
 fn revision_mutations_preview_until_confirmed() -> Result<()> {
     let scratch = Scratch::repository()?;
     scratch.git(&["switch", "--create", "feature"])?;

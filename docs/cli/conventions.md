@@ -182,7 +182,7 @@ Boolean flags are presence only. There are no `--no-` inversions. Long options
 take their value as the next word or after an equals sign, so `--interval 5`
 and `--interval=5` are the same.
 
-`--yes` means the same thing everywhere it appears, on `discard`,
+`--yes` means the same thing everywhere it appears, on `discard`, `remove`,
 `branch delete`, `stash drop`, `stash clear`, `cherry-pick`, and `revert`:
 without it the verb reports what it would do and changes nothing.
 
@@ -215,7 +215,7 @@ nothing else. The metadata verbs run without a repository.
 | --- | --- |
 | `completions`, `man`, `capabilities` | nothing for generated stdout, including no repository and no `git`; `completions --install` also needs a home directory and permission to update completion files, state, any completion profile block, and a writable bin directory on `PATH` for `q` |
 | `update` | network access to GitHub Releases, permission to replace the running executable and refresh user completions, and `curl`/`wget` on Unix or PowerShell on Windows; no `git`, `gh`, or Cargo |
-| `status`, `diff`, `log`, `show`, `stage`, `unstage`, `discard`, `commit`, `resolve`, `branch`, `stash`, `cherry-pick`, `revert` | nothing |
+| `status`, `diff`, `log`, `show`, `stage`, `unstage`, `discard`, `remove`, `commit`, `resolve`, `branch`, `stash`, `cherry-pick`, `revert` | nothing |
 | `fetch`, `pull`, `push`, `sync` | network and whatever credentials Git is configured with |
 | `repos` | `gh`, but only for a host Quinjet cannot recognize locally |
 | `pr view`, `files`, `diff`, `conversation`, `checks`, `logs` | `gh`, authenticated |

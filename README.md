@@ -15,6 +15,7 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 - Live working-tree, index, conflict, branch, and ahead/behind refresh
 - Scrollable staged, unstaged, untracked, renamed, deleted, and conflict groups
 - Visible, clickable per-file and per-group stage/unstage actions with immediate authoritative refresh
+- Per-file and multi-file revert and removal, from a row, a checkbox selection, or the changes dropdown, always behind a confirmation
 - Syntax highlighting for TypeScript/TSX, Rust, Python, Go, JavaScript, and hundreds of other formats
 - Themed Font Awesome Brands and Devicons file logos for common languages, ecosystems, documents, media, and data formats
 - Twelve unified color themes, each with light and dark variants selected from the system appearance at startup
@@ -186,7 +187,7 @@ Exit codes are part of the contract: `0` success, `1` failure or a watched run t
 
 ### Changes, staging, branch comparison, and stashes
 
-The Changes view follows the VS Code SCM grouping model: conflicts, staged changes, and working-tree changes are separate selectable groups. Every file row has a checkbox for stash selection plus a visible `[+]`, `[−]`, or `[!]` stage action, and group headers expose stage-all/unstage-all actions. The bottom toolbar is a single primary button (`Commit`, or `Stash` when any file is checked) with a `▶` menu for Stage All, Unstage All, Compare Branch, Manage Stashes, and the full-tree stash variants. Keyboard equivalents remain available.
+The Changes view follows the VS Code SCM grouping model: conflicts, staged changes, and working-tree changes are separate selectable groups. Every file row has a checkbox for multi-file selection plus a visible `[+]`, `[−]`, or `[!]` stage action, and group headers carry their own checkbox that checks or clears the whole group, showing `[x]`, `[ ]`, or `[-]` when only part of it is checked, next to the stage-all/unstage-all action. The bottom toolbar is a single primary button (`Commit`) until any file is checked, at which point it becomes `Stash (n)` with a red `Revert (n)` button above it. Both count the checked files, share one width, and align their labels to the same column whatever the count grows to. The `▶` menu follows the selection too: Stage All, Unstage All, then Revert and Remove for the checked files with their count, or for the selected file when nothing is checked, then Revert Unstaged Changes, Revert All Changes, Compare Branch, Manage Stashes, and the full-tree stash variants. Reverting restores a file; removing deletes it from the working tree and stages the deletion. Both ask first, and `x` and `X` are their keyboard equivalents.
 
 All local code views are index-first. Quinjet enumerates paths and immediately renders stable collapsed file headers, then loads only the first file in the background. Expanding another header requests only that path and keeps the result cached for the current view; it never calculates the complete patch up front. Click a file header or focus the preview and press `Space` to expand it. A single-file preview always stays expanded and shows no collapse control.
 
@@ -244,7 +245,8 @@ The UI intentionally stays uncluttered; press `?` for the complete shortcut refe
 | `d` in Changes | Compare current branch with another branch |
 | `t` | Toggle compact hunks/full-file context |
 | `v` | Toggle unified/side-by-side diff |
-| `x` | Discard a normal change after confirmation; open resolution for a conflict |
+| `x` | Revert a normal change, or every checked file, after confirmation; open resolution for a conflict |
+| `X` | Remove the selected file, or every checked file, from the working tree and the index |
 | `b` in History | View another local/remote branch without checkout |
 | `b` elsewhere / `B` | Checkout branch picker; `F2`/`Ctrl+R` renames a local branch |
 | `o` in Pull Requests | Discover/select a repository and reopen the entered PR |

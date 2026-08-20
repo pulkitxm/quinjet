@@ -643,6 +643,12 @@ pub(crate) enum ConfirmAction {
 pub(crate) enum ScmMenuItem {
     StageAll,
     UnstageAll,
+    DiscardChecked,
+    RemoveChecked,
+    DiscardSelected,
+    RemoveSelected,
+    DiscardUnstaged,
+    DiscardAll,
     CompareBranch,
     ManageStashes,
     StashAll,
@@ -651,20 +657,16 @@ pub(crate) enum ScmMenuItem {
 }
 
 impl ScmMenuItem {
-    pub(crate) const ALL: [Self; 7] = [
-        Self::StageAll,
-        Self::UnstageAll,
-        Self::CompareBranch,
-        Self::ManageStashes,
-        Self::StashAll,
-        Self::StashIncludeUntracked,
-        Self::StashStagedOnly,
-    ];
-
     pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::StageAll => "Stage All",
             Self::UnstageAll => "Unstage All",
+            Self::DiscardChecked => "Revert Checked Files",
+            Self::RemoveChecked => "Remove Checked Files",
+            Self::DiscardSelected => "Revert Selected File",
+            Self::RemoveSelected => "Remove Selected File",
+            Self::DiscardUnstaged => "Revert Unstaged Changes",
+            Self::DiscardAll => "Revert All Changes",
             Self::CompareBranch => "Compare Branch",
             Self::ManageStashes => "Manage Stashes",
             Self::StashAll => "Stash All Changes",
@@ -952,7 +954,9 @@ pub(crate) enum ScmAction {
     StageSection(ChangeSection),
     UnstageSection(ChangeSection),
     ToggleCheck(usize),
+    ToggleCheckSection(ChangeSection),
     Primary,
+    RevertChecked,
     ToggleMenu,
     Menu(ScmMenuItem),
     PrPrimary,
@@ -2272,15 +2276,21 @@ impl App {
                 self.open_compare_branches(&mut effects);
             }
             KeyCode::Up if self.scm_menu_open && self.view == View::Changes => {
-                self.scm_menu_selected =
-                    previous_list_index(self.scm_menu_selected, ScmMenuItem::ALL.len());
+                let items = self.scm_menu_items();
+                if !items.is_empty() {
+                    self.scm_menu_selected =
+                        previous_list_index(self.scm_menu_selected, items.len());
+                }
             }
             KeyCode::Down if self.scm_menu_open && self.view == View::Changes => {
-                self.scm_menu_selected =
-                    next_list_index(self.scm_menu_selected, ScmMenuItem::ALL.len());
+                let items = self.scm_menu_items();
+                if !items.is_empty() {
+                    self.scm_menu_selected = next_list_index(self.scm_menu_selected, items.len());
+                }
             }
             KeyCode::Enter if self.scm_menu_open && self.view == View::Changes => {
-                if let Some(item) = ScmMenuItem::ALL.get(self.scm_menu_selected).copied() {
+                let items = self.scm_menu_items();
+                if let Some(item) = items.get(self.scm_menu_selected).copied() {
                     self.scm_menu_open = false;
                     self.handle_scm_menu_item(item, &mut effects);
                 }
@@ -2388,10 +2398,11 @@ impl App {
             {
                 self.unstage_selected(&mut effects);
             }
-            KeyCode::Char('x')
-                if self.view == View::Changes && self.selected_change_section.is_none() =>
-            {
+            KeyCode::Char('x') if self.view == View::Changes => {
                 self.confirm_discard();
+            }
+            KeyCode::Char('X') if self.view == View::Changes => {
+                self.confirm_remove();
             }
             KeyCode::Char('P') if self.view == View::PullRequests => {
                 self.select_pull_request_section(PullRequestSection::Overview, &mut effects);
@@ -4950,6 +4961,11 @@ impl App {
                     self.checked_change_paths.extend([change.path.clone()]);
                 }
             }
+            ScmAction::ToggleCheckSection(section) => self.toggle_section_check(section),
+            ScmAction::RevertChecked => {
+                self.scm_menu_open = false;
+                self.confirm_discard_checked();
+            }
             ScmAction::Primary => {
                 self.scm_menu_open = false;
                 if self.checked_change_paths.is_empty() {
@@ -5015,6 +5031,20 @@ impl App {
                     action: ConfirmAction::Operate(GitOperation::UnstageAll),
                 });
             }
+            ScmMenuItem::DiscardChecked => self.confirm_discard_checked(),
+            ScmMenuItem::RemoveChecked => self.confirm_remove_checked(),
+            ScmMenuItem::DiscardSelected => self.confirm_discard_selected_file(),
+            ScmMenuItem::RemoveSelected => self.confirm_remove(),
+            ScmMenuItem::DiscardUnstaged => self.confirm_discard_area(
+                Some(ChangeArea::Unstaged),
+                "Revert Unstaged Changes?",
+                "Permanently discard every unstaged change? This cannot be undone.",
+            ),
+            ScmMenuItem::DiscardAll => self.confirm_discard_area(
+                None,
+                "Revert All Changes?",
+                "Permanently discard every change in the working tree and the index? This cannot be undone.",
+            ),
             ScmMenuItem::CompareBranch => self.open_compare_branches(effects),
             ScmMenuItem::ManageStashes => self.open_stashes(effects),
             ScmMenuItem::StashAll => {
@@ -5118,6 +5148,55 @@ impl App {
                 paths: Vec::new(),
             },
         });
+    }
+
+    fn toggle_section_check(&mut self, section: ChangeSection) {
+        let paths = self
+            .status
+            .changes
+            .iter()
+            .filter(|change| section.matches(change))
+            .map(|change| change.path.clone())
+            .collect::<Vec<_>>();
+        if paths.is_empty() {
+            return;
+        }
+        if paths
+            .iter()
+            .all(|path| self.checked_change_paths.contains(path))
+        {
+            self.checked_change_paths
+                .retain(|path| !paths.contains(path));
+        } else {
+            self.checked_change_paths.extend(paths);
+        }
+    }
+
+    pub(crate) fn section_check_label(&self, section: ChangeSection) -> &'static str {
+        let mut total = 0_usize;
+        let mut checked = 0_usize;
+        for change in self
+            .status
+            .changes
+            .iter()
+            .filter(|change| section.matches(change))
+        {
+            total = total.saturating_add(1);
+            if self.checked_change_paths.contains(&change.path) {
+                checked = checked.saturating_add(1);
+            }
+        }
+        if total == 0 || checked == 0 {
+            "[ ]"
+        } else if checked == total {
+            "[x]"
+        } else {
+            "[-]"
+        }
+    }
+
+    pub(crate) fn checked_change_count(&self) -> usize {
+        self.checked_change_paths.len()
     }
 
     fn toggle_checked_selected(&mut self) {
@@ -5293,6 +5372,10 @@ impl App {
     }
 
     fn confirm_discard(&mut self) {
+        if !self.checked_change_paths.is_empty() {
+            self.confirm_discard_checked();
+            return;
+        }
         if self.selected_change_section.is_some() {
             return;
         }
@@ -5311,6 +5394,163 @@ impl App {
             ),
             action: ConfirmAction::Operate(GitOperation::Discard(vec![change])),
         });
+    }
+
+    fn confirm_remove(&mut self) {
+        if !self.checked_change_paths.is_empty() {
+            self.confirm_remove_checked();
+            return;
+        }
+        if self.selected_change_section.is_some() {
+            return;
+        }
+        let Some(change) = self.selected_change().cloned() else {
+            return;
+        };
+        self.modal = Some(Modal::Confirm {
+            title: "Remove File?".to_owned(),
+            message: format!(
+                "Delete `{}` from the working tree and the index? This cannot be undone.",
+                change.display_path()
+            ),
+            action: ConfirmAction::Operate(GitOperation::Remove(vec![change.path])),
+        });
+    }
+
+    fn confirm_discard_checked(&mut self) {
+        let changes = self.checked_changes();
+        if changes.is_empty() {
+            return;
+        }
+        self.modal = Some(Modal::Confirm {
+            title: "Revert Checked Files?".to_owned(),
+            message: change_list_message(
+                "Permanently discard changes to these files? This cannot be undone.",
+                &changes,
+            ),
+            action: ConfirmAction::Operate(GitOperation::Discard(changes)),
+        });
+    }
+
+    fn confirm_remove_checked(&mut self) {
+        let changes = self.checked_changes();
+        if changes.is_empty() {
+            return;
+        }
+        let mut paths: Vec<PathBuf> = Vec::new();
+        for change in &changes {
+            if !paths.contains(&change.path) {
+                paths.push(change.path.clone());
+            }
+        }
+        self.modal = Some(Modal::Confirm {
+            title: "Remove Checked Files?".to_owned(),
+            message: change_list_message(
+                "Delete these files from the working tree and the index? This cannot be undone.",
+                &changes,
+            ),
+            action: ConfirmAction::Operate(GitOperation::Remove(paths)),
+        });
+    }
+
+    fn confirm_discard_selected_file(&mut self) {
+        if self.selected_change_section.is_some() {
+            return;
+        }
+        let Some(change) = self.selected_change().cloned() else {
+            return;
+        };
+        if change.area == ChangeArea::Conflict {
+            self.modal = Some(Modal::Conflict { change });
+            return;
+        }
+        self.modal = Some(Modal::Confirm {
+            title: "Revert Selected File?".to_owned(),
+            message: format!(
+                "Permanently discard changes to `{}`? This cannot be undone.",
+                change.display_path()
+            ),
+            action: ConfirmAction::Operate(GitOperation::Discard(vec![change])),
+        });
+    }
+
+    fn confirm_discard_area(&mut self, area: Option<ChangeArea>, title: &str, message: &str) {
+        let changes = self
+            .status
+            .changes
+            .iter()
+            .filter(|change| change.area != ChangeArea::Conflict)
+            .filter(|change| area.is_none_or(|wanted| change.area == wanted))
+            .cloned()
+            .collect::<Vec<_>>();
+        if changes.is_empty() {
+            return;
+        }
+        self.modal = Some(Modal::Confirm {
+            title: title.to_owned(),
+            message: change_list_message(message, &changes),
+            action: ConfirmAction::Operate(GitOperation::Discard(changes)),
+        });
+    }
+
+    fn checked_changes(&self) -> Vec<Change> {
+        self.status
+            .changes
+            .iter()
+            .filter(|change| change.area != ChangeArea::Conflict)
+            .filter(|change| self.checked_change_paths.contains(&change.path))
+            .cloned()
+            .collect()
+    }
+
+    pub(crate) fn scm_menu_items(&self) -> Vec<ScmMenuItem> {
+        let mut items = vec![ScmMenuItem::StageAll, ScmMenuItem::UnstageAll];
+        if self.checked_change_paths.is_empty() {
+            if self.selected_change_section.is_none() && self.selected_change().is_some() {
+                items.push(ScmMenuItem::DiscardSelected);
+                items.push(ScmMenuItem::RemoveSelected);
+            }
+        } else {
+            items.push(ScmMenuItem::DiscardChecked);
+            items.push(ScmMenuItem::RemoveChecked);
+        }
+        if self
+            .status
+            .changes
+            .iter()
+            .any(|change| change.area == ChangeArea::Unstaged)
+        {
+            items.push(ScmMenuItem::DiscardUnstaged);
+        }
+        if self
+            .status
+            .changes
+            .iter()
+            .any(|change| change.area != ChangeArea::Conflict)
+        {
+            items.push(ScmMenuItem::DiscardAll);
+        }
+        items.extend([
+            ScmMenuItem::CompareBranch,
+            ScmMenuItem::ManageStashes,
+            ScmMenuItem::StashAll,
+            ScmMenuItem::StashIncludeUntracked,
+            ScmMenuItem::StashStagedOnly,
+        ]);
+        items
+    }
+
+    pub(crate) fn scm_menu_label(&self, item: ScmMenuItem) -> String {
+        match item {
+            ScmMenuItem::DiscardChecked | ScmMenuItem::RemoveChecked => {
+                let mut label = item.label().to_owned();
+                label.push_str(" (");
+                label.push_str(&self.checked_change_paths.len().to_string());
+                label.push(')');
+                label
+            }
+            other => other.label().to_owned(),
+        }
     }
 
     fn confirm_cherry_pick(&mut self) {
@@ -6276,6 +6516,17 @@ impl App {
         self.operation_id = self.operation_id.wrapping_add(1);
         self.busy = Some(operation.label().to_owned());
         self.operation_frame = 0;
+        match &operation {
+            GitOperation::Remove(paths) => {
+                self.checked_change_paths
+                    .retain(|path| !paths.contains(path));
+            }
+            GitOperation::Discard(changes) => {
+                self.checked_change_paths
+                    .retain(|path| !changes.iter().any(|change| &change.path == path));
+            }
+            _ => {}
+        }
         effects.push(AppEffect::Git(Box::new(WorkerCommand::Operate {
             id: self.operation_id,
             operation,
@@ -7018,6 +7269,22 @@ impl App {
     }
 }
 
+fn change_list_message(prefix: &str, changes: &[Change]) -> String {
+    let mut message = prefix.to_owned();
+    let mut listed: Vec<String> = Vec::new();
+    for change in changes {
+        let label = change.display_path();
+        if !listed.contains(&label) {
+            listed.push(label);
+        }
+    }
+    for label in &listed {
+        message.push_str("\n  ");
+        message.push_str(label);
+    }
+    message
+}
+
 fn pull_request_loading_document(pull_request: &PullRequest, message: &str) -> DiffDocument {
     let mut document = DiffDocument::empty(
         format!(
@@ -7470,6 +7737,153 @@ mod tests {
 
         assert!(effects.is_empty());
         assert!(matches!(app.modal, Some(Modal::Conflict { .. })));
+    }
+
+    #[test]
+    fn a_section_checkbox_checks_and_clears_its_whole_group() {
+        let mut app = app_with_changes();
+        let mut effects = Vec::new();
+
+        app.handle_scm_action(
+            ScmAction::ToggleCheckSection(ChangeSection::Unstaged),
+            &mut effects,
+        );
+        assert_eq!(app.checked_change_count(), 1);
+        assert_eq!(app.section_check_label(ChangeSection::Unstaged), "[x]");
+        assert_eq!(app.section_check_label(ChangeSection::Staged), "[ ]");
+
+        app.handle_scm_action(
+            ScmAction::ToggleCheckSection(ChangeSection::Staged),
+            &mut effects,
+        );
+        app.status.changes.push(Change {
+            path: PathBuf::from("docs/notes.md"),
+            original_path: None,
+            area: ChangeArea::Staged,
+            status: ChangeStatus::Modified,
+        });
+        assert_eq!(app.section_check_label(ChangeSection::Staged), "[-]");
+
+        app.handle_scm_action(
+            ScmAction::ToggleCheckSection(ChangeSection::Staged),
+            &mut effects,
+        );
+        assert_eq!(app.section_check_label(ChangeSection::Staged), "[x]");
+        assert_eq!(app.checked_change_count(), 3);
+
+        app.handle_scm_action(
+            ScmAction::ToggleCheckSection(ChangeSection::Staged),
+            &mut effects,
+        );
+        assert_eq!(app.section_check_label(ChangeSection::Staged), "[ ]");
+        assert_eq!(app.checked_change_count(), 1);
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn the_revert_button_asks_about_the_checked_files() {
+        let mut app = app_with_changes();
+        let mut effects = Vec::new();
+        app.handle_scm_action(
+            ScmAction::ToggleCheckSection(ChangeSection::Unstaged),
+            &mut effects,
+        );
+
+        app.handle_scm_action(ScmAction::RevertChecked, &mut effects);
+
+        let Some(Modal::Confirm { title, action, .. }) = app.modal else {
+            panic!("the revert button must ask first");
+        };
+        assert_eq!(title, "Revert Checked Files?");
+        let ConfirmAction::Operate(GitOperation::Discard(changes)) = action else {
+            panic!("the confirmation must carry a discard operation");
+        };
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].path, PathBuf::from("src/main.rs"));
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn shift_x_asks_to_remove_the_selected_file() {
+        let mut app = app_with_changes();
+
+        let effects = app.handle_key(
+            KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT),
+            Instant::now(),
+        );
+
+        assert!(effects.is_empty());
+        let Some(Modal::Confirm { title, action, .. }) = app.modal else {
+            panic!("removing the selected file must ask first");
+        };
+        assert_eq!(title, "Remove File?");
+        let ConfirmAction::Operate(GitOperation::Remove(paths)) = action else {
+            panic!("the confirmation must carry a remove operation");
+        };
+        assert_eq!(paths, vec![PathBuf::from("src/main.rs")]);
+    }
+
+    #[test]
+    fn checked_files_drive_revert_and_remove() {
+        let mut app = app_with_changes();
+        app.checked_change_paths
+            .extend([PathBuf::from("src/main.rs"), PathBuf::from("README.md")]);
+
+        let items = app.scm_menu_items();
+        assert!(items.contains(&ScmMenuItem::RemoveChecked));
+        assert!(items.contains(&ScmMenuItem::DiscardChecked));
+        assert!(!items.contains(&ScmMenuItem::RemoveSelected));
+        assert_eq!(
+            app.scm_menu_label(ScmMenuItem::RemoveChecked),
+            "Remove Checked Files (2)"
+        );
+
+        let effects = app.handle_key(
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+            Instant::now(),
+        );
+
+        assert!(effects.is_empty());
+        let Some(Modal::Confirm { title, action, .. }) = app.modal else {
+            panic!("reverting the checked files must ask first");
+        };
+        assert_eq!(title, "Revert Checked Files?");
+        let ConfirmAction::Operate(GitOperation::Discard(changes)) = action else {
+            panic!("the confirmation must carry a discard operation");
+        };
+        assert_eq!(changes.len(), 2);
+    }
+
+    #[test]
+    fn the_changes_menu_offers_reverting_the_working_tree() {
+        let mut app = app_with_changes();
+
+        let items = app.scm_menu_items();
+        assert!(items.contains(&ScmMenuItem::DiscardUnstaged));
+        assert!(items.contains(&ScmMenuItem::DiscardAll));
+        assert!(items.contains(&ScmMenuItem::RemoveSelected));
+
+        let position = items
+            .iter()
+            .position(|item| *item == ScmMenuItem::DiscardAll)
+            .expect("the menu must offer reverting every change");
+        app.scm_menu_open = true;
+        app.scm_menu_selected = position;
+        let effects = app.handle_key(
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            Instant::now(),
+        );
+
+        assert!(effects.is_empty());
+        assert!(!app.scm_menu_open);
+        let Some(Modal::Confirm { title, action, .. }) = app.modal else {
+            panic!("reverting every change must ask first");
+        };
+        assert_eq!(title, "Revert All Changes?");
+        let ConfirmAction::Operate(GitOperation::Discard(changes)) = action else {
+            panic!("the confirmation must carry a discard operation");
+        };
+        assert_eq!(changes.len(), 2);
     }
 
     #[test]

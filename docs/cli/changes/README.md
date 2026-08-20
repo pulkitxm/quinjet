@@ -1,6 +1,6 @@
 # Changing a repository
 
-This section documents seven top-level verbs that move the index, the working
+This section documents eight top-level verbs that move the index, the working
 tree, or `HEAD`. They use no network, `gh`, or cache. Branch and stash mutations
 have their own command groups. If `git` is on `PATH` and the directory is a
 repository, these work.
@@ -25,7 +25,10 @@ own: a staged row goes to
 `git restore --staged --worktree --source=HEAD -- <paths>`, every other tracked
 row goes to `git restore --worktree -- <paths>`, and a file that is both staged
 and modified is two rows and so reaches both commands. Untracked entries are
-deleted with a filesystem removal rather than with Git. `commit` is
+deleted with a filesystem removal rather than with Git. `remove` classifies each
+path with `git ls-files -z -- <paths>` and then deletes: tracked paths go to one
+`git rm --force -r -- <paths>`, and the rest are unlinked from the working tree.
+`commit` is
 `git commit [--amend] --message <message>`. `resolve --ours` and
 `resolve --theirs` are `git checkout --ours|--theirs -- <path>` followed by
 `git add -- <path>`, and `resolve --stage` is `git add -- <path>` on its own.
@@ -43,7 +46,7 @@ message that is empty or only whitespace is refused with
 `Commit message cannot be empty`, so an unset shell variable cannot become a
 commit. And `discard` without `--yes` prints what it would discard, changes
 nothing, and exits 0, because a missing confirmation is a decision rather than
-an error. Nothing else here has a confirmation gate: `stage`, `unstage`,
+an error, and `remove` does the same for the files it would delete. Nothing else here has a confirmation gate: `stage`, `unstage`,
 `commit` and `resolve` act the moment they are run.
 
 ## At a glance
@@ -53,6 +56,7 @@ an error. Nothing else here has a confirmation gate: `stage`, `unstage`,
 | `quinjet stage` | Adds paths, or every change, to the index. |
 | `quinjet unstage` | Takes paths, or everything, back out of the index. |
 | `quinjet discard` | Throws away changes to paths, permanently, behind `--yes`. |
+| `quinjet remove` | Deletes paths from the working tree and the index, behind `--yes`. |
 | `quinjet commit` | Records what is staged, or replaces the previous commit. |
 | `quinjet resolve` | Takes one side of a merge conflict, or marks a path resolved. |
 | `quinjet cherry-pick` | Applies an existing commit, behind a preview and `--yes`. |
@@ -63,6 +67,7 @@ an error. Nothing else here has a confirmation gate: `stage`, `unstage`,
 - [`quinjet stage`](./stage.md)
 - [`quinjet unstage`](./unstage.md)
 - [`quinjet discard`](./discard.md)
+- [`quinjet remove`](./remove.md)
 - [`quinjet commit`](./commit.md)
 - [`quinjet resolve`](./resolve.md)
 - [`quinjet cherry-pick`](./cherry-pick.md)
@@ -72,7 +77,7 @@ an error. Nothing else here has a confirmation gate: `stage`, `unstage`,
 
 | Code | When this group produces it |
 | --- | --- |
-| 0 | The operation finished and its sentence printed. Also `discard` without `--yes`, which reports and changes nothing, and `discard` whose paths match no change, which prints `No changes match`. Also `--help` on any of the seven. |
+| 0 | The operation finished and its sentence printed. Also `discard` without `--yes`, which reports and changes nothing, and `discard` whose paths match no change, which prints `No changes match`. Also `remove` without `--yes`, and `remove --all` in a clean repository, which prints `No files match`. Also `--help` on any of the eight. |
 | 1 | Git refused: nothing staged for `commit`, a pathspec that matches no file for `stage` or `unstage`, an ignored path for `stage`, a path with no such side for `resolve`, or `--amend` with no commit to amend. A blank commit message is also refused before Git runs. |
 | 2 | clap rejected the command line: missing paths and `--all`, `commit` without `--message`, `resolve` without a side, a revision verb without a revision, `--all` together with paths, two conflict sides, a flag given twice, or an unknown flag. |
 | 3 | `cherry-pick` or `revert` could not resolve the named revision. |
@@ -82,7 +87,7 @@ can exist but be unavailable.
 
 ## Notes and gotchas
 
-- There is no `quinjet changes` command. The seven are top-level verbs, so there
+- There is no `quinjet changes` command. The eight are top-level verbs, so there
   is no group `--help` to run; `quinjet --help` lists them among the rest, and
   `quinjet stage --help` and friends work as usual.
 - Paths are interpreted from the repository root, always. Running
@@ -101,6 +106,10 @@ can exist but be unavailable.
   staged and modified is two rows, so `quinjet discard src/main.rs` reports two
   changes and names `src/main.rs` twice in its dry run. That is not a bug in the
   message; it is two pieces of work.
+- `remove` deletes rather than restores, and takes any path, not only a changed
+  one. A tracked removal is staged, so `git checkout HEAD -- <path>` brings the
+  committed content back; an untracked one is unlinked and gone. `quinjet rm` is
+  the same verb.
 - `discard` skips conflicted paths entirely. During a conflicted merge,
   `quinjet discard --all` leaves every conflict exactly where it was, and if the
   conflicts are the only changes it prints `No changes match` and exits 0.
@@ -180,7 +189,7 @@ can exist but be unavailable.
   worktree recursively and refreshes when anything that is not `.git/objects`,
   `index.lock` or a Watchman cookie changes, so a `quinjet commit` in another
   window repaints the Changes tab within a redraw.
-- On a detached `HEAD` all seven work, and `commit` makes a commit that only
+- On a detached `HEAD` all eight work, and `commit` makes a commit that only
   `HEAD` points at. Note the id with `quinjet log -n 1` before switching away,
   or it is reachable only through the reflog.
 - None of these verbs takes `--watch`, `--expanded` or `--refresh`. They finish.
