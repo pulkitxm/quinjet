@@ -3,11 +3,11 @@ NIGHTLY ?= nightly
 COVERAGE_MIN ?= 65
 
 .PHONY: ci ci-fast deep fmt fmt-check lint lint-nightly test doc msrv build package \
-	install-check comments secrets typos spellcheck deny audit osv sbom unused sort hack wiki \
+	install-check comments secrets homebrew typos spellcheck deny audit osv sbom unused sort hack wiki \
 	coverage shell actions yaml markdown toml editorconfig ruff miri careful sanitize mutants \
 	minimal-versions udeps bloat optimization-docs tools tools-deep
 
-ci: fmt-check lint test doc comments secrets typos spellcheck deny audit osv unused sort hack \
+ci: fmt-check lint test doc comments secrets homebrew typos spellcheck deny audit osv unused sort hack \
 	shell actions yaml markdown toml editorconfig ruff wiki package
 
 ci-fast: fmt-check lint test comments secrets
@@ -54,6 +54,9 @@ install-check: build
 	test -s /tmp/quinjet-install/home/.local/state/quinjet/shortcut-installed
 	HOME=/tmp/quinjet-install/home XDG_DATA_HOME=/tmp/quinjet-install/data SHELL=/bin/bash \
 		/tmp/quinjet-install/bin/quinjet --help >/dev/null
+
+homebrew:
+	python3 scripts/homebrew_formula.py --selftest
 
 comments:
 	python3 scripts/check_comments.py --selftest
