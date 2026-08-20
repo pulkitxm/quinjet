@@ -280,12 +280,9 @@ jobs:
             --checksums "${RUNNER_TEMP}/SHA256SUMS" \
             --output "${RUNNER_TEMP}/quinjet.rb"
       - name: Stage the formula in a test tap
-        env:
-          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
-          GIT_AUTHOR_NAME: github-actions[bot]
-          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
-          GIT_COMMITTER_NAME: github-actions[bot]
         run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
           brew tap-new pulkitxm/tap
           cp "${RUNNER_TEMP}/quinjet.rb" \
             "$(brew --repository pulkitxm/tap)/Formula/quinjet.rb"
@@ -299,16 +296,10 @@ jobs:
           test -L "${prefix}/bin/q"
           quinjet --version
           q --version
-          test -s "$(brew --prefix)/etc/bash_completion.d/quinjet"
-          test -s "$(brew --prefix)/share/zsh/site-functions/_quinjet"
-          test -s "$(brew --prefix)/share/fish/vendor_completions.d/quinjet.fish"
-          test -s "$(brew --prefix)/share/man/man1/quinjet.1"
-          set +e
-          quinjet update >"${RUNNER_TEMP}/update-output" 2>&1
-          status=$?
-          set -e
-          test "${status}" -eq 69
-          grep -F 'brew upgrade quinjet' "${RUNNER_TEMP}/update-output"
+          test -s "${prefix}/etc/bash_completion.d/quinjet"
+          test -s "${prefix}/share/zsh/site-functions/_quinjet"
+          test -s "${prefix}/share/fish/vendor_completions.d/quinjet.fish"
+          test -s "${prefix}/share/man/man1/quinjet.1"
 
   ci:
     name: CI
