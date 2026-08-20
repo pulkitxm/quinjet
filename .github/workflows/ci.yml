@@ -280,6 +280,11 @@ jobs:
             --checksums "${RUNNER_TEMP}/SHA256SUMS" \
             --output "${RUNNER_TEMP}/quinjet.rb"
       - name: Stage the formula in a test tap
+        env:
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
         run: |
           brew tap-new pulkitxm/tap
           cp "${RUNNER_TEMP}/quinjet.rb" \
@@ -294,7 +299,7 @@ jobs:
           test -L "${prefix}/bin/q"
           quinjet --version
           q --version
-          test -s "$(brew --prefix)/share/bash-completion/completions/quinjet"
+          test -s "$(brew --prefix)/etc/bash_completion.d/quinjet"
           test -s "$(brew --prefix)/share/zsh/site-functions/_quinjet"
           test -s "$(brew --prefix)/share/fish/vendor_completions.d/quinjet.fish"
           test -s "$(brew --prefix)/share/man/man1/quinjet.1"
