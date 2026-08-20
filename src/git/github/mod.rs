@@ -3155,11 +3155,14 @@ mod tests {
 
     #[test]
     fn api_file_counts_parse_and_skip_malformed_records() {
-        let data =
-            b"src/main.rs\t12\t3\nREADME.md\t1\t0\nbroken record\nassets/logo.png\tnot\tnumbers\n";
+        let data = b"src/main.rs\t12\t3\nREADME.md\t1\t0\nbroken record\nassets/logo.png\tnot\tnumbers\nassets/icon.png\t0\t0\n";
         let counts = parse_api_file_counts(data);
 
-        assert_eq!(counts.len(), 2, "malformed records are skipped");
+        assert_eq!(
+            counts.len(),
+            2,
+            "malformed and countless records are skipped"
+        );
         assert_eq!(
             counts.get(Path::new("src/main.rs")),
             Some(&DiffLineCounts {
