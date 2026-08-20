@@ -596,6 +596,7 @@ pub(crate) struct ValidatedRead {
     pub data: Vec<u8>,
     pub unchanged: bool,
     pub complete: bool,
+    pub last_page: Option<usize>,
 }
 
 impl Repository {
@@ -627,6 +628,7 @@ impl Repository {
                 data: split_validator(&entry).1.to_vec(),
                 unchanged: true,
                 complete: true,
+                last_page: None,
             });
         }
         let complete = !has_next_page(head);
@@ -640,6 +642,7 @@ impl Repository {
             data: body.to_vec(),
             unchanged: false,
             complete,
+            last_page: last_page(head),
         })
     }
 }
@@ -686,6 +689,23 @@ fn header_value(head: &str, name: &str) -> Option<String> {
 
 fn has_next_page(head: &str) -> bool {
     header_value(head, "link").is_some_and(|link| link.contains("rel=\"next\""))
+}
+
+/// The page number GitHub advertises as `rel="last"`, when the response is one
+/// page of a longer listing.
+fn last_page(head: &str) -> Option<usize> {
+    let link = header_value(head, "link")?;
+    link.split(',').find_map(|segment| {
+        if !segment.contains("rel=\"last\"") {
+            return None;
+        }
+        let url = segment.trim().strip_prefix('<')?.split('>').next()?;
+        url.split(['?', '&']).find_map(|parameter| {
+            parameter
+                .strip_prefix("page=")
+                .and_then(|value| value.parse().ok())
+        })
+    })
 }
 
 struct GhResponse {
@@ -2999,6 +3019,24 @@ mod tests {
         assert!(has_next_page(paged));
         assert!(!has_next_page(last));
         assert!(!has_next_page("HTTP/2.0 200 OK"));
+    }
+
+    #[test]
+    fn the_link_header_names_the_newest_timeline_page() {
+        let head = "HTTP/2.0 200 OK\nLink: <https://api.github.com/x?per_page=100&page=2>; rel=\"next\", <https://api.github.com/x?per_page=100&page=12>; rel=\"last\"";
+        assert_eq!(last_page(head), Some(12));
+        assert_eq!(
+            last_page("HTTP/2.0 200 OK"),
+            None,
+            "a single page advertises no last page"
+        );
+        let reversed =
+            "HTTP/2.0 200 OK\nLink: <https://api.github.com/x?page=7&per_page=100>; rel=\"last\"";
+        assert_eq!(
+            last_page(reversed),
+            Some(7),
+            "per_page never shadows the page parameter"
+        );
     }
 
     #[test]
