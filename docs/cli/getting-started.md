@@ -391,6 +391,7 @@ Commands:
   stage        Stage paths, or everything
   unstage      Unstage paths, or everything
   discard      Throw away changes to paths
+  remove       Delete paths from the working tree and the index
   commit       Record the staged changes
   fetch        Fetch every remote and prune deleted refs
   pull         Pull the current branch
@@ -562,7 +563,7 @@ Two small things worth knowing before you parse anything:
 - A list verb with nothing to list prints nothing on the human path and exits 0.
   `quinjet stash list` in a repository with no stashes writes zero bytes. Under
   `--json` the same call prints `[]`, which is easier to test.
-- A missing `--yes` is not an error. `discard`, `cherry-pick`, and `revert`
+- A missing `--yes` is not an error. `discard`, `remove`, `cherry-pick`, and `revert`
   preview their work, change nothing, and exit 0 without it. A script that means
   to mutate must pass `--yes`, and must not read exit 0 as "it happened".
 

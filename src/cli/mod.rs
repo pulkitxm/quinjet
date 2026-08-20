@@ -139,6 +139,9 @@ enum Verb {
     Unstage(SelectionArgs),
     /// Throw away changes to paths
     Discard(DiscardArgs),
+    /// Delete paths from the working tree and the index
+    #[command(visible_alias = "rm")]
+    Remove(RemoveArgs),
     /// Record the staged changes
     Commit(CommitArgs),
     /// Fetch every remote and prune deleted refs
@@ -202,6 +205,7 @@ impl Verb {
             Self::Stage(_) => Some("Staging changes"),
             Self::Unstage(_) => Some("Unstaging changes"),
             Self::Discard(_) => Some("Reading changes to discard"),
+            Self::Remove(_) => Some("Reading files to remove"),
             Self::Commit(_) => Some("Creating commit"),
             Self::Fetch => Some("Fetching remotes"),
             Self::Pull => Some("Pulling changes"),
@@ -331,6 +335,15 @@ struct DiscardArgs {
     #[command(flatten)]
     selection: SelectionArgs,
     /// Confirm; without it the command reports what it would discard
+    #[arg(long)]
+    yes: bool,
+}
+
+#[derive(Debug, Args)]
+struct RemoveArgs {
+    #[command(flatten)]
+    selection: SelectionArgs,
+    /// Confirm; without it the command reports what it would remove
     #[arg(long)]
     yes: bool,
 }
@@ -1165,6 +1178,7 @@ fn run(session: &mut Session, out: &Emitter, verb: Verb) -> Result<u8> {
             operate(session, out, operation)
         }
         Verb::Discard(args) => discard(session, out, &args),
+        Verb::Remove(args) => remove(session, out, &args),
         Verb::Commit(args) => operate(
             session,
             out,
@@ -1457,22 +1471,30 @@ fn stash(session: &mut Session, out: &Emitter, command: StashVerb) -> Result<u8>
     }
 }
 
-fn discard(session: &mut Session, out: &Emitter, args: &DiscardArgs) -> Result<u8> {
-    let status = session.execute(Command::Status)?.status()?;
-    let changes: Vec<Change> = status
-        .changes
-        .iter()
-        .filter(|change| change.area != ChangeArea::Conflict)
-        .filter(|change| args.selection.all || matches(&change.path, &args.selection.paths))
-        .cloned()
-        .collect();
-    if !args.selection.all && args.selection.paths.is_empty() {
+fn selected_changes(
+    session: &mut Session,
+    selection: &SelectionArgs,
+    verb: &str,
+) -> Result<Vec<Change>> {
+    if !selection.all && selection.paths.is_empty() {
         return Err(Failure::new(
             EXIT_FAILURE,
-            "discard needs paths, or --all for every change",
+            format!("{verb} needs paths, or --all for every change"),
         )
         .into());
     }
+    let status = session.execute(Command::Status)?.status()?;
+    Ok(status
+        .changes
+        .iter()
+        .filter(|change| change.area != ChangeArea::Conflict)
+        .filter(|change| selection.all || matches(&change.path, &selection.paths))
+        .cloned()
+        .collect())
+}
+
+fn discard(session: &mut Session, out: &Emitter, args: &DiscardArgs) -> Result<u8> {
+    let changes = selected_changes(session, &args.selection, "discard")?;
     if changes.is_empty() {
         out.message("No changes match")?;
         return Ok(0);
@@ -1487,6 +1509,45 @@ fn discard(session: &mut Session, out: &Emitter, args: &DiscardArgs) -> Result<u
         return Ok(0);
     }
     operate(session, out, GitOperation::Discard(changes))
+}
+
+fn remove(session: &mut Session, out: &Emitter, args: &RemoveArgs) -> Result<u8> {
+    let mut paths: Vec<PathBuf> = if args.selection.all {
+        let mut changed: Vec<PathBuf> = Vec::new();
+        for change in selected_changes(session, &args.selection, "remove")? {
+            if !changed.contains(&change.path) {
+                changed.push(change.path);
+            }
+        }
+        changed
+    } else {
+        args.selection.paths.clone()
+    };
+    paths.dedup();
+    if !args.selection.all && paths.is_empty() {
+        return Err(Failure::new(
+            EXIT_FAILURE,
+            "remove needs paths, or --all for every changed file",
+        )
+        .into());
+    }
+    if paths.is_empty() {
+        out.message("No files match")?;
+        return Ok(0);
+    }
+    if !args.yes {
+        let listed: Vec<String> = paths
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect();
+        out.message(&format!(
+            "Would remove {} file(s): {}. Pass --yes to remove them.",
+            listed.len(),
+            listed.join(", ")
+        ))?;
+        return Ok(0);
+    }
+    operate(session, out, GitOperation::Remove(paths))
 }
 
 fn resolve(session: &mut Session, out: &Emitter, args: ResolveArgs) -> Result<u8> {
@@ -2679,6 +2740,7 @@ mod tests {
         GitOperation::Unstage(_) => GitOperation::Unstage(Vec::new()) => ["unstage"];
         GitOperation::UnstageAll => GitOperation::UnstageAll => ["unstage"];
         GitOperation::Discard(_) => GitOperation::Discard(Vec::new()) => ["discard"];
+        GitOperation::Remove(_) => GitOperation::Remove(Vec::new()) => ["remove"];
         GitOperation::Commit { .. } => GitOperation::Commit { message: String::new(), amend: false } => ["commit"];
         GitOperation::Fetch => GitOperation::Fetch => ["fetch"];
         GitOperation::Pull => GitOperation::Pull => ["pull"];

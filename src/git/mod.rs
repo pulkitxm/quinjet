@@ -157,6 +157,7 @@ pub(crate) enum GitOperation {
     Unstage(Vec<PathBuf>),
     UnstageAll,
     Discard(Vec<Change>),
+    Remove(Vec<PathBuf>),
     Commit {
         message: String,
         amend: bool,
@@ -201,6 +202,7 @@ impl GitOperation {
             Self::Unstage(_) => "Unstaging change",
             Self::UnstageAll => "Unstaging all changes",
             Self::Discard(_) => "Discarding changes",
+            Self::Remove(_) => "Removing files",
             Self::Commit { amend: true, .. } => "Amending commit",
             Self::Commit { amend: false, .. } => "Creating commit",
             Self::Fetch => "Fetching remotes",
@@ -976,6 +978,10 @@ impl Repository {
                     "changes discarded",
                 ))
             }
+            GitOperation::Remove(paths) => {
+                let removed = self.remove(paths)?;
+                Ok(plural_message(removed, "file removed", "files removed"))
+            }
             GitOperation::Commit { message, amend } => {
                 if message.trim().is_empty() {
                     bail!("Commit message cannot be empty");
@@ -1164,19 +1170,64 @@ impl Repository {
         Ok((patch, input_truncated || patch_truncated))
     }
 
+    fn delete_worktree_entry(&self, relative: &Path) -> Result<()> {
+        let path = safe_worktree_path(&self.root, relative)?;
+        let metadata = fs::symlink_metadata(&path)
+            .with_context(|| format!("failed to inspect {}", relative.display()))?;
+        if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            fs::remove_dir_all(&path)?;
+        } else {
+            fs::remove_file(&path)?;
+        }
+        Ok(())
+    }
+
+    fn remove(&self, paths: &[PathBuf]) -> Result<usize> {
+        let mut wanted: Vec<PathBuf> = Vec::new();
+        for path in paths {
+            if !wanted.contains(path) {
+                wanted.push(path.clone());
+            }
+        }
+        if wanted.is_empty() {
+            return Ok(0);
+        }
+        let tracked = self.tracked_paths(&wanted)?;
+        for path in wanted.iter().filter(|path| !tracked.contains(*path)) {
+            self.delete_worktree_entry(path)?;
+        }
+        if !tracked.is_empty() {
+            drop(self.with_paths(["rm", "--force", "-r"], &tracked)?);
+        }
+        Ok(wanted.len())
+    }
+
+    fn tracked_paths(&self, paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
+        let mut args: Vec<OsString> = strings(["ls-files", "-z", "--"]).to_vec();
+        args.extend(paths.iter().map(|path| path.as_os_str().to_owned()));
+        let output = self.checked(args)?;
+        let listed: Vec<PathBuf> = output
+            .split(|byte| *byte == 0)
+            .filter(|entry| !entry.is_empty())
+            .map(|entry| PathBuf::from(text(entry)))
+            .collect();
+        Ok(paths
+            .iter()
+            .filter(|path| {
+                listed
+                    .iter()
+                    .any(|entry| entry == *path || entry.starts_with(path))
+            })
+            .cloned()
+            .collect())
+    }
+
     fn discard(&self, changes: &[Change]) -> Result<()> {
         let mut restore_worktree = Vec::new();
         let mut restore_both = Vec::new();
         for change in changes {
             if change.status == ChangeStatus::Untracked {
-                let path = safe_worktree_path(&self.root, &change.path)?;
-                let metadata = fs::symlink_metadata(&path)
-                    .with_context(|| format!("failed to inspect {}", change.display_path()))?;
-                if metadata.is_dir() && !metadata.file_type().is_symlink() {
-                    fs::remove_dir_all(&path)?;
-                } else {
-                    fs::remove_file(&path)?;
-                }
+                self.delete_worktree_entry(&change.path)?;
             } else if change.area == ChangeArea::Staged {
                 restore_both.push(change.path.clone());
             } else {

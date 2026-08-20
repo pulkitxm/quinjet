@@ -166,7 +166,11 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
     },
     HelpRow::Shortcut {
         keys: "x",
-        description: "Discard selected change (asks first)",
+        description: "Revert the selected change, or every checked file (asks first)",
+    },
+    HelpRow::Shortcut {
+        keys: "X",
+        description: "Remove the selected file, or every checked file (asks first)",
     },
     HelpRow::Shortcut {
         keys: "c",
@@ -174,7 +178,7 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
     },
     HelpRow::Shortcut {
         keys: "*",
-        description: "Check / uncheck the selected file for stash",
+        description: "Check / uncheck the selected file; a group header checkbox does its whole group",
     },
     HelpRow::Shortcut {
         keys: "S",
@@ -846,7 +850,14 @@ fn draw_changes_sidebar(
         return (Vec::new(), Vec::new());
     }
 
-    let controls_height = u16::from(inner.height != 0);
+    let checked_count = app.checked_change_count();
+    let controls_height = if inner.height == 0 {
+        0
+    } else if checked_count == 0 || inner.height == 1 {
+        1
+    } else {
+        2
+    };
     let list_area = Rect::new(
         inner.x,
         inner.y,
@@ -892,12 +903,22 @@ fn draw_changes_sidebar(
                 } else {
                     theme.panel_alt
                 };
+                let check_label = app.section_check_label(*section);
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![
                         Span::styled(
                             disclosure_prefix(!collapsed),
                             Style::default().fg(theme.muted),
                         ),
+                        Span::styled(
+                            check_label,
+                            Style::default().fg(if check_label == "[ ]" {
+                                theme.muted
+                            } else {
+                                theme.accent
+                            }),
+                        ),
+                        Span::raw(" "),
                         Span::styled(
                             section.label().to_uppercase(),
                             Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
@@ -907,6 +928,10 @@ fn draw_changes_sidebar(
                     .style(Style::default().bg(background)),
                     Rect::new(list_area.x, y, list_area.width, 1),
                 );
+                action_hits.push(ScmActionHit {
+                    area: Rect::new(list_area.x.saturating_add(3), y, 3, 1),
+                    action: ScmAction::ToggleCheckSection(*section),
+                });
                 let (label, action) = match section {
                     ChangeSection::Staged => ("[−]", ScmAction::UnstageSection(*section)),
                     ChangeSection::Conflict | ChangeSection::Unstaged => {
@@ -1053,39 +1078,82 @@ fn draw_changes_sidebar(
 
     let controls_y = list_area.bottom();
     if controls_height >= 1 {
-        let row = Rect::new(inner.x, controls_y, inner.width, 1);
+        let arrow_width = 3.min(inner.width);
+        let button_width = inner.width.saturating_sub(arrow_width);
         let primary_label = if app.primary_is_stash() {
-            "Stash"
+            format!("Stash ({checked_count})")
         } else {
-            "Commit"
+            "Commit".to_owned()
         };
+        let revert_label = (controls_height == 2).then(|| format!("Revert ({checked_count})"));
+        let indent = toolbar_indent(
+            button_width,
+            revert_label
+                .iter()
+                .chain(std::iter::once(&primary_label))
+                .map(|label| label.width())
+                .max()
+                .unwrap_or_default(),
+        );
+        let primary_row = Rect::new(
+            inner.x,
+            controls_y.saturating_add(controls_height.saturating_sub(1)),
+            inner.width,
+            1,
+        );
+        let button_area = |row: Rect| Rect::new(row.x, row.y, button_width, 1);
+        let revert_row = revert_label.map(|label| {
+            let row = Rect::new(inner.x, controls_y, inner.width, 1);
+            let area = button_area(row);
+            frame.render_widget(
+                Paragraph::new(
+                    " ".repeat(indent)
+                        + &truncate_middle(&label, (button_width as usize).saturating_sub(indent)),
+                )
+                .style(
+                    Style::default()
+                        .fg(theme.error)
+                        .bg(theme.removed_background)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                area,
+            );
+            action_hits.push(ScmActionHit {
+                area,
+                action: ScmAction::RevertChecked,
+            });
+            row
+        });
         let primary_color = if app.primary_is_stash() {
             theme.modified
         } else {
             theme.accent
         };
-        let arrow = "▶";
-        let arrow_width = 3.min(row.width);
-        let label_width = row.width.saturating_sub(arrow_width);
-        let label_area = Rect::new(row.x, row.y, label_width, 1);
-        let arrow_area = Rect::new(row.x.saturating_add(label_width), row.y, arrow_width, 1);
-        frame.render_widget(
-            Paragraph::new("").style(Style::default().bg(theme.panel_alt)),
-            row,
+        let label_area = button_area(primary_row);
+        let arrow_area = Rect::new(
+            primary_row.x.saturating_add(button_width),
+            primary_row.y,
+            arrow_width,
+            1,
         );
         frame.render_widget(
-            Paragraph::new(primary_label)
-                .alignment(Alignment::Center)
-                .style(
-                    Style::default()
-                        .fg(primary_color)
-                        .bg(theme.panel_alt)
-                        .add_modifier(Modifier::BOLD),
-                ),
+            Paragraph::new(
+                " ".repeat(indent)
+                    + &truncate_middle(
+                        &primary_label,
+                        (button_width as usize).saturating_sub(indent),
+                    ),
+            )
+            .style(
+                Style::default()
+                    .fg(primary_color)
+                    .bg(theme.panel_alt)
+                    .add_modifier(Modifier::BOLD),
+            ),
             label_area,
         );
         frame.render_widget(
-            Paragraph::new(arrow)
+            Paragraph::new("▶")
                 .alignment(Alignment::Center)
                 .style(Style::default().fg(theme.muted).bg(theme.panel_alt)),
             arrow_area,
@@ -1099,10 +1167,34 @@ fn draw_changes_sidebar(
             action: ScmAction::ToggleMenu,
         });
         if app.scm_menu_open {
-            draw_scm_menu(frame, row, app.scm_menu_selected, theme, &mut action_hits);
+            let items = app
+                .scm_menu_items()
+                .into_iter()
+                .map(|item| {
+                    let label = app.scm_menu_label(item);
+                    (item, label)
+                })
+                .collect::<Vec<_>>();
+            draw_scm_menu(
+                frame,
+                revert_row.unwrap_or(primary_row),
+                app.scm_menu_selected,
+                &items,
+                theme,
+                &mut action_hits,
+            );
         }
     }
     (hits, action_hits)
+}
+
+#[expect(
+    clippy::integer_division,
+    reason = "an odd amount of free space intentionally leaves the extra column on the right"
+)]
+fn toolbar_indent(button_width: u16, widest_label: usize) -> usize {
+    let room = (button_width as usize).saturating_sub(widest_label);
+    if room == 0 { 0 } else { (room / 2).max(1) }
 }
 
 fn overflow_menu_area(anchor: Rect, width: usize, item_count: usize) -> Rect {
@@ -1118,16 +1210,20 @@ fn draw_scm_menu(
     frame: &mut Frame<'_>,
     anchor: Rect,
     selected: usize,
+    items: &[(ScmMenuItem, String)],
     theme: &Theme,
     action_hits: &mut Vec<ScmActionHit>,
 ) {
-    let width = ScmMenuItem::ALL
+    if items.is_empty() {
+        return;
+    }
+    let width = items
         .iter()
-        .map(|item| item.label().width())
+        .map(|(_, label)| label.width())
         .max()
         .unwrap_or(12)
         .saturating_add(4);
-    let area = overflow_menu_area(anchor, width, ScmMenuItem::ALL.len());
+    let area = overflow_menu_area(anchor, width, items.len());
     frame.render_widget(Clear, area);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -1135,7 +1231,7 @@ fn draw_scm_menu(
         .style(Style::default().bg(theme.panel));
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    for (index, item) in ScmMenuItem::ALL.iter().enumerate() {
+    for (index, (item, label)) in items.iter().enumerate() {
         let active = index == selected;
         let row = Rect::new(
             inner.x,
@@ -1144,7 +1240,7 @@ fn draw_scm_menu(
             1,
         );
         frame.render_widget(
-            Paragraph::new(format!(" {} ", item.label())).style(if active {
+            Paragraph::new(format!(" {label} ")).style(if active {
                 Style::default().fg(theme.text).bg(theme.selected)
             } else {
                 Style::default().fg(theme.text).bg(theme.panel)
@@ -6614,6 +6710,78 @@ mod tests {
         assert_eq!(yes.width, no.width);
         assert_eq!(yes.y, no.y);
         assert_eq!(yes.right(), no.x);
+    }
+
+    #[test]
+    fn the_toolbar_indent_is_shared_and_survives_a_label_that_cannot_fit() {
+        assert_eq!(toolbar_indent(40, 12), 14);
+        assert_eq!(toolbar_indent(40, 40), 0);
+        assert_eq!(toolbar_indent(40, 64), 0);
+        assert_eq!(toolbar_indent(13, 12), 1);
+        assert_eq!(toolbar_indent(0, 6), 0);
+    }
+
+    #[test]
+    fn revert_and_stash_share_one_width_and_one_indent_at_any_count() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        fn toolbar(count: usize) -> (Rect, Rect, String, String, Buffer) {
+            let theme = Theme::default();
+            let mut app = App::new("/tmp/repo", "repo");
+            app.status.changes = (0..count)
+                .map(|index| Change {
+                    path: std::path::PathBuf::from(format!("file_{index}.txt")),
+                    original_path: None,
+                    area: ChangeArea::Unstaged,
+                    status: ChangeStatus::Modified,
+                })
+                .collect();
+            app.checked_change_paths = app
+                .status
+                .changes
+                .iter()
+                .map(|change| change.path.clone())
+                .collect();
+            let mut terminal = Terminal::new(TestBackend::new(120, 34)).unwrap();
+            terminal
+                .draw(|frame| draw(frame, &mut app, &theme))
+                .unwrap();
+            let area = |wanted: &ScmAction| {
+                app.geometry
+                    .scm_action_hits
+                    .iter()
+                    .find(|hit| hit.action == *wanted)
+                    .map(|hit| hit.area)
+                    .expect("both toolbar buttons must be clickable")
+            };
+            let revert = area(&ScmAction::RevertChecked);
+            let primary = area(&ScmAction::Primary);
+            let buffer = terminal.backend().buffer().clone();
+            let row = |area: Rect| {
+                (area.x..area.right())
+                    .map(|x| buffer[(x, area.y)].symbol().to_owned())
+                    .collect::<String>()
+            };
+            (revert, primary, row(revert), row(primary), buffer)
+        }
+
+        for count in [1, 12, 128, 4096] {
+            let (revert, primary, revert_row, primary_row, buffer) = toolbar(count);
+            assert_eq!(revert.x, primary.x, "{count} files");
+            assert_eq!(revert.width, primary.width, "{count} files");
+            assert_eq!(revert.y.saturating_add(1), primary.y, "{count} files");
+            assert_eq!(
+                revert_row.len() - revert_row.trim_start().len(),
+                primary_row.len() - primary_row.trim_start().len(),
+                "{count} files indent"
+            );
+            assert!(revert_row.trim().starts_with(&format!("Revert ({count})")));
+            assert!(primary_row.trim().starts_with(&format!("Stash ({count})")));
+            let theme = Theme::default();
+            assert_eq!(buffer[(revert.x, revert.y)].bg, theme.removed_background);
+            assert_eq!(buffer[(primary.x, primary.y)].bg, theme.panel_alt);
+        }
     }
 
     #[test]
