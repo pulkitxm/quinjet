@@ -55,4 +55,27 @@ mod tests {
             "/home/pat/Cellar/downloads/quinjet"
         )));
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn prefix_symlink_resolves_to_the_cellar() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory
+            .path()
+            .join("Cellar")
+            .join(PROGRAM)
+            .join("1.2.3")
+            .join("bin")
+            .join(PROGRAM);
+        std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        std::fs::write(&executable, []).unwrap();
+        let prefix_bin = directory.path().join("bin");
+        std::fs::create_dir_all(&prefix_bin).unwrap();
+        let linked = prefix_bin.join(PROGRAM);
+        symlink(executable, &linked).unwrap();
+
+        assert!(manages(&linked));
+    }
 }

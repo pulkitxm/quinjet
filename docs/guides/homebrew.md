@@ -82,7 +82,7 @@ brew untap pulkitxm/tap
 
 ## Releasing
 
-Nothing about the formula is hand-edited. `extras/homebrew/quinjet.rb` is the
+Nothing about the formula is hand-edited. `Formula/quinjet.rb` is the
 authored source and carries one placeholder per release-specific value. The
 `publish` job in `.github/workflows/release.yml` renders it with
 `scripts/homebrew_formula.py`, reading the version it just cut and the checksums
@@ -91,9 +91,9 @@ repository. That repository is generated output; never edit it by hand.
 
 Pushing to the tap needs a `TAP_PUSH_TOKEN` secret on this repository: a
 fine-grained personal access token scoped to `pulkitxm/homebrew-tap` with read
-and write access to contents. Without it the release fails at the mirror step,
-after the crate and the GitHub release are already published, and the mirror can
-be re-run once the token exists.
+and write access to contents. The publish job checks for it before publishing
+the crate or GitHub release. A later clone or push failure still fails the
+release visibly so the tap cannot drift silently behind the published version.
 
 `make homebrew` renders the template locally with placeholder checksums, which
 is what CI runs to catch a placeholder that no longer matches the script.
