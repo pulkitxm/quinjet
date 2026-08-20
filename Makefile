@@ -57,6 +57,7 @@ install-check: build
 
 homebrew:
 	python3 scripts/homebrew_formula.py --selftest
+	sh scripts/update_homebrew_tap.sh --selftest
 
 comments:
 	python3 scripts/check_comments.py --selftest
@@ -122,8 +123,8 @@ coverage:
 	$(CARGO) llvm-cov --all-features --locked --fail-under-lines $(COVERAGE_MIN)
 
 shell:
-	shellcheck --severity=style --enable=all install.sh tests/install.sh
-	shfmt --diff --indent 4 --case-indent install.sh tests/install.sh
+	shellcheck --severity=style --enable=all install.sh tests/install.sh scripts/update_homebrew_tap.sh
+	shfmt --diff --indent 4 --case-indent install.sh tests/install.sh scripts/update_homebrew_tap.sh
 
 actions:
 	actionlint
