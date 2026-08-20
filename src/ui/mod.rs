@@ -867,7 +867,7 @@ fn draw_changes_sidebar(
             ChangeRow::Spacer => false,
         })
         .unwrap_or_default();
-    ensure_offset(&mut app.sidebar_offset, selected_row, height, row_count);
+    app.sidebar_viewport(selected_row, height, row_count);
     let mut hits = Vec::new();
     let mut action_hits = Vec::new();
     let end = (app.sidebar_offset + height).min(rows.len());
@@ -1196,12 +1196,7 @@ fn draw_history_sidebar(
 
     let visible = app.visible_commit_indices();
     let height = inner.height as usize;
-    ensure_offset(
-        &mut app.sidebar_offset,
-        app.history_cursor,
-        height,
-        visible.len(),
-    );
+    app.sidebar_viewport(app.history_cursor, height, visible.len());
     let mut hits = Vec::new();
     let end = (app.sidebar_offset + height).min(visible.len());
     for (row_offset, index) in visible
@@ -1771,8 +1766,7 @@ fn draw_pull_request_file_tree(
     app.pull_request_tree_cursor = app
         .pull_request_tree_cursor
         .min(row_count.saturating_sub(1));
-    ensure_offset(
-        &mut app.sidebar_offset,
+    app.sidebar_viewport(
         app.pull_request_tree_cursor,
         area.height as usize,
         row_count,
@@ -1926,12 +1920,7 @@ fn draw_pull_request_check_list(
         .iter()
         .position(|row| check_list_row_selected(app, row))
         .unwrap_or_default();
-    ensure_offset(
-        &mut app.sidebar_offset,
-        selected_row,
-        area.height as usize,
-        rows.len(),
-    );
+    app.sidebar_viewport(selected_row, area.height as usize, rows.len());
 
     let mut hits = Vec::new();
     let end = (app.sidebar_offset + area.height as usize).min(rows.len());
