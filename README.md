@@ -40,6 +40,21 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 
 ## Installation
 
+### Homebrew
+
+On macOS or Linux:
+
+```bash
+brew install pulkitxm/tap/quinjet
+```
+
+The formula downloads the release binary for your platform, verifies its
+published checksum, and installs the `quinjet` executable, the `q` shortcut,
+shell completions, and the manual page under `brew --prefix`. Homebrew owns that
+installation, so upgrade it with `brew upgrade quinjet` rather than
+`quinjet update`. See [the Homebrew guide](docs/guides/homebrew.md) for the rest
+of the commands.
+
 ### Install script
 
 On Linux or macOS:
