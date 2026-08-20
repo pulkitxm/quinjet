@@ -1238,13 +1238,14 @@ impl Repository {
         &self,
         pull_request: &PullRequest,
     ) -> Option<HashMap<PathBuf, DiffLineCounts>> {
+        let base = pull_request.base_oid.trim();
         let head = pull_request.head_oid.trim();
         let repository = &pull_request.base_repository;
-        if !is_commit_oid(head) || repository.name_with_owner.is_empty() {
+        if !is_commit_oid(base) || !is_commit_oid(head) || repository.name_with_owner.is_empty() {
             return None;
         }
         let key = format!(
-            "pr-file-counts-v1\n{}\n{}\n{head}",
+            "pr-file-counts-v2\n{}\n{}\n{base}\n{head}",
             repository.url.trim_end_matches('/'),
             pull_request.number
         );
@@ -1906,6 +1907,9 @@ fn parse_api_file_counts(data: &[u8]) -> HashMap<PathBuf, DiffLineCounts> {
         let (Ok(additions), Ok(deletions)) = (additions.parse(), deletions.parse()) else {
             continue;
         };
+        if additions == 0 && deletions == 0 {
+            continue;
+        }
         let _ = counts.insert(
             PathBuf::from(path),
             DiffLineCounts {
