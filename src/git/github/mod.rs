@@ -467,6 +467,7 @@ impl PreparedPullRequest {
         };
         let sections = split_patch_by_file(&patch);
         let mut documents = Vec::with_capacity(files.len());
+        let mut truncated_fallback = None;
         for file in files {
             if let Some(body) = cached.get(&file.path) {
                 documents.push((
@@ -484,6 +485,12 @@ impl PreparedPullRequest {
             };
             let section_truncated = truncated && index == sections.len().saturating_sub(1);
             if section_truncated && requested.len() > 1 {
+                if truncated_fallback.is_none() {
+                    truncated_fallback = Some((
+                        file.path.clone(),
+                        pull_request_file_document(section.body, &self.pull_request, file, true),
+                    ));
+                }
                 continue;
             }
             if !section_truncated {
@@ -499,6 +506,11 @@ impl PreparedPullRequest {
                     section_truncated,
                 ),
             ));
+        }
+        if documents.is_empty()
+            && let Some(fallback) = truncated_fallback
+        {
+            documents.push(fallback);
         }
         Ok(documents)
     }
@@ -1689,7 +1701,9 @@ fn fetch_pull_request(
         if fetch_ref(temporary, "origin", &hint_refspec, 1).is_ok() {
             let head =
                 preferred_fetched_commit(temporary, &pull_request.head_oid, "refs/quinjet/head")?;
-            return Ok((hint.to_owned(), head));
+            if head == pull_request.head_oid {
+                return Ok((hint.to_owned(), head));
+            }
         }
     }
 
