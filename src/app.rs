@@ -925,6 +925,22 @@ pub(crate) struct PullRequestContentRow {
     pub wide: bool,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct PullRequestContentLink {
+    pub row: usize,
+    pub start: usize,
+    pub width: usize,
+    pub target: OpenTarget,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SideBySideRow {
+    FileHeader(usize),
+    FileFooter,
+    Full { index: usize, boxed: bool },
+    Split(Option<usize>, Option<usize>),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ScmAction {
     Stage(usize),
@@ -1069,7 +1085,9 @@ pub(crate) struct App {
     /// the pane to the selected step and make its own output unreadable.
     pub pull_request_step_reveal: bool,
     pub pull_request_content_rows: Vec<PullRequestContentRow>,
-    pub pull_request_content_rows_key: Option<(bool, usize, u64, u64, u64, u64, u64)>,
+    pub pull_request_content_rows_key: Option<(bool, usize, u64)>,
+    pub pull_request_content_width: usize,
+    pub pull_request_content_links: Vec<PullRequestContentLink>,
     pub pull_request_content_generation: u64,
     /// Whether the last draw left the content pane scrolled to its end. The
     /// renderer owns the row count, so it reports this back for the one decision
@@ -1078,6 +1096,10 @@ pub(crate) struct App {
     pub pull_request_progress: Option<PullRequestProgress>,
     pub auxiliary_preview: Option<AuxiliaryPreview>,
     pub document: DiffDocument,
+    pub document_layout_generation: u64,
+    pub unified_diff_rows: Vec<usize>,
+    pub side_by_side_diff_rows: Vec<SideBySideRow>,
+    pub diff_rows_key: Option<(u64, bool)>,
     pub selected_change_section: Option<ChangeSection>,
     pub collapsed_change_sections: HashSet<ChangeSection>,
     pub checked_change_paths: HashSet<PathBuf>,
@@ -1234,11 +1256,17 @@ impl App {
             pull_request_step_reveal: false,
             pull_request_content_rows: Vec::new(),
             pull_request_content_rows_key: None,
+            pull_request_content_width: 0,
+            pull_request_content_links: Vec::new(),
             pull_request_content_generation: 0,
             content_at_bottom: true,
             pull_request_progress: None,
             auxiliary_preview: None,
             document: DiffDocument::empty("Working Tree", "Loading changes…"),
+            document_layout_generation: 0,
+            unified_diff_rows: Vec::new(),
+            side_by_side_diff_rows: Vec::new(),
+            diff_rows_key: None,
             selected_change_section: Some(ChangeSection::Unstaged),
             collapsed_change_sections: HashSet::new(),
             checked_change_paths: HashSet::new(),
@@ -1331,6 +1359,7 @@ impl App {
         self.theme_name = name;
         self.appearance_choice = choice;
         self.appearance = appearance;
+        self.invalidate_pull_request_content_rows();
     }
 
     pub(crate) fn initial_effects(&mut self) -> Vec<AppEffect> {
@@ -1852,6 +1881,7 @@ impl App {
     }
 
     fn reset_preview_file_folds(&mut self, paths: &[PathBuf]) {
+        self.invalidate_diff_rows();
         self.collapsed_preview_files.clear();
         self.expanded_preview_files.clear();
         if paths.len() > 1 && !self.files_collapsed && !self.collapse_preference_set {
@@ -1883,6 +1913,7 @@ impl App {
         }
         self.files_collapsed = !self.preview_files_all_collapsed();
         self.collapse_preference_set = true;
+        self.invalidate_diff_rows();
         self.collapsed_preview_files.clear();
         self.expanded_preview_files.clear();
         self.content_scroll = 0;
@@ -1907,6 +1938,7 @@ impl App {
             &mut self.collapsed_preview_files
         };
         toggle_membership(overrides, path.clone());
+        self.invalidate_diff_rows();
         self.selected_preview_file = Some(path.clone());
         self.preview_file_cursor = self
             .preview_file_paths()
@@ -2387,10 +2419,10 @@ impl App {
                     self.pull_request_poll_due = None;
                     self.pull_request_lookup = TextBuffer::default();
                     self.pull_request_lookup_active = self.recent_pull_requests.is_empty();
-                    self.document = DiffDocument::empty(
+                    self.set_document(DiffDocument::empty(
                         "Open Pull Request",
                         "Enter a pull-request number and press Enter",
-                    );
+                    ));
                 } else if !self.filter.is_empty() {
                     self.filter.clear();
                     self.normalize_selection();
@@ -3140,7 +3172,7 @@ impl App {
                     }
                     Err(error) => {
                         self.reset_local_diff_runtime();
-                        self.document = DiffDocument::empty("Preview Error", error.clone());
+                        self.set_document(DiffDocument::empty("Preview Error", error.clone()));
                         self.show_toast(error, ToastLevel::Error, now);
                     }
                 }
@@ -3197,7 +3229,7 @@ impl App {
                     Err(error) => {
                         self.document_loading = false;
                         self.pull_request_workspace_generation = None;
-                        self.document = DiffDocument::empty("Preview Error", error.clone());
+                        self.set_document(DiffDocument::empty("Preview Error", error.clone()));
                         self.show_toast(error, ToastLevel::Error, now);
                     }
                 }
@@ -3224,12 +3256,12 @@ impl App {
                                     self.cache_pull_request_document(path, document);
                                     self.rebuild_pull_request_all_files_document();
                                 } else {
-                                    self.document = document;
+                                    self.set_document(document);
                                 }
                             }
                             PullRequestFileView::SingleFile => {
                                 self.cache_current_pull_request_single_document();
-                                self.document = document;
+                                self.set_document(document);
                                 self.pull_request_single_file = path;
                                 self.selected_preview_file = None;
                                 self.preview_file_cursor = 0;
@@ -3285,9 +3317,15 @@ impl App {
                         let was_running = self
                             .selected_pull_request_check()
                             .is_some_and(|check| check.status.is_running());
+                        let changed = self.pull_request_checks_error.is_some()
+                            || self.pull_request_checks_from_cache != snapshot.from_cache
+                            || self.pull_request_checks != snapshot.checks
+                            || snapshot.checks.is_empty();
                         self.pull_request_checks_from_cache = snapshot.from_cache;
                         self.pull_request_checks = snapshot.checks;
-                        self.invalidate_pull_request_content_rows();
+                        if changed {
+                            self.invalidate_pull_request_content_rows();
+                        }
                         let cursor = selected.and_then(|selected| {
                             self.pull_request_checks
                                 .iter()
@@ -3301,8 +3339,12 @@ impl App {
                         self.request_check_log_prefetch(&mut effects);
                     }
                     Err(error) => {
-                        self.pull_request_checks_error = Some(error);
-                        self.invalidate_pull_request_content_rows();
+                        if self.pull_request_checks.is_empty()
+                            || self.pull_request_checks_error.as_ref() != Some(&error)
+                        {
+                            self.pull_request_checks_error = Some(error);
+                            self.invalidate_pull_request_content_rows();
+                        }
                     }
                 }
             }
@@ -3317,30 +3359,42 @@ impl App {
                         .is_some_and(|check| check.status.is_running());
                 match result {
                     Ok(log) => {
-                        if self.expanded_check_steps.is_empty()
+                        let auto_expanded = if self.expanded_check_steps.is_empty()
                             && let Some(step) = log.failed_step().or_else(|| log.running_step())
                         {
                             let number = step.number;
                             let _ = self.expanded_check_steps.insert(number);
                             self.reveal_check_step(number);
-                        }
+                            true
+                        } else {
+                            false
+                        };
                         if self.pull_request_step_cursor == 0
                             && let Some(step) = log.steps.first()
                         {
                             let number = step.number;
                             self.reveal_check_step(number);
                         }
+                        let changed = auto_expanded
+                            || log.running_step().is_some()
+                            || self.pull_request_check_log_error.is_some()
+                            || self.pull_request_check_log.as_ref() != Some(&log);
                         self.pull_request_check_log = Some(log);
-                        self.invalidate_pull_request_content_rows();
+                        if changed {
+                            self.invalidate_pull_request_content_rows();
+                        }
                         self.pull_request_check_log_error = None;
                         if following {
                             self.content_scroll = usize::MAX;
                         }
                     }
                     Err(error) => {
-                        self.pull_request_check_log = None;
+                        let changed = self.pull_request_check_log.take().is_some()
+                            || self.pull_request_check_log_error.as_ref() != Some(&error);
                         self.pull_request_check_log_error = Some(error);
-                        self.invalidate_pull_request_content_rows();
+                        if changed {
+                            self.invalidate_pull_request_content_rows();
+                        }
                     }
                 }
             }
@@ -3351,13 +3405,20 @@ impl App {
                 self.pull_request_conversation_loading = false;
                 match result {
                     Ok(conversation) => {
-                        self.pull_request_conversation = conversation;
-                        self.pull_request_conversation_error = None;
-                        self.invalidate_pull_request_content_rows();
+                        if self.pull_request_conversation_error.is_some()
+                            || conversation.entries.is_empty()
+                            || self.pull_request_conversation != conversation
+                        {
+                            self.pull_request_conversation = conversation;
+                            self.pull_request_conversation_error = None;
+                            self.invalidate_pull_request_content_rows();
+                        }
                     }
                     Err(error) => {
-                        self.pull_request_conversation_error = Some(error);
-                        self.invalidate_pull_request_content_rows();
+                        if self.pull_request_conversation_error.as_ref() != Some(&error) {
+                            self.pull_request_conversation_error = Some(error);
+                            self.invalidate_pull_request_content_rows();
+                        }
                     }
                 }
                 if self.pull_request_conversation_refresh_again {
@@ -3467,7 +3528,9 @@ impl App {
                         }
                         let newly_opened = self.pull_request.is_none();
                         let previous = self.pull_request.replace(snapshot.pull_request);
-                        self.invalidate_pull_request_content_rows();
+                        if previous.as_ref() != self.pull_request.as_ref() {
+                            self.invalidate_pull_request_content_rows();
+                        }
                         let current = self.pull_request.as_ref().expect("just assigned");
                         let same = previous.as_ref().is_some_and(|previous| {
                             previous.number == current.number
@@ -3505,7 +3568,8 @@ impl App {
                     Err(error) => {
                         self.pull_request_progress = None;
                         self.pull_request_error = Some(error.clone());
-                        self.document = DiffDocument::empty("Pull Requests", error.clone());
+                        self.invalidate_pull_request_content_rows();
+                        self.set_document(DiffDocument::empty("Pull Requests", error.clone()));
                         self.show_toast(error, ToastLevel::Error, now);
                     }
                 }
@@ -4430,6 +4494,7 @@ impl App {
     fn apply_theme(&mut self, name: ThemeName) {
         self.theme_name = name;
         self.theme = Theme::new(name, self.appearance);
+        self.invalidate_pull_request_content_rows();
     }
 
     fn apply_live_modal_filter(&mut self) {
@@ -4519,7 +4584,7 @@ impl App {
         self.content_scroll = 0;
         self.horizontal_scroll = 0;
         self.invalidate_preview();
-        self.document = self.loading_document_for_view(view);
+        self.set_document(self.loading_document_for_view(view));
         self.schedule_pull_request_poll(Instant::now());
         if view == View::PullRequests && self.pull_request.is_none() {
             self.pull_request_lookup_active = self.recent_pull_requests.is_empty();
@@ -5406,32 +5471,33 @@ impl App {
     }
 
     fn rebuild_local_diff_document(&mut self) {
-        if let Some(index) = &self.local_diff_index {
+        let Some(index) = &self.local_diff_index else {
+            return;
+        };
+        let document = if index.files.is_empty()
+            && matches!(
+                self.local_diff_request.as_ref(),
+                Some(LocalDiffRequest::Changes { .. })
+            ) {
+            DiffDocument::empty(
+                &index.title,
+                if self.status.changes.is_empty() {
+                    "Working tree clean — no changes"
+                } else {
+                    "No changes match the current filter"
+                },
+            )
+        } else {
             let paths = index
                 .files
                 .iter()
                 .map(|file| file.path.clone())
                 .collect::<Vec<_>>();
             let visible = self.visible_preview_paths(&paths);
-            self.document = index.document_with_visibility(&self.local_diff_documents, |path| {
-                visible.contains(path)
-            });
-            if index.files.is_empty()
-                && matches!(
-                    self.local_diff_request.as_ref(),
-                    Some(LocalDiffRequest::Changes { .. })
-                )
-            {
-                self.document = DiffDocument::empty(
-                    &index.title,
-                    if self.status.changes.is_empty() {
-                        "Working tree clean — no changes"
-                    } else {
-                        "No changes match the current filter"
-                    },
-                );
-            }
-        }
+            index
+                .document_with_visibility(&self.local_diff_documents, |path| visible.contains(path))
+        };
+        self.set_document(document);
     }
 
     fn store_local_diff_document(&mut self, path: PathBuf, document: DiffDocument) {
@@ -5440,7 +5506,7 @@ impl App {
             .as_ref()
             .is_some_and(|index| index.files.len() == 1)
         {
-            self.document = document;
+            self.set_document(document);
             self.local_diff_single_loaded = true;
         } else {
             drop(self.local_diff_documents.insert(path, document));
@@ -5535,6 +5601,8 @@ impl App {
         self.pull_request_step_cursor = 0;
         self.pull_request_content_rows.clear();
         self.pull_request_content_rows_key = None;
+        self.pull_request_content_width = 0;
+        self.pull_request_content_links.clear();
         self.pull_request_content_generation = self.pull_request_content_generation.wrapping_add(1);
         self.pull_request_checks_read_at = None;
         self.pull_request_detail_read_at = None;
@@ -5587,7 +5655,7 @@ impl App {
                 },
             );
             document.pull_request_details = Some(pull_request_details(pull_request));
-            self.document = document;
+            self.set_document(document);
             return;
         }
         let index = DiffIndex {
@@ -5614,7 +5682,7 @@ impl App {
         let mut document = index
             .document_with_visibility(&self.pull_request_documents, |path| visible.contains(path));
         document.pull_request_details = Some(pull_request_details(pull_request));
-        self.document = document;
+        self.set_document(document);
     }
 
     fn cache_current_pull_request_single_document(&mut self) {
@@ -5625,6 +5693,7 @@ impl App {
             return;
         }
         let document = std::mem::take(&mut self.document);
+        self.invalidate_diff_rows();
         self.cache_pull_request_document(path, document);
     }
 
@@ -5730,7 +5799,7 @@ impl App {
             }
             if let Some(document) = self.take_pull_request_document(&path) {
                 self.document_loading = false;
-                self.document = document;
+                self.set_document(document);
                 self.pull_request_single_file = Some(path);
                 self.selected_preview_file = None;
                 self.preview_file_cursor = 0;
@@ -5811,6 +5880,9 @@ impl App {
         };
         self.pull_request_checks_generation = self.pull_request_checks_generation.wrapping_add(1);
         self.pull_request_checks_loading = true;
+        if self.pull_request_checks.is_empty() {
+            self.invalidate_pull_request_content_rows();
+        }
         effects.push(AppEffect::Git(Box::new(
             WorkerCommand::LoadPullRequestChecks {
                 generation: self.pull_request_checks_generation,
@@ -5858,6 +5930,16 @@ impl App {
         self.invalidate_check_run_log();
         self.invalidate_pull_request_content_rows();
         true
+    }
+
+    pub(crate) fn set_document(&mut self, document: DiffDocument) {
+        self.document = document;
+        self.invalidate_diff_rows();
+    }
+
+    pub(crate) const fn invalidate_diff_rows(&mut self) {
+        self.document_layout_generation = self.document_layout_generation.wrapping_add(1);
+        self.diff_rows_key = None;
     }
 
     const fn invalidate_pull_request_content_rows(&mut self) {
@@ -5984,6 +6066,9 @@ impl App {
         self.pull_request_check_log_generation =
             self.pull_request_check_log_generation.wrapping_add(1);
         self.pull_request_check_log_loading = true;
+        if self.pull_request_check_log.is_none() {
+            self.invalidate_pull_request_content_rows();
+        }
         effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadCheckRunLog {
             generation: self.pull_request_check_log_generation,
             pull_request: Box::new(pull_request),
@@ -6038,6 +6123,9 @@ impl App {
         self.pull_request_conversation_generation =
             self.pull_request_conversation_generation.wrapping_add(1);
         self.pull_request_conversation_loading = true;
+        if self.pull_request_conversation.entries.is_empty() {
+            self.invalidate_pull_request_content_rows();
+        }
         effects.push(AppEffect::Git(Box::new(
             WorkerCommand::LoadPullRequestConversation {
                 generation: self.pull_request_conversation_generation,
@@ -6237,10 +6325,10 @@ impl App {
             self.pull_request_warnings.clear();
             self.pull_request = None;
             self.reset_pull_request_runtime();
-            self.document = DiffDocument::empty(
+            self.set_document(DiffDocument::empty(
                 format!("Opening Pull Request #{number}"),
                 PullRequestProgress::LoadingMetadata.label(),
-            );
+            ));
         }
         effects.push(AppEffect::Git(Box::new(WorkerCommand::LookupPullRequest {
             generation: self.pull_request_generation,
@@ -6343,7 +6431,7 @@ impl App {
         self.preview_file_cursor = 0;
         self.collapsed_preview_files.clear();
         self.expanded_preview_files.clear();
-        self.document = DiffDocument::empty(title, "Indexing changed files…");
+        self.set_document(DiffDocument::empty(title, "Indexing changed files…"));
         effects.push(AppEffect::Git(Box::new(WorkerCommand::PrepareLocalDiff {
             generation,
             request: Box::new(request),
@@ -6373,14 +6461,14 @@ impl App {
         if self.view == View::History {
             self.reset_local_diff_runtime();
             self.document_loading = false;
-            self.document = DiffDocument::empty(
+            self.set_document(DiffDocument::empty(
                 "Commit History",
                 if self.history.is_empty() {
                     "No commits in this repository"
                 } else {
                     "No commits match the current filter"
                 },
-            );
+            ));
             return;
         }
 
@@ -6390,14 +6478,14 @@ impl App {
                 let Some(pull_request) = self.selected_pull_request().cloned() else {
                     self.document_loading = false;
                     if self.pull_request_section == PullRequestSection::Files {
-                        self.document = DiffDocument::empty(
+                        self.set_document(DiffDocument::empty(
                             "Open Pull Request",
                             if self.pull_request_loading {
                                 "Fetching pull-request metadata…"
                             } else {
                                 "Enter a pull-request number and press Enter"
                             },
-                        );
+                        ));
                     }
                     return;
                 };
@@ -6407,10 +6495,10 @@ impl App {
                     return;
                 }
                 if preparing {
-                    self.document = pull_request_loading_document(
+                    self.set_document(pull_request_loading_document(
                         &pull_request,
                         PullRequestProgress::PreparingRepository.label(),
-                    );
+                    ));
                     return;
                 }
 
@@ -6469,7 +6557,7 @@ impl App {
         self.invalidate_preview();
         if self.view != View::PullRequests {
             self.reset_local_diff_runtime();
-            self.document = self.loading_document_for_view(self.view);
+            self.set_document(self.loading_document_for_view(self.view));
         }
         self.preview_due = Some(now + PREVIEW_DEBOUNCE);
     }

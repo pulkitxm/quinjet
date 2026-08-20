@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::num::NonZeroU16;
 use std::ops::Range;
 use std::path::Path;
@@ -13,8 +14,9 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use crate::app::{
     App, ChangeRow, ChangeSection, CheckListRow, ContentFileHit, ContentStepHit, DiffLayout, Focus,
     HelpHit, LinkHit, Modal, ModalAction, OpenTarget, PaletteCommand, PrMenuItem,
-    PullRequestContentRow, PullRequestSection, PullRequestTreeEntry, ScmAction, ScmActionHit,
-    ScmMenuItem, SidebarHit, SidebarHitArea, ToastLevel, UiGeometry, View,
+    PullRequestContentLink, PullRequestContentRow, PullRequestSection, PullRequestTreeEntry,
+    ScmAction, ScmActionHit, ScmMenuItem, SideBySideRow, SidebarHit, SidebarHitArea, ToastLevel,
+    UiGeometry, View,
 };
 use crate::convert::cells;
 use crate::date_time::format_local_timestamp;
@@ -2150,12 +2152,7 @@ const fn pull_request_check_icon(
 /// the step cursor can find it after scrolling.
 type ContentRow = PullRequestContentRow;
 
-struct ContentLink {
-    row: usize,
-    start: usize,
-    width: usize,
-    link: Link,
-}
+type ContentLink = PullRequestContentLink;
 
 #[derive(Clone)]
 struct Link {
@@ -2237,31 +2234,27 @@ fn draw_pull_request_overview(
     }
 
     let width = inner.width as usize;
-    let rows_key = (
-        showing_check,
-        width,
-        app.pull_request_generation,
-        app.pull_request_checks_generation,
-        app.pull_request_conversation_generation,
-        app.pull_request_check_log_generation,
-        app.pull_request_content_generation,
-    );
+    let rows_key = (showing_check, width, app.pull_request_content_generation);
     if app.pull_request_content_rows_key != Some(rows_key) {
         app.pull_request_content_rows = if showing_check {
             check_run_rows(app, width, theme)
         } else {
             conversation_rows(app, width, theme)
         };
+        app.pull_request_content_width = app
+            .pull_request_content_rows
+            .iter()
+            .filter(|row| row.wide)
+            .map(|row| row.line.width())
+            .max()
+            .unwrap_or_default();
+        app.pull_request_content_links =
+            pull_request_content_links(app, showing_check, &app.pull_request_content_rows);
         app.pull_request_content_rows_key = Some(rows_key);
     }
     let rows = &app.pull_request_content_rows;
-    let row_links = pull_request_content_links(app, showing_check, rows);
-    let content_width = rows
-        .iter()
-        .filter(|row| row.wide)
-        .map(|row| row.line.width())
-        .max()
-        .unwrap_or_default();
+    let row_links = &app.pull_request_content_links;
+    let content_width = app.pull_request_content_width;
     let overflow = content_width.saturating_sub(width);
     app.horizontal_scroll = app.horizontal_scroll.min(overflow);
 
@@ -2329,7 +2322,7 @@ fn draw_pull_request_overview(
                 link.start,
                 link.width,
             );
-            link.link.register(area, link_hits);
+            Link::new(link.target.clone()).register(area, link_hits);
         }
     }
     draw_scrollbar(frame, inner, app.content_scroll, rows.len(), theme);
@@ -2348,7 +2341,7 @@ fn pull_request_content_links(
         else {
             return Vec::new();
         };
-        let link = Link::new(OpenTarget::Browser(check.link.clone()));
+        let target = OpenTarget::Browser(check.link.clone());
         let url_row = 2
             + usize::from(!check.started_at.is_empty())
             + usize::from(!check.description.is_empty());
@@ -2357,13 +2350,13 @@ fn pull_request_content_links(
                 row: 0,
                 start: 2,
                 width: check.name.width(),
-                link: link.clone(),
+                target: target.clone(),
             },
             ContentLink {
                 row: url_row,
                 start: DETAIL_LABEL_WIDTH,
                 width: check.link.width(),
-                link,
+                target,
             },
         ];
     }
@@ -2402,7 +2395,7 @@ fn pull_request_content_links(
                     row,
                     start,
                     width,
-                    link: Link::new(target),
+                    target,
                 });
             }
             conversation_row = row.saturating_add(1);
@@ -2417,7 +2410,7 @@ fn pull_request_content_links(
                         row,
                         start: action_start,
                         width: action_width,
-                        link: Link::new(OpenTarget::Browser(entry.url.clone())),
+                        target: OpenTarget::Browser(entry.url.clone()),
                     });
                 }
             }
@@ -2455,7 +2448,7 @@ fn push_content_link(
             row,
             start,
             width,
-            link: Link::new(target),
+            target,
         });
     }
 }
@@ -3325,15 +3318,22 @@ fn draw_content(
         0
     };
     let side_by_side = app.diff_layout == DiffLayout::SideBySide && inner.width >= 72;
-    let side_rows = optional_side_by_side_rows(side_by_side, &app.document, app);
-    let unified_rows = if side_by_side {
-        None
+    let rows_key = (app.document_layout_generation, side_by_side);
+    if app.diff_rows_key != Some(rows_key) {
+        if side_by_side {
+            app.side_by_side_diff_rows = side_by_side_rows(&app.document, app);
+            app.unified_diff_rows = Vec::new();
+        } else {
+            app.unified_diff_rows = unified_row_indices(&app.document, app);
+            app.side_by_side_diff_rows = Vec::new();
+        }
+        app.diff_rows_key = Some(rows_key);
+    }
+    let diff_rows = if side_by_side {
+        app.side_by_side_diff_rows.len()
     } else {
-        Some(unified_row_indices(&app.document, app))
+        app.unified_diff_rows.len()
     };
-    let diff_rows = side_rows
-        .as_ref()
-        .map_or_else(|| unified_rows.as_ref().map_or(0, Vec::len), Vec::len);
     let visual_length = details_rows + diff_rows;
     let max_scroll = visual_length.saturating_sub(inner.height as usize);
     app.content_scroll = app.content_scroll.min(max_scroll);
@@ -3384,15 +3384,26 @@ fn draw_content(
     );
     let (divider, content_file_hits) = if render_area.width < 2 || render_area.height == 0 {
         (None, Vec::new())
-    } else if let Some(rows) = side_rows.as_deref() {
-        let (divider, hits) =
-            draw_side_by_side_diff(frame, render_area, app, rows, diff_scroll, theme);
+    } else if side_by_side {
+        let (divider, hits) = draw_side_by_side_diff(
+            frame,
+            render_area,
+            app,
+            &app.side_by_side_diff_rows,
+            diff_scroll,
+            theme,
+        );
         (Some(divider), hits)
-    } else if let Some(rows) = unified_rows.as_deref() {
-        let hits = draw_unified_diff(frame, render_area, app, rows, diff_scroll, theme);
-        (None, hits)
     } else {
-        (None, Vec::new())
+        let hits = draw_unified_diff(
+            frame,
+            render_area,
+            app,
+            &app.unified_diff_rows,
+            diff_scroll,
+            theme,
+        );
+        (None, hits)
     };
     draw_scrollbar(frame, inner, app.content_scroll, visual_length, theme);
     (divider, content_file_hits, Vec::new())
@@ -4073,7 +4084,13 @@ fn draw_unified_diff(
 ) -> Vec<ContentFileHit> {
     let first_index = rows.get(diff_scroll).copied().unwrap_or_default();
     let mut in_file = inside_file_before(&app.document, first_index);
-    let emphasis = intraline_emphasis(&app.document.lines);
+    let emphasis = visible_intraline_emphasis(
+        &app.document.lines,
+        rows.iter()
+            .copied()
+            .skip(diff_scroll)
+            .take(area.height as usize),
+    );
     let sticky = app
         .document
         .lines
@@ -4125,7 +4142,7 @@ fn draw_unified_diff(
                 line,
                 in_file,
                 app.horizontal_scroll,
-                emphasis.get(line_index).and_then(Option::as_ref),
+                emphasis.get(&line_index),
                 theme,
             ),
         }
@@ -4281,7 +4298,7 @@ fn draw_side_by_side_diff(
     frame: &mut Frame<'_>,
     area: Rect,
     app: &App,
-    rows: &[SideBySideRow<'_>],
+    rows: &[SideBySideRow],
     diff_scroll: usize,
     theme: &Theme,
 ) -> (Rect, Vec<ContentFileHit>) {
@@ -4302,6 +4319,7 @@ fn draw_side_by_side_diff(
         theme.border
     };
 
+    let lines = &app.document.lines;
     let sticky = rows.get(diff_scroll).and_then(|first| match first {
         SideBySideRow::FileHeader(_) | SideBySideRow::FileFooter => None,
         _ => rows
@@ -4310,7 +4328,7 @@ fn draw_side_by_side_diff(
             .iter()
             .rev()
             .find_map(|row| match row {
-                SideBySideRow::FileHeader(header) => Some(*header),
+                SideBySideRow::FileHeader(header) => lines.get(*header),
                 _ => None,
             }),
     });
@@ -4336,7 +4354,10 @@ fn draw_side_by_side_diff(
         let y = content_y + cells(offset);
         let row_area = Rect::new(area.x, y, area.width, 1);
         match row {
-            SideBySideRow::FileHeader(line) => {
+            SideBySideRow::FileHeader(header) => {
+                let Some(line) = lines.get(*header) else {
+                    continue;
+                };
                 draw_file_header(frame, row_area, line, app, theme);
                 if let Some(path) = file_header_path(line) {
                     hits.push(ContentFileHit {
@@ -4346,20 +4367,27 @@ fn draw_side_by_side_diff(
                 }
             }
             SideBySideRow::FileFooter => draw_file_footer(frame, row_area, theme),
-            SideBySideRow::Full { line, boxed } => draw_full_width_diff_line(
-                frame,
-                row_area,
-                line,
-                *boxed,
-                app.horizontal_scroll,
-                theme,
-            ),
-            SideBySideRow::Split(old_line, new_line) => {
-                let (old_emphasis, new_emphasis) = paired_intraline_emphasis(*old_line, *new_line);
+            SideBySideRow::Full { index, boxed } => {
+                let Some(line) = lines.get(*index) else {
+                    continue;
+                };
+                draw_full_width_diff_line(
+                    frame,
+                    row_area,
+                    line,
+                    *boxed,
+                    app.horizontal_scroll,
+                    theme,
+                );
+            }
+            SideBySideRow::Split(old_index, new_index) => {
+                let old_line = old_index.and_then(|line_index| lines.get(line_index));
+                let new_line = new_index.and_then(|line_index| lines.get(line_index));
+                let (old_emphasis, new_emphasis) = paired_intraline_emphasis(old_line, new_line);
                 draw_diff_side(
                     frame,
                     Rect::new(left.x, y, left.width, 1),
-                    *old_line,
+                    old_line,
                     true,
                     app.horizontal_scroll,
                     old_emphasis.as_ref(),
@@ -4372,7 +4400,7 @@ fn draw_side_by_side_diff(
                 draw_diff_side(
                     frame,
                     Rect::new(right.x, y, right.width, 1),
-                    *new_line,
+                    new_line,
                     false,
                     app.horizontal_scroll,
                     new_emphasis.as_ref(),
@@ -4384,21 +4412,14 @@ fn draw_side_by_side_diff(
     (divider, hits)
 }
 
-enum SideBySideRow<'a> {
-    FileHeader(&'a DiffLine),
-    FileFooter,
-    Full { line: &'a DiffLine, boxed: bool },
-    Split(Option<&'a DiffLine>, Option<&'a DiffLine>),
-}
-
-fn side_by_side_rows<'a>(document: &'a DiffDocument, app: &App) -> Vec<SideBySideRow<'a>> {
+fn side_by_side_rows(document: &DiffDocument, app: &App) -> Vec<SideBySideRow> {
     let mut rows = Vec::new();
     let mut index = 0;
     let mut in_file = false;
     while let Some(line) = document.lines.get(index) {
         match line.kind {
             DiffLineKind::FileHeader => {
-                rows.push(SideBySideRow::FileHeader(line));
+                rows.push(SideBySideRow::FileHeader(index));
                 in_file = true;
                 index += 1;
                 if file_header_path(line).is_some_and(|path| app.preview_file_collapsed(path)) {
@@ -4425,17 +4446,17 @@ fn side_by_side_rows<'a>(document: &'a DiffDocument, app: &App) -> Vec<SideBySid
             }
             DiffLineKind::Meta => {
                 rows.push(SideBySideRow::Full {
-                    line,
+                    index,
                     boxed: in_file,
                 });
                 index += 1;
             }
             DiffLineKind::Added => {
-                rows.push(SideBySideRow::Split(None, Some(line)));
+                rows.push(SideBySideRow::Split(None, Some(index)));
                 index += 1;
             }
             DiffLineKind::Context => {
-                rows.push(SideBySideRow::Split(Some(line), Some(line)));
+                rows.push(SideBySideRow::Split(Some(index), Some(index)));
                 index += 1;
             }
             DiffLineKind::Removed => {
@@ -4455,15 +4476,12 @@ fn side_by_side_rows<'a>(document: &'a DiffDocument, app: &App) -> Vec<SideBySid
                 {
                     index += 1;
                 }
-                let removed = document
-                    .lines
-                    .get(removed_start..added_start)
-                    .unwrap_or_default();
-                let added = document.lines.get(added_start..index).unwrap_or_default();
-                for pair_index in 0..removed.len().max(added.len()) {
+                let removed_len = added_start - removed_start;
+                let added_len = index - added_start;
+                for pair_index in 0..removed_len.max(added_len) {
                     rows.push(SideBySideRow::Split(
-                        removed.get(pair_index),
-                        added.get(pair_index),
+                        (pair_index < removed_len).then(|| removed_start + pair_index),
+                        (pair_index < added_len).then(|| added_start + pair_index),
                     ));
                 }
             }
@@ -4472,48 +4490,105 @@ fn side_by_side_rows<'a>(document: &'a DiffDocument, app: &App) -> Vec<SideBySid
     rows
 }
 
-fn optional_side_by_side_rows<'a>(
-    enabled: bool,
-    document: &'a DiffDocument,
-    app: &App,
-) -> Option<Vec<SideBySideRow<'a>>> {
-    enabled.then(|| side_by_side_rows(document, app))
+struct EmphasisBlock {
+    removed_start: usize,
+    added_start: usize,
+    added_end: usize,
 }
 
-fn intraline_emphasis(lines: &[DiffLine]) -> Vec<Option<Range<usize>>> {
-    let mut emphasis = vec![None; lines.len()];
-    let mut index = 0;
-    while let Some(line) = lines.get(index) {
-        if line.kind != DiffLineKind::Removed {
-            index += 1;
+impl EmphasisBlock {
+    const fn contains(&self, index: usize) -> bool {
+        self.removed_start <= index && index < self.added_end
+    }
+}
+
+fn emphasis_run_start(lines: &[DiffLine], mut start: usize, kind: DiffLineKind) -> usize {
+    while start > 0
+        && lines
+            .get(start.saturating_sub(1))
+            .is_some_and(|line| line.kind == kind)
+    {
+        start = start.saturating_sub(1);
+    }
+    start
+}
+
+fn emphasis_run_end(lines: &[DiffLine], mut end: usize, kind: DiffLineKind) -> usize {
+    while lines.get(end).is_some_and(|line| line.kind == kind) {
+        end = end.saturating_add(1);
+    }
+    end
+}
+
+fn emphasis_block(lines: &[DiffLine], index: usize) -> Option<EmphasisBlock> {
+    match lines.get(index)?.kind {
+        DiffLineKind::Removed => {
+            let removed_start = emphasis_run_start(lines, index, DiffLineKind::Removed);
+            let added_start =
+                emphasis_run_end(lines, index.saturating_add(1), DiffLineKind::Removed);
+            let added_end = emphasis_run_end(lines, added_start, DiffLineKind::Added);
+            Some(EmphasisBlock {
+                removed_start,
+                added_start,
+                added_end,
+            })
+        }
+        DiffLineKind::Added => {
+            let added_start = emphasis_run_start(lines, index, DiffLineKind::Added);
+            let removed_start = emphasis_run_start(lines, added_start, DiffLineKind::Removed);
+            let added_end = emphasis_run_end(lines, index.saturating_add(1), DiffLineKind::Added);
+            Some(EmphasisBlock {
+                removed_start,
+                added_start,
+                added_end,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn visible_intraline_emphasis(
+    lines: &[DiffLine],
+    visible: impl Iterator<Item = usize>,
+) -> HashMap<usize, Range<usize>> {
+    let mut emphasis = HashMap::new();
+    let mut block: Option<EmphasisBlock> = None;
+    for index in visible {
+        let Some(kind) = lines.get(index).map(|line| line.kind) else {
+            continue;
+        };
+        if kind != DiffLineKind::Removed && kind != DiffLineKind::Added {
             continue;
         }
-        let removed_start = index;
-        while lines
-            .get(index)
-            .is_some_and(|line| line.kind == DiffLineKind::Removed)
-        {
-            index += 1;
+        if !block.as_ref().is_some_and(|block| block.contains(index)) {
+            block = emphasis_block(lines, index);
         }
-        let added_start = index;
-        while lines
-            .get(index)
-            .is_some_and(|line| line.kind == DiffLineKind::Added)
-        {
-            index += 1;
+        let Some(current) = block.as_ref() else {
+            continue;
+        };
+        let pair_count = current
+            .added_start
+            .saturating_sub(current.removed_start)
+            .min(current.added_end.saturating_sub(current.added_start));
+        let pair_index = if kind == DiffLineKind::Removed {
+            index.saturating_sub(current.removed_start)
+        } else {
+            index.saturating_sub(current.added_start)
+        };
+        if pair_index >= pair_count {
+            continue;
         }
-        let pair_count = (added_start - removed_start).min(index - added_start);
-        for pair_index in 0..pair_count {
-            let old_index = removed_start + pair_index;
-            let new_index = added_start + pair_index;
-            let (old_range, new_range) =
-                paired_intraline_emphasis(lines.get(old_index), lines.get(new_index));
-            if let Some(slot) = emphasis.get_mut(old_index) {
-                *slot = old_range;
-            }
-            if let Some(slot) = emphasis.get_mut(new_index) {
-                *slot = new_range;
-            }
+        let (old_range, new_range) = paired_intraline_emphasis(
+            lines.get(current.removed_start.saturating_add(pair_index)),
+            lines.get(current.added_start.saturating_add(pair_index)),
+        );
+        let range = if kind == DiffLineKind::Removed {
+            old_range
+        } else {
+            new_range
+        };
+        if let Some(range) = range {
+            let _ = emphasis.insert(index, range);
         }
     }
     emphasis
@@ -7111,6 +7186,61 @@ mod tests {
     }
 
     #[test]
+    fn diff_rows_are_cached_between_draws_and_rebuilt_on_document_change() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = App::new("/tmp/repo", "repo");
+        app.set_document(DiffDocument {
+            title: "Changes".to_owned(),
+            truncated: false,
+            commit_details: None,
+            pull_request_details: None,
+            lines: vec![
+                test_file_header("src/main.rs", 1, 0),
+                test_line(DiffLineKind::Context, "same"),
+                test_line(DiffLineKind::FileFooter, ""),
+            ],
+        });
+        let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+        assert!(
+            !app.unified_diff_rows.is_empty(),
+            "the first draw builds the unified rows"
+        );
+        let key = app.diff_rows_key;
+        let pointer = app.unified_diff_rows.as_ptr();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+        assert_eq!(
+            app.diff_rows_key, key,
+            "an unchanged document keeps its key"
+        );
+        assert_eq!(
+            app.unified_diff_rows.as_ptr(),
+            pointer,
+            "an unchanged document reuses its rows"
+        );
+
+        app.set_document(DiffDocument::empty("Changes", "Working tree clean"));
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+        assert_ne!(
+            app.diff_rows_key, key,
+            "replacing the document rebuilds the rows"
+        );
+        assert_eq!(
+            app.unified_diff_rows.len(),
+            app.document.lines.len(),
+            "the rebuilt rows describe the new document"
+        );
+    }
+
+    #[test]
     fn side_by_side_pairs_replacements() {
         let document = DiffDocument {
             title: String::new(),
@@ -7127,11 +7257,12 @@ mod tests {
         let app = App::new("/tmp/repo", "repo");
         let rows = side_by_side_rows(&document, &app);
         assert_eq!(rows.len(), 3);
+        let line_text = |index: usize| document.lines.get(index).map(DiffLine::text).unwrap();
         let SideBySideRow::Split(old, new) = &rows[0] else {
             panic!("expected a split diff row");
         };
-        assert_eq!(old.unwrap().text(), "old one");
-        assert_eq!(new.unwrap().text(), "new one");
+        assert_eq!(line_text(old.unwrap()), "old one");
+        assert_eq!(line_text(new.unwrap()), "new one");
         let SideBySideRow::Split(_, new) = &rows[1] else {
             panic!("expected a split diff row");
         };
@@ -7139,7 +7270,7 @@ mod tests {
         let SideBySideRow::Split(old, _) = &rows[2] else {
             panic!("expected a split diff row");
         };
-        assert_eq!(old.unwrap().text(), "same");
+        assert_eq!(line_text(old.unwrap()), "same");
     }
 
     #[test]
@@ -7270,11 +7401,16 @@ mod tests {
 
         let app = App::new("/tmp/repo", "repo");
         assert_eq!(unified_row_indices(&document, &app), vec![0, 2, 3]);
-        assert!(
-            side_by_side_rows(&document, &app)
-                .iter()
-                .all(|row| !matches!(row, SideBySideRow::Full { line, .. } if line.kind == DiffLineKind::HunkHeader))
-        );
+        assert!(side_by_side_rows(&document, &app).iter().all(|row| {
+            !matches!(
+                row,
+                SideBySideRow::Full { index, .. }
+                    if document
+                        .lines
+                        .get(*index)
+                        .is_some_and(|line| line.kind == DiffLineKind::HunkHeader)
+            )
+        }));
     }
 
     #[test]
@@ -8431,6 +8567,34 @@ terminal rows because that is what real pull-request comments look like in pract
         assert_eq!(
             paired_intraline_emphasis(Some(&old), Some(&new)),
             (None, None)
+        );
+    }
+
+    #[test]
+    fn visible_intraline_emphasis_matches_block_pairing() {
+        let lines = vec![
+            test_line(DiffLineKind::Context, "same"),
+            test_line(DiffLineKind::Removed, "value = 1"),
+            test_line(DiffLineKind::Removed, "gone"),
+            test_line(DiffLineKind::Added, "value = 2"),
+            test_line(DiffLineKind::Context, "same"),
+            test_line(DiffLineKind::Added, "standalone"),
+        ];
+
+        let emphasis = visible_intraline_emphasis(&lines, 0..lines.len());
+        assert_eq!(emphasis.get(&1), Some(&(8..9)), "removed side of the pair");
+        assert_eq!(emphasis.get(&3), Some(&(8..9)), "added side of the pair");
+        assert!(!emphasis.contains_key(&2), "unpaired removed line");
+        assert!(
+            !emphasis.contains_key(&5),
+            "added run without a removed partner"
+        );
+
+        let only_added = visible_intraline_emphasis(&lines, [3_usize].into_iter());
+        assert_eq!(
+            only_added.get(&3),
+            Some(&(8..9)),
+            "partner is found outside the viewport"
         );
     }
 
