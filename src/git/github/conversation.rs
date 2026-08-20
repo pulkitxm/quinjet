@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use super::{
     CacheLife, PullRequest, Repository, bounded_command_error, bounded_text, cache_read,
-    cache_write, parse_tsv_record,
+    cache_write, has_next_page, last_page, parse_tsv_record, split_http_response,
 };
 
 /// The renderer wraps every entry to the pane width on each redraw, so this cap
@@ -94,6 +94,30 @@ struct ConversationRecords {
     from_cache: bool,
 }
 
+/// How a stream reaches its newest entries. Review comments accept a
+/// descending sort, so their newest page is page one. The timeline API only
+/// serves oldest-first, so its newest page is the one `rel="last"` names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConversationPaging {
+    NewestFirst,
+    LastPageFirst,
+}
+
+struct ConversationStream {
+    cache_key: String,
+    validator_key: String,
+    endpoint: String,
+    jq: String,
+    paging: ConversationPaging,
+}
+
+struct ConversationPage {
+    data: Vec<u8>,
+    truncated: bool,
+    has_next: bool,
+    last_page: Option<usize>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ConversationEntry {
@@ -160,15 +184,23 @@ impl Repository {
             pull_request.number
         );
         let timeline = self.conversation_records(
-            &format!("conversation-timeline-v1\n{stamp}"),
-            &format!("conversation-timeline-validator-v1\n{identity}"),
-            timeline_args(pull_request),
+            &ConversationStream {
+                cache_key: format!("conversation-timeline-v2\n{stamp}"),
+                validator_key: format!("conversation-timeline-validator-v2\n{identity}"),
+                endpoint: timeline_endpoint(pull_request),
+                jq: timeline_tsv_jq(),
+                paging: ConversationPaging::LastPageFirst,
+            },
             "unable to load the pull-request timeline",
         )?;
         let comments = self.conversation_records(
-            &format!("conversation-comments-v1\n{stamp}"),
-            &format!("conversation-comments-validator-v1\n{identity}"),
-            review_comment_args(pull_request),
+            &ConversationStream {
+                cache_key: format!("conversation-comments-v2\n{stamp}"),
+                validator_key: format!("conversation-comments-validator-v2\n{identity}"),
+                endpoint: review_comment_endpoint(pull_request),
+                jq: REVIEW_COMMENT_TSV_JQ.to_owned(),
+                paging: ConversationPaging::NewestFirst,
+            },
             "unable to load pull-request review comments",
         )?;
 
@@ -201,59 +233,171 @@ impl Repository {
         })
     }
 
+    /// Read one stream page by page, newest pages first, stopping at the entry
+    /// cap. A capped read keeps only the newest pages, so the omitted activity
+    /// is genuinely the oldest; an oversized or failed validated first page
+    /// degrades to the bounded page loop instead of failing the conversation.
+    /// Only a pipe-truncated page prevents caching.
     fn conversation_records(
         &self,
-        key: &str,
-        validator_key: &str,
-        args: Vec<OsString>,
+        stream: &ConversationStream,
         error_context: &str,
     ) -> Result<ConversationRecords> {
-        if let Some(data) = cache_read(key, CacheLife::Immutable) {
+        if let Some(entry) = cache_read(&stream.cache_key, CacheLife::Immutable) {
+            let (complete, body) = split_conversation_cache(&entry);
             return Ok(ConversationRecords {
-                entries: parse_conversation(&data).context(error_context.to_owned())?,
-                truncated: false,
+                entries: parse_conversation(body).context(error_context.to_owned())?,
+                truncated: !complete,
                 from_cache: true,
             });
         }
-        let single_page = validator_args(&args);
-        if let Ok(read) = self.validated_gh(validator_key, single_page)
+        let first = match self.validated_gh(
+            &stream.validator_key,
+            vec![
+                OsString::from(&stream.endpoint),
+                OsString::from("--jq"),
+                OsString::from(&stream.jq),
+            ],
+        ) {
+            Ok(read) if !read.truncated => Some(read),
+            Ok(_) | Err(_) => None,
+        };
+        if let Some(read) = &first
             && read.complete
         {
             let entries = parse_conversation(&read.data).context(error_context.to_owned())?;
-            cache_write(key, &read.data);
+            cache_write(
+                &stream.cache_key,
+                &conversation_cache_entry(true, &read.data),
+            );
             return Ok(ConversationRecords {
                 entries,
                 truncated: false,
                 from_cache: read.unchanged,
             });
         }
-        let output = self.run_gh(args)?;
+
+        let mut collected: Vec<u8> = Vec::new();
+        let mut lines = 0_usize;
+        let mut pipe_truncated = false;
+        let mut complete = true;
+        let (first_data, first_last_page, has_more) = if let Some(read) = first {
+            (read.data, read.last_page, true)
+        } else {
+            let read = self.conversation_page(&stream.endpoint, &stream.jq, 1, error_context)?;
+            pipe_truncated |= read.truncated;
+            (read.data, read.last_page, read.has_next)
+        };
+        match (stream.paging, first_last_page.filter(|last| *last >= 2)) {
+            (ConversationPaging::LastPageFirst, Some(last)) => {
+                for page in (2..=last).rev() {
+                    if lines >= MAX_CONVERSATION_ENTRIES {
+                        complete = false;
+                        break;
+                    }
+                    let read =
+                        self.conversation_page(&stream.endpoint, &stream.jq, page, error_context)?;
+                    pipe_truncated |= read.truncated;
+                    append_records(&mut collected, &mut lines, &read.data);
+                }
+                if complete {
+                    append_records(&mut collected, &mut lines, &first_data);
+                }
+            }
+            (ConversationPaging::NewestFirst, _) | (ConversationPaging::LastPageFirst, None) => {
+                append_records(&mut collected, &mut lines, &first_data);
+                let mut next = has_more.then_some(2_usize);
+                while let Some(page) = next {
+                    if lines >= MAX_CONVERSATION_ENTRIES {
+                        complete = false;
+                        break;
+                    }
+                    let read =
+                        self.conversation_page(&stream.endpoint, &stream.jq, page, error_context)?;
+                    pipe_truncated |= read.truncated;
+                    append_records(&mut collected, &mut lines, &read.data);
+                    next = read.has_next.then(|| page.saturating_add(1));
+                }
+            }
+        }
+
+        let entries = parse_conversation(&collected).context(error_context.to_owned())?;
+        if !pipe_truncated {
+            cache_write(
+                &stream.cache_key,
+                &conversation_cache_entry(complete, &collected),
+            );
+        }
+        Ok(ConversationRecords {
+            entries,
+            truncated: pipe_truncated || !complete,
+            from_cache: false,
+        })
+    }
+
+    fn conversation_page(
+        &self,
+        endpoint: &str,
+        jq: &str,
+        page: usize,
+        error_context: &str,
+    ) -> Result<ConversationPage> {
+        let output = self.run_gh([
+            OsString::from("api"),
+            OsString::from("-i"),
+            OsString::from(format!("{endpoint}&page={page}")),
+            OsString::from("--jq"),
+            OsString::from(jq),
+        ])?;
         if !output.status.success() && !output.stdout_truncated {
             bail!("{}", bounded_command_error(error_context, &output));
         }
-        let mut data = output.stdout;
+        let (head, body) = split_http_response(&output.stdout);
+        let has_next = has_next_page(head.as_ref());
+        let mut data = body.to_vec();
         if output.stdout_truncated {
             while data.last().is_some_and(|byte| *byte != b'\n') {
                 let _ = data.pop();
             }
         }
-        let entries = parse_conversation(&data).context(error_context.to_owned())?;
-        if !output.stdout_truncated {
-            cache_write(key, &data);
-        }
-        Ok(ConversationRecords {
-            entries,
+        Ok(ConversationPage {
+            data,
             truncated: output.stdout_truncated,
-            from_cache: false,
+            has_next,
+            last_page: last_page(head.as_ref()),
         })
     }
 }
 
-fn validator_args(args: &[OsString]) -> Vec<OsString> {
-    args.iter()
-        .filter(|arg| arg.as_encoded_bytes() != b"api" && arg.as_encoded_bytes() != b"--paginate")
-        .cloned()
-        .collect()
+fn append_records(collected: &mut Vec<u8>, lines: &mut usize, data: &[u8]) {
+    if data.is_empty() {
+        return;
+    }
+    let mut added = data.split(|byte| *byte == b'\n').count().saturating_sub(1);
+    collected.extend_from_slice(data);
+    if collected.last() != Some(&b'\n') {
+        collected.push(b'\n');
+        added = added.saturating_add(1);
+    }
+    *lines = lines.saturating_add(added);
+}
+
+fn conversation_cache_entry(complete: bool, data: &[u8]) -> Vec<u8> {
+    let mut entry = Vec::with_capacity(data.len().saturating_add(12));
+    entry.extend_from_slice(if complete { b"complete" } else { b"partial" });
+    entry.push(b'\n');
+    entry.extend_from_slice(data);
+    entry
+}
+
+fn split_conversation_cache(entry: &[u8]) -> (bool, &[u8]) {
+    entry
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .map_or((true, entry), |index| {
+            let (marker, rest) = entry.split_at(index);
+            (marker == b"complete", rest.get(1..).unwrap_or_default())
+        })
 }
 
 fn opened_entry(pull_request: &PullRequest) -> ConversationEntry {
@@ -300,34 +444,18 @@ fn parse_conversation(output: &[u8]) -> Result<Vec<ConversationEntry>> {
     Ok(entries)
 }
 
-fn timeline_args(pull_request: &PullRequest) -> Vec<OsString> {
-    api_args(
-        format!(
-            "repos/{}/issues/{}/timeline?per_page={CONVERSATION_PAGE_SIZE}",
-            pull_request.base_repository.name_with_owner, pull_request.number
-        ),
-        timeline_tsv_jq(),
+fn timeline_endpoint(pull_request: &PullRequest) -> String {
+    format!(
+        "repos/{}/issues/{}/timeline?per_page={CONVERSATION_PAGE_SIZE}",
+        pull_request.base_repository.name_with_owner, pull_request.number
     )
 }
 
-fn review_comment_args(pull_request: &PullRequest) -> Vec<OsString> {
-    api_args(
-        format!(
-            "repos/{}/pulls/{}/comments?per_page={CONVERSATION_PAGE_SIZE}",
-            pull_request.base_repository.name_with_owner, pull_request.number
-        ),
-        REVIEW_COMMENT_TSV_JQ.to_owned(),
+fn review_comment_endpoint(pull_request: &PullRequest) -> String {
+    format!(
+        "repos/{}/pulls/{}/comments?per_page={CONVERSATION_PAGE_SIZE}&sort=created&direction=desc",
+        pull_request.base_repository.name_with_owner, pull_request.number
     )
-}
-
-fn api_args(endpoint: String, jq: String) -> Vec<OsString> {
-    vec![
-        OsString::from("api"),
-        OsString::from("--paginate"),
-        OsString::from(endpoint),
-        OsString::from("--jq"),
-        OsString::from(jq),
-    ]
 }
 
 /// Flatten every timeline shape into one fixed-width record. GitHub gives each
@@ -415,7 +543,7 @@ weird_new_event\tsomebody\t2026-08-01T15:00:00Z\t\t\t\t\t\n";
     }
 
     #[test]
-    fn queries_are_paginated_and_scoped_to_the_pull_request() {
+    fn queries_are_page_bounded_and_scoped_to_the_pull_request() {
         let request = super::super::tests::pull_request(
             super::super::tests::repository(
                 "acme/widget",
@@ -425,40 +553,42 @@ weird_new_event\tsomebody\t2026-08-01T15:00:00Z\t\t\t\t\t\n";
             42,
         );
 
-        let timeline: Vec<String> = timeline_args(&request)
-            .iter()
-            .map(|arg| arg.to_string_lossy().into_owned())
-            .collect();
-        let comments: Vec<String> = review_comment_args(&request)
-            .iter()
-            .map(|arg| arg.to_string_lossy().into_owned())
-            .collect();
+        assert_eq!(
+            timeline_endpoint(&request),
+            "repos/acme/widget/issues/42/timeline?per_page=100"
+        );
+        assert_eq!(
+            review_comment_endpoint(&request),
+            "repos/acme/widget/pulls/42/comments?per_page=100&sort=created&direction=desc"
+        );
+        assert!(timeline_tsv_jq().contains("head_ref_force_pushed"));
+        assert!(timeline_tsv_jq().contains("line-commented"));
+        assert!(REVIEW_COMMENT_TSV_JQ.contains("diff_hunk"));
+    }
+
+    #[test]
+    fn cache_entries_remember_whether_the_read_was_complete() {
+        let complete = conversation_cache_entry(true, b"comment\trow\n");
+        let partial = conversation_cache_entry(false, b"comment\trow\n");
 
         assert_eq!(
-            &timeline[..3],
-            &[
-                "api",
-                "--paginate",
-                "repos/acme/widget/issues/42/timeline?per_page=100"
-            ]
+            split_conversation_cache(&complete),
+            (true, b"comment\trow\n".as_slice())
         );
         assert_eq!(
-            &comments[..3],
-            &[
-                "api",
-                "--paginate",
-                "repos/acme/widget/pulls/42/comments?per_page=100"
-            ]
+            split_conversation_cache(&partial),
+            (false, b"comment\trow\n".as_slice())
         );
-        assert!(timeline[4].contains("head_ref_force_pushed"));
-        assert!(timeline[4].contains("line-commented"));
-        assert!(comments[4].contains("diff_hunk"));
-        assert_eq!(
-            validator_args(&timeline_args(&request))
-                .iter()
-                .map(|arg| arg.to_string_lossy().into_owned())
-                .collect::<Vec<_>>(),
-            timeline[2..]
-        );
+    }
+
+    #[test]
+    fn appended_records_always_end_on_a_record_boundary() {
+        let mut collected = Vec::new();
+        let mut lines = 0;
+        append_records(&mut collected, &mut lines, b"a\tb\nc\td");
+        append_records(&mut collected, &mut lines, b"e\tf\n");
+
+        assert_eq!(lines, 3, "an unterminated tail still counts as one record");
+        assert_eq!(collected, b"a\tb\nc\td\ne\tf\n");
     }
 }

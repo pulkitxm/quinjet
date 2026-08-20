@@ -958,6 +958,7 @@ pub(crate) enum ScmAction {
     PrPrimary,
     PrToggleMenu,
     PrMenu(PrMenuItem),
+    JumpToBottom,
 }
 
 #[derive(Debug, Clone)]
@@ -4961,6 +4962,10 @@ impl App {
             ScmAction::PrMenu(item) => {
                 self.pr_menu_open = false;
                 self.handle_pr_menu_item(item, effects);
+            }
+            ScmAction::JumpToBottom => {
+                self.set_focus(Focus::Content, effects);
+                self.content_scroll = usize::MAX;
             }
         }
     }
