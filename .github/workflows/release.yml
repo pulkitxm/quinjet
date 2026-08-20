@@ -10,6 +10,7 @@ on:
       - 'README.md'
       - 'Formula/quinjet.rb'
       - 'scripts/homebrew_formula.py'
+      - 'scripts/update_homebrew_tap.sh'
       - '.github/workflows/release.yml'
   workflow_dispatch:
 
@@ -252,17 +253,7 @@ jobs:
             || { echo "release blocked: TAP_PUSH_TOKEN is required" >&2; exit 1; }
           git clone --depth 1 \
             "https://x-access-token:${TAP_PUSH_TOKEN}@github.com/pulkitxm/homebrew-tap.git" tap
-          mkdir -p tap/Formula
-          cp quinjet.rb tap/Formula/quinjet.rb
-          cd tap
-          if git diff --quiet -- Formula/quinjet.rb; then
-            echo "the tap already carries ${TAG}"
-            exit 0
-          fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Formula/quinjet.rb
-          git commit -m "Update the Quinjet formula to ${TAG}"
-          git push origin HEAD:main
-          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$(git rev-parse HEAD)" \
+          sh scripts/update_homebrew_tap.sh quinjet.rb tap "${TAG}"
+          git -C tap push origin HEAD:main
+          test "$(git -C tap ls-remote origin refs/heads/main | cut -f1)" = "$(git -C tap rev-parse HEAD)" \
             || { echo "release blocked: the tap did not take ${TAG}" >&2; exit 1; }
