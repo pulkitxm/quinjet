@@ -5357,7 +5357,7 @@ impl App {
                 "Delete `{}` from the working tree and the index? This cannot be undone.",
                 change.display_path()
             ),
-            action: ConfirmAction::Operate(GitOperation::Remove(vec![change])),
+            action: ConfirmAction::Operate(GitOperation::Remove(vec![change.path])),
         });
     }
 
@@ -5381,13 +5381,19 @@ impl App {
         if changes.is_empty() {
             return;
         }
+        let mut paths: Vec<PathBuf> = Vec::new();
+        for change in &changes {
+            if !paths.contains(&change.path) {
+                paths.push(change.path.clone());
+            }
+        }
         self.modal = Some(Modal::Confirm {
             title: "Remove Checked Files?".to_owned(),
             message: change_list_message(
                 "Delete these files from the working tree and the index? This cannot be undone.",
                 &changes,
             ),
-            action: ConfirmAction::Operate(GitOperation::Remove(changes)),
+            action: ConfirmAction::Operate(GitOperation::Remove(paths)),
         });
     }
 
@@ -7664,6 +7670,89 @@ mod tests {
 
         assert!(effects.is_empty());
         assert!(matches!(app.modal, Some(Modal::Conflict { .. })));
+    }
+
+    #[test]
+    fn shift_x_asks_to_remove_the_selected_file() {
+        let mut app = app_with_changes();
+
+        let effects = app.handle_key(
+            KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT),
+            Instant::now(),
+        );
+
+        assert!(effects.is_empty());
+        let Some(Modal::Confirm { title, action, .. }) = app.modal else {
+            panic!("removing the selected file must ask first");
+        };
+        assert_eq!(title, "Remove File?");
+        let ConfirmAction::Operate(GitOperation::Remove(paths)) = action else {
+            panic!("the confirmation must carry a remove operation");
+        };
+        assert_eq!(paths, vec![PathBuf::from("src/main.rs")]);
+    }
+
+    #[test]
+    fn checked_files_drive_revert_and_remove() {
+        let mut app = app_with_changes();
+        app.checked_change_paths
+            .extend([PathBuf::from("src/main.rs"), PathBuf::from("README.md")]);
+
+        let items = app.scm_menu_items();
+        assert!(items.contains(&ScmMenuItem::RemoveChecked));
+        assert!(items.contains(&ScmMenuItem::DiscardChecked));
+        assert!(!items.contains(&ScmMenuItem::RemoveSelected));
+        assert_eq!(
+            app.scm_menu_label(ScmMenuItem::RemoveChecked),
+            "Remove Checked Files (2)"
+        );
+
+        let effects = app.handle_key(
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+            Instant::now(),
+        );
+
+        assert!(effects.is_empty());
+        let Some(Modal::Confirm { title, action, .. }) = app.modal else {
+            panic!("reverting the checked files must ask first");
+        };
+        assert_eq!(title, "Revert Checked Files?");
+        let ConfirmAction::Operate(GitOperation::Discard(changes)) = action else {
+            panic!("the confirmation must carry a discard operation");
+        };
+        assert_eq!(changes.len(), 2);
+    }
+
+    #[test]
+    fn the_changes_menu_offers_reverting_the_working_tree() {
+        let mut app = app_with_changes();
+
+        let items = app.scm_menu_items();
+        assert!(items.contains(&ScmMenuItem::DiscardUnstaged));
+        assert!(items.contains(&ScmMenuItem::DiscardAll));
+        assert!(items.contains(&ScmMenuItem::RemoveSelected));
+
+        let position = items
+            .iter()
+            .position(|item| *item == ScmMenuItem::DiscardAll)
+            .expect("the menu must offer reverting every change");
+        app.scm_menu_open = true;
+        app.scm_menu_selected = position;
+        let effects = app.handle_key(
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            Instant::now(),
+        );
+
+        assert!(effects.is_empty());
+        assert!(!app.scm_menu_open);
+        let Some(Modal::Confirm { title, action, .. }) = app.modal else {
+            panic!("reverting every change must ask first");
+        };
+        assert_eq!(title, "Revert All Changes?");
+        let ConfirmAction::Operate(GitOperation::Discard(changes)) = action else {
+            panic!("the confirmation must carry a discard operation");
+        };
+        assert_eq!(changes.len(), 2);
     }
 
     #[test]

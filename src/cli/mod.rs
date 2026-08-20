@@ -1512,22 +1512,42 @@ fn discard(session: &mut Session, out: &Emitter, args: &DiscardArgs) -> Result<u
 }
 
 fn remove(session: &mut Session, out: &Emitter, args: &RemoveArgs) -> Result<u8> {
-    let changes = selected_changes(session, &args.selection, "remove")?;
-    if changes.is_empty() {
+    let mut paths: Vec<PathBuf> = if args.selection.all {
+        let mut changed: Vec<PathBuf> = Vec::new();
+        for change in selected_changes(session, &args.selection, "remove")? {
+            if !changed.contains(&change.path) {
+                changed.push(change.path);
+            }
+        }
+        changed
+    } else {
+        args.selection.paths.clone()
+    };
+    paths.dedup();
+    if !args.selection.all && paths.is_empty() {
+        return Err(Failure::new(
+            EXIT_FAILURE,
+            "remove needs paths, or --all for every changed file",
+        )
+        .into());
+    }
+    if paths.is_empty() {
         out.message("No files match")?;
         return Ok(0);
     }
     if !args.yes {
-        let mut paths: Vec<String> = changes.iter().map(Change::display_path).collect();
-        paths.dedup();
+        let listed: Vec<String> = paths
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect();
         out.message(&format!(
             "Would remove {} file(s): {}. Pass --yes to remove them.",
-            paths.len(),
-            paths.join(", ")
+            listed.len(),
+            listed.join(", ")
         ))?;
         return Ok(0);
     }
-    operate(session, out, GitOperation::Remove(changes))
+    operate(session, out, GitOperation::Remove(paths))
 }
 
 fn resolve(session: &mut Session, out: &Emitter, args: ResolveArgs) -> Result<u8> {
