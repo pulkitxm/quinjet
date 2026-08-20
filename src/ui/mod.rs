@@ -1099,7 +1099,22 @@ fn draw_changes_sidebar(
             action: ScmAction::ToggleMenu,
         });
         if app.scm_menu_open {
-            draw_scm_menu(frame, row, app.scm_menu_selected, theme, &mut action_hits);
+            let items = app
+                .scm_menu_items()
+                .into_iter()
+                .map(|item| {
+                    let label = app.scm_menu_label(item);
+                    (item, label)
+                })
+                .collect::<Vec<_>>();
+            draw_scm_menu(
+                frame,
+                row,
+                app.scm_menu_selected,
+                &items,
+                theme,
+                &mut action_hits,
+            );
         }
     }
     (hits, action_hits)
@@ -1118,16 +1133,20 @@ fn draw_scm_menu(
     frame: &mut Frame<'_>,
     anchor: Rect,
     selected: usize,
+    items: &[(ScmMenuItem, String)],
     theme: &Theme,
     action_hits: &mut Vec<ScmActionHit>,
 ) {
-    let width = ScmMenuItem::ALL
+    if items.is_empty() {
+        return;
+    }
+    let width = items
         .iter()
-        .map(|item| item.label().width())
+        .map(|(_, label)| label.width())
         .max()
         .unwrap_or(12)
         .saturating_add(4);
-    let area = overflow_menu_area(anchor, width, ScmMenuItem::ALL.len());
+    let area = overflow_menu_area(anchor, width, items.len());
     frame.render_widget(Clear, area);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -1135,7 +1154,7 @@ fn draw_scm_menu(
         .style(Style::default().bg(theme.panel));
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    for (index, item) in ScmMenuItem::ALL.iter().enumerate() {
+    for (index, (item, label)) in items.iter().enumerate() {
         let active = index == selected;
         let row = Rect::new(
             inner.x,
@@ -1144,7 +1163,7 @@ fn draw_scm_menu(
             1,
         );
         frame.render_widget(
-            Paragraph::new(format!(" {} ", item.label())).style(if active {
+            Paragraph::new(format!(" {label} ")).style(if active {
                 Style::default().fg(theme.text).bg(theme.selected)
             } else {
                 Style::default().fg(theme.text).bg(theme.panel)
