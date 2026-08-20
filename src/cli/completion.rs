@@ -9,7 +9,7 @@ use anyhow::{Context, Result, bail};
 use clap::CommandFactory;
 use clap_complete::{Shell, generate};
 
-use super::{Cli, PROGRAM};
+use super::{Cli, PROGRAM, homebrew};
 
 const COMPLETION_BEGIN: &str = "# >>> quinjet completions >>>";
 const COMPLETION_END: &str = "# <<< quinjet completions <<<";
@@ -120,7 +120,7 @@ fn shell_from_path(shell: &OsStr) -> Option<Shell> {
 }
 
 pub(super) fn auto_install() {
-    if development_binary() {
+    if development_binary() || homebrew::manages_running_executable() {
         return;
     }
     let active = detected_shell();

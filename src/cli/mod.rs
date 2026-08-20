@@ -1,5 +1,6 @@
 pub(crate) mod command;
 mod completion;
+mod homebrew;
 mod render;
 mod update;
 mod watch;

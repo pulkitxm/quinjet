@@ -26,6 +26,8 @@ jobs:
         run: |
           python3 scripts/check_comments.py --selftest
           python3 scripts/check_comments.py
+      - name: The Homebrew formula template renders
+        run: python3 scripts/homebrew_formula.py --selftest
       - name: No committed secrets
         run: |
           python3 scripts/check_secrets.py --selftest

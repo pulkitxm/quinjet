@@ -254,6 +254,53 @@ jobs:
         shell: pwsh
         run: ./tests/install.ps1
 
+  homebrew:
+    name: Homebrew (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@1f8e202ffddf94def7f42f6fa3a482e821489f9c # 2026.07.10.1
+      - name: Render the formula for the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName)
+          version=${tag#v}
+          gh release download "${tag}" --repo "${GITHUB_REPOSITORY}" \
+            --pattern SHA256SUMS --dir "${RUNNER_TEMP}"
+          python3 scripts/homebrew_formula.py --version "${version}" \
+            --checksums "${RUNNER_TEMP}/SHA256SUMS" \
+            --output "${RUNNER_TEMP}/quinjet.rb"
+      - name: Stage the formula in a test tap
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          brew tap-new pulkitxm/tap
+          cp "${RUNNER_TEMP}/quinjet.rb" \
+            "$(brew --repository pulkitxm/tap)/Formula/quinjet.rb"
+      - name: Install the formula
+        run: brew install pulkitxm/tap/quinjet
+      - name: Verify the installation
+        run: |
+          set -euo pipefail
+          prefix=$(brew --prefix quinjet)
+          test -x "${prefix}/bin/quinjet"
+          test -L "${prefix}/bin/q"
+          quinjet --version
+          q --version
+          test -s "${prefix}/etc/bash_completion.d/quinjet"
+          test -s "${prefix}/share/zsh/site-functions/_quinjet"
+          test -s "${prefix}/share/fish/vendor_completions.d/quinjet.fish"
+          test -s "${prefix}/share/man/man1/quinjet.1"
+
   ci:
     name: CI
     if: always()
@@ -268,6 +315,7 @@ jobs:
       - coverage
       - package
       - installers
+      - homebrew
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any required job failed

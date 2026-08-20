@@ -18,7 +18,15 @@ Options:
 | `-C, --path <DIR>` | path | `.` | Accepted as a global option but unused because updating is not a repository operation. |
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |
 
-`update` does not try to infer whether the binary came from `cargo install`,
+A Homebrew installation is the one case `update` refuses to touch. When the
+resolved executable sits inside a Homebrew Cellar, `update` prints that Homebrew
+owns the executable, hints `brew upgrade quinjet`, and exits 4 without any
+network request. Replacing a file inside the Cellar would leave Homebrew's
+records describing a version that is no longer installed. `update --check` is
+unaffected and still reports whether a newer release exists. See
+[the Homebrew guide](../guides/homebrew.md).
+
+Beyond that, `update` does not try to infer whether the binary came from `cargo install`,
 cargo-binstall, `install.sh`, `install.ps1`, or a copied release artifact. Those
 methods can all use custom directories, and the existing installers do not
 persist provenance. The reliable identity is `std::env::current_exe()`,
