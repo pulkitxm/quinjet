@@ -32,11 +32,9 @@ const TOAST_DURATION: Duration = Duration::from_secs(4);
 const HISTORY_PAGE_SIZE: usize = 300;
 const PULL_REQUEST_PREFETCH_BATCH: usize = 32;
 const PULL_REQUEST_PREFETCH_BYTE_BUDGET: usize = 6 * 1024 * 1024;
-const HUGE_PULL_REQUEST_LINES: usize = 100_000;
-const HUGE_PULL_REQUEST_FILES: usize = 1_000;
 const PULL_REQUEST_PATCH_FALLBACK_ESTIMATE: usize = 512 * 1024;
 const PULL_REQUEST_PATCH_LINE_ESTIMATE: usize = 80;
-const MAX_PREFETCHED_PULL_REQUEST_FILES: usize = 400;
+const MAX_PREFETCHED_PULL_REQUEST_FILES: usize = 4_096;
 const MAX_PULL_REQUEST_DOCUMENT_BYTES: usize = 32 * 1024 * 1024;
 /// Poll cadences for an open pull request. A run in progress changes state in
 /// seconds and is worth watching closely; a settled pull request only needs to
@@ -3039,6 +3037,13 @@ impl App {
                 self.pull_request_checks_read_at = Some(now);
             }
         }
+        let settled = self
+            .pull_request
+            .as_ref()
+            .is_some_and(|pull_request| matches!(pull_request.state.as_str(), "MERGED" | "CLOSED"));
+        if settled && !force {
+            return;
+        }
         if due(self.pull_request_detail_read_at, PULL_REQUEST_DETAIL_POLL) {
             let issued = effects.len();
             self.request_pull_request_lookup(number, true, true, effects);
@@ -3272,6 +3277,9 @@ impl App {
                                 .and_then(|details| details.selected_file.as_ref())
                                 .map(PathBuf::from)
                         });
+                        if let Some(path) = path.as_deref() {
+                            let _ = self.backfill_pull_request_counts(path, &document);
+                        }
                         match self.pull_request_file_view {
                             PullRequestFileView::AllFiles => {
                                 if let Some(path) = path {
@@ -3308,14 +3316,17 @@ impl App {
                     Ok(documents) => {
                         self.pull_request_prefetch_retrying = false;
                         let mut arrived_visible = false;
+                        let mut counts_changed = false;
                         for (path, document) in documents {
                             if !self.pull_request_documents.contains_key(&path) {
                                 arrived_visible = arrived_visible
                                     || !self.preview_file_collapsed(&path.to_string_lossy());
+                                counts_changed |=
+                                    self.backfill_pull_request_counts(&path, &document);
                                 self.cache_pull_request_document(path, document);
                             }
                         }
-                        if arrived_visible
+                        if (arrived_visible || counts_changed)
                             && self.pull_request_file_view == PullRequestFileView::AllFiles
                         {
                             self.rebuild_pull_request_all_files_document();
@@ -5865,6 +5876,54 @@ impl App {
             && self.pull_request_single_file.as_deref() != Some(path)
     }
 
+    /// A finished patch knows its real totals, so a file whose counts GitHub
+    /// could not report fills its header in as soon as its document arrives.
+    fn backfill_pull_request_counts(&mut self, path: &Path, document: &DiffDocument) -> bool {
+        if document.truncated {
+            return false;
+        }
+        let Some(file) = self
+            .pull_request_files
+            .iter_mut()
+            .find(|file| file.path == path && file.counts.is_none())
+        else {
+            return false;
+        };
+        let mut additions = 0_usize;
+        let mut deletions = 0_usize;
+        for line in &document.lines {
+            match line.kind {
+                DiffLineKind::Added => additions = additions.saturating_add(1),
+                DiffLineKind::Removed => deletions = deletions.saturating_add(1),
+                _ => {}
+            }
+        }
+        file.counts = Some(DiffLineCounts {
+            additions,
+            deletions,
+            binary: false,
+        });
+        true
+    }
+
+    /// Where background fill should start: the first file visible in the
+    /// Files tree, so patches land where the reader is looking and then wrap
+    /// around the rest of the index in order.
+    fn prefetch_anchor_index(&self) -> usize {
+        if self.view != View::PullRequests || self.pull_request_section != PullRequestSection::Files
+        {
+            return 0;
+        }
+        self.pull_request_tree
+            .iter()
+            .skip(self.sidebar_offset)
+            .find_map(|entry| match entry {
+                PullRequestTreeEntry::File { index, .. } => Some(*index),
+                PullRequestTreeEntry::Directory { .. } => None,
+            })
+            .unwrap_or(0)
+    }
+
     /// Walk the index in batches until every file has a patch. Each batch is one
     /// Git invocation and lands as soon as it is parsed, so the diff fills in
     /// progressively instead of a file at a time on demand.
@@ -5881,19 +5940,13 @@ impl App {
         let remaining = MAX_PREFETCHED_PULL_REQUEST_FILES
             .saturating_sub(self.pull_request_prefetched_paths.len());
         let limit = PULL_REQUEST_PREFETCH_BATCH.min(remaining);
-        let huge = self.pull_request.as_ref().is_some_and(|pull_request| {
-            pull_request
-                .additions
-                .saturating_add(pull_request.deletions)
-                >= HUGE_PULL_REQUEST_LINES
-        }) || self.pull_request_files.len() >= HUGE_PULL_REQUEST_FILES;
-        let mut candidates: Vec<&PullRequestFile> = self.pull_request_files.iter().collect();
-        if huge {
-            candidates.sort_by_key(|file| estimated_patch_bytes(file.counts));
-        }
+        let anchor = self
+            .prefetch_anchor_index()
+            .min(self.pull_request_files.len());
+        let (before, from_anchor) = self.pull_request_files.split_at(anchor);
         let mut batch_bytes = 0_usize;
         let mut paths: Vec<PathBuf> = Vec::new();
-        for file in candidates {
+        for file in from_anchor.iter().chain(before.iter()) {
             if paths.len() >= limit {
                 break;
             }
@@ -8916,7 +8969,7 @@ mod tests {
     }
 
     #[test]
-    fn huge_pull_requests_prefetch_their_smallest_files_first() {
+    fn prefetch_starts_at_the_files_viewport_and_wraps_around() {
         let counts = |additions: usize| {
             Some(DiffLineCounts {
                 additions,
@@ -8924,22 +8977,19 @@ mod tests {
                 binary: false,
             })
         };
-        let file = |path: &str, additions: usize| PullRequestFile {
+        let file = |path: &str| PullRequestFile {
             path: PathBuf::from(path),
             old_path: None,
             status: PullRequestFileStatus::Modified,
-            counts: counts(additions),
+            counts: counts(5),
         };
         let mut app = App::new("/tmp/repo", "repo");
         app.pull_request_workspace_generation = Some(10);
-        let mut huge = pull_request(7, "Rewrite", "acme/widget");
-        huge.additions = 1_000_000;
-        app.pull_request = Some(huge);
-        app.pull_request_files = vec![
-            file("src/big.rs", 50_000),
-            file("src/small.rs", 5),
-            file("src/medium.rs", 500),
-        ];
+        app.view = View::PullRequests;
+        app.pull_request_section = PullRequestSection::Files;
+        app.pull_request_files = vec![file("a.rs"), file("b.rs"), file("c.rs"), file("d.rs")];
+        let _ = app.pull_request_tree_entries();
+        app.sidebar_offset = 2;
 
         let mut effects = Vec::new();
         app.request_pull_request_prefetch(&mut effects);
@@ -8950,13 +9000,14 @@ mod tests {
                     command.as_ref(),
                     WorkerCommand::LoadPullRequestFileBatch { workspace_generation: 10, paths }
                         if paths == &[
-                            PathBuf::from("src/small.rs"),
-                            PathBuf::from("src/medium.rs"),
-                            PathBuf::from("src/big.rs"),
+                            PathBuf::from("c.rs"),
+                            PathBuf::from("d.rs"),
+                            PathBuf::from("a.rs"),
+                            PathBuf::from("b.rs"),
                         ]
                 )
             ),
-            "a huge pull request fills its budget with the smallest files first"
+            "fill starts at the visible file and wraps around the index"
         );
     }
 
