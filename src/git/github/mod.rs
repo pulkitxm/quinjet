@@ -483,6 +483,9 @@ impl PreparedPullRequest {
                 continue;
             };
             let section_truncated = truncated && index == sections.len().saturating_sub(1);
+            if section_truncated && requested.len() > 1 {
+                continue;
+            }
             if !section_truncated {
                 let key = patch_cache_key(&self.merge_base, &self.head, &file.path);
                 cache_write_bounded(&key, section.body, MAX_CACHED_PATCH_BYTES);
