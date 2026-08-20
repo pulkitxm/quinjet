@@ -15,7 +15,7 @@ use crate::app::{
     App, ChangeRow, ChangeSection, CheckListRow, ContentFileHit, ContentStepHit, DiffLayout, Focus,
     HelpHit, LinkHit, Modal, ModalAction, OpenTarget, PaletteCommand, PrMenuItem,
     PullRequestContentRow, PullRequestSection, PullRequestTreeEntry, ScmAction, ScmActionHit,
-    ScmMenuItem, SidebarHit, SidebarHitArea, ToastLevel, UiGeometry, View,
+    ScmMenuItem, SideBySideRow, SidebarHit, SidebarHitArea, ToastLevel, UiGeometry, View,
 };
 use crate::convert::cells;
 use crate::date_time::format_local_timestamp;
@@ -3326,15 +3326,22 @@ fn draw_content(
         0
     };
     let side_by_side = app.diff_layout == DiffLayout::SideBySide && inner.width >= 72;
-    let side_rows = optional_side_by_side_rows(side_by_side, &app.document, app);
-    let unified_rows = if side_by_side {
-        None
+    let rows_key = (app.document_layout_generation, side_by_side);
+    if app.diff_rows_key != Some(rows_key) {
+        if side_by_side {
+            app.side_by_side_diff_rows = side_by_side_rows(&app.document, app);
+            app.unified_diff_rows = Vec::new();
+        } else {
+            app.unified_diff_rows = unified_row_indices(&app.document, app);
+            app.side_by_side_diff_rows = Vec::new();
+        }
+        app.diff_rows_key = Some(rows_key);
+    }
+    let diff_rows = if side_by_side {
+        app.side_by_side_diff_rows.len()
     } else {
-        Some(unified_row_indices(&app.document, app))
+        app.unified_diff_rows.len()
     };
-    let diff_rows = side_rows
-        .as_ref()
-        .map_or_else(|| unified_rows.as_ref().map_or(0, Vec::len), Vec::len);
     let visual_length = details_rows + diff_rows;
     let max_scroll = visual_length.saturating_sub(inner.height as usize);
     app.content_scroll = app.content_scroll.min(max_scroll);
@@ -3385,15 +3392,26 @@ fn draw_content(
     );
     let (divider, content_file_hits) = if render_area.width < 2 || render_area.height == 0 {
         (None, Vec::new())
-    } else if let Some(rows) = side_rows.as_deref() {
-        let (divider, hits) =
-            draw_side_by_side_diff(frame, render_area, app, rows, diff_scroll, theme);
+    } else if side_by_side {
+        let (divider, hits) = draw_side_by_side_diff(
+            frame,
+            render_area,
+            app,
+            &app.side_by_side_diff_rows,
+            diff_scroll,
+            theme,
+        );
         (Some(divider), hits)
-    } else if let Some(rows) = unified_rows.as_deref() {
-        let hits = draw_unified_diff(frame, render_area, app, rows, diff_scroll, theme);
-        (None, hits)
     } else {
-        (None, Vec::new())
+        let hits = draw_unified_diff(
+            frame,
+            render_area,
+            app,
+            &app.unified_diff_rows,
+            diff_scroll,
+            theme,
+        );
+        (None, hits)
     };
     draw_scrollbar(frame, inner, app.content_scroll, visual_length, theme);
     (divider, content_file_hits, Vec::new())
@@ -4288,7 +4306,7 @@ fn draw_side_by_side_diff(
     frame: &mut Frame<'_>,
     area: Rect,
     app: &App,
-    rows: &[SideBySideRow<'_>],
+    rows: &[SideBySideRow],
     diff_scroll: usize,
     theme: &Theme,
 ) -> (Rect, Vec<ContentFileHit>) {
@@ -4309,6 +4327,7 @@ fn draw_side_by_side_diff(
         theme.border
     };
 
+    let lines = &app.document.lines;
     let sticky = rows.get(diff_scroll).and_then(|first| match first {
         SideBySideRow::FileHeader(_) | SideBySideRow::FileFooter => None,
         _ => rows
@@ -4317,7 +4336,7 @@ fn draw_side_by_side_diff(
             .iter()
             .rev()
             .find_map(|row| match row {
-                SideBySideRow::FileHeader(header) => Some(*header),
+                SideBySideRow::FileHeader(header) => lines.get(*header),
                 _ => None,
             }),
     });
@@ -4343,7 +4362,10 @@ fn draw_side_by_side_diff(
         let y = content_y + cells(offset);
         let row_area = Rect::new(area.x, y, area.width, 1);
         match row {
-            SideBySideRow::FileHeader(line) => {
+            SideBySideRow::FileHeader(header) => {
+                let Some(line) = lines.get(*header) else {
+                    continue;
+                };
                 draw_file_header(frame, row_area, line, app, theme);
                 if let Some(path) = file_header_path(line) {
                     hits.push(ContentFileHit {
@@ -4353,20 +4375,27 @@ fn draw_side_by_side_diff(
                 }
             }
             SideBySideRow::FileFooter => draw_file_footer(frame, row_area, theme),
-            SideBySideRow::Full { line, boxed } => draw_full_width_diff_line(
-                frame,
-                row_area,
-                line,
-                *boxed,
-                app.horizontal_scroll,
-                theme,
-            ),
-            SideBySideRow::Split(old_line, new_line) => {
-                let (old_emphasis, new_emphasis) = paired_intraline_emphasis(*old_line, *new_line);
+            SideBySideRow::Full { index, boxed } => {
+                let Some(line) = lines.get(*index) else {
+                    continue;
+                };
+                draw_full_width_diff_line(
+                    frame,
+                    row_area,
+                    line,
+                    *boxed,
+                    app.horizontal_scroll,
+                    theme,
+                );
+            }
+            SideBySideRow::Split(old_index, new_index) => {
+                let old_line = old_index.and_then(|line_index| lines.get(line_index));
+                let new_line = new_index.and_then(|line_index| lines.get(line_index));
+                let (old_emphasis, new_emphasis) = paired_intraline_emphasis(old_line, new_line);
                 draw_diff_side(
                     frame,
                     Rect::new(left.x, y, left.width, 1),
-                    *old_line,
+                    old_line,
                     true,
                     app.horizontal_scroll,
                     old_emphasis.as_ref(),
@@ -4379,7 +4408,7 @@ fn draw_side_by_side_diff(
                 draw_diff_side(
                     frame,
                     Rect::new(right.x, y, right.width, 1),
-                    *new_line,
+                    new_line,
                     false,
                     app.horizontal_scroll,
                     new_emphasis.as_ref(),
@@ -4391,21 +4420,14 @@ fn draw_side_by_side_diff(
     (divider, hits)
 }
 
-enum SideBySideRow<'a> {
-    FileHeader(&'a DiffLine),
-    FileFooter,
-    Full { line: &'a DiffLine, boxed: bool },
-    Split(Option<&'a DiffLine>, Option<&'a DiffLine>),
-}
-
-fn side_by_side_rows<'a>(document: &'a DiffDocument, app: &App) -> Vec<SideBySideRow<'a>> {
+fn side_by_side_rows(document: &DiffDocument, app: &App) -> Vec<SideBySideRow> {
     let mut rows = Vec::new();
     let mut index = 0;
     let mut in_file = false;
     while let Some(line) = document.lines.get(index) {
         match line.kind {
             DiffLineKind::FileHeader => {
-                rows.push(SideBySideRow::FileHeader(line));
+                rows.push(SideBySideRow::FileHeader(index));
                 in_file = true;
                 index += 1;
                 if file_header_path(line).is_some_and(|path| app.preview_file_collapsed(path)) {
@@ -4432,17 +4454,17 @@ fn side_by_side_rows<'a>(document: &'a DiffDocument, app: &App) -> Vec<SideBySid
             }
             DiffLineKind::Meta => {
                 rows.push(SideBySideRow::Full {
-                    line,
+                    index,
                     boxed: in_file,
                 });
                 index += 1;
             }
             DiffLineKind::Added => {
-                rows.push(SideBySideRow::Split(None, Some(line)));
+                rows.push(SideBySideRow::Split(None, Some(index)));
                 index += 1;
             }
             DiffLineKind::Context => {
-                rows.push(SideBySideRow::Split(Some(line), Some(line)));
+                rows.push(SideBySideRow::Split(Some(index), Some(index)));
                 index += 1;
             }
             DiffLineKind::Removed => {
@@ -4462,29 +4484,18 @@ fn side_by_side_rows<'a>(document: &'a DiffDocument, app: &App) -> Vec<SideBySid
                 {
                     index += 1;
                 }
-                let removed = document
-                    .lines
-                    .get(removed_start..added_start)
-                    .unwrap_or_default();
-                let added = document.lines.get(added_start..index).unwrap_or_default();
-                for pair_index in 0..removed.len().max(added.len()) {
+                let removed_len = added_start - removed_start;
+                let added_len = index - added_start;
+                for pair_index in 0..removed_len.max(added_len) {
                     rows.push(SideBySideRow::Split(
-                        removed.get(pair_index),
-                        added.get(pair_index),
+                        (pair_index < removed_len).then(|| removed_start + pair_index),
+                        (pair_index < added_len).then(|| added_start + pair_index),
                     ));
                 }
             }
         }
     }
     rows
-}
-
-fn optional_side_by_side_rows<'a>(
-    enabled: bool,
-    document: &'a DiffDocument,
-    app: &App,
-) -> Option<Vec<SideBySideRow<'a>>> {
-    enabled.then(|| side_by_side_rows(document, app))
 }
 
 struct EmphasisBlock {
@@ -7183,6 +7194,61 @@ mod tests {
     }
 
     #[test]
+    fn diff_rows_are_cached_between_draws_and_rebuilt_on_document_change() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut app = App::new("/tmp/repo", "repo");
+        app.set_document(DiffDocument {
+            title: "Changes".to_owned(),
+            truncated: false,
+            commit_details: None,
+            pull_request_details: None,
+            lines: vec![
+                test_file_header("src/main.rs", 1, 0),
+                test_line(DiffLineKind::Context, "same"),
+                test_line(DiffLineKind::FileFooter, ""),
+            ],
+        });
+        let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+        assert!(
+            !app.unified_diff_rows.is_empty(),
+            "the first draw builds the unified rows"
+        );
+        let key = app.diff_rows_key;
+        let pointer = app.unified_diff_rows.as_ptr();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+        assert_eq!(
+            app.diff_rows_key, key,
+            "an unchanged document keeps its key"
+        );
+        assert_eq!(
+            app.unified_diff_rows.as_ptr(),
+            pointer,
+            "an unchanged document reuses its rows"
+        );
+
+        app.set_document(DiffDocument::empty("Changes", "Working tree clean"));
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+        assert_ne!(
+            app.diff_rows_key, key,
+            "replacing the document rebuilds the rows"
+        );
+        assert_eq!(
+            app.unified_diff_rows.len(),
+            app.document.lines.len(),
+            "the rebuilt rows describe the new document"
+        );
+    }
+
+    #[test]
     fn side_by_side_pairs_replacements() {
         let document = DiffDocument {
             title: String::new(),
@@ -7199,11 +7265,12 @@ mod tests {
         let app = App::new("/tmp/repo", "repo");
         let rows = side_by_side_rows(&document, &app);
         assert_eq!(rows.len(), 3);
+        let line_text = |index: usize| document.lines.get(index).map(DiffLine::text).unwrap();
         let SideBySideRow::Split(old, new) = &rows[0] else {
             panic!("expected a split diff row");
         };
-        assert_eq!(old.unwrap().text(), "old one");
-        assert_eq!(new.unwrap().text(), "new one");
+        assert_eq!(line_text(old.unwrap()), "old one");
+        assert_eq!(line_text(new.unwrap()), "new one");
         let SideBySideRow::Split(_, new) = &rows[1] else {
             panic!("expected a split diff row");
         };
@@ -7211,7 +7278,7 @@ mod tests {
         let SideBySideRow::Split(old, _) = &rows[2] else {
             panic!("expected a split diff row");
         };
-        assert_eq!(old.unwrap().text(), "same");
+        assert_eq!(line_text(old.unwrap()), "same");
     }
 
     #[test]
@@ -7342,11 +7409,16 @@ mod tests {
 
         let app = App::new("/tmp/repo", "repo");
         assert_eq!(unified_row_indices(&document, &app), vec![0, 2, 3]);
-        assert!(
-            side_by_side_rows(&document, &app)
-                .iter()
-                .all(|row| !matches!(row, SideBySideRow::Full { line, .. } if line.kind == DiffLineKind::HunkHeader))
-        );
+        assert!(side_by_side_rows(&document, &app).iter().all(|row| {
+            !matches!(
+                row,
+                SideBySideRow::Full { index, .. }
+                    if document
+                        .lines
+                        .get(*index)
+                        .is_some_and(|line| line.kind == DiffLineKind::HunkHeader)
+            )
+        }));
     }
 
     #[test]
