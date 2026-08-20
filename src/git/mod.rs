@@ -157,6 +157,7 @@ pub(crate) enum GitOperation {
     Unstage(Vec<PathBuf>),
     UnstageAll,
     Discard(Vec<Change>),
+    Remove(Vec<Change>),
     Commit {
         message: String,
         amend: bool,
@@ -201,6 +202,7 @@ impl GitOperation {
             Self::Unstage(_) => "Unstaging change",
             Self::UnstageAll => "Unstaging all changes",
             Self::Discard(_) => "Discarding changes",
+            Self::Remove(_) => "Removing files",
             Self::Commit { amend: true, .. } => "Amending commit",
             Self::Commit { amend: false, .. } => "Creating commit",
             Self::Fetch => "Fetching remotes",
@@ -976,6 +978,10 @@ impl Repository {
                     "changes discarded",
                 ))
             }
+            GitOperation::Remove(changes) => {
+                let removed = self.remove(changes)?;
+                Ok(plural_message(removed, "file removed", "files removed"))
+            }
             GitOperation::Commit { message, amend } => {
                 if message.trim().is_empty() {
                     bail!("Commit message cannot be empty");
@@ -1164,19 +1170,45 @@ impl Repository {
         Ok((patch, input_truncated || patch_truncated))
     }
 
+    fn delete_untracked(&self, change: &Change) -> Result<()> {
+        let path = safe_worktree_path(&self.root, &change.path)?;
+        let metadata = fs::symlink_metadata(&path)
+            .with_context(|| format!("failed to inspect {}", change.display_path()))?;
+        if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            fs::remove_dir_all(&path)?;
+        } else {
+            fs::remove_file(&path)?;
+        }
+        Ok(())
+    }
+
+    fn remove(&self, changes: &[Change]) -> Result<usize> {
+        let mut tracked: Vec<PathBuf> = Vec::new();
+        let mut untracked: Vec<&Change> = Vec::new();
+        for change in changes {
+            if change.status == ChangeStatus::Untracked {
+                if !untracked.iter().any(|seen| seen.path == change.path) {
+                    untracked.push(change);
+                }
+            } else if !tracked.contains(&change.path) {
+                tracked.push(change.path.clone());
+            }
+        }
+        for change in &untracked {
+            self.delete_untracked(change)?;
+        }
+        if !tracked.is_empty() {
+            drop(self.with_paths(["rm", "--force", "--ignore-unmatch"], &tracked)?);
+        }
+        Ok(tracked.len().saturating_add(untracked.len()))
+    }
+
     fn discard(&self, changes: &[Change]) -> Result<()> {
         let mut restore_worktree = Vec::new();
         let mut restore_both = Vec::new();
         for change in changes {
             if change.status == ChangeStatus::Untracked {
-                let path = safe_worktree_path(&self.root, &change.path)?;
-                let metadata = fs::symlink_metadata(&path)
-                    .with_context(|| format!("failed to inspect {}", change.display_path()))?;
-                if metadata.is_dir() && !metadata.file_type().is_symlink() {
-                    fs::remove_dir_all(&path)?;
-                } else {
-                    fs::remove_file(&path)?;
-                }
+                self.delete_untracked(change)?;
             } else if change.area == ChangeArea::Staged {
                 restore_both.push(change.path.clone());
             } else {
