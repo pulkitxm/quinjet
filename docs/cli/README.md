@@ -46,7 +46,7 @@ quinjet update --check           check the latest stable release
 
 | Page | What it covers |
 | --- | --- |
-| [`quinjet stage`, `unstage`, `discard`, `commit`, `resolve`, `cherry-pick`, `revert`](./changes/README.md) | Top-level verbs that move the index, working tree, or `HEAD` |
+| [`quinjet stage`, `unstage`, `discard`, `remove`, `commit`, `resolve`, `cherry-pick`, `revert`](./changes/README.md) | Top-level verbs that move the index, working tree, or `HEAD` |
 | [`quinjet fetch`, `pull`, `push`, `sync`, `repos`](./remotes/README.md) | Talking to remotes, and which GitHub repositories this checkout points at |
 
 ## Pull requests

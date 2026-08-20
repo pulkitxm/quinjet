@@ -281,7 +281,7 @@ drawn. Keys that only move the view have no verb, and say so.
 
 The verbs in the right-hand column are documented in their groups:
 [`status`, `diff`, `log`, `show`](./repository/README.md),
-[`stage`, `unstage`, `discard`, `commit`, `resolve`](./changes/README.md),
+[`stage`, `unstage`, `discard`, `remove`, `commit`, `resolve`](./changes/README.md),
 [`branch`](./branch/README.md), [`stash`](./stash/README.md),
 [`fetch`, `pull`, `push`, `sync`, `repos`](./remotes/README.md) and
 [`pr`](./pull-request/README.md).
@@ -301,6 +301,10 @@ The verbs in the right-hand column are documented in their groups:
 | `a` | `quinjet stage --all` |
 | `U` | `quinjet unstage --all` |
 | `x` on a normal change, then `y` or Enter | `quinjet discard <path> --yes` |
+| `x` with files checked, then `y` or Enter | `quinjet discard <paths> --yes` |
+| `X` on a file row, then `y` or Enter | `quinjet remove <path> --yes` |
+| Remove Checked Files in the dropdown, then `y` or Enter | `quinjet remove <paths> --yes` |
+| Revert Unstaged Changes / Revert All Changes in the dropdown, then `y` or Enter | `quinjet discard <paths> --yes` |
 | `x` on a conflict | opens the conflict resolution modal, matching `quinjet resolve <path> --ours`, `--theirs`, or `--stage`; conflict discard is not an operation |
 | `c`, then `Ctrl+Enter` | `quinjet commit -m "<message>"` |
 | Amend in the command palette | `quinjet commit -m "<message>" --amend` |

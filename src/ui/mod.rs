@@ -166,7 +166,11 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
     },
     HelpRow::Shortcut {
         keys: "x",
-        description: "Discard selected change (asks first)",
+        description: "Revert the selected change, or every checked file (asks first)",
+    },
+    HelpRow::Shortcut {
+        keys: "X",
+        description: "Remove the selected file, or every checked file (asks first)",
     },
     HelpRow::Shortcut {
         keys: "c",
@@ -174,7 +178,7 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
     },
     HelpRow::Shortcut {
         keys: "*",
-        description: "Check / uncheck the selected file for stash",
+        description: "Check / uncheck the selected file for stash, revert, or removal",
     },
     HelpRow::Shortcut {
         keys: "S",
