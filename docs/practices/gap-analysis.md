@@ -102,7 +102,7 @@ uniformly: that is the fd exit-code enum (extras/fd/src/exit_codes.rs), the ripg
 broken-pipe rule (extras/bat/src/error.rs), and the uv `Hint` pattern
 (extras/uv/crates/uv-errors/src/lib.rs) all present. The `Emitter` in src/cli/mod.rs
 guarantees one JSON document per invocation on a locked stdout, documented as a contract in
-docs/cli/conventions.md. Destructive verbs (`discard`, `branch delete`, `stash drop`,
+docs/cli/conventions.md. Destructive verbs (`discard`, `remove`, `branch delete`, `stash drop`,
 `stash clear`, `cherry-pick`, and `revert`) report what they would do and require `--yes`.
 This is the alacritty dry-run-before-wet-run lesson
 (extras/alacritty/alacritty/src/migrate/mod.rs) already built into the CLI surface.
@@ -145,6 +145,7 @@ or check.
 
 Mutating operations: every `GitOperation` variant maps to a verb in src/cli/mod.rs:
 `Stage`/`StageAll` to `stage`, `Unstage`/`UnstageAll` to `unstage`, `Discard` to `discard`,
+`Remove` to `remove`,
 `Commit` to `commit` with `--amend`, `Fetch`/`Pull`/`Push`/`Sync` to their verbs, `Checkout`
 to `branch switch`, `CreateBranch` to `branch create`, `RenameBranch` to `branch rename`,
 `DeleteBranch` to `branch delete`, the five stash variants to `stash push`, `apply`, `pop`,
