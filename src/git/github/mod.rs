@@ -596,6 +596,7 @@ pub(crate) struct ValidatedRead {
     pub data: Vec<u8>,
     pub unchanged: bool,
     pub complete: bool,
+    pub truncated: bool,
     pub last_page: Option<usize>,
 }
 
@@ -611,7 +612,7 @@ impl Repository {
         request.extend(args);
 
         let output = self.run_gh(request)?;
-        if !output.status.success() {
+        if !output.status.success() && !output.stdout_truncated {
             bail!(
                 "{}",
                 bounded_command_error("unable to read from GitHub", &output)
@@ -628,10 +629,11 @@ impl Repository {
                 data: split_validator(&entry).1.to_vec(),
                 unchanged: true,
                 complete: true,
+                truncated: false,
                 last_page: None,
             });
         }
-        let complete = !has_next_page(head);
+        let complete = !output.stdout_truncated && !has_next_page(head);
         if let Some(etag) = header_value(head, "etag").filter(|_| complete) {
             let mut entry = etag.into_bytes();
             entry.push(b'\n');
@@ -642,6 +644,7 @@ impl Repository {
             data: body.to_vec(),
             unchanged: false,
             complete,
+            truncated: output.stdout_truncated,
             last_page: last_page(head),
         })
     }

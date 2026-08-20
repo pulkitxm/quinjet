@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use super::{
     CacheLife, PullRequest, Repository, bounded_command_error, bounded_text, cache_read,
-    cache_write, has_next_page, parse_tsv_record, split_http_response,
+    cache_write, has_next_page, last_page, parse_tsv_record, split_http_response,
 };
 
 /// The renderer wraps every entry to the pane width on each redraw, so this cap
@@ -115,6 +115,7 @@ struct ConversationPage {
     data: Vec<u8>,
     truncated: bool,
     has_next: bool,
+    last_page: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -233,8 +234,10 @@ impl Repository {
     }
 
     /// Read one stream page by page, newest pages first, stopping at the entry
-    /// cap. A capped read keeps the newest activity and reports itself as
-    /// incomplete; only a pipe-truncated page prevents caching.
+    /// cap. A capped read keeps only the newest pages, so the omitted activity
+    /// is genuinely the oldest; an oversized or failed validated first page
+    /// degrades to the bounded page loop instead of failing the conversation.
+    /// Only a pipe-truncated page prevents caching.
     fn conversation_records(
         &self,
         stream: &ConversationStream,
@@ -248,24 +251,29 @@ impl Repository {
                 from_cache: true,
             });
         }
-        let first = self.validated_gh(
+        let first = match self.validated_gh(
             &stream.validator_key,
             vec![
                 OsString::from(&stream.endpoint),
                 OsString::from("--jq"),
                 OsString::from(&stream.jq),
             ],
-        )?;
-        if first.complete {
-            let entries = parse_conversation(&first.data).context(error_context.to_owned())?;
+        ) {
+            Ok(read) if !read.truncated => Some(read),
+            Ok(_) | Err(_) => None,
+        };
+        if let Some(read) = &first
+            && read.complete
+        {
+            let entries = parse_conversation(&read.data).context(error_context.to_owned())?;
             cache_write(
                 &stream.cache_key,
-                &conversation_cache_entry(true, &first.data),
+                &conversation_cache_entry(true, &read.data),
             );
             return Ok(ConversationRecords {
                 entries,
                 truncated: false,
-                from_cache: first.unchanged,
+                from_cache: read.unchanged,
             });
         }
 
@@ -273,8 +281,14 @@ impl Repository {
         let mut lines = 0_usize;
         let mut pipe_truncated = false;
         let mut complete = true;
-        append_records(&mut collected, &mut lines, &first.data);
-        match (stream.paging, first.last_page.filter(|last| *last >= 2)) {
+        let (first_data, first_last_page, has_more) = if let Some(read) = first {
+            (read.data, read.last_page, true)
+        } else {
+            let read = self.conversation_page(&stream.endpoint, &stream.jq, 1, error_context)?;
+            pipe_truncated |= read.truncated;
+            (read.data, read.last_page, read.has_next)
+        };
+        match (stream.paging, first_last_page.filter(|last| *last >= 2)) {
             (ConversationPaging::LastPageFirst, Some(last)) => {
                 for page in (2..=last).rev() {
                     if lines >= MAX_CONVERSATION_ENTRIES {
@@ -286,9 +300,13 @@ impl Repository {
                     pipe_truncated |= read.truncated;
                     append_records(&mut collected, &mut lines, &read.data);
                 }
+                if complete {
+                    append_records(&mut collected, &mut lines, &first_data);
+                }
             }
             (ConversationPaging::NewestFirst, _) | (ConversationPaging::LastPageFirst, None) => {
-                let mut next = Some(2_usize);
+                append_records(&mut collected, &mut lines, &first_data);
+                let mut next = has_more.then_some(2_usize);
                 while let Some(page) = next {
                     if lines >= MAX_CONVERSATION_ENTRIES {
                         complete = false;
@@ -346,6 +364,7 @@ impl Repository {
             data,
             truncated: output.stdout_truncated,
             has_next,
+            last_page: last_page(head.as_ref()),
         })
     }
 }
