@@ -254,6 +254,52 @@ jobs:
         shell: pwsh
         run: ./tests/install.ps1
 
+  homebrew:
+    name: Homebrew (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@1f8e202ffddf94def7f42f6fa3a482e821489f9c # 2026.07.10.1
+      - name: Render the formula for the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName)
+          version=${tag#v}
+          gh release download "${tag}" --repo "${GITHUB_REPOSITORY}" \
+            --pattern SHA256SUMS --dir "${RUNNER_TEMP}"
+          python3 scripts/homebrew_formula.py --version "${version}" \
+            --checksums "${RUNNER_TEMP}/SHA256SUMS" \
+            --output "${RUNNER_TEMP}/quinjet.rb"
+      - name: Install the formula
+        run: brew install --formula "${RUNNER_TEMP}/quinjet.rb"
+      - name: Verify the installation
+        run: |
+          set -euo pipefail
+          prefix=$(brew --prefix quinjet)
+          test -x "${prefix}/bin/quinjet"
+          test -L "${prefix}/bin/q"
+          quinjet --version
+          q --version
+          test -s "$(brew --prefix)/share/bash-completion/completions/quinjet"
+          test -s "$(brew --prefix)/share/zsh/site-functions/_quinjet"
+          test -s "$(brew --prefix)/share/fish/vendor_completions.d/quinjet.fish"
+          test -s "$(brew --prefix)/share/man/man1/quinjet.1"
+          set +e
+          quinjet update >"${RUNNER_TEMP}/update-output" 2>&1
+          status=$?
+          set -e
+          test "${status}" -eq 69
+          grep -F 'brew upgrade quinjet' "${RUNNER_TEMP}/update-output"
+
   ci:
     name: CI
     if: always()
@@ -268,6 +314,7 @@ jobs:
       - coverage
       - package
       - installers
+      - homebrew
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any required job failed
