@@ -57,7 +57,7 @@ fn repository_tab_strip_appears_only_for_multiple_tabs() {
         .draw(|frame| draw(frame, &mut single, &Theme::default()))
         .unwrap();
 
-    assert!(single.geometry.repository_tab_hits.is_empty());
+    assert_eq!(single.geometry.repository_tab_hits, Vec::new());
     assert_eq!(single.geometry.repository_tab_open, Rect::default());
     assert_eq!(single.geometry.repository_tab_previous, Rect::default());
     assert_eq!(single.geometry.repository_tab_next, Rect::default());

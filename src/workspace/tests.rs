@@ -1,53 +1,15 @@
 use std::collections::HashSet;
-use std::fs;
-use std::path::Path;
-use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use tempfile::TempDir;
-
 use super::*;
 use crate::app::View;
+use crate::git::tests::TestRepository;
 
-fn test_repository(branch: &str) -> (TempDir, Repository) {
-    let directory = tempfile::Builder::new()
-        .prefix("quinjet-workspace-test-")
-        .tempdir()
-        .expect("temporary repository");
-    let branch_argument = format!("--initial-branch={branch}");
-    git(directory.path(), &["init", &branch_argument]);
-    fs::write(directory.path().join("README.md"), format!("{branch}\n"))
-        .expect("write repository fixture");
-    git(directory.path(), &["add", "README.md"]);
-    git(
-        directory.path(),
-        &[
-            "-c",
-            "user.name=Quinjet Test",
-            "-c",
-            "user.email=quinjet@example.com",
-            "commit",
-            "--message=base",
-        ],
-    );
-    let repository = Repository::discover(directory.path()).expect("discover repository");
-    (directory, repository)
-}
-
-fn git(path: &Path, arguments: &[&str]) {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(path)
-        .args(arguments)
-        .env("LC_ALL", "C")
-        .output()
-        .expect("run Git fixture command");
-    assert!(
-        output.status.success(),
-        "git {arguments:?} failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+fn test_repository(branch: &str) -> (TestRepository, Repository) {
+    let fixture = TestRepository::with_branch(branch);
+    let repository = fixture.repository();
+    (fixture, repository)
 }
 
 fn workspace(repository: &Repository) -> RepositoryWorkspace {

@@ -245,8 +245,9 @@ impl<T> RepositoryTabs<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RepositoryTabs, TabInfo};
     use std::path::{Path, PathBuf};
+
+    use super::{RepositoryTabs, TabInfo};
 
     #[test]
     fn new_collection_has_one_active_tab() {
