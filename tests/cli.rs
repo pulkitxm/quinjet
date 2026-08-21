@@ -235,6 +235,8 @@ mod capabilities;
 mod metadata;
 #[path = "cli/output.rs"]
 mod output;
+#[path = "cli/remotes.rs"]
+mod remotes;
 #[path = "cli/repository.rs"]
 mod repository;
 #[path = "cli/shell.rs"]
