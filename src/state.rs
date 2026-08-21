@@ -169,10 +169,202 @@ mod tests {
     use super::*;
     use crate::git::support::same_path;
 
+    struct StateRootGuard {
+        previous: Option<PathBuf>,
+    }
+
+    impl StateRootGuard {
+        fn new(root: &Path) -> Self {
+            let previous = STATE_ROOT_OVERRIDE.with(|cell| cell.replace(Some(root.to_path_buf())));
+            Self { previous }
+        }
+    }
+
+    impl Drop for StateRootGuard {
+        fn drop(&mut self) {
+            let previous = self.previous.take();
+            drop(STATE_ROOT_OVERRIDE.with(|cell| cell.replace(previous)));
+        }
+    }
+
+    #[test]
+    fn invalid_state_documents_are_treated_as_empty() {
+        let (state, _guard) = isolated_state();
+        let documents: [&[u8]; 4] = [b"", b"{", br#"{"path":"repo","commonDir":"git"}"#, b"null"];
+        for document in documents {
+            write_state_bytes(state.path(), document);
+            assert_eq!(read_entries(), Vec::<RecentEntry>::new());
+        }
+    }
+
+    #[test]
+    fn partially_valid_state_is_treated_as_empty() {
+        let (state, _guard) = isolated_state();
+        write_state_bytes(
+            state.path(),
+            br#"[{"path":"valid","commonDir":"common"},{"path":3,"commonDir":"broken"}]"#,
+        );
+        assert_eq!(read_entries(), Vec::<RecentEntry>::new());
+    }
+
+    #[test]
+    fn current_repository_is_inserted_first_and_deduplicated() {
+        let (_state, _guard) = isolated_state();
+        let repo = git_repo();
+        let common_dir = repository_common_dir(repo.path());
+        let first = fake_entry(1);
+        let last = fake_entry(2);
+        let stored = vec![
+            first.clone(),
+            RecentEntry {
+                path: PathBuf::from("old-checkout"),
+                common_dir: common_dir.clone(),
+            },
+            last.clone(),
+            RecentEntry {
+                path: PathBuf::from("older-checkout"),
+                common_dir: common_dir.clone(),
+            },
+        ];
+        write_entries(&stored);
+
+        let entries = recent_entries_with_current(repo.path());
+
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].common_dir, common_dir);
+        assert!(same_path(&entries[0].path, repo.path()));
+        assert_eq!(entries[1], first);
+        assert_eq!(entries[2], last);
+        assert_eq!(read_entries(), stored);
+    }
+
+    #[test]
+    fn recording_preserves_order_and_caps_entries() {
+        let (_state, _guard) = isolated_state();
+        let repo = git_repo();
+        let older = (0..MAX_RECENT_PROJECTS + 5)
+            .map(fake_entry)
+            .collect::<Vec<_>>();
+        write_entries(&older);
+
+        record_recent_project(repo.path());
+
+        let entries = read_entries();
+        assert_eq!(entries.len(), MAX_RECENT_PROJECTS);
+        assert!(same_path(&entries[0].path, repo.path()));
+        assert_eq!(
+            entries.get(1..),
+            older.get(..MAX_RECENT_PROJECTS.saturating_sub(1))
+        );
+    }
+
+    #[test]
+    fn recording_non_repository_paths_preserves_state() {
+        let (_state, _guard) = isolated_state();
+        let entries = vec![fake_entry(1), fake_entry(2)];
+        write_entries(&entries);
+        let plain = tempfile::tempdir().unwrap();
+
+        record_recent_project(plain.path());
+        record_recent_project(&plain.path().join("deleted"));
+
+        assert_eq!(read_entries(), entries);
+    }
+
+    #[test]
+    fn loading_skips_deleted_and_non_repository_entries() {
+        let (_state, _guard) = isolated_state();
+        let active = git_repo();
+        let active_common = repository_common_dir(active.path());
+        let deleted = git_repo();
+        let deleted_entry = RecentEntry {
+            path: deleted.path().to_path_buf(),
+            common_dir: repository_common_dir(deleted.path()),
+        };
+        drop(deleted);
+        let plain = tempfile::tempdir().unwrap();
+        let session = tempfile::tempdir().unwrap();
+        write_entries(&[
+            RecentEntry {
+                path: session.path().join("missing-checkout"),
+                common_dir: active_common.clone(),
+            },
+            RecentEntry {
+                path: active.path().to_path_buf(),
+                common_dir: active_common.clone(),
+            },
+            deleted_entry,
+            RecentEntry {
+                path: plain.path().to_path_buf(),
+                common_dir: plain.path().to_path_buf(),
+            },
+        ]);
+
+        let groups = load_recent_projects(session.path());
+
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].common_dir, active_common);
+        assert_eq!(groups[0].worktrees.len(), 1);
+        assert!(same_path(&groups[0].worktrees[0].path, active.path()));
+    }
+
+    #[test]
+    fn forgetting_existing_missing_and_only_entries_is_stable() {
+        let (_state, _guard) = isolated_state();
+        let first = fake_entry(1);
+        let only = fake_entry(2);
+        write_entries(&[first.clone(), only.clone()]);
+
+        forget_recent_project(&first.common_dir);
+        assert_eq!(read_entries(), vec![only.clone()]);
+        forget_recent_project(Path::new("missing-common-dir"));
+        assert_eq!(read_entries(), vec![only.clone()]);
+        forget_recent_project(&only.common_dir);
+        assert_eq!(read_entries(), Vec::<RecentEntry>::new());
+    }
+
+    #[test]
+    fn writing_creates_the_state_directory() {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("nested").join("state");
+        let _guard = StateRootGuard::new(&root);
+        let entries = vec![fake_entry(1)];
+
+        write_entries(&entries);
+
+        assert!(root.is_dir());
+        assert_eq!(read_entries(), entries);
+        assert!(!root.join("recent-projects.json.tmp").exists());
+    }
+
+    #[test]
+    fn regular_file_state_root_rejects_writes() {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("state");
+        fs::write(&root, "sentinel").unwrap();
+        let _guard = StateRootGuard::new(&root);
+
+        write_entries(&[fake_entry(1)]);
+
+        assert_eq!(fs::read_to_string(&root).unwrap(), "sentinel");
+        assert_eq!(read_entries(), Vec::<RecentEntry>::new());
+    }
+
+    #[test]
+    fn unwritable_staging_path_preserves_existing_state() {
+        let (state, _guard) = isolated_state();
+        let original = vec![fake_entry(1)];
+        write_entries(&original);
+        fs::create_dir_all(state.path().join("recent-projects.json.tmp")).unwrap();
+
+        write_entries(&[fake_entry(2)]);
+
+        assert_eq!(read_entries(), original);
+    }
+
     #[test]
     fn records_one_project_per_common_directory() {
-        let state = tempfile::tempdir().unwrap();
-        drop(STATE_ROOT_OVERRIDE.with(|cell| cell.replace(Some(state.path().to_path_buf()))));
+        let (_state, _guard) = isolated_state();
         let repo = git_repo();
         let linked_root = tempfile::tempdir().unwrap();
         let linked = linked_root.path().join("topic");
@@ -196,7 +388,30 @@ mod tests {
         );
         forget_recent_project(&entries[0].common_dir);
         assert_eq!(read_entries(), Vec::<RecentEntry>::new());
-        drop(STATE_ROOT_OVERRIDE.with(|cell| cell.replace(None)));
+    }
+
+    fn isolated_state() -> (tempfile::TempDir, StateRootGuard) {
+        let state = tempfile::tempdir().unwrap();
+        let guard = StateRootGuard::new(state.path());
+        (state, guard)
+    }
+
+    fn fake_entry(index: usize) -> RecentEntry {
+        RecentEntry {
+            path: PathBuf::from(format!("project-{index}")),
+            common_dir: PathBuf::from(format!("common-{index}")),
+        }
+    }
+
+    fn repository_common_dir(path: &Path) -> PathBuf {
+        Repository::discover(path)
+            .unwrap()
+            .git_common_dir()
+            .unwrap()
+    }
+
+    fn write_state_bytes(state: &Path, data: &[u8]) {
+        fs::write(state.join(RECENT_PROJECTS_FILE), data).unwrap();
     }
 
     fn git_repo() -> tempfile::TempDir {
