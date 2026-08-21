@@ -1647,7 +1647,7 @@ dependencies = [
 
 [[package]]
 name = "quinjet"
-version = "0.0.6"
+version = "0.0.35"
 dependencies = [
  "anyhow",
  "clap",
