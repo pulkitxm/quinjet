@@ -26,6 +26,10 @@ jobs:
         run: |
           python3 scripts/check_comments.py --selftest
           python3 scripts/check_comments.py
+      - name: Rust files stay focused
+        run: |
+          python3 scripts/check_rust_sizes.py --selftest
+          python3 scripts/check_rust_sizes.py
       - name: The Homebrew formula template renders
         run: python3 scripts/homebrew_formula.py --selftest
       - name: No committed secrets

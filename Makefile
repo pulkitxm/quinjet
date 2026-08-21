@@ -3,14 +3,14 @@ NIGHTLY ?= nightly
 COVERAGE_MIN ?= 65
 
 .PHONY: ci ci-fast deep fmt fmt-check lint lint-nightly test doc msrv build package \
-	install-check comments secrets homebrew typos spellcheck deny audit osv sbom unused sort hack wiki \
+	install-check comments rust-sizes secrets homebrew typos spellcheck deny audit osv sbom unused sort hack wiki \
 	coverage shell actions yaml markdown toml editorconfig ruff miri careful sanitize mutants \
 	minimal-versions udeps bloat optimization-docs tools tools-deep
 
-ci: fmt-check lint test doc comments secrets homebrew typos spellcheck deny audit osv unused sort hack \
+ci: fmt-check lint test doc comments rust-sizes secrets homebrew typos spellcheck deny audit osv unused sort hack \
 	shell actions yaml markdown toml editorconfig ruff wiki package
 
-ci-fast: fmt-check lint test comments secrets
+ci-fast: fmt-check lint test comments rust-sizes secrets
 
 fmt:
 	$(CARGO) fmt --all
@@ -62,6 +62,10 @@ homebrew:
 comments:
 	python3 scripts/check_comments.py --selftest
 	python3 scripts/check_comments.py
+
+rust-sizes:
+	python3 scripts/check_rust_sizes.py --selftest
+	python3 scripts/check_rust_sizes.py
 
 secrets:
 	python3 scripts/check_secrets.py --selftest
