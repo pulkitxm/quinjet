@@ -263,7 +263,8 @@ impl App {
                                 self.cache_pull_request_document(path, document);
                             }
                         }
-                        if (arrived_visible || counts_changed)
+                        if self.view == View::PullRequests
+                            && (arrived_visible || counts_changed)
                             && self.pull_request_file_view == PullRequestFileView::AllFiles
                         {
                             self.rebuild_pull_request_all_files_document();
@@ -328,7 +329,8 @@ impl App {
                     return effects;
                 }
                 self.pull_request_check_log_loading = false;
-                let following = self.content_at_bottom
+                let following = self.view == View::PullRequests
+                    && self.content_at_bottom
                     && self
                         .selected_pull_request_check()
                         .is_some_and(|check| check.status.is_running());

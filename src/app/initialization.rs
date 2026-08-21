@@ -11,6 +11,7 @@ impl App {
             repository_root: root.as_ref().to_path_buf(),
             repository_name: name.into(),
             view: View::Changes,
+            view_states: ViewStates::default(),
             focus: Focus::Sidebar,
             diff_layout: DiffLayout::SideBySide,
             theme: Theme::default(),

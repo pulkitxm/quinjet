@@ -149,6 +149,7 @@ mod scm;
 mod selection;
 mod support;
 mod view;
+mod view_state;
 mod worker_content;
 mod worker_events;
 mod worker_repository;
@@ -159,6 +160,7 @@ pub(crate) use pull_request_actions::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use support::*;
 pub(crate) use view::*;
+pub(crate) use view_state::*;
 
 #[derive(Debug)]
 pub(crate) enum AppEffect {
@@ -178,6 +180,7 @@ pub(crate) struct App {
     pub repository_root: PathBuf,
     pub repository_name: String,
     pub view: View,
+    pub view_states: ViewStates,
     pub focus: Focus,
     pub diff_layout: DiffLayout,
     pub theme: Theme,

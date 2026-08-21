@@ -153,15 +153,22 @@ impl App {
                         self.request_pull_request_checks(true, &mut effects);
                         self.request_pull_request_conversation(true, &mut effects);
                         if !same || head_moved {
-                            self.preview_due = None;
-                            self.request_preview(&mut effects);
+                            if self.view == View::PullRequests {
+                                self.preview_due = None;
+                                self.request_preview(&mut effects);
+                            } else {
+                                self.mark_view_preview_for_resume(View::PullRequests);
+                            }
                         }
                     }
                     Err(error) => {
                         self.pull_request_progress = None;
                         self.pull_request_error = Some(error.clone());
                         self.invalidate_pull_request_content_rows();
-                        self.set_document(DiffDocument::empty("Pull Requests", error.clone()));
+                        self.set_view_document(
+                            View::PullRequests,
+                            DiffDocument::empty("Pull Requests", error.clone()),
+                        );
                         self.show_toast(error, ToastLevel::Error, now);
                     }
                 }
