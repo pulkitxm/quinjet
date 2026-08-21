@@ -4,6 +4,7 @@ mod convert;
 mod date_time;
 mod file_icons;
 mod git;
+mod onboarding;
 mod state;
 mod tabs;
 mod theme;
@@ -40,6 +41,7 @@ use ratatui::backend::CrosstermBackend;
 use crate::app::AppEffect;
 use crate::cli::{Launch, TerminalOptions};
 use crate::git::Repository;
+use crate::onboarding::{Onboarding, OnboardingAction};
 use crate::webhook::WebhookListener;
 use crate::workspace::{RepositoryWorkspace, RoutedEffects};
 
@@ -99,106 +101,169 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
     }
 
     install_panic_hook();
-    let repository = Repository::discover(&options.path)?;
-    state::record_recent_project(repository.root());
     let webhooks = options
         .webhook_listen
         .as_deref()
         .map(WebhookListener::bind)
         .transpose()?;
-    let mut workspace = RepositoryWorkspace::new(
-        &repository,
-        options.theme,
-        options.appearance,
-        !options.no_mouse,
-        webhooks.is_some(),
-    );
-    workspace.sync_tabs(Instant::now());
+    let repository = Repository::discover(&options.path).ok();
+    if let Some(repository) = repository.as_ref() {
+        state::record_recent_project(repository.root());
+    }
+    let mut workspace = repository.as_ref().map(|repository| {
+        let mut workspace = RepositoryWorkspace::new(
+            repository,
+            options.theme,
+            options.appearance,
+            !options.no_mouse,
+            webhooks.is_some(),
+        );
+        workspace.sync_tabs(Instant::now());
+        workspace
+    });
+    let mut onboarding = Onboarding::new(&options.path);
+    let onboarding_theme = theme::Theme::new(options.theme, options.appearance.resolve());
     let mut terminal = TerminalGuard::enter(!options.no_mouse)?;
     let render_tick = tick(Duration::from_millis(16));
     let periodic_refresh = tick(Duration::from_secs(10));
     let mut dirty = true;
     let mut running = true;
 
-    if let Some(effects) = workspace.initial_effects() {
-        running &= dispatch_effects(&mut workspace, &mut terminal, [effects]);
-    }
-    if let Some(number) = options.pull_request
-        && let Some(effects) = workspace.open_pull_request_on_launch(number)
-    {
-        running &= dispatch_effects(&mut workspace, &mut terminal, [effects]);
+    if let Some(current) = workspace.as_mut() {
+        running &= dispatch_launch_effects(current, &mut terminal, options.pull_request);
     }
     while running {
         if dirty {
-            let Some(app) = workspace.active_app_mut() else {
-                break;
-            };
-            let theme = app.theme;
-            let _ = terminal
-                .terminal
-                .draw(|frame| ui::draw(frame, app, &theme))
-                .context("failed to render Quinjet")?;
+            if let Some(current) = workspace.as_mut() {
+                let Some(app) = current.active_app_mut() else {
+                    break;
+                };
+                let theme = app.theme;
+                let _ = terminal
+                    .terminal
+                    .draw(|frame| ui::draw(frame, app, &theme))
+                    .context("failed to render Quinjet")?;
+            } else {
+                let _ = terminal
+                    .terminal
+                    .draw(|frame| onboarding.draw(frame, &onboarding_theme))
+                    .context("failed to render Quinjet onboarding")?;
+            }
             dirty = false;
         }
 
-        let worker_effects = workspace.drain_worker_events(Instant::now());
-        if !worker_effects.is_empty() {
-            running &= dispatch_effects(&mut workspace, &mut terminal, worker_effects);
-            dirty = true;
-        }
+        if let Some(current) = workspace.as_mut() {
+            let worker_effects = current.drain_worker_events(Instant::now());
+            if !worker_effects.is_empty() {
+                running &= dispatch_effects(current, &mut terminal, worker_effects);
+                dirty = true;
+            }
 
-        let watcher_effects = workspace.poll_watchers();
-        if !watcher_effects.is_empty() {
-            running &= dispatch_effects(&mut workspace, &mut terminal, watcher_effects);
-            dirty = true;
-        }
+            let watcher_effects = current.poll_watchers();
+            if !watcher_effects.is_empty() {
+                running &= dispatch_effects(current, &mut terminal, watcher_effects);
+                dirty = true;
+            }
 
-        if webhook_delivered(webhooks.as_ref()) {
-            let effects = workspace.webhook_delivered(Instant::now());
-            running &= dispatch_effects(&mut workspace, &mut terminal, effects);
-            dirty = true;
-        }
+            if webhook_delivered(webhooks.as_ref()) {
+                let effects = current.webhook_delivered(Instant::now());
+                running &= dispatch_effects(current, &mut terminal, effects);
+                dirty = true;
+            }
 
-        if render_tick.try_recv().is_ok() {
-            let (effects, changed) = workspace.tick(Instant::now());
-            running &= dispatch_effects(&mut workspace, &mut terminal, effects);
-            dirty |= changed;
-        }
-        if periodic_refresh.try_recv().is_ok() {
-            let effects = workspace.periodic_refresh();
-            running &= dispatch_effects(&mut workspace, &mut terminal, effects);
-            dirty = true;
+            if render_tick.try_recv().is_ok() {
+                let (effects, changed) = current.tick(Instant::now());
+                running &= dispatch_effects(current, &mut terminal, effects);
+                dirty |= changed;
+            }
+            if periodic_refresh.try_recv().is_ok() {
+                let effects = current.periodic_refresh();
+                running &= dispatch_effects(current, &mut terminal, effects);
+                dirty = true;
+            }
         }
 
         if event::poll(Duration::from_millis(8)).context("failed to poll terminal events")? {
-            let Some(id) = workspace.active_id() else {
-                break;
-            };
-            let Some(app) = workspace.app_mut(id) else {
-                break;
-            };
-            let effects = match event::read().context("failed to read terminal event")? {
-                Event::Key(key) if key.kind != KeyEventKind::Release => {
-                    app.handle_key(key, Instant::now())
+            let event = event::read().context("failed to read terminal event")?;
+            if let Some(current) = workspace.as_mut() {
+                let Some(id) = current.active_id() else {
+                    break;
+                };
+                let Some(app) = current.app_mut(id) else {
+                    break;
+                };
+                let effects = match event {
+                    Event::Key(key) if key.kind != KeyEventKind::Release => {
+                        app.handle_key(key, Instant::now())
+                    }
+                    Event::Mouse(mouse) => app.handle_mouse(mouse, Instant::now()),
+                    Event::Paste(text) => {
+                        app.handle_paste(&text);
+                        Vec::new()
+                    }
+                    _ => Vec::new(),
+                };
+                current.propagate_preferences(id);
+                running &=
+                    dispatch_effects(current, &mut terminal, [RoutedEffects { id, effects }]);
+            } else {
+                let action = match event {
+                    Event::Key(key) if key.kind != KeyEventKind::Release => {
+                        onboarding.handle_key(key)
+                    }
+                    Event::Paste(text) => {
+                        onboarding.handle_paste(&text);
+                        OnboardingAction::None
+                    }
+                    _ => OnboardingAction::None,
+                };
+                match action {
+                    OnboardingAction::None => {}
+                    OnboardingAction::Quit => running = false,
+                    OnboardingAction::Open(path) => match Repository::discover(&path) {
+                        Ok(repository) => {
+                            state::record_recent_project(repository.root());
+                            let mut next = RepositoryWorkspace::new(
+                                &repository,
+                                options.theme,
+                                options.appearance,
+                                !options.no_mouse,
+                                webhooks.is_some(),
+                            );
+                            next.sync_tabs(Instant::now());
+                            running &= dispatch_launch_effects(
+                                &mut next,
+                                &mut terminal,
+                                options.pull_request,
+                            );
+                            workspace = Some(next);
+                        }
+                        Err(error) => onboarding.show_error(error.to_string()),
+                    },
                 }
-                Event::Mouse(mouse) => app.handle_mouse(mouse, Instant::now()),
-                Event::Paste(text) => {
-                    app.handle_paste(&text);
-                    Vec::new()
-                }
-                _ => Vec::new(),
-            };
-            workspace.propagate_preferences(id);
-            running &= dispatch_effects(
-                &mut workspace,
-                &mut terminal,
-                [RoutedEffects { id, effects }],
-            );
+            }
             dirty = true;
         }
     }
 
     Ok(())
+}
+
+fn dispatch_launch_effects(
+    workspace: &mut RepositoryWorkspace,
+    terminal: &mut TerminalGuard,
+    pull_request: Option<u64>,
+) -> bool {
+    let mut running = true;
+    if let Some(effects) = workspace.initial_effects() {
+        running &= dispatch_effects(workspace, terminal, [effects]);
+    }
+    if let Some(number) = pull_request
+        && let Some(effects) = workspace.open_pull_request_on_launch(number)
+    {
+        running &= dispatch_effects(workspace, terminal, [effects]);
+    }
+    running
 }
 
 #[doc = " Deliveries only say that something changed, so several arriving together"]

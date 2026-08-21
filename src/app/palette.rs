@@ -32,6 +32,9 @@ impl App {
             PaletteCommand::OpenProject => {
                 self.open_projects(ProjectOpenMode::CurrentTab, effects);
             }
+            PaletteCommand::OpenProjectNewTab => {
+                self.open_projects(ProjectOpenMode::NewTab, effects);
+            }
             PaletteCommand::Branches => self.open_branches(effects),
             PaletteCommand::CompareBranch => self.open_compare_branches(effects),
             PaletteCommand::RenameCurrentBranch => {
