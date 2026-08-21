@@ -77,7 +77,9 @@ impl App {
                             .collect::<Vec<_>>();
                         self.local_diff_workspace_generation = Some(generation);
                         self.local_diff_documents.clear();
-                        if !preserve_document {
+                        if preserve_document {
+                            self.reconcile_refreshed_preview_file_folds(&paths);
+                        } else {
                             self.reset_preview_file_folds(&paths);
                         }
                         self.selected_preview_file = selected_path

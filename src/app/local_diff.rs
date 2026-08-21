@@ -4,6 +4,8 @@ use super::*;
 impl App {
     pub(super) fn reset_local_diff_runtime(&mut self) {
         self.local_diff_request = None;
+        self.local_diff_change_section = None;
+        self.local_diff_preserved_paths.clear();
         self.local_diff_workspace_generation = None;
         self.local_diff_index = None;
         self.local_diff_documents.clear();

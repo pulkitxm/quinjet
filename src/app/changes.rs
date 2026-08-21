@@ -146,6 +146,28 @@ impl App {
         }
     }
 
+    pub(super) fn reconcile_refreshed_preview_file_folds(&mut self, paths: &[PathBuf]) {
+        self.invalidate_diff_rows();
+        let indexed = paths.iter().cloned().collect::<HashSet<_>>();
+        self.collapsed_preview_files
+            .retain(|path| indexed.contains(path));
+        self.expanded_preview_files
+            .retain(|path| indexed.contains(path));
+        if !self.files_collapsed && !self.collapse_preference_set && paths.len() > 1 {
+            if self.local_diff_preserved_paths.len() <= 1 {
+                self.collapsed_preview_files.extend(paths.iter().cloned());
+            } else {
+                self.collapsed_preview_files.extend(
+                    paths
+                        .iter()
+                        .filter(|path| !self.local_diff_preserved_paths.contains(*path))
+                        .cloned(),
+                );
+            }
+        }
+        self.local_diff_preserved_paths.clear();
+    }
+
     pub(super) fn visible_preview_paths(&self, paths: &[PathBuf]) -> HashSet<PathBuf> {
         if paths.len() <= 1 {
             return paths.iter().cloned().collect();
