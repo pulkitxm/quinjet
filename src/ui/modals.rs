@@ -1,3 +1,4 @@
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
 pub(super) fn draw_modal(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {

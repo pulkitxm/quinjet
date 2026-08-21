@@ -77,13 +77,17 @@ mod pull_request;
 mod temporary;
 
 pub(crate) use cache::*;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use change_index::*;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use http::*;
 pub(crate) use model::*;
 pub(crate) use operation::*;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use parsing::*;
 pub(crate) use prepared::*;
 pub(crate) use process::{BoundedOutput, bounded_command_error, run_bounded_command};
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use temporary::*;
 
 #[cfg(test)]

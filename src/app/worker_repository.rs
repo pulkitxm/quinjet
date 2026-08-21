@@ -1,6 +1,15 @@
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
 impl App {
+    #[expect(
+        clippy::excessive_nesting,
+        reason = "the event handler mirrors the result and modal states it decodes"
+    )]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the exhaustive event match keeps each state transition together"
+    )]
     pub(super) fn handle_repository_worker_event(
         &mut self,
         event: WorkerEvent,
@@ -89,14 +98,14 @@ impl App {
                     }
                 }
             }
-            WorkerEvent::LocalGitHubRepository { result } => {
-                if let Ok(repository) = result {
-                    self.recent_pull_requests = repository
-                        .as_ref()
-                        .map_or_else(Vec::new, cached_recent_pull_requests_for);
-                    self.recent_pull_request_cursor = 0;
-                    self.local_github_repository = repository;
-                }
+            WorkerEvent::LocalGitHubRepository {
+                result: Ok(repository),
+            } => {
+                self.recent_pull_requests = repository
+                    .as_ref()
+                    .map_or_else(Vec::new, cached_recent_pull_requests_for);
+                self.recent_pull_request_cursor = 0;
+                self.local_github_repository = repository;
             }
             WorkerEvent::PullRequestLookup { generation, result } => {
                 if generation != self.pull_request_generation {
@@ -108,12 +117,12 @@ impl App {
                         if !snapshot.repositories.is_empty() {
                             self.github_repositories = snapshot.repositories;
                         }
+                        let current = snapshot.pull_request;
                         let newly_opened = self.pull_request.is_none();
-                        let previous = self.pull_request.replace(snapshot.pull_request);
-                        if previous.as_ref() != self.pull_request.as_ref() {
+                        let previous = self.pull_request.take();
+                        if previous.as_ref() != Some(&current) {
                             self.invalidate_pull_request_content_rows();
                         }
-                        let current = self.pull_request.as_ref().expect("just assigned");
                         let same = previous.as_ref().is_some_and(|previous| {
                             previous.number == current.number
                                 && previous
@@ -125,9 +134,10 @@ impl App {
                             previous.is_some_and(|previous| previous.head_oid != current.head_oid);
                         if newly_opened {
                             self.recent_pull_requests =
-                                updated_recent_pull_requests(&self.recent_pull_requests, current);
+                                updated_recent_pull_requests(&self.recent_pull_requests, &current);
                             self.recent_pull_request_cursor = 0;
                         }
+                        self.pull_request = Some(current);
                         self.pull_request_repository = snapshot.selected_repository;
                         self.pull_request_warnings = snapshot.warnings;
                         self.pull_request_exact_number = snapshot.exact_number;

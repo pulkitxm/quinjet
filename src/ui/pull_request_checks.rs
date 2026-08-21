@@ -1,3 +1,4 @@
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
 pub(super) fn check_summary_line(app: &App, theme: &Theme) -> Line<'static> {

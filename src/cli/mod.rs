@@ -422,11 +422,16 @@ pub(crate) mod support;
 mod verbs;
 
 pub(crate) use entry::dispatch;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use output::*;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use pull_request::*;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use repository::*;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use support::*;
 pub(crate) use support::{open_url, report, stdout_is_terminal};
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use verbs::*;
 
 #[cfg(test)]

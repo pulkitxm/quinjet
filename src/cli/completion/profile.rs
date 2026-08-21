@@ -1,3 +1,4 @@
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
 pub(super) fn remove_profile_integration(profile: &Path, begin: &str, end: &str) -> Result<()> {

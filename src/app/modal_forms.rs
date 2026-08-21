@@ -1,6 +1,11 @@
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
 impl App {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the exhaustive modal match keeps each state transition together"
+    )]
     pub(super) fn handle_form_modal_key(
         &mut self,
         mut modal: Modal,

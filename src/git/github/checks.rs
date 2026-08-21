@@ -26,6 +26,7 @@ mod parsing;
 mod repository;
 
 pub(crate) use model::*;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use parsing::*;
 
 #[cfg(test)]

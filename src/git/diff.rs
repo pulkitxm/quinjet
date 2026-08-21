@@ -21,6 +21,7 @@ mod syntax;
 
 pub(crate) use model::*;
 pub(crate) use parser::*;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use syntax::*;
 
 #[cfg(test)]

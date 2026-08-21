@@ -10,6 +10,7 @@ pub(crate) struct FileIcon {
 
 mod catalog;
 
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use catalog::*;
 
 #[derive(Debug, Clone, Copy)]

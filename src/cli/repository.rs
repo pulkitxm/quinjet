@@ -1,3 +1,4 @@
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
 pub(super) fn run(session: &mut Session, out: &Emitter, verb: Verb) -> Result<u8> {

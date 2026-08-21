@@ -1,3 +1,4 @@
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
 pub(super) fn parse_api_file_counts(data: &[u8]) -> HashMap<PathBuf, DiffLineCounts> {

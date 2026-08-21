@@ -334,8 +334,8 @@ fn compare_branch_picker_queues_a_head_diff_without_checkout() {
         )
     ));
     assert!(matches!(
-        app.auxiliary_preview,
-        Some(AuxiliaryPreview::Branch(ref branch)) if branch.name == "topic"
+        &app.auxiliary_preview,
+        Some(AuxiliaryPreview::Branch(branch)) if branch.name == "topic"
     ));
     assert_eq!(app.focus, Focus::Content);
 }

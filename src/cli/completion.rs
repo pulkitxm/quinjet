@@ -238,8 +238,11 @@ mod profile;
 mod shortcut;
 mod targets;
 
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use profile::*;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use shortcut::*;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use targets::*;
 
 #[cfg(test)]

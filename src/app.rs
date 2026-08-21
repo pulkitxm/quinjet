@@ -148,6 +148,7 @@ mod worker_repository;
 
 pub(crate) use geometry::*;
 pub(crate) use modal::*;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use support::*;
 pub(crate) use view::*;
 

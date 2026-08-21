@@ -252,6 +252,7 @@ mod reads;
 mod repository;
 pub(crate) mod support;
 
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use support::*;
 
 #[cfg(test)]

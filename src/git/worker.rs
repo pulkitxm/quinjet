@@ -321,6 +321,7 @@ mod lifecycle;
 mod runtime;
 
 pub(crate) use lifecycle::GitWorker;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use runtime::*;
 
 #[cfg(test)]
