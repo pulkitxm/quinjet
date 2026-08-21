@@ -166,6 +166,7 @@ impl App {
         if self.view == View::Changes && self.auxiliary_preview.is_none() {
             self.invalidate_preview();
             self.local_diff_loading_path = None;
+            self.local_diff_pending_paths.clear();
         }
         self.request_refresh(effects);
     }

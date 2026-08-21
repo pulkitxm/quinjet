@@ -222,10 +222,7 @@ impl App {
                 self.toggle_check_step(self.pull_request_step_cursor);
             }
             KeyCode::Char(' ')
-                if self.focus == Focus::Content
-                    && (self.local_diff_index.is_some()
-                        || (self.view == View::PullRequests
-                            && self.pull_request_file_view == PullRequestFileView::AllFiles)) =>
+                if self.focus == Focus::Content && self.preview_files_collapsible() =>
             {
                 if let Some(path) = self.selected_preview_file.clone() {
                     self.toggle_preview_file(path, &mut effects);
