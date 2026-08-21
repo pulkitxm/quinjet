@@ -7,17 +7,17 @@ use super::{
     CacheLife, PullRequest, Repository, bounded_text, cache_read, cache_write, parse_tsv_record,
 };
 
-/// The renderer wraps every entry to the pane width on each redraw, so this cap
-/// is what keeps that work bounded. It is far above any real thread; the entries
-/// dropped are the oldest, and the view says so.
+#[doc = " The renderer wraps every entry to the pane width on each redraw, so this cap"]
+#[doc = " is what keeps that work bounded. It is far above any real thread; the entries"]
+#[doc = " dropped are the oldest, and the view says so."]
 const MAX_CONVERSATION_ENTRIES: usize = 500;
 const MAX_CONVERSATION_BODY_BYTES: usize = 64 * 1024;
 const MAX_CONVERSATION_CONTEXT_BYTES: usize = 8 * 1024;
 const CONVERSATION_FIELDS: usize = 8;
 const CONVERSATION_PAGE_SIZE: usize = 100;
 
-/// Events GitHub records but never renders in a pull-request conversation.
-/// Dropping them in the query keeps the response small and the thread readable.
+#[doc = " Events GitHub records but never renders in a pull-request conversation."]
+#[doc = " Dropping them in the query keeps the response small and the thread readable."]
 const HIDDEN_TIMELINE_EVENTS: &str = r#"["subscribed","unsubscribed","mentioned","referenced","milestoned","demilestoned","user_blocked","connected","disconnected","transferred","pinned","unpinned","locked","unlocked","marked_as_duplicate","unmarked_as_duplicate","comment_deleted","deployed","deployment_environment_changed","automatic_base_change_succeeded","automatic_base_change_failed"]"#;
 
 const REVIEW_COMMENT_TSV_JQ: &str = r#".[] | ["review_comment", (.user.login // ""), (.created_at // ""), ((.path // "") + ":" + (((.line // .original_line) // 0)|tostring)), (.body // ""), (.html_url // ""), ((.pull_request_review_id // 0)|tostring), (.diff_hunk // "")] | @tsv"#;
@@ -78,7 +78,7 @@ impl ConversationKind {
         }
     }
 
-    /// Whether the entry carries prose worth rendering under its header.
+    #[doc = " Whether the entry carries prose worth rendering under its header."]
     pub(crate) const fn has_body(self) -> bool {
         matches!(
             self,
@@ -93,9 +93,9 @@ struct ConversationRecords {
     from_cache: bool,
 }
 
-/// How a stream reaches its newest entries. Review comments accept a
-/// descending sort, so their newest page is page one. The timeline API only
-/// serves oldest-first, so its newest page is the one `rel="last"` names.
+#[doc = " How a stream reaches its newest entries. Review comments accept a"]
+#[doc = " descending sort, so their newest page is page one. The timeline API only"]
+#[doc = " serves oldest-first, so its newest page is the one `rel=\"last\"` names."]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ConversationPaging {
     NewestFirst,
@@ -116,15 +116,15 @@ pub(crate) struct ConversationEntry {
     pub kind: ConversationKind,
     pub actor: String,
     pub timestamp: String,
-    /// Short qualifier for the header: a review verdict, a label name, a
-    /// `path:line` anchor, an abbreviated commit, or a renamed title.
+    #[doc = " Short qualifier for the header: a review verdict, a label name, a"]
+    #[doc = " `path:line` anchor, an abbreviated commit, or a renamed title."]
     pub detail: String,
     pub body: String,
     pub url: String,
-    /// Stable identity for the underlying object: a commit OID, a review id, or
-    /// the post-rename title.
+    #[doc = " Stable identity for the underlying object: a commit OID, a review id, or"]
+    #[doc = " the post-rename title."]
     pub reference: String,
-    /// Supporting text shown with the entry, currently a review comment's hunk.
+    #[doc = " Supporting text shown with the entry, currently a review comment's hunk."]
     pub context: String,
 }
 
@@ -133,8 +133,8 @@ pub(crate) struct ConversationEntry {
 pub(crate) struct PullRequestConversation {
     pub entries: Vec<ConversationEntry>,
     pub truncated: bool,
-    /// True when nothing had to be transferred: either the thread was already
-    /// held for this update stamp, or GitHub confirmed it had not changed.
+    #[doc = " True when nothing had to be transferred: either the thread was already"]
+    #[doc = " held for this update stamp, or GitHub confirmed it had not changed."]
     pub from_cache: bool,
 }
 
@@ -153,13 +153,13 @@ impl PullRequestConversation {
 }
 
 impl Repository {
-    /// Read the whole pull-request conversation: issue comments, reviews and
-    /// their inline comments, pushed commits, force pushes, and the lifecycle
-    /// events GitHub shows between them.
-    ///
-    /// Inline review comments are read from their own endpoint rather than
-    /// trusted to the timeline, which only groups them into `line-commented`
-    /// entries for some pull requests.
+    #[doc = " Read the whole pull-request conversation: issue comments, reviews and"]
+    #[doc = " their inline comments, pushed commits, force pushes, and the lifecycle"]
+    #[doc = " events GitHub shows between them."]
+    #[doc = ""]
+    #[doc = " Inline review comments are read from their own endpoint rather than"]
+    #[doc = " trusted to the timeline, which only groups them into `line-commented`"]
+    #[doc = " entries for some pull requests."]
     pub(crate) fn pull_request_conversation(
         &self,
         pull_request: &PullRequest,
@@ -225,11 +225,11 @@ impl Repository {
         })
     }
 
-    /// Read one stream page by page, newest pages first, stopping at the entry
-    /// cap. A capped read keeps only the newest pages, so the omitted activity
-    /// is genuinely the oldest; an oversized or failed validated first page
-    /// degrades to the bounded page loop instead of failing the conversation.
-    /// Only a pipe-truncated page prevents caching.
+    #[doc = " Read one stream page by page, newest pages first, stopping at the entry"]
+    #[doc = " cap. A capped read keeps only the newest pages, so the omitted activity"]
+    #[doc = " is genuinely the oldest; an oversized or failed validated first page"]
+    #[doc = " degrades to the bounded page loop instead of failing the conversation."]
+    #[doc = " Only a pipe-truncated page prevents caching."]
     fn conversation_records(
         &self,
         stream: &ConversationStream,
@@ -415,9 +415,9 @@ fn review_comment_endpoint(pull_request: &PullRequest) -> String {
     )
 }
 
-/// Flatten every timeline shape into one fixed-width record. GitHub gives each
-/// event type its own field names, so the mapping has to be explicit; anything
-/// unrecognized still arrives with an actor and a timestamp.
+#[doc = " Flatten every timeline shape into one fixed-width record. GitHub gives each"]
+#[doc = " event type its own field names, so the mapping has to be explicit; anything"]
+#[doc = " unrecognized still arrives with an actor and a timestamp."]
 fn timeline_tsv_jq() -> String {
     format!(
         r#".[]

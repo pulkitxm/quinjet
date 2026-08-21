@@ -13,8 +13,8 @@ pub(super) fn diff_index_args(base: &str, head: &str) -> Vec<OsString> {
     ]
 }
 
-/// Reuse an index command's own revision range for its totals by swapping the
-/// listing option. This keeps the two reads describing exactly the same diff.
+#[doc = " Reuse an index command's own revision range for its totals by swapping the"]
+#[doc = " listing option. This keeps the two reads describing exactly the same diff."]
 pub(super) fn numstat_args(args: &[OsString]) -> Option<Vec<OsString>> {
     let name_status = OsStr::new("--name-status");
     args.iter().any(|arg| arg == name_status).then(|| {

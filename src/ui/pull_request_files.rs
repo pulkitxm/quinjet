@@ -199,9 +199,9 @@ pub(super) const fn pull_request_file_status_color(
     }
 }
 
-/// The overview sidebar is the pull request itself on row zero, then status
-/// sections and their checks, so one list carries both the way back to the
-/// conversation and the way into any run's log.
+#[doc = " The overview sidebar is the pull request itself on row zero, then status"]
+#[doc = " sections and their checks, so one list carries both the way back to the"]
+#[doc = " conversation and the way into any run's log."]
 pub(super) fn draw_pull_request_check_list(
     frame: &mut Frame<'_>,
     area: Rect,

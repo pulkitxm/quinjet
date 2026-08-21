@@ -66,10 +66,10 @@ impl PreparedPullRequest {
         ))
     }
 
-    /// Produce many file documents from a single `git diff`. Spawning one Git
-    /// process per file dominates the cost of a wide pull request, so batching
-    /// is what lets the whole diff arrive while the reader is still reading the
-    /// first file.
+    #[doc = " Produce many file documents from a single `git diff`. Spawning one Git"]
+    #[doc = " process per file dominates the cost of a wide pull request, so batching"]
+    #[doc = " is what lets the whole diff arrive while the reader is still reading the"]
+    #[doc = " first file."]
     pub(crate) fn diff_files(&self, paths: &[PathBuf]) -> Result<Vec<(PathBuf, DiffDocument)>> {
         let files: Vec<&PullRequestFile> = paths
             .iter()

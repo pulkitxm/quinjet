@@ -9,10 +9,10 @@ use super::{
 };
 
 const MAX_CHECK_LOG_BYTES: usize = 8 * 1024 * 1024;
-/// Check state is the one thing here that genuinely changes minute to minute,
-/// so it is the one thing kept on a clock rather than on an identity.
+#[doc = " Check state is the one thing here that genuinely changes minute to minute,"]
+#[doc = " so it is the one thing kept on a clock rather than on an identity."]
 const CHECK_LIST_CACHE_TTL: Duration = Duration::from_secs(30);
-/// A ceiling on how much a single pull request will warm in the background.
+#[doc = " A ceiling on how much a single pull request will warm in the background."]
 const MAX_PREFETCHED_CHECK_LOGS: usize = 32;
 const MAX_CHECK_LOG_LINES: usize = 200_000;
 const CHECK_TSV_FIELDS: usize = 8;

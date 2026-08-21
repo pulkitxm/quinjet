@@ -49,8 +49,8 @@ impl PullRequestCheck {
         elapsed_label(&self.started_at, &self.completed_at)
     }
 
-    /// GitHub Actions check links end in `/actions/runs/<run>/job/<job>`, which
-    /// is the only place a check run exposes the job identity its logs need.
+    #[doc = " GitHub Actions check links end in `/actions/runs/<run>/job/<job>`, which"]
+    #[doc = " is the only place a check run exposes the job identity its logs need."]
     pub(crate) fn job_id(&self) -> Option<u64> {
         let (_, job) = self.link.rsplit_once("/job/")?;
         let job = job.split(['?', '#', '/']).next()?;
@@ -102,8 +102,8 @@ pub(crate) struct CheckStep {
 }
 
 impl CheckStep {
-    /// How long the step took, or how long it has been running so far when it
-    /// has started but not finished.
+    #[doc = " How long the step took, or how long it has been running so far when it"]
+    #[doc = " has started but not finished."]
     pub(crate) fn duration_label(&self, now: i64) -> String {
         if self.completed_at.is_empty() {
             let Some(started) = timestamp_seconds(&self.started_at) else {
@@ -119,7 +119,7 @@ impl CheckStep {
     }
 }
 
-/// Seconds since the Unix epoch, for measuring against a GitHub timestamp.
+#[doc = " Seconds since the Unix epoch, for measuring against a GitHub timestamp."]
 pub(crate) fn unix_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -128,8 +128,8 @@ pub(crate) fn unix_now() -> i64 {
         .unwrap_or_default()
 }
 
-/// A check list plus where it came from, so the view can say whether it is
-/// showing a cached answer or one just read from GitHub.
+#[doc = " A check list plus where it came from, so the view can say whether it is"]
+#[doc = " showing a cached answer or one just read from GitHub."]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PullRequestChecks {
@@ -141,15 +141,15 @@ pub(crate) struct PullRequestChecks {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CheckRunLog {
     pub steps: Vec<CheckStep>,
-    /// Output produced before the first step or after the last one, which is
-    /// where a runner reports provisioning and teardown failures.
+    #[doc = " Output produced before the first step or after the last one, which is"]
+    #[doc = " where a runner reports provisioning and teardown failures."]
     pub loose_lines: Vec<CheckLogLine>,
     pub truncated: bool,
-    /// Set when there is nothing to show at all, with the reason to display.
+    #[doc = " Set when there is nothing to show at all, with the reason to display."]
     pub unavailable: Option<String>,
-    /// The runner has not written anything yet. This is only true for the first
-    /// seconds of a job: GitHub serves a growing partial log from then on, so a
-    /// running job tails rather than waiting for its own completion.
+    #[doc = " The runner has not written anything yet. This is only true for the first"]
+    #[doc = " seconds of a job: GitHub serves a growing partial log from then on, so a"]
+    #[doc = " running job tails rather than waiting for its own completion."]
     pub log_pending: bool,
 }
 
@@ -161,7 +161,7 @@ impl CheckRunLog {
         }
     }
 
-    /// The step a runner is currently executing, if any.
+    #[doc = " The step a runner is currently executing, if any."]
     pub(crate) fn running_step(&self) -> Option<&CheckStep> {
         self.steps
             .iter()

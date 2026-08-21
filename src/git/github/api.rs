@@ -32,8 +32,8 @@ impl Repository {
         Ok(operation.success_message(pull_request))
     }
 
-    /// One bounded page of a listing endpoint: its body trimmed to whole
-    /// records, plus whether GitHub advertises another page after it.
+    #[doc = " One bounded page of a listing endpoint: its body trimmed to whole"]
+    #[doc = " records, plus whether GitHub advertises another page after it."]
     pub(super) fn api_page(
         &self,
         endpoint: &str,
@@ -67,9 +67,9 @@ impl Repository {
         })
     }
 
-    /// Per-file additions and deletions from the pull-request files endpoint.
-    /// In the blob-less disposable workspace a local `--numstat` would download
-    /// every changed blob just to count lines; GitHub already knows the totals.
+    #[doc = " Per-file additions and deletions from the pull-request files endpoint."]
+    #[doc = " In the blob-less disposable workspace a local `--numstat` would download"]
+    #[doc = " every changed blob just to count lines; GitHub already knows the totals."]
     pub(super) fn pull_request_file_counts_from_api(
         &self,
         pull_request: &PullRequest,
@@ -117,9 +117,9 @@ impl Repository {
         Some(parse_api_file_counts(&collected))
     }
 
-    /// Ask the GitHub compare API for the merge base of the two immutable PR
-    /// commits. One metadata request replaces the deepening fetch ladder, which
-    /// cannot reach a merge base thousands of commits behind either tip.
+    #[doc = " Ask the GitHub compare API for the merge base of the two immutable PR"]
+    #[doc = " commits. One metadata request replaces the deepening fetch ladder, which"]
+    #[doc = " cannot reach a merge base thousands of commits behind either tip."]
     pub(super) fn merge_base_from_api(&self, pull_request: &PullRequest) -> Option<String> {
         let base = pull_request.base_oid.trim();
         let head = pull_request.head_oid.trim();
@@ -167,8 +167,8 @@ impl Repository {
         self.run_gh_bounded(args, MAX_GH_METADATA_BYTES)
     }
 
-    /// Metadata responses are small and share one cap, but a check run log is
-    /// arbitrarily large and needs its own.
+    #[doc = " Metadata responses are small and share one cap, but a check run log is"]
+    #[doc = " arbitrarily large and needs its own."]
     pub(super) fn run_gh_bounded<I, S>(&self, args: I, stdout_limit: usize) -> Result<BoundedOutput>
     where
         I: IntoIterator<Item = S>,

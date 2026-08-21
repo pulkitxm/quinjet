@@ -2,9 +2,9 @@
 use super::*;
 
 impl App {
-    /// Reporting the mouse to the application is what stops a terminal from
-    /// selecting text with it. Releasing it hands selection and copying back to
-    /// the terminal, which is the only place either can happen.
+    #[doc = " Reporting the mouse to the application is what stops a terminal from"]
+    #[doc = " selecting text with it. Releasing it hands selection and copying back to"]
+    #[doc = " the terminal, which is the only place either can happen."]
     pub(super) fn toggle_mouse_capture(&mut self, now: Instant) -> AppEffect {
         self.mouse_capture = !self.mouse_capture;
         self.mouse_capture_preference = self.mouse_capture;
@@ -128,8 +128,8 @@ impl App {
         selected
     }
 
-    /// A check's own link is the run it describes; anywhere else in the pull
-    /// request view the pull request itself is what the reader is looking at.
+    #[doc = " A check's own link is the run it describes; anywhere else in the pull"]
+    #[doc = " request view the pull request itself is what the reader is looking at."]
     pub(super) fn github_url_for_selection(&self) -> Option<&str> {
         if self.view != View::PullRequests {
             return None;

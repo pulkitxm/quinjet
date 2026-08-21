@@ -132,9 +132,9 @@ impl GitWorker {
         }
     }
 
-    /// Queue work without blocking the render thread. Read requests occupy fixed
-    /// mailbox slots and replace obsolete requests; repository mutations remain an
-    /// ordered queue and are additionally serialized by the app's busy state.
+    #[doc = " Queue work without blocking the render thread. Read requests occupy fixed"]
+    #[doc = " mailbox slots and replace obsolete requests; repository mutations remain an"]
+    #[doc = " ordered queue and are additionally serialized by the app's busy state."]
     pub(crate) fn send(&self, mut command: WorkerCommand) -> bool {
         if let WorkerCommand::PrefetchCheckRunLogs { generation, .. } = &mut command {
             *generation = self.warm_generation.fetch_add(1, Ordering::SeqCst) + 1;

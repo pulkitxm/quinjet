@@ -9,7 +9,6 @@ indent_style = space
 indent_size = 4
 
 [*.rs]
-# rustfmt aligns continuation lines, which is not a multiple of the indent.
 indent_size = unset
 
 [*.{yml,yaml,json,toml,md}]
@@ -25,9 +24,6 @@ indent_size = 2
 trim_trailing_whitespace = false
 
 [docs/**.md]
-# The reference pages quote real output. A patch's context lines start with a
-# single space and a synopsis aligns under its own command, neither of which is
-# a multiple of the indent.
 indent_size = unset
 
 [Makefile]

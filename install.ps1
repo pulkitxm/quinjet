@@ -1,4 +1,3 @@
-# Install Quinjet from GitHub Releases.
 [CmdletBinding()]
 param(
     [Parameter()]

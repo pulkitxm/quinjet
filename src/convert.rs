@@ -1,5 +1,5 @@
-//! Terminal geometry is `u16` and collection sizes are `usize`, so every
-//! crossing needs a saturating answer rather than a wrapping cast.
+#![doc = " Terminal geometry is `u16` and collection sizes are `usize`, so every"]
+#![doc = " crossing needs a saturating answer rather than a wrapping cast."]
 
 pub(crate) fn cells(value: usize) -> u16 {
     u16::try_from(value).unwrap_or(u16::MAX)

@@ -1,6 +1,5 @@
 #!/bin/sh
 # shellcheck disable=SC2310,SC2312 # the installer guards every command with || fail, which is exactly what these two audits flag
-# Install Quinjet from GitHub Releases.
 
 set -eu
 umask 077

@@ -5,33 +5,33 @@ use super::*;
 
 #[derive(Debug, Subcommand)]
 pub(super) enum PrReviewVerb {
-    /// Print review threads and pending-review state
+    #[doc = " Print review threads and pending-review state"]
     Show(PrArgs),
-    /// Add a pending line or file comment
+    #[doc = " Add a pending line or file comment"]
     Comment(PrReviewCommentArgs),
-    /// Add a pending reply to a review thread
+    #[doc = " Add a pending reply to a review thread"]
     Reply(PrReviewReplyArgs),
-    /// Replace one of your review comments
+    #[doc = " Replace one of your review comments"]
     Edit(PrReviewEditArgs),
-    /// Delete one of your review comments
+    #[doc = " Delete one of your review comments"]
     Delete(PrReviewDeleteArgs),
-    /// Submit the current pending review
+    #[doc = " Submit the current pending review"]
     Submit(PrReviewSubmitArgs),
-    /// Discard the current pending review
+    #[doc = " Discard the current pending review"]
     Discard(PrMutateArgs),
-    /// Resolve a review thread
+    #[doc = " Resolve a review thread"]
     Resolve(PrReviewThreadArgs),
-    /// Reopen a resolved review thread
+    #[doc = " Reopen a resolved review thread"]
     Unresolve(PrReviewThreadArgs),
 }
 
 #[derive(Debug, Args)]
 #[group(required = true, multiple = false)]
 pub(super) struct PrReviewBodyArgs {
-    /// Review text
+    #[doc = " Review text"]
     #[arg(short, long, value_name = "TEXT")]
     pub(super) body: Option<String>,
-    /// Read review text from a file, or standard input with `-`
+    #[doc = " Read review text from a file, or standard input with `-`"]
     #[arg(long, value_name = "PATH", value_hint = ValueHint::FilePath)]
     pub(super) body_file: Option<PathBuf>,
 }
@@ -55,22 +55,22 @@ impl From<PrReviewSideArg> for PullRequestReviewSide {
 pub(super) struct PrReviewCommentArgs {
     #[command(flatten)]
     pub(super) pull_request: PrArgs,
-    /// Repository-relative path to comment on
+    #[doc = " Repository-relative path to comment on"]
     #[arg(value_name = "PATH", value_hint = ValueHint::AnyPath)]
     pub(super) path: PathBuf,
-    /// End line in the old or new file
+    #[doc = " End line in the old or new file"]
     #[arg(long, required_unless_present = "file")]
     pub(super) line: Option<usize>,
-    /// Side of the diff containing the end line
+    #[doc = " Side of the diff containing the end line"]
     #[arg(long, value_enum, required_unless_present = "file")]
     pub(super) side: Option<PrReviewSideArg>,
-    /// First line of a multi-line comment
+    #[doc = " First line of a multi-line comment"]
     #[arg(long, requires = "line")]
     pub(super) start_line: Option<usize>,
-    /// Side containing the first line
+    #[doc = " Side containing the first line"]
     #[arg(long, value_enum, requires = "start_line")]
     pub(super) start_side: Option<PrReviewSideArg>,
-    /// Comment on the whole file
+    #[doc = " Comment on the whole file"]
     #[arg(long, conflicts_with_all = ["line", "side", "start_line", "start_side"])]
     pub(super) file: bool,
     #[command(flatten)]
@@ -81,7 +81,7 @@ pub(super) struct PrReviewCommentArgs {
 pub(super) struct PrReviewReplyArgs {
     #[command(flatten)]
     pub(super) pull_request: PrArgs,
-    /// Review thread node ID
+    #[doc = " Review thread node ID"]
     #[arg(value_name = "THREAD_ID")]
     pub(super) thread_id: String,
     #[command(flatten)]
@@ -92,7 +92,7 @@ pub(super) struct PrReviewReplyArgs {
 pub(super) struct PrReviewEditArgs {
     #[command(flatten)]
     pub(super) pull_request: PrArgs,
-    /// Review comment node ID
+    #[doc = " Review comment node ID"]
     #[arg(value_name = "COMMENT_ID")]
     pub(super) comment_id: String,
     #[command(flatten)]
@@ -103,10 +103,10 @@ pub(super) struct PrReviewEditArgs {
 pub(super) struct PrReviewDeleteArgs {
     #[command(flatten)]
     pub(super) pull_request: PrArgs,
-    /// Review comment node ID
+    #[doc = " Review comment node ID"]
     #[arg(value_name = "COMMENT_ID")]
     pub(super) comment_id: String,
-    /// Confirm; without it the command reports what it would delete
+    #[doc = " Confirm; without it the command reports what it would delete"]
     #[arg(long)]
     pub(super) yes: bool,
 }
@@ -114,13 +114,13 @@ pub(super) struct PrReviewDeleteArgs {
 #[derive(Debug, Args)]
 #[group(required = true, multiple = false)]
 pub(super) struct PrReviewDecisionArgs {
-    /// Submit general feedback
+    #[doc = " Submit general feedback"]
     #[arg(long)]
     pub(super) comment: bool,
-    /// Approve the pull request
+    #[doc = " Approve the pull request"]
     #[arg(long)]
     pub(super) approve: bool,
-    /// Request changes
+    #[doc = " Request changes"]
     #[arg(long)]
     pub(super) request_changes: bool,
 }
@@ -151,7 +151,7 @@ pub(super) struct PrReviewSubmitArgs {
 pub(super) struct PrReviewThreadArgs {
     #[command(flatten)]
     pub(super) pull_request: PrArgs,
-    /// Review thread node ID
+    #[doc = " Review thread node ID"]
     #[arg(value_name = "THREAD_ID")]
     pub(super) thread_id: String,
 }

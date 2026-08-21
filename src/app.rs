@@ -40,19 +40,19 @@ const PULL_REQUEST_PATCH_FALLBACK_ESTIMATE: usize = 512 * 1024;
 const PULL_REQUEST_PATCH_LINE_ESTIMATE: usize = 80;
 const MAX_PREFETCHED_PULL_REQUEST_FILES: usize = 4_096;
 const MAX_PULL_REQUEST_DOCUMENT_BYTES: usize = 32 * 1024 * 1024;
-/// Poll cadences for an open pull request. A run in progress changes state in
-/// seconds and is worth watching closely; a settled pull request only needs to
-/// notice new comments; a pull request nobody is looking at needs less again.
+#[doc = " Poll cadences for an open pull request. A run in progress changes state in"]
+#[doc = " seconds and is worth watching closely; a settled pull request only needs to"]
+#[doc = " notice new comments; a pull request nobody is looking at needs less again."]
 const PULL_REQUEST_ACTIVE_POLL: Duration = Duration::from_secs(5);
 const PULL_REQUEST_IDLE_POLL: Duration = Duration::from_secs(20);
 const PULL_REQUEST_BACKGROUND_POLL: Duration = Duration::from_secs(120);
-/// Each live stream costs its own GitHub requests, so the tick cadence is a
-/// ceiling rather than a schedule: check state is the only thing worth reading
-/// as often as the tick fires. Metadata, the conversation and a growing log all
-/// change on human or build timescales and hold their own floor.
+#[doc = " Each live stream costs its own GitHub requests, so the tick cadence is a"]
+#[doc = " ceiling rather than a schedule: check state is the only thing worth reading"]
+#[doc = " as often as the tick fires. Metadata, the conversation and a growing log all"]
+#[doc = " change on human or build timescales and hold their own floor."]
 const PULL_REQUEST_DETAIL_POLL: Duration = Duration::from_secs(20);
-/// A running job's log grows continuously, so this is a tail interval rather
-/// than a staleness bound.
+#[doc = " A running job's log grows continuously, so this is a tail interval rather"]
+#[doc = " than a staleness bound."]
 const PULL_REQUEST_LOG_POLL: Duration = Duration::from_secs(8);
 const MAX_PULL_REQUEST_NUMBER_DIGITS: usize = 20;
 const DEFAULT_SIDEBAR_WIDTH: u16 = 42;
@@ -194,9 +194,9 @@ pub(crate) struct App {
     pub local_github_repository: Option<GitHubRepository>,
     pub pull_request_repository: Option<GitHubRepository>,
     pub pull_request_warnings: Vec<String>,
-    /// Why the last lookup failed. The pull-request pane renders app state
-    /// rather than a document, so a failure needs somewhere to live that
-    /// outlasts the toast announcing it.
+    #[doc = " Why the last lookup failed. The pull-request pane renders app state"]
+    #[doc = " rather than a document, so a failure needs somewhere to live that"]
+    #[doc = " outlasts the toast announcing it."]
     pub pull_request_error: Option<String>,
     pub pull_request_exact_number: Option<u64>,
     pub pull_request_from_cache: bool,
@@ -217,8 +217,8 @@ pub(crate) struct App {
     pub pull_request_tree_cursor: usize,
     pub collapsed_pull_request_directories: HashSet<PathBuf>,
     pub pull_request_checks: Vec<PullRequestCheck>,
-    /// `None` keeps the content pane on the pull request itself; selecting a
-    /// check replaces it with that run's steps and log.
+    #[doc = " `None` keeps the content pane on the pull request itself; selecting a"]
+    #[doc = " check replaces it with that run's steps and log."]
     pub pull_request_check_cursor: Option<usize>,
     pub selected_check_section: Option<CheckStatusSection>,
     pub collapsed_check_sections: HashSet<CheckStatusSection>,
@@ -241,18 +241,18 @@ pub(crate) struct App {
     pub pull_request_check_log_error: Option<String>,
     pub expanded_check_steps: HashSet<usize>,
     pub pull_request_step_cursor: usize,
-    /// Set when the step selection moves, and cleared by the draw that acts on
-    /// it. Scrolling the selection into view on every frame instead would pin
-    /// the pane to the selected step and make its own output unreadable.
+    #[doc = " Set when the step selection moves, and cleared by the draw that acts on"]
+    #[doc = " it. Scrolling the selection into view on every frame instead would pin"]
+    #[doc = " the pane to the selected step and make its own output unreadable."]
     pub pull_request_step_reveal: bool,
     pub pull_request_content_rows: Vec<PullRequestContentRow>,
     pub pull_request_content_rows_key: Option<(bool, usize, u64)>,
     pub pull_request_content_width: usize,
     pub pull_request_content_links: Vec<PullRequestContentLink>,
     pub pull_request_content_generation: u64,
-    /// Whether the last draw left the content pane scrolled to its end. The
-    /// renderer owns the row count, so it reports this back for the one decision
-    /// that needs it: whether a growing log should keep following.
+    #[doc = " Whether the last draw left the content pane scrolled to its end. The"]
+    #[doc = " renderer owns the row count, so it reports this back for the one decision"]
+    #[doc = " that needs it: whether a growing log should keep following."]
     pub content_at_bottom: bool,
     pub pull_request_progress: Option<PullRequestProgress>,
     pub auxiliary_preview: Option<AuxiliaryPreview>,
@@ -310,9 +310,9 @@ pub(crate) struct App {
     pub diff_generation: u64,
     pub history_generation: u64,
     pub pull_request_generation: u64,
-    /// Repository discovery answers on its own counter. Sharing the lookup's
-    /// would let opening the picker discard a pull request already on its way,
-    /// leaving its loading flag set with no reply ever able to clear it.
+    #[doc = " Repository discovery answers on its own counter. Sharing the lookup's"]
+    #[doc = " would let opening the picker discard a pull request already on its way,"]
+    #[doc = " leaving its loading flag set with no reply ever able to clear it."]
     pub repository_generation: u64,
     pub pull_request_workspace_generation: Option<u64>,
     pub pull_request_documents: HashMap<PathBuf, DiffDocument>,
@@ -320,9 +320,9 @@ pub(crate) struct App {
     pub pull_request_document_bytes: usize,
     pub pull_request_prefetched_paths: HashSet<PathBuf>,
     pub pull_request_loading_path: Option<PathBuf>,
-    /// The path whose patch currently occupies `document` in single-file view.
-    /// Tracking it explicitly keeps the cache authoritative about which files
-    /// already have a patch, wherever that patch happens to be held.
+    #[doc = " The path whose patch currently occupies `document` in single-file view."]
+    #[doc = " Tracking it explicitly keeps the cache authoritative about which files"]
+    #[doc = " already have a patch, wherever that patch happens to be held."]
     pub pull_request_single_file: Option<PathBuf>,
     pub pull_request_prefetching: bool,
     pub pull_request_prefetch_retrying: bool,

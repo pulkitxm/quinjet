@@ -19,9 +19,9 @@ pub(super) fn prose_style(style: ProseStyle, theme: &Theme) -> Style {
     }
 }
 
-/// Render a body under its header behind a continuous gutter, so a long comment
-/// stays visibly attached to the person who wrote it. Code carries a second
-/// marker because it is the one kind of line that is not wrapped to the pane.
+#[doc = " Render a body under its header behind a continuous gutter, so a long comment"]
+#[doc = " stays visibly attached to the person who wrote it. Code carries a second"]
+#[doc = " marker because it is the one kind of line that is not wrapped to the pane."]
 pub(super) fn push_prose(
     rows: &mut Vec<ContentRow>,
     body: &str,
@@ -47,8 +47,8 @@ pub(super) fn push_prose(
     }
 }
 
-/// Window a composed row horizontally, in display columns rather than bytes, so
-/// wide code and log lines can be read past the edge of the pane.
+#[doc = " Window a composed row horizontally, in display columns rather than bytes, so"]
+#[doc = " wide code and log lines can be read past the edge of the pane."]
 pub(super) fn shift_line(line: &Line<'static>, skip: usize, width: usize) -> Line<'static> {
     let mut spans = Vec::with_capacity(line.spans.len());
     let mut scanned = 0;
@@ -77,9 +77,9 @@ pub(super) fn shift_line(line: &Line<'static>, skip: usize, width: usize) -> Lin
     clippy::option_if_let_else,
     reason = "the branch is one arm of a longer chain that map_or_else cannot express"
 )]
-/// Wrap a Markdown body to a fixed width, keeping paragraph breaks, list
-/// structure and fenced code intact. Code is truncated rather than wrapped so
-/// its own indentation still reads correctly.
+#[doc = " Wrap a Markdown body to a fixed width, keeping paragraph breaks, list"]
+#[doc = " structure and fenced code intact. Code is truncated rather than wrapped so"]
+#[doc = " its own indentation still reads correctly."]
 pub(super) fn wrap_prose(value: &str, width: usize) -> Vec<(ProseStyle, String)> {
     let width = width.max(8);
     let mut output = Vec::new();

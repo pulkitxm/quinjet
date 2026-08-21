@@ -37,12 +37,12 @@ const MAX_GH_ERROR_BYTES: usize = 256 * 1024;
 const MAX_PR_PATH_BYTES: usize = 8 * 1024 * 1024;
 const MAX_PR_PATHS: usize = 16_384;
 const MAX_FILE_COUNT_PAGES: usize = 64;
-/// A single file's patch is cached only if it is small enough that one file
-/// cannot crowd out the rest of a pull request.
+#[doc = " A single file's patch is cached only if it is small enough that one file"]
+#[doc = " cannot crowd out the rest of a pull request."]
 const MAX_CACHED_PATCH_BYTES: usize = 1024 * 1024;
-/// The cache now holds immutable content (finished run logs, patches for a
-/// fixed pair of commits) rather than only small metadata blobs, so the budget
-/// is sized for those and pruned oldest-first.
+#[doc = " The cache now holds immutable content (finished run logs, patches for a"]
+#[doc = " fixed pair of commits) rather than only small metadata blobs, so the budget"]
+#[doc = " is sized for those and pruned oldest-first."]
 const MAX_CACHE_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_CACHE_ENTRIES: usize = 2_048;
 const REPOSITORY_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
