@@ -1,8 +1,7 @@
 use super::*;
 
-#[test]
-fn pull_request_operation_messages_name_the_number_and_title() {
-    let pull_request = pull_request(
+fn operation_pull_request() -> PullRequest {
+    let mut request = pull_request(
         repository(
             "pulkitxm/quinjet",
             "https://github.com/pulkitxm/quinjet",
@@ -10,105 +9,248 @@ fn pull_request_operation_messages_name_the_number_and_title() {
         ),
         12,
     );
-    let merge = PullRequestOperation::Merge {
-        method: PullRequestMergeMethod::Squash,
-        mode: PullRequestMergeMode::Direct,
-        delete_branch: false,
+    request.head_oid = "abc123".into();
+    request.action_state.node_id = "PR_node".into();
+    request
+}
+
+fn operation_arguments(request: &PullRequest, operation: &PullRequestOperation) -> Vec<String> {
+    api::pull_request_operation_args(request, operation)
+        .into_iter()
+        .map(|value| value.to_string_lossy().into_owned())
+        .collect()
+}
+
+fn contract_fields(spec: &str) -> (&str, &str, &str, &str) {
+    let mut fields = spec.split('|');
+    let values = (
+        fields.next().unwrap_or_default(),
+        fields.next().unwrap_or_default(),
+        fields.next().unwrap_or_default(),
+        fields.next().unwrap_or_default(),
+    );
+    assert!(fields.next().is_none(), "invalid contract: {spec}");
+    values
+}
+
+fn assert_operation_contract(
+    request: &PullRequest,
+    operation: &PullRequestOperation,
+    spec: &str,
+    confirm: Option<&str>,
+) {
+    let (label, success, transport, required) = contract_fields(spec);
+    let generated_confirm = format!("Really {}", label.to_lowercase());
+    let confirm = confirm.unwrap_or(&generated_confirm);
+    assert_eq!(operation.label(), label);
+    assert_eq!(operation.confirm_title(), format!("{label}?"));
+    assert_eq!(
+        operation.confirm_message(request),
+        format!("{confirm} #12 (Ship the rocket)?")
+    );
+    assert_eq!(operation.success_message(request), format!("{success} #12"));
+    let arguments = operation_arguments(request, operation);
+    if let Some(query) = transport.strip_prefix("graphql:") {
+        assert_eq!(
+            &arguments[..4],
+            &["api", "graphql", "--hostname", "github.com"]
+        );
+        assert!(arguments.iter().any(|value| value == "id=PR_node"));
+        assert!(arguments.iter().any(|value| value.contains(query)));
+    } else {
+        assert_eq!(
+            &arguments[..5],
+            &[
+                "pr",
+                transport,
+                "12",
+                "--repo",
+                "https://github.com/pulkitxm/quinjet"
+            ]
+        );
+    }
+    for expected in required.split(',').filter(|value| !value.is_empty()) {
+        let (present, token) = expected
+            .strip_prefix('!')
+            .map_or((true, expected), |value| (false, value));
+        assert_eq!(
+            arguments.iter().any(|value| value == token),
+            present,
+            "{operation:?}: {token}: {arguments:?}"
+        );
+    }
+}
+
+fn assert_standard_contract(request: &PullRequest, operation: &PullRequestOperation, spec: &str) {
+    assert_operation_contract(request, operation, spec, None);
+}
+
+macro_rules! operation_contracts {
+    ($request:expr; $($operation:expr => $spec:literal;)*) => {
+        $(assert_standard_contract($request, &$operation, $spec);)*
     };
-    assert_eq!(
-        merge.confirm_message(&pull_request),
-        "Really squash and merge #12 (Ship the rocket)?"
-    );
-    assert_eq!(
-        merge.success_message(&pull_request),
-        "Squashed and merged #12"
-    );
-    assert_eq!(
-        PullRequestOperation::Close.confirm_message(&pull_request),
-        "Really close #12 (Ship the rocket)?"
-    );
-    assert_eq!(
-        PullRequestOperation::Reopen.success_message(&pull_request),
-        "Reopened #12"
+}
+
+fn review(kind: PullRequestReviewKind) -> PullRequestOperation {
+    PullRequestOperation::Review {
+        kind,
+        body: "review body".into(),
+    }
+}
+
+fn comment(mode: PullRequestCommentMode, body: &str) -> PullRequestOperation {
+    PullRequestOperation::Comment {
+        mode,
+        body: body.into(),
+    }
+}
+
+#[test]
+fn every_merge_mode_and_method_has_a_stable_contract() {
+    let request = operation_pull_request();
+    let methods = [
+        "Create a merge commit|create a merge commit for|Merged",
+        "Squash and merge|squash and merge|Squashed and merged",
+        "Rebase and merge|rebase and merge|Rebased and merged",
+    ];
+    for (method_index, (method, words)) in
+        PullRequestMergeMethod::ALL.iter().zip(methods).enumerate()
+    {
+        let (method_label, action, method_success, _) = contract_fields(words);
+        for (mode_index, mode) in [
+            PullRequestMergeMode::Direct,
+            PullRequestMergeMode::Auto,
+            PullRequestMergeMode::Admin,
+        ]
+        .iter()
+        .enumerate()
+        {
+            let (label, prefix, success) = match mode {
+                PullRequestMergeMode::Direct => (method_label, "", method_success),
+                PullRequestMergeMode::Auto => (
+                    "Enable auto-merge",
+                    "enable auto-merge to ",
+                    "Enabled auto-merge for",
+                ),
+                PullRequestMergeMode::Admin => (
+                    "Merge with administrator privileges",
+                    "use administrator privileges to ",
+                    "Administrator-merged",
+                ),
+            };
+            let delete_branch = (method_index + mode_index) % 2 == 0;
+            let operation = PullRequestOperation::Merge {
+                method: *method,
+                mode: *mode,
+                delete_branch,
+            };
+            let spec = format!(
+                "{label}|{success}|merge|{},--match-head-commit,abc123",
+                method.flag()
+            );
+            let confirm = format!("Really {prefix}{action}");
+            assert_operation_contract(&request, &operation, &spec, Some(&confirm));
+            let arguments = operation_arguments(&request, &operation);
+            for candidate in PullRequestMergeMethod::ALL {
+                assert_eq!(
+                    arguments.iter().any(|value| value == candidate.flag()),
+                    candidate == *method
+                );
+            }
+            assert_eq!(
+                arguments.iter().any(|value| value == "--auto"),
+                *mode == PullRequestMergeMode::Auto
+            );
+            assert_eq!(
+                arguments.iter().any(|value| value == "--admin"),
+                *mode == PullRequestMergeMode::Admin
+            );
+            assert_eq!(
+                arguments.iter().any(|value| value == "--delete-branch"),
+                delete_branch
+            );
+        }
+    }
+}
+
+#[test]
+fn state_review_and_comment_operations_have_stable_contracts() {
+    use PullRequestCommentMode::{Create, DeleteLast, EditLast};
+    use PullRequestReviewKind::{Approve, Comment, RequestChanges};
+    let request = operation_pull_request();
+    operation_contracts!(&request;
+        PullRequestOperation::SetDraft(true) => "Convert to draft|Converted to draft|ready|--undo";
+        PullRequestOperation::SetDraft(false) => "Mark ready for review|Marked ready for review|ready|!--undo";
+        review(Approve) => "Approve pull request|Approved|review|--approve,--body,review body";
+        review(Comment) => "Submit review comment|Reviewed|review|--comment,--body,review body";
+        review(RequestChanges) => "Request changes|Requested changes on|review|--request-changes,--body,review body";
+        comment(Create, "created") => "Comment on pull request|Commented on|comment|--body,created,!--edit-last,!--delete-last";
+        comment(EditLast, "edited") => "Edit last comment|Edited the last comment on|comment|--edit-last,--body,edited";
+        comment(DeleteLast, "") => "Delete last comment|Deleted the last comment on|comment|--delete-last,--yes";
     );
 }
 
 #[test]
-fn pull_request_operations_map_to_non_interactive_gh_commands() {
-    let mut pull_request = pull_request(
-        repository(
-            "pulkitxm/quinjet",
-            "https://github.com/pulkitxm/quinjet",
-            &[],
-        ),
-        12,
+fn every_edit_field_has_a_stable_contract() {
+    use PullRequestEdit::*;
+    let request = operation_pull_request();
+    operation_contracts!(&request;
+        PullRequestOperation::Edit(Title("New title".into())) => "Edit pull-request title|Updated|edit|--title,New title";
+        PullRequestOperation::Edit(Body("New body".into())) => "Edit pull-request description|Updated|edit|--body,New body";
+        PullRequestOperation::Edit(Base("trunk".into())) => "Change base branch|Updated|edit|--base,trunk";
+        PullRequestOperation::Edit(AddAssignee("octocat".into())) => "Add assignees|Updated|edit|--add-assignee,octocat";
+        PullRequestOperation::Edit(RemoveAssignee("hubot".into())) => "Remove assignees|Updated|edit|--remove-assignee,hubot";
+        PullRequestOperation::Edit(AddLabel("bug".into())) => "Add labels|Updated|edit|--add-label,bug";
+        PullRequestOperation::Edit(RemoveLabel("stale".into())) => "Remove labels|Updated|edit|--remove-label,stale";
+        PullRequestOperation::Edit(AddProject("Roadmap".into())) => "Add to projects|Updated|edit|--add-project,Roadmap";
+        PullRequestOperation::Edit(RemoveProject("Backlog".into())) => "Remove from projects|Updated|edit|--remove-project,Backlog";
+        PullRequestOperation::Edit(AddReviewer("reviewer".into())) => "Request reviewers|Updated|edit|--add-reviewer,reviewer";
+        PullRequestOperation::Edit(RemoveReviewer("former".into())) => "Remove review requests|Updated|edit|--remove-reviewer,former";
+        PullRequestOperation::Edit(SetMilestone("v1".into())) => "Set milestone|Updated|edit|--milestone,v1";
+        PullRequestOperation::Edit(RemoveMilestone) => "Remove milestone|Updated|edit|--remove-milestone";
     );
-    pull_request.head_oid = "abc123".to_owned();
-    pull_request.action_state.node_id = "PR_node".to_owned();
-    let args = |operation: &PullRequestOperation| {
-        api::pull_request_operation_args(&pull_request, operation)
-            .into_iter()
-            .map(|arg| arg.to_string_lossy().into_owned())
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(
-        args(&PullRequestOperation::Merge {
-            method: PullRequestMergeMethod::Squash,
-            mode: PullRequestMergeMode::Auto,
-            delete_branch: true,
-        }),
-        [
-            "pr",
-            "merge",
-            "12",
-            "--repo",
-            "https://github.com/pulkitxm/quinjet",
-            "--squash",
-            "--auto",
-            "--match-head-commit",
-            "abc123",
-            "--delete-branch",
-        ]
+}
+
+#[test]
+fn branch_and_conversation_operations_have_stable_contracts() {
+    use PullRequestLockReason::{OffTopic, Resolved, Spam, TooHeated};
+    let request = operation_pull_request();
+    operation_contracts!(&request;
+        PullRequestOperation::UpdateBranch(PullRequestUpdateMethod::Merge) => "Update branch with merge|Updated the branch for|update-branch|!--rebase";
+        PullRequestOperation::UpdateBranch(PullRequestUpdateMethod::Rebase) => "Update branch with rebase|Updated the branch for|update-branch|--rebase";
+        PullRequestOperation::DisableAutoMerge => "Disable auto-merge|Disabled auto-merge for|merge|--disable-auto";
+        PullRequestOperation::Dequeue => "Remove from merge queue|Removed from the merge queue|graphql:dequeuePullRequest|";
+        PullRequestOperation::Lock(None) => "Lock conversation|Locked the conversation on|lock|!--reason";
+        PullRequestOperation::Lock(Some(OffTopic)) => "Lock conversation|Locked the conversation on|lock|--reason,off_topic";
+        PullRequestOperation::Lock(Some(Resolved)) => "Lock conversation|Locked the conversation on|lock|--reason,resolved";
+        PullRequestOperation::Lock(Some(Spam)) => "Lock conversation|Locked the conversation on|lock|--reason,spam";
+        PullRequestOperation::Lock(Some(TooHeated)) => "Lock conversation|Locked the conversation on|lock|--reason,too_heated";
+        PullRequestOperation::Unlock => "Unlock conversation|Unlocked the conversation on|unlock|";
     );
-    assert!(args(&PullRequestOperation::SetDraft(true)).ends_with(&["--undo".to_owned()]));
-    assert!(
-        args(&PullRequestOperation::Review {
-            kind: PullRequestReviewKind::RequestChanges,
-            body: "Needs tests".to_owned(),
-        })
-        .ends_with(&[
-            "--request-changes".to_owned(),
-            "--body".to_owned(),
-            "Needs tests".to_owned(),
-        ])
+}
+
+#[test]
+fn subscription_maintainer_revert_and_state_operations_have_stable_contracts() {
+    let request = operation_pull_request();
+    operation_contracts!(&request;
+        PullRequestOperation::Subscribe(true) => "Subscribe to pull request|Subscribed to|graphql:updateSubscription|state=SUBSCRIBED";
+        PullRequestOperation::Subscribe(false) => "Unsubscribe from pull request|Unsubscribed from|graphql:updateSubscription|state=UNSUBSCRIBED";
+        PullRequestOperation::SetMaintainerEdits(true) => "Allow maintainer edits|Allowed maintainer edits on|graphql:updatePullRequest|enabled=true";
+        PullRequestOperation::SetMaintainerEdits(false) => "Disallow maintainer edits|Disallowed maintainer edits on|graphql:updatePullRequest|enabled=false";
+        PullRequestOperation::Revert { draft: false, title: String::new(), body: String::new() } => "Create revert pull request|Created a revert for|revert|!--draft,!--title,!--body";
+        PullRequestOperation::Revert { draft: true, title: "Undo launch".into(), body: "Rollback".into() } => "Create revert pull request|Created a revert for|revert|--draft,--title,Undo launch,--body,Rollback";
     );
-    assert!(
-        args(&PullRequestOperation::Edit(PullRequestEdit::AddReviewer(
-            "octocat".to_owned(),
-        )))
-        .ends_with(&["--add-reviewer".to_owned(), "octocat".to_owned()])
+    assert_operation_contract(
+        &request,
+        &PullRequestOperation::Close,
+        "Close pull request|Closed|close|",
+        Some("Really close"),
     );
-    assert!(
-        args(&PullRequestOperation::Dequeue)
-            .iter()
-            .any(|arg| arg.contains("dequeuePullRequest"))
-    );
-    assert!(
-        args(&PullRequestOperation::Subscribe(false))
-            .iter()
-            .any(|arg| arg == "state=UNSUBSCRIBED")
-    );
-    assert!(
-        args(&PullRequestOperation::Comment {
-            mode: PullRequestCommentMode::DeleteLast,
-            body: String::new(),
-        })
-        .ends_with(&["--delete-last".to_owned(), "--yes".to_owned()])
-    );
-    assert!(
-        args(&PullRequestOperation::SetMaintainerEdits(true))
-            .iter()
-            .any(|arg| arg == "enabled=true")
+    assert_operation_contract(
+        &request,
+        &PullRequestOperation::Reopen,
+        "Reopen pull request|Reopened|reopen|",
+        Some("Really reopen"),
     );
 }
 
