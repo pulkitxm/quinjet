@@ -132,7 +132,7 @@ fn an_individual_change_preserves_its_diff_when_its_status_changes() {
 
 #[test]
 fn selecting_a_different_change_replaces_the_previous_diff_with_indexing() {
-    let (mut app, _, _, _) = loaded_changes_preview();
+    let (mut app, ..) = loaded_changes_preview();
     let now = Instant::now();
     let mut status = app.status.clone();
     status
@@ -151,7 +151,7 @@ fn selecting_a_different_change_replaces_the_previous_diff_with_indexing() {
 
 #[test]
 fn moving_the_same_path_to_another_area_does_not_preserve_its_diff() {
-    let (mut app, _, _, _) = loaded_changes_preview();
+    let (mut app, ..) = loaded_changes_preview();
     let now = Instant::now();
     let mut status = app.status.clone();
     status
@@ -169,7 +169,7 @@ fn moving_the_same_path_to_another_area_does_not_preserve_its_diff() {
 
 #[test]
 fn moving_a_selected_section_to_another_area_does_not_preserve_its_diff() {
-    let (mut app, _, _, _) = loaded_two_file_changes_preview();
+    let (mut app, ..) = loaded_two_file_changes_preview();
     let now = Instant::now();
     let mut status = app.status.clone();
     for change in &mut status.changes {

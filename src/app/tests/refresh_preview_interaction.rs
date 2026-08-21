@@ -236,7 +236,7 @@ fn a_preserved_file_failure_keeps_the_rendered_diff() {
 
 #[test]
 fn expanding_a_lazy_file_after_a_failed_refresh_uses_the_retained_workspace() {
-    let (mut app, [_, readme_path], _, _) = loaded_two_file_changes_preview();
+    let (mut app, [_, readme_path], ..) = loaded_two_file_changes_preview();
     app.focus = Focus::Content;
     app.files_collapsed = false;
     app.collapse_preference_set = true;
