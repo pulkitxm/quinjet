@@ -148,6 +148,24 @@ fn control_tab_cycles_and_control_w_closes_the_active_repository_tab() {
 }
 
 #[test]
+fn alt_number_activates_the_repository_tab_at_that_position() {
+    let (tabs, first, second, third) = repository_tabs();
+    let mut app = app_with_repository_tabs(&tabs);
+    let now = Instant::now();
+
+    for (number, expected) in [('1', first), ('2', second), ('3', third)] {
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Char(number), KeyModifiers::ALT), now);
+        assert!(matches!(
+            effects.as_slice(),
+            [AppEffect::ActivateRepositoryTab(id)] if *id == expected
+        ));
+    }
+
+    let effects = app.handle_key(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::ALT), now);
+    assert!(effects.is_empty());
+}
+
+#[test]
 fn control_w_edits_an_open_text_modal_instead_of_closing_its_tab() {
     let (tabs, ..) = repository_tabs();
     let mut app = app_with_repository_tabs(&tabs);

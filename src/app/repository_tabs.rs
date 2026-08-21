@@ -50,6 +50,15 @@ impl App {
             }
             return Some(effects);
         }
+        if key.modifiers == KeyModifiers::ALT {
+            return repository_tab_shortcut_index(key.code).map(|index| {
+                self.repository_tabs
+                    .get(index)
+                    .map_or_else(Vec::new, |tab| {
+                        vec![AppEffect::ActivateRepositoryTab(tab.id)]
+                    })
+            });
+        }
         if !key.modifiers.contains(KeyModifiers::CONTROL) {
             return None;
         }
@@ -240,5 +249,20 @@ impl App {
             }
             RepositoryTabAction::CloseAll => effects.push(AppEffect::CloseAllRepositoryTabs),
         }
+    }
+}
+
+const fn repository_tab_shortcut_index(code: KeyCode) -> Option<usize> {
+    match code {
+        KeyCode::Char('1') => Some(0),
+        KeyCode::Char('2') => Some(1),
+        KeyCode::Char('3') => Some(2),
+        KeyCode::Char('4') => Some(3),
+        KeyCode::Char('5') => Some(4),
+        KeyCode::Char('6') => Some(5),
+        KeyCode::Char('7') => Some(6),
+        KeyCode::Char('8') => Some(7),
+        KeyCode::Char('9') => Some(8),
+        _ => None,
     }
 }

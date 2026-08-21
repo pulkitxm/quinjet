@@ -136,6 +136,10 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
         description: "Next / previous project tab",
     },
     HelpRow::Shortcut {
+        keys: "Option/Alt+1..9",
+        description: "Activate a project tab by position",
+    },
+    HelpRow::Shortcut {
         keys: "Ctrl+W",
         description: "Close the active project tab",
     },
