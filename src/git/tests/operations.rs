@@ -211,6 +211,42 @@ fn staged_only_stash_leaves_unstaged_worktree_changes_in_place() {
 }
 
 #[test]
+fn unstage_all_clears_an_unborn_index_without_removing_files() {
+    let test_repository = TestRepository::new();
+    let repository = test_repository.repository();
+    run_test_git(
+        &test_repository.path,
+        ["update-ref", "-d", "refs/heads/main"],
+    );
+    fs::write(test_repository.path.join("added.txt"), "added\n").unwrap();
+    run_test_git(&test_repository.path, ["add", "--all"]);
+
+    repository.perform(&GitOperation::UnstageAll).unwrap();
+    repository.perform(&GitOperation::UnstageAll).unwrap();
+
+    assert!(
+        run_test_git(&test_repository.path, ["ls-files", "--cached"]).is_empty(),
+        "the unborn index must be empty"
+    );
+    assert_eq!(
+        fs::read_to_string(test_repository.path.join("README.md")).unwrap(),
+        "test repository\n"
+    );
+    assert_eq!(
+        fs::read_to_string(test_repository.path.join("added.txt")).unwrap(),
+        "added\n"
+    );
+    let status = repository.status().unwrap();
+    assert_eq!(status.changes.len(), 2);
+    assert!(
+        status
+            .changes
+            .iter()
+            .all(|change| change.status == ChangeStatus::Untracked)
+    );
+}
+
+#[test]
 fn branch_rename_rejects_invalid_identical_and_existing_names() {
     let test_repository = TestRepository::new();
     let repository = test_repository.repository();

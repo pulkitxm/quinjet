@@ -322,7 +322,7 @@ impl Repository {
         if self.has_head() {
             drop(self.checked(strings(["reset", "--mixed", "--quiet", "HEAD", "--"]))?);
         } else {
-            let output = self.run(strings(["rm", "--recursive", "--cached", "."]))?;
+            let output = self.run(strings(["rm", "-r", "--cached", "--ignore-unmatch", "."]))?;
             if !output.status.success() && !self.status()?.changes.is_empty() {
                 bail!("{}", command_error("Unable to unstage changes", &output));
             }

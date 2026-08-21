@@ -120,4 +120,81 @@ mod tests {
         assert_eq!(commits[1].subject, "Initial commit");
         assert_eq!(commits[1].parent_ids, Vec::<String>::new());
     }
+
+    #[test]
+    fn skips_incomplete_records_without_losing_valid_neighbors() {
+        let first = record("one", "", "HEAD -> main", b"");
+        let second = record("two", "parent-a parent-b", "tag: v2", b"");
+        let mut output = first;
+        output.extend_from_slice(b"broken\x1frecord\x1e");
+        output.extend_from_slice(&second);
+
+        let commits = parse_log(&output);
+
+        assert_eq!(commits.len(), 2);
+        assert_eq!(commits[0].subject, "one");
+        assert_eq!(commits[1].subject, "two");
+        assert_eq!(commits[1].parent_ids, ["parent-a", "parent-b"]);
+    }
+
+    #[test]
+    fn accepts_extra_fields_and_a_final_record_without_separator() {
+        let output = record("subject", "parent", "main", b"\x1fignored");
+        let without_separator = output.strip_suffix(b"\x1e").unwrap();
+
+        for value in [output.as_slice(), without_separator] {
+            let commits = parse_log(value);
+            assert_eq!(commits.len(), 1);
+            assert_eq!(commits[0].subject, "subject");
+            assert_eq!(commits[0].parent_ids, ["parent"]);
+        }
+    }
+
+    #[test]
+    fn trims_decorations_and_decodes_invalid_utf8_lossily() {
+        let output = record("bad-\u{fffd}", "", " main, , tag: v1,  ", b"");
+        let mut bytes = output;
+        let position = bytes
+            .windows("bad-\u{fffd}".len())
+            .position(|window| window == "bad-\u{fffd}".as_bytes())
+            .unwrap();
+        drop(bytes.splice(
+            position..position + "bad-\u{fffd}".len(),
+            b"bad-\xff".iter().copied(),
+        ));
+
+        let commits = parse_log(&bytes);
+
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0].subject, "bad-\u{fffd}");
+        assert_eq!(commits[0].decorations, ["main", "tag: v1"]);
+    }
+
+    #[test]
+    fn empty_and_whitespace_only_streams_have_no_commits() {
+        for output in [b"".as_slice(), b" \n\t\x1e\r\n".as_slice()] {
+            assert_eq!(parse_log(output), Vec::<Commit>::new());
+        }
+    }
+
+    fn record(subject: &str, parents: &str, decorations: &str, suffix: &[u8]) -> Vec<u8> {
+        let fields = [
+            "0123456789abcdef0123456789abcdef01234567",
+            "0123456",
+            parents,
+            "Author",
+            "author@example.com",
+            "2026-01-02T03:04:05Z",
+            "Committer",
+            "committer@example.com",
+            "2026-01-02T04:05:06Z",
+            "now",
+            subject,
+            decorations,
+        ];
+        let mut output = fields.join("\x1f").into_bytes();
+        output.extend_from_slice(suffix);
+        output.push(0x1e);
+        output
+    }
 }

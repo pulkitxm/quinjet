@@ -338,6 +338,87 @@ fn pull_request_review_verbs_parse_at_their_leaf() {
     .unwrap_err();
 }
 
+fn assert_argument_cases(cases: &str, succeeds: bool) -> usize {
+    let mut count = 0;
+    for arguments in cases
+        .split(['|', '\n'])
+        .map(str::trim)
+        .filter(|arguments| !arguments.is_empty())
+    {
+        let parsed = Cli::try_parse_from(
+            std::iter::once("quinjet").chain(arguments.split_ascii_whitespace()),
+        )
+        .is_ok();
+        if succeeds {
+            assert!(parsed, "expected valid arguments: {arguments}");
+        } else {
+            assert!(!parsed, "expected invalid arguments: {arguments}");
+        }
+        count += 1;
+    }
+    count
+}
+
+#[test]
+fn argument_relationships_accept_the_supported_combinations() {
+    let cases = "
+-C /tmp --json diff --staged src|branch list --json -C /tmp|pr reviews show 7 -C /tmp --json
+stage src|stage --all|unstage src|unstage --all|discard --all --yes
+rm generated --yes|status --watch --interval 1|diff --unstaged --expanded src
+resolve file --ours|resolve file --theirs|resolve file --stage
+stash push --staged -m saved|stash push --include-untracked src|stash pop stash@{0}
+completions --install|completions fish --install|completion zsh|log HEAD --skip 2 --limit 4
+branch create topic HEAD|pr view 7 --watch --interval 2|pr conversation 7 --watch --interval 2
+pr checks 7 --watch --interval 2|pr checks 7 --exit-code|pr logs 7 lint --watch --interval 3
+pr admin-merge 7 --merge|pr auto-merge 7 --rebase --delete-branch|pr merge 7 --merge
+pr review 7 --approve|pr review 7 --comment --body note|pr update-branch 7 --rebase --yes
+pr revert 7 --title undo --body reason --draft --yes|pr lock 7 --reason off-topic --yes
+pr edit 7 title value|pr edit 7 body value|pr edit 7 base main
+pr edit 7 add-assignee octo|pr edit 7 remove-assignee octo|pr edit 7 add-label bug
+pr edit 7 remove-label bug|pr edit 7 add-project road|pr edit 7 remove-project road
+pr edit 7 add-reviewer octo|pr edit 7 remove-reviewer octo|pr edit 7 milestone v1
+pr edit 7 remove-milestone
+pr reviews comment 7 file --line 2 --side left --start-line 1 --start-side left -b note
+pr reviews comment 7 file --file --body-file note.txt|pr reviews reply 7 thread -b reply
+pr reviews reply 7 thread --body-file -|pr reviews edit 7 comment --body-file note.txt
+pr reviews delete 7 comment --yes|pr reviews submit 7 --comment -b note
+pr reviews submit 7 --request-changes --body-file note.txt|pr reviews discard 7 --yes
+pr reviews resolve 7 thread|pr reviews unresolve 7 thread
+";
+    assert_eq!(assert_argument_cases(cases, true), 59);
+}
+
+#[test]
+fn argument_relationships_reject_unsupported_combinations() {
+    let cases = "
+stage|stage src --all|unstage|unstage src --all|discard|discard src --all
+remove|remove src --all|status --interval 1|status --watch --interval 0
+diff --staged --unstaged|resolve file|resolve file --ours --theirs
+resolve file --ours --stage|resolve file --theirs --stage|stash push --staged --include-untracked
+completions|completions bash --automatic|completions --automatic|commit -m|branch create
+pr view 7 --interval 2|pr view 7 --watch --interval 1
+pr conversation 7 --interval 2|pr conversation 7 --watch --interval 1
+pr checks 7 --interval 2|pr checks 7 --watch --interval 1|pr checks 7 --watch --exit-code
+pr logs 7 lint --interval 3|pr logs 7 lint --watch --interval 2
+pr admin-merge 7|pr admin-merge 7 --merge --squash
+pr auto-merge 7|pr auto-merge 7 --rebase --merge|pr merge 7 --squash --rebase
+pr review 7|pr review 7 --approve --comment|pr review 7 --comment --request-changes|pr review 7 --approve --request-changes
+pr edit 7 unknown value|pr lock 7 --reason noisy
+pr reviews comment 7 file --line 2 -b note
+pr reviews comment 7 file --side right -b note
+pr reviews comment 7 file --line 2 --side right --start-side left -b note
+pr reviews comment 7 file --file --line 2 --side right -b note
+pr reviews comment 7 file --file -b note --body-file note.txt
+pr reviews comment 7 file --line 2 --side right
+pr reviews reply 7 thread|pr reviews reply 7 thread -b note --body-file note.txt
+pr reviews edit 7 comment|pr reviews edit 7 comment -b note --body-file note.txt
+pr reviews submit 7 -b note|pr reviews submit 7 --approve --comment -b note
+pr reviews submit 7 --approve|pr reviews submit 7 --approve -b note --body-file note.txt
+pr reviews delete 7|pr reviews resolve 7|pr reviews unresolve 7
+";
+    assert_eq!(assert_argument_cases(cases, false), 58);
+}
+
 #[test]
 fn a_session_answers_a_status_command_with_the_working_tree() {
     let repository = TestRepository::new();
