@@ -319,7 +319,10 @@ pub(super) fn write_pages(
     fs::write(&file, render_page(command, name)?)
         .with_context(|| format!("failed to write {}", file.display()))?;
     written.push(file.display().to_string());
-    for child in command.get_subcommands() {
+    for child in command
+        .get_subcommands()
+        .filter(|child| child.get_name() != "help")
+    {
         write_pages(
             child,
             &format!("{name}-{}", child.get_name()),
