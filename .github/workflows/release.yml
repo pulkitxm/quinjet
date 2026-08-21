@@ -225,6 +225,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: crates-io
     permissions:
+      actions: write
       contents: write # push the version bump, tag and release assets
       id-token: write # authenticate through OIDC
       attestations: write # record the build provenance
@@ -322,3 +323,7 @@ jobs:
           git -C tap push origin HEAD:main
           test "$(git -C tap ls-remote origin refs/heads/main | cut -f1)" = "$(git -C tap rev-parse HEAD)" \
             || { echo "release blocked: the tap did not take ${TAG}" >&2; exit 1; }
+      - name: Deploy package repositories
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --ref main

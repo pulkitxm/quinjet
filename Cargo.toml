@@ -49,12 +49,32 @@ section = "vcs"
 priority = "optional"
 revision = ""
 assets = [
-    ["target/release/quinjet", "usr/bin/", "755"],
-    { dest = "usr/bin/q", link_name = "quinjet" },
-    ["target/release/quinjet.bash", "usr/share/bash-completion/completions/quinjet", "644"],
-    ["target/release/quinjet.fish", "usr/share/fish/vendor_completions.d/quinjet.fish", "644"],
-    ["target/release/quinjet.zsh", "usr/share/zsh/vendor-completions/_quinjet", "644"],
-    ["target/release/quinjet.1", "usr/share/man/man1/quinjet.1", "644"],
+  [
+    "target/release/quinjet",
+    "usr/bin/",
+    "755",
+  ],
+  { dest = "usr/bin/q", link_name = "quinjet" },
+  [
+    "target/release/quinjet.bash",
+    "usr/share/bash-completion/completions/quinjet",
+    "644",
+  ],
+  [
+    "target/release/quinjet.fish",
+    "usr/share/fish/vendor_completions.d/quinjet.fish",
+    "644",
+  ],
+  [
+    "target/release/quinjet.zsh",
+    "usr/share/zsh/vendor-completions/_quinjet",
+    "644",
+  ],
+  [
+    "target/release/quinjet.1",
+    "usr/share/man/man1/quinjet.1",
+    "644",
+  ],
 ]
 
 [dependencies]

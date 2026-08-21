@@ -9,9 +9,6 @@ on:
       - 'packaging/apt/**'
       - 'scripts/build_apt_repository.sh'
       - '.github/workflows/pages.yml'
-  workflow_run:
-    workflows: [Release]
-    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -24,7 +21,6 @@ concurrency:
 jobs:
   deploy:
     name: Deploy installers
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read # read the checkout
