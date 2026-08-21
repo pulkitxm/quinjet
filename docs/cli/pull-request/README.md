@@ -3,11 +3,11 @@
 `quinjet pr` reads and operates on one pull request by number. Its read verbs
 cover metadata, changed files, patches, the conversation, checks, one check
 run's log, and browser opening. Its write verbs cover the full existing-PR
-workflow exposed by GitHub CLI, plus merge-queue removal and notification
-subscriptions through GitHub's GraphQL API. There is no listing, checkout, or
-creation verb. Reach for this group when you want the same operations in a pipe,
-and reach for the pull-request pane of [the terminal interface](../tui.md) when
-you want to work interactively.
+workflow exposed by GitHub CLI, plus merge-queue removal, notification
+subscriptions, and fork maintainer-edit access through GitHub's GraphQL API.
+There is no listing, checkout, or creation verb. Reach for this group when you
+want the same operations in a pipe, and reach for the pull-request pane of
+[the terminal interface](../tui.md) when you want to work interactively.
 
 Every verb begins with the same lookup, so understanding that one step explains
 most of the group's behavior. Quinjet first works out which GitHub repositories
@@ -90,6 +90,7 @@ when their check state settles.
 | `quinjet pr update-branch` | Merges or rebases the base branch into the pull request branch. |
 | `quinjet pr lock` / `unlock` | Changes whether the conversation accepts new comments. |
 | `quinjet pr subscribe` / `unsubscribe` | Changes notification subscription state. |
+| `quinjet pr allow-maintainer-edits` / `disallow-maintainer-edits` | Changes whether maintainers can edit a fork's head branch. |
 | `quinjet pr revert` | Creates a pull request that reverts a merged pull request. |
 | `quinjet pr close` | Closes the pull request without merging, after `--yes`. |
 | `quinjet pr reopen` | Reopens a closed pull request that has not been merged, after `--yes`. |
@@ -120,6 +121,8 @@ when their check state settles.
 - [`quinjet pr unlock`](./unlock.md)
 - [`quinjet pr subscribe`](./subscribe.md)
 - [`quinjet pr unsubscribe`](./unsubscribe.md)
+- [`quinjet pr allow-maintainer-edits`](./allow-maintainer-edits.md)
+- [`quinjet pr disallow-maintainer-edits`](./disallow-maintainer-edits.md)
 - [`quinjet pr revert`](./revert.md)
 - [`quinjet pr close`](./close.md)
 - [`quinjet pr reopen`](./reopen.md)
@@ -268,9 +271,9 @@ leaves stdout empty.
 - `pr open` hands a URL to a platform opener (`open` on macOS, `explorer` on
   Windows, `xdg-open` elsewhere) and does not wait on the child. Every write
   verb is preview-first and needs `--yes`. Existing pull-request actions use
-  non-interactive `gh pr` commands. Queue and subscription changes use GraphQL
-  mutations keyed by the node identity from the same lookup. Checkout and new
-  pull-request creation remain outside this group.
+  non-interactive `gh pr` commands. Queue, subscription, and maintainer-edit
+  changes use GraphQL mutations keyed by the node identity from the same lookup.
+  Checkout and new pull-request creation remain outside this group.
 - `pr open --check <name>` resolves the check by exact name first and then by a
   unique case-insensitive substring, using the same selection rule as
   `pr logs`. It opens the check's `link`; a selected check with no link exits 4.

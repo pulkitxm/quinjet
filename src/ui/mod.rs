@@ -13,7 +13,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{
     App, ChangeRow, ChangeSection, CheckListRow, ContentFileHit, ContentStepHit, DiffLayout, Focus,
-    HelpHit, LinkHit, Modal, ModalAction, OpenTarget, PaletteCommand, PrMenuItem,
+    HelpHit, LinkHit, Modal, ModalAction, OpenTarget, PaletteCommand, PrActionItem, PrMenuItem,
     PullRequestContentLink, PullRequestContentRow, PullRequestSection, PullRequestTreeEntry,
     ScmAction, ScmActionHit, ScmMenuItem, SideBySideRow, SidebarHit, SidebarHitArea, ToastLevel,
     UiGeometry, View,
@@ -26,7 +26,7 @@ use crate::git::diff::PullRequestDetails;
 use crate::git::diff::{DiffDocument, DiffLine, DiffLineKind, HighlightSpan};
 use crate::git::github::{
     CheckLogLine, CheckLogSeverity, CheckStep, ConversationEntry, ConversationKind,
-    GitHubRepository, PullRequestCheckStatus, PullRequestFileStatus,
+    GitHubRepository, PullRequest, PullRequestCheckStatus, PullRequestFileStatus,
 };
 #[cfg(test)]
 use crate::git::github::{PullRequestCheck, PullRequestFile, RecentPullRequest};

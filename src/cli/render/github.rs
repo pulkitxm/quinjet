@@ -42,6 +42,31 @@ pub(crate) fn pull_request(pull_request: &PullRequest) -> String {
         "Changes      {} files, +{} -{}",
         pull_request.changed_files, pull_request.additions, pull_request.deletions
     ));
+    let action = &pull_request.action_state;
+    if !action.merge_queue_entry_id.is_empty() {
+        out.line(&format!(
+            "Merge        queue position {} ({})",
+            action.merge_queue_position,
+            action.merge_queue_state.to_ascii_lowercase()
+        ));
+    } else if !action.auto_merge_method.is_empty() {
+        out.line(&format!(
+            "Merge        auto {}",
+            action.auto_merge_method.to_ascii_lowercase()
+        ));
+    } else if pull_request.state == "OPEN"
+        && !pull_request.is_draft
+        && !action.merge_state.is_empty()
+    {
+        out.line(&format!(
+            "Merge        {} ({})",
+            action.merge_state.to_ascii_lowercase(),
+            action.mergeable.to_ascii_lowercase()
+        ));
+    }
+    if action.is_locked {
+        out.line("Conversation locked");
+    }
     out.line(&format!("URL          {}", pull_request.url));
     if !pull_request.description.trim().is_empty() {
         out.line(&format!("\n{}", pull_request.description.trim_end()));

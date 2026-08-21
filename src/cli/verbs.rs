@@ -176,6 +176,10 @@ pub(super) enum PrVerb {
     Subscribe(PrMutateArgs),
     /// Unsubscribe from notifications
     Unsubscribe(PrMutateArgs),
+    /// Allow maintainers to edit a fork's head branch
+    AllowMaintainerEdits(PrMutateArgs),
+    /// Prevent maintainers from editing a fork's head branch
+    DisallowMaintainerEdits(PrMutateArgs),
     /// Create a pull request that reverts a merged pull request
     Revert(PrRevertArgs),
     /// Close a pull request

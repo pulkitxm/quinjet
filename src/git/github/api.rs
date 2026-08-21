@@ -196,19 +196,29 @@ pub(super) fn pull_request_operation_args(
         return pull_request_graphql_args(
             pull_request,
             "mutation($id:ID!){dequeuePullRequest(input:{id:$id}){mergeQueueEntry{id}}}",
-            None,
         );
     }
     if let PullRequestOperation::Subscribe(subscribe) = operation {
-        return pull_request_graphql_args(
+        let mut args = pull_request_graphql_args(
             pull_request,
             "mutation($id:ID!,$state:SubscriptionState!){updateSubscription(input:{subscribableId:$id,state:$state}){subscribable{viewerSubscription}}}",
-            Some(if *subscribe {
-                "SUBSCRIBED"
-            } else {
-                "UNSUBSCRIBED"
-            }),
         );
+        args.push(OsString::from("-f"));
+        args.push(OsString::from(if *subscribe {
+            "state=SUBSCRIBED"
+        } else {
+            "state=UNSUBSCRIBED"
+        }));
+        return args;
+    }
+    if let PullRequestOperation::SetMaintainerEdits(enabled) = operation {
+        let mut args = pull_request_graphql_args(
+            pull_request,
+            "mutation($id:ID!,$enabled:Boolean!){updatePullRequest(input:{pullRequestId:$id,maintainerCanModify:$enabled}){pullRequest{maintainerCanModify}}}",
+        );
+        args.push(OsString::from("-F"));
+        args.push(OsString::from(format!("enabled={enabled}")));
+        return args;
     }
     let command = match operation {
         PullRequestOperation::Merge { .. } | PullRequestOperation::DisableAutoMerge => "merge",
@@ -222,7 +232,9 @@ pub(super) fn pull_request_operation_args(
         PullRequestOperation::Revert { .. } => "revert",
         PullRequestOperation::Close => "close",
         PullRequestOperation::Reopen => "reopen",
-        PullRequestOperation::Dequeue | PullRequestOperation::Subscribe(_) => return Vec::new(),
+        PullRequestOperation::Dequeue
+        | PullRequestOperation::Subscribe(_)
+        | PullRequestOperation::SetMaintainerEdits(_) => return Vec::new(),
     };
     let mut args = vec![
         OsString::from("pr"),
@@ -307,7 +319,8 @@ pub(super) fn pull_request_operation_args(
         | PullRequestOperation::Close
         | PullRequestOperation::Reopen
         | PullRequestOperation::Dequeue
-        | PullRequestOperation::Subscribe(_) => {}
+        | PullRequestOperation::Subscribe(_)
+        | PullRequestOperation::SetMaintainerEdits(_) => {}
     }
     if matches!(operation, PullRequestOperation::DisableAutoMerge) {
         args.push(OsString::from("--disable-auto"));
@@ -315,12 +328,8 @@ pub(super) fn pull_request_operation_args(
     args
 }
 
-fn pull_request_graphql_args(
-    pull_request: &PullRequest,
-    query: &str,
-    subscription: Option<&str>,
-) -> Vec<OsString> {
-    let mut args = vec![
+fn pull_request_graphql_args(pull_request: &PullRequest, query: &str) -> Vec<OsString> {
+    vec![
         OsString::from("api"),
         OsString::from("graphql"),
         OsString::from("--hostname"),
@@ -329,10 +338,5 @@ fn pull_request_graphql_args(
         OsString::from(format!("id={}", pull_request.action_state.node_id)),
         OsString::from("-f"),
         OsString::from(format!("query={query}")),
-    ];
-    if let Some(subscription) = subscription {
-        args.push(OsString::from("-f"));
-        args.push(OsString::from(format!("state={subscription}")));
-    }
-    args
+    ]
 }

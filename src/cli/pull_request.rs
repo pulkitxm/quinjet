@@ -225,6 +225,20 @@ pub(super) fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb
             args.yes,
             PullRequestOperation::Subscribe(false),
         ),
+        PrVerb::AllowMaintainerEdits(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::SetMaintainerEdits(true),
+        ),
+        PrVerb::DisallowMaintainerEdits(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::SetMaintainerEdits(false),
+        ),
         PrVerb::Revert(args) => mutate_pull_request(
             session,
             out,

@@ -138,6 +138,16 @@ impl App {
                             );
                             self.checked_change_paths.clear();
                         }
+                        PromptKind::PullRequest {
+                            pull_request,
+                            action,
+                        } => {
+                            self.queue_pull_request_operation(
+                                *pull_request.clone(),
+                                Self::operation_for_pr_action(*action, input.value.clone()),
+                                &mut effects,
+                            );
+                        }
                     }
                     return effects;
                 }
@@ -149,6 +159,25 @@ impl App {
                 }
                 self.modal = Some(modal);
             }
+            Modal::PullRequestActions {
+                items, selected, ..
+            } => match key.code {
+                KeyCode::Esc => {}
+                KeyCode::Up | KeyCode::Char('k') => {
+                    *selected = previous_list_index(*selected, items.len());
+                    self.modal = Some(modal);
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    *selected = next_list_index(*selected, items.len());
+                    self.modal = Some(modal);
+                }
+                KeyCode::Enter => {
+                    if let Some(item) = items.get(*selected).copied() {
+                        self.handle_pr_action_item(item);
+                    }
+                }
+                _ => self.modal = Some(modal),
+            },
             Modal::Confirm { action, .. } => match key.code {
                 KeyCode::Enter | KeyCode::Char('y' | 'Y') => match action {
                     ConfirmAction::Operate(operation) => {

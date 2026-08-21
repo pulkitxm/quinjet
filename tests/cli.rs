@@ -82,6 +82,8 @@ const COMMAND_PATHS: &[&[&str]] = &[
     &["pr", "unlock"],
     &["pr", "subscribe"],
     &["pr", "unsubscribe"],
+    &["pr", "allow-maintainer-edits"],
+    &["pr", "disallow-maintainer-edits"],
     &["pr", "revert"],
     &["pr", "close"],
     &["pr", "reopen"],

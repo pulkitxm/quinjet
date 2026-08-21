@@ -14,9 +14,10 @@ use crate::convert::{count, offset};
 use crate::git::diff::{DiffDocument, DiffIndex, DiffLineCounts, DiffLineKind, PullRequestDetails};
 use crate::git::github::{
     CheckRunLog, GitHubRepository, PullRequest, PullRequestCheck, PullRequestCheckStatus,
-    PullRequestConversation, PullRequestDiffIndex, PullRequestFile, PullRequestFileStatus,
-    PullRequestMergeMethod, PullRequestMergeMode, PullRequestOperation, PullRequestProgress,
-    RecentPullRequest,
+    PullRequestCommentMode, PullRequestConversation, PullRequestDiffIndex, PullRequestEdit,
+    PullRequestFile, PullRequestFileStatus, PullRequestLockReason, PullRequestMergeMethod,
+    PullRequestMergeMode, PullRequestOperation, PullRequestProgress, PullRequestReviewKind,
+    PullRequestUpdateMethod, RecentPullRequest,
 };
 use crate::git::history::Commit;
 use crate::git::status::{Change, ChangeArea, ChangeStatus, RepoStatus};

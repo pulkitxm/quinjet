@@ -258,6 +258,7 @@ pub(crate) enum PullRequestOperation {
     Lock(Option<PullRequestLockReason>),
     Unlock,
     Subscribe(bool),
+    SetMaintainerEdits(bool),
     Revert {
         draft: bool,
         title: String,
@@ -307,6 +308,8 @@ impl PullRequestOperation {
             Self::Unlock => "Unlock conversation",
             Self::Subscribe(true) => "Subscribe to pull request",
             Self::Subscribe(false) => "Unsubscribe from pull request",
+            Self::SetMaintainerEdits(true) => "Allow maintainer edits",
+            Self::SetMaintainerEdits(false) => "Disallow maintainer edits",
             Self::Revert { .. } => "Create revert pull request",
             Self::Close => "Close pull request",
             Self::Reopen => "Reopen pull request",
@@ -342,6 +345,7 @@ impl PullRequestOperation {
             | Self::Lock(_)
             | Self::Unlock
             | Self::Subscribe(_)
+            | Self::SetMaintainerEdits(_)
             | Self::Revert { .. } => format!("Really {}", self.label().to_lowercase()),
             Self::Close => String::from("Really close"),
             Self::Reopen => String::from("Really reopen"),
@@ -396,6 +400,8 @@ impl PullRequestOperation {
             Self::Unlock => String::from("Unlocked the conversation on"),
             Self::Subscribe(true) => String::from("Subscribed to"),
             Self::Subscribe(false) => String::from("Unsubscribed from"),
+            Self::SetMaintainerEdits(true) => String::from("Allowed maintainer edits on"),
+            Self::SetMaintainerEdits(false) => String::from("Disallowed maintainer edits on"),
             Self::Revert { .. } => String::from("Created a revert for"),
             Self::Close => String::from("Closed"),
             Self::Reopen => String::from("Reopened"),

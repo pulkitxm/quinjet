@@ -67,6 +67,14 @@ impl App {
                     }
                 }
             }
+            ModalAction::PullRequestAction(index) => {
+                let Some(Modal::PullRequestActions { items, .. }) = self.modal.take() else {
+                    return;
+                };
+                if let Some(item) = items.get(index).copied() {
+                    self.handle_pr_action_item(item);
+                }
+            }
         }
     }
 }

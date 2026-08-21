@@ -5,7 +5,7 @@ fn overview_app() -> App {
     let mut app = App::new("/tmp/repo", "repo");
     app.view = View::PullRequests;
     app.pull_request_exact_number = Some(42);
-    app.pull_request = Some(crate::git::github::PullRequest {
+    app.pull_request = Some(PullRequest {
         number: 42,
         title: "Ship the rocket".to_owned(),
         description: "## Summary\n- Launch **safely**\n\n```sh\ncargo test\n```".to_owned(),

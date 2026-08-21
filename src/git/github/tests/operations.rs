@@ -105,6 +105,11 @@ fn pull_request_operations_map_to_non_interactive_gh_commands() {
         })
         .ends_with(&["--delete-last".to_owned(), "--yes".to_owned()])
     );
+    assert!(
+        args(&PullRequestOperation::SetMaintainerEdits(true))
+            .iter()
+            .any(|arg| arg == "enabled=true")
+    );
 }
 
 #[test]
