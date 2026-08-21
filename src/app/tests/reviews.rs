@@ -1,5 +1,34 @@
 use super::*;
 
+fn review_snapshot() -> PullRequestReviewSnapshot {
+    PullRequestReviewSnapshot {
+        pull_request_id: "PR_1".to_owned(),
+        head_oid: "head".to_owned(),
+        review_decision: None,
+        pending_review: None,
+        threads: vec![PullRequestReviewThread {
+            id: "thread-1".to_owned(),
+            path: PathBuf::from("src/lib.rs"),
+            side: PullRequestReviewSide::Right,
+            line: Some(1),
+            original_line: Some(1),
+            start_side: None,
+            start_line: None,
+            original_start_line: None,
+            subject: PullRequestReviewThreadSubject::Line,
+            is_resolved: false,
+            is_outdated: false,
+            resolved_by: None,
+            viewer_can_reply: true,
+            viewer_can_resolve: true,
+            viewer_can_unresolve: false,
+            comments: Vec::new(),
+            comments_truncated: false,
+        }],
+        truncated: false,
+    }
+}
+
 #[test]
 fn pull_request_files_create_pending_line_reviews() {
     let mut app = App::new("/tmp/repo", "repo");
@@ -47,6 +76,8 @@ fn pull_request_files_create_pending_line_reviews() {
 #[test]
 fn pull_request_review_threads_render_below_their_diff_line() {
     let mut app = App::new("/tmp/repo", "repo");
+    app.view = View::PullRequests;
+    app.pull_request_section = PullRequestSection::Files;
     app.pull_request_file_view = PullRequestFileView::SingleFile;
     app.pull_request_single_file = Some(PathBuf::from("src/lib.rs"));
     app.document = crate::git::diff::parse_diff(
@@ -60,32 +91,7 @@ fn pull_request_review_threads_render_below_their_diff_line() {
     app.handle_worker_event(
         WorkerEvent::PullRequestReview {
             generation: 4,
-            result: Ok(PullRequestReviewSnapshot {
-                pull_request_id: "PR_1".to_owned(),
-                head_oid: "head".to_owned(),
-                review_decision: None,
-                pending_review: None,
-                threads: vec![PullRequestReviewThread {
-                    id: "thread-1".to_owned(),
-                    path: PathBuf::from("src/lib.rs"),
-                    side: PullRequestReviewSide::Right,
-                    line: Some(1),
-                    original_line: Some(1),
-                    start_side: None,
-                    start_line: None,
-                    original_start_line: None,
-                    subject: PullRequestReviewThreadSubject::Line,
-                    is_resolved: false,
-                    is_outdated: false,
-                    resolved_by: None,
-                    viewer_can_reply: true,
-                    viewer_can_resolve: true,
-                    viewer_can_unresolve: false,
-                    comments: Vec::new(),
-                    comments_truncated: false,
-                }],
-                truncated: false,
-            }),
+            result: Ok(review_snapshot()),
         },
         Instant::now(),
     );
@@ -101,6 +107,75 @@ fn pull_request_review_threads_render_below_their_diff_line() {
         .iter()
         .position(|line| line.kind == DiffLineKind::Review);
     assert_eq!(review, added.map(|index| index + 1));
+}
+
+#[test]
+fn a_late_review_refresh_does_not_decorate_another_view() {
+    let mut app = App::new("/tmp/repo", "repo");
+    let now = Instant::now();
+    app.view = View::PullRequests;
+    app.pull_request_section = PullRequestSection::Files;
+    app.pull_request_file_view = PullRequestFileView::SingleFile;
+    app.pull_request_single_file = Some(PathBuf::from("src/lib.rs"));
+    app.document = crate::git::diff::parse_diff(
+        b"diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -0,0 +1 @@\n+pull request\n",
+        "src/lib.rs",
+        Some(Path::new("src/lib.rs")),
+        false,
+    );
+    app.pull_request_review_generation = 4;
+    app.switch_view(View::History, &mut Vec::new());
+    app.document = crate::git::diff::parse_diff(
+        b"diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -0,0 +1 @@\n+history\n",
+        "History",
+        Some(Path::new("src/lib.rs")),
+        false,
+    );
+    app.content_scroll = 23;
+    app.horizontal_scroll = 7;
+    let history_document = app.document.clone();
+
+    app.handle_worker_event(
+        WorkerEvent::PullRequestReview {
+            generation: 4,
+            result: Ok(review_snapshot()),
+        },
+        now,
+    );
+
+    assert_eq!(app.document, history_document);
+    assert_eq!(app.content_scroll, 23);
+    assert_eq!(app.horizontal_scroll, 7);
+
+    app.switch_view(View::PullRequests, &mut Vec::new());
+    assert!(
+        app.document
+            .lines
+            .iter()
+            .any(|line| line.kind == DiffLineKind::Review)
+    );
+}
+
+#[test]
+fn a_review_refresh_does_not_decorate_the_pull_request_overview() {
+    let mut app = App::new("/tmp/repo", "repo");
+    app.view = View::PullRequests;
+    app.pull_request_section = PullRequestSection::Overview;
+    app.pull_request_file_view = PullRequestFileView::SingleFile;
+    app.pull_request_single_file = Some(PathBuf::from("src/lib.rs"));
+    app.pull_request_review_generation = 4;
+    app.document = DiffDocument::empty("Pull Request", "overview");
+    let overview = app.document.clone();
+
+    app.handle_worker_event(
+        WorkerEvent::PullRequestReview {
+            generation: 4,
+            result: Ok(review_snapshot()),
+        },
+        Instant::now(),
+    );
+
+    assert_eq!(app.document, overview);
 }
 
 #[test]

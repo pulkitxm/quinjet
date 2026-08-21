@@ -104,11 +104,13 @@ fn pull_request_diff_position_survives_outer_view_switches() {
 }
 
 #[test]
-fn interrupted_local_preview_resumes_without_losing_visible_state() {
+fn interrupted_preserved_local_preview_resumes_with_its_retained_workspace() {
     let mut app = app_with_changes();
     let path = PathBuf::from("src/main.rs");
     app.document = indexed_document(&["src/main.rs"]);
+    app.diff_generation = 3;
     app.document_loading = true;
+    app.local_diff_preserving_document = true;
     app.local_diff_request = app.local_diff_request_for_view();
     app.local_diff_workspace_generation = Some(3);
     app.local_diff_index = Some(DiffIndex {
@@ -128,6 +130,7 @@ fn interrupted_local_preview_resumes_without_losing_visible_state() {
     app.switch_view(View::History, &mut Vec::new());
     let mut effects = Vec::new();
     app.switch_view(View::Changes, &mut effects);
+    let resumed_generation = app.diff_generation;
 
     assert_eq!(app.content_scroll, 12);
     assert!(matches!(
@@ -135,10 +138,14 @@ fn interrupted_local_preview_resumes_without_losing_visible_state() {
         [AppEffect::Git(command)] if matches!(
             command.as_ref(),
             WorkerCommand::LoadLocalDiffFile {
+                generation,
                 workspace_generation: 3,
                 path: queued,
                 ..
-            } if queued == &path
+            } if *generation == resumed_generation && queued == &path
         )
     ));
+    assert_ne!(resumed_generation, 3);
+    assert_eq!(app.local_diff_loading_path, Some(path));
+    assert!(app.local_diff_pending_paths.is_empty());
 }

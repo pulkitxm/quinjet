@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -16,8 +15,6 @@ use crate::git::{
     Branch, GitOperation, HistoryBranch, LocalDiffRequest, PreparedLocalDiff, ProjectGroup,
     Repository, Stash, Worktree,
 };
-
-const MAX_PREPARED_LOCAL_DIFF_WORKSPACES: usize = 3;
 
 #[derive(Debug)]
 pub(crate) enum Command {
@@ -230,7 +227,7 @@ fn unexpected(outcome: &Outcome, wanted: &str) -> anyhow::Error {
 
 pub(crate) struct Session {
     repository: Repository,
-    local_diffs: VecDeque<(u64, PreparedLocalDiff)>,
+    local_diffs: LocalDiffWorkspaces<PreparedLocalDiff>,
     pull_request_diff: Option<(u64, PreparedPullRequest)>,
 }
 
@@ -238,7 +235,7 @@ impl Session {
     pub(crate) const fn new(repository: Repository) -> Self {
         Self {
             repository,
-            local_diffs: VecDeque::new(),
+            local_diffs: LocalDiffWorkspaces::new(),
             pull_request_diff: None,
         }
     }
@@ -280,9 +277,10 @@ impl Session {
                 crate::state::load_recent_projects(self.repository.root()),
             )),
             Command::PrepareLocalDiff { workspace, request } => {
+                let kind = LocalDiffWorkspaceKind::from_request(&request);
                 let prepared = self.repository.prepare_local_diff(&request)?;
                 let index = prepared.index();
-                store_recent_workspace(&mut self.local_diffs, workspace, prepared);
+                self.local_diffs.store(kind, workspace, prepared);
                 Ok(Outcome::LocalDiffIndex(Box::new(index)))
             }
             Command::LocalDiffFile { workspace, path } => {
@@ -408,7 +406,8 @@ impl Session {
     }
 
     fn local_workspace(&self, workspace: u64) -> Result<&PreparedLocalDiff> {
-        find_recent_workspace(&self.local_diffs, workspace)
+        self.local_diffs
+            .get(workspace)
             .ok_or_else(|| anyhow::anyhow!("Local diff workspace is no longer available"))
     }
 
@@ -421,57 +420,80 @@ impl Session {
     }
 }
 
-fn store_recent_workspace<T>(workspaces: &mut VecDeque<(u64, T)>, workspace: u64, prepared: T) {
-    workspaces.retain(|(candidate, _)| *candidate != workspace);
-    workspaces.push_front((workspace, prepared));
-    workspaces.truncate(MAX_PREPARED_LOCAL_DIFF_WORKSPACES);
+#[derive(Clone, Copy)]
+enum LocalDiffWorkspaceKind {
+    Changes,
+    History,
 }
 
-fn find_recent_workspace<T>(workspaces: &VecDeque<(u64, T)>, workspace: u64) -> Option<&T> {
-    workspaces
-        .iter()
-        .find(|(candidate, _)| *candidate == workspace)
-        .map(|(_, prepared)| prepared)
+impl LocalDiffWorkspaceKind {
+    const fn from_request(request: &LocalDiffRequest) -> Self {
+        match request {
+            LocalDiffRequest::Commit { .. } => Self::History,
+            LocalDiffRequest::Changes { .. }
+            | LocalDiffRequest::Branch { .. }
+            | LocalDiffRequest::Stash { .. } => Self::Changes,
+        }
+    }
+}
+
+struct LocalDiffWorkspaces<T> {
+    changes: Option<(u64, T)>,
+    history: Option<(u64, T)>,
+}
+
+impl<T> LocalDiffWorkspaces<T> {
+    const fn new() -> Self {
+        Self {
+            changes: None,
+            history: None,
+        }
+    }
+
+    fn store(&mut self, kind: LocalDiffWorkspaceKind, workspace: u64, prepared: T) {
+        let slot = match kind {
+            LocalDiffWorkspaceKind::Changes => &mut self.changes,
+            LocalDiffWorkspaceKind::History => &mut self.history,
+        };
+        *slot = Some((workspace, prepared));
+    }
+
+    fn get(&self, workspace: u64) -> Option<&T> {
+        [&self.changes, &self.history]
+            .into_iter()
+            .flatten()
+            .find(|(candidate, _)| *candidate == workspace)
+            .map(|(_, prepared)| prepared)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
-
-    use super::{find_recent_workspace, store_recent_workspace};
+    use super::{LocalDiffWorkspaceKind, LocalDiffWorkspaces};
 
     #[test]
-    fn workspace_lookup_retains_three_most_recent_generations() {
-        let mut workspaces = VecDeque::new();
-        store_recent_workspace(&mut workspaces, 11, 110);
-        store_recent_workspace(&mut workspaces, 12, 120);
-        store_recent_workspace(&mut workspaces, 13, 130);
+    fn paused_changes_workspace_survives_history_browsing() {
+        let mut workspaces = LocalDiffWorkspaces::new();
+        workspaces.store(LocalDiffWorkspaceKind::Changes, 11, 110);
 
-        assert_eq!(find_recent_workspace(&workspaces, 11), Some(&110));
-        assert_eq!(find_recent_workspace(&workspaces, 12), Some(&120));
-        assert_eq!(find_recent_workspace(&workspaces, 13), Some(&130));
+        for generation in 12..100 {
+            workspaces.store(LocalDiffWorkspaceKind::History, generation, generation * 10);
+        }
 
-        store_recent_workspace(&mut workspaces, 14, 140);
-
-        assert_eq!(workspaces.len(), 3);
-        assert_eq!(find_recent_workspace(&workspaces, 11), None);
-        assert_eq!(find_recent_workspace(&workspaces, 12), Some(&120));
-        assert_eq!(find_recent_workspace(&workspaces, 14), Some(&140));
+        assert_eq!(workspaces.get(11), Some(&110));
+        assert_eq!(workspaces.get(98), None);
+        assert_eq!(workspaces.get(99), Some(&990));
     }
 
     #[test]
-    fn preparing_an_existing_generation_refreshes_its_retention() {
-        let mut workspaces = VecDeque::new();
-        store_recent_workspace(&mut workspaces, 21, 210);
-        store_recent_workspace(&mut workspaces, 22, 220);
-        store_recent_workspace(&mut workspaces, 23, 230);
-        store_recent_workspace(&mut workspaces, 21, 211);
-        store_recent_workspace(&mut workspaces, 24, 240);
+    fn each_view_replaces_only_its_own_workspace() {
+        let mut workspaces = LocalDiffWorkspaces::new();
+        workspaces.store(LocalDiffWorkspaceKind::Changes, 21, 210);
+        workspaces.store(LocalDiffWorkspaceKind::History, 22, 220);
+        workspaces.store(LocalDiffWorkspaceKind::Changes, 23, 230);
 
-        assert_eq!(workspaces.len(), 3);
-        assert_eq!(find_recent_workspace(&workspaces, 21), Some(&211));
-        assert_eq!(find_recent_workspace(&workspaces, 22), None);
-        assert_eq!(find_recent_workspace(&workspaces, 23), Some(&230));
-        assert_eq!(find_recent_workspace(&workspaces, 24), Some(&240));
+        assert_eq!(workspaces.get(21), None);
+        assert_eq!(workspaces.get(22), Some(&220));
+        assert_eq!(workspaces.get(23), Some(&230));
     }
 }

@@ -62,8 +62,7 @@ impl App {
             return false;
         }
         self.pull_request_check_cursor = next;
-        self.content_scroll = 0;
-        self.horizontal_scroll = 0;
+        self.reset_view_content_position(View::PullRequests);
         self.invalidate_check_run_log();
         self.invalidate_pull_request_content_rows();
         true

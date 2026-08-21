@@ -176,6 +176,9 @@ impl App {
         self.text_selection = None;
         self.resize_target = None;
         let resume_preview = self.restore_view(view);
+        if view == View::PullRequests {
+            self.decorate_pull_request_review();
+        }
         self.set_focus(self.focus, effects);
         self.schedule_pull_request_poll(Instant::now());
         if view == View::PullRequests && self.pull_request.is_none() {

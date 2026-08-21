@@ -106,6 +106,11 @@ impl ViewState {
         self.sidebar_last_cursor = None;
     }
 
+    pub(super) const fn reset_content_position(&mut self) {
+        self.content_scroll = 0;
+        self.horizontal_scroll = 0;
+    }
+
     pub(super) fn set_document(&mut self, document: DiffDocument) {
         self.document = document;
     }
@@ -187,6 +192,15 @@ impl App {
             self.reset_sidebar_scroll();
         } else if let Some(state) = self.view_states.state_mut(view) {
             state.reset_sidebar_scroll();
+        }
+    }
+
+    pub(super) fn reset_view_content_position(&mut self, view: View) {
+        if self.view == view {
+            self.content_scroll = 0;
+            self.horizontal_scroll = 0;
+        } else if let Some(state) = self.view_states.state_mut(view) {
+            state.reset_content_position();
         }
     }
 
