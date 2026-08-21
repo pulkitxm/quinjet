@@ -166,23 +166,8 @@ impl RepositoryWorkspace {
                 return None;
             }
         };
-        let source_runtime = self.tabs.get(source)?;
-        let theme = source_runtime.app.theme_name;
-        let appearance = source_runtime.app.appearance_choice;
-        let mouse = source_runtime.app.mouse_capture_preference;
-        let webhooks_listening = source_runtime.app.webhooks_listening;
         crate::state::record_recent_project(repository.root());
-        let title = repository.name();
-        let root = repository.root().to_path_buf();
-        let runtime =
-            RepositoryRuntime::new(&repository, theme, appearance, mouse, webhooks_listening);
-        drop(self.tabs.replace(source, title, root, runtime));
-        self.sync_tabs(now);
-        let effects = self.app_mut(source)?.initial_effects();
-        Some(RoutedEffects {
-            id: source,
-            effects,
-        })
+        self.replace_repository(source, &repository, now)
     }
 
     pub(crate) fn open_repository_tab(
@@ -204,16 +189,49 @@ impl RepositoryWorkspace {
             self.activate(id, now);
             return None;
         }
+        crate::state::record_recent_project(repository.root());
+        self.append_repository(source, &repository, now)
+    }
+
+    fn replace_repository(
+        &mut self,
+        source: TabId,
+        repository: &Repository,
+        now: Instant,
+    ) -> Option<RoutedEffects> {
+        let source_runtime = self.tabs.get(source)?;
+        let theme = source_runtime.app.theme_name;
+        let appearance = source_runtime.app.appearance_choice;
+        let mouse = source_runtime.app.mouse_capture_preference;
+        let webhooks_listening = source_runtime.app.webhooks_listening;
+        let title = repository.name();
+        let root = repository.root().to_path_buf();
+        let runtime =
+            RepositoryRuntime::new(repository, theme, appearance, mouse, webhooks_listening);
+        drop(self.tabs.replace(source, title, root, runtime));
+        self.sync_tabs(now);
+        let effects = self.app_mut(source)?.initial_effects();
+        Some(RoutedEffects {
+            id: source,
+            effects,
+        })
+    }
+
+    fn append_repository(
+        &mut self,
+        source: TabId,
+        repository: &Repository,
+        now: Instant,
+    ) -> Option<RoutedEffects> {
         let source = self.tabs.get(source).or_else(|| self.tabs.active())?;
         let theme = source.app.theme_name;
         let appearance = source.app.appearance_choice;
         let mouse = source.app.mouse_capture_preference;
         let webhooks_listening = source.app.webhooks_listening;
-        crate::state::record_recent_project(repository.root());
         let title = repository.name();
         let root = repository.root().to_path_buf();
         let runtime =
-            RepositoryRuntime::new(&repository, theme, appearance, mouse, webhooks_listening);
+            RepositoryRuntime::new(repository, theme, appearance, mouse, webhooks_listening);
         let id = self.tabs.append(title, root, runtime);
         self.sync_tabs(now);
         let effects = self.app_mut(id)?.initial_effects();
@@ -280,3 +298,6 @@ impl RepositoryWorkspace {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests;
