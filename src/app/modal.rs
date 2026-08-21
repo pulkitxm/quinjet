@@ -221,6 +221,10 @@ pub(crate) enum PromptKind {
         staged: bool,
         paths: Vec<PathBuf>,
     },
+    PullRequest {
+        pull_request: Box<PullRequest>,
+        action: PrActionItem,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -274,46 +278,13 @@ impl ScmMenuItem {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PrMenuItem {
-    Merge(PullRequestMergeMethod),
-    Close,
-    OpenInBrowser,
-}
-
-impl PrMenuItem {
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::Merge(method) => method.label(),
-            Self::Close => "Close pull request",
-            Self::OpenInBrowser => "Open in browser",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PrPrimaryAction {
-    Merge(PullRequestMergeMethod),
-    Reopen,
-    OpenInBrowser,
-}
-
-impl PrPrimaryAction {
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::Merge(method) => method.label(),
-            Self::Reopen => "Reopen pull request",
-            Self::OpenInBrowser => "Open in browser",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ModalAction {
     CommitSubmit,
     CommitCancel,
     CommitToggleAmend,
     ConfirmYes,
     ConfirmNo,
+    PullRequestAction(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -331,6 +302,11 @@ pub(crate) enum Modal {
         title: String,
         input: TextBuffer,
         kind: PromptKind,
+    },
+    PullRequestActions {
+        title: String,
+        items: Vec<PrActionItem>,
+        selected: usize,
     },
     Confirm {
         title: String,

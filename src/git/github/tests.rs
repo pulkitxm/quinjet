@@ -83,6 +83,7 @@ pub(super) fn pull_request(base: GitHubRepository, number: u64) -> PullRequest {
         additions: 1,
         deletions: 0,
         changed_files: 1,
+        action_state: PullRequestActionState::default(),
     }
 }
 

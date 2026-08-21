@@ -54,7 +54,10 @@ pub(super) fn conversation_rows(app: &App, width: usize, theme: &Theme) -> Vec<C
             format!("{:<DETAIL_LABEL_WIDTH$}", "State"),
             Style::default().fg(theme.muted),
         ),
-        Span::styled(format!("{state}  ·  "), Style::default().fg(theme.text)),
+        Span::styled(
+            format!("{state}{}  ·  ", pull_request_action_summary(pull_request)),
+            Style::default().fg(theme.text),
+        ),
         Span::styled(
             format!("@{}", pull_request.author),
             app.account_open_target(&pull_request.author).map_or_else(
@@ -185,6 +188,39 @@ pub(super) fn conversation_rows(app: &App, width: usize, theme: &Theme) -> Vec<C
         push_conversation_entry(&mut rows, entry, width, app, theme);
     }
     rows
+}
+
+fn pull_request_action_summary(pull_request: &PullRequest) -> String {
+    let action = &pull_request.action_state;
+    let mut parts = Vec::new();
+    if !action.merge_queue_entry_id.is_empty() {
+        parts.push(format!(
+            "queue {} {}",
+            action.merge_queue_position,
+            action.merge_queue_state.to_ascii_lowercase()
+        ));
+    } else if !action.auto_merge_method.is_empty() {
+        parts.push(format!(
+            "auto-merge {}",
+            action.auto_merge_method.to_ascii_lowercase()
+        ));
+    }
+    if action.is_locked {
+        parts.push("locked".to_owned());
+    }
+    if !action.review_decision.is_empty() {
+        parts.push(
+            action
+                .review_decision
+                .to_ascii_lowercase()
+                .replace('_', " "),
+        );
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!("  ·  {}", parts.join("  ·  "))
+    }
 }
 
 pub(super) fn push_conversation_entry(

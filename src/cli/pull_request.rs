@@ -1,6 +1,16 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
+mod monitor;
+pub(super) use monitor::select_check;
+use monitor::{checks, logs, watch_conversation, watch_pull_request};
+#[cfg(test)]
+pub(super) use monitor::{ensure_log_available, exit_for};
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "the match is the exhaustive pull-request command routing table"
+)]
 pub(super) fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb) -> Result<u8> {
     match command {
         PrVerb::View(args) => {
@@ -78,7 +88,172 @@ pub(super) fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb
             args.yes,
             PullRequestOperation::Merge {
                 method: args.method.method(),
+                mode: PullRequestMergeMode::Direct,
                 delete_branch: args.delete_branch,
+            },
+        ),
+        PrVerb::AdminMerge(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Merge {
+                method: args.method.method(),
+                mode: PullRequestMergeMode::Admin,
+                delete_branch: args.delete_branch,
+            },
+        ),
+        PrVerb::AutoMerge(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Merge {
+                method: args.method.method(),
+                mode: PullRequestMergeMode::Auto,
+                delete_branch: args.delete_branch,
+            },
+        ),
+        PrVerb::DisableAutoMerge(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::DisableAutoMerge,
+        ),
+        PrVerb::Dequeue(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Dequeue,
+        ),
+        PrVerb::Ready(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::SetDraft(false),
+        ),
+        PrVerb::Draft(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::SetDraft(true),
+        ),
+        PrVerb::Review(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Review {
+                kind: args.choice.kind(),
+                body: args.body.unwrap_or_default(),
+            },
+        ),
+        PrVerb::Comment(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Comment {
+                mode: PullRequestCommentMode::Create,
+                body: args.body,
+            },
+        ),
+        PrVerb::EditLastComment(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Comment {
+                mode: PullRequestCommentMode::EditLast,
+                body: args.body,
+            },
+        ),
+        PrVerb::DeleteLastComment(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Comment {
+                mode: PullRequestCommentMode::DeleteLast,
+                body: String::new(),
+            },
+        ),
+        PrVerb::Edit(args) => {
+            let edit = args.edit()?;
+            mutate_pull_request(
+                session,
+                out,
+                &args.pull_request,
+                args.yes,
+                PullRequestOperation::Edit(edit),
+            )
+        }
+        PrVerb::UpdateBranch(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::UpdateBranch(if args.rebase {
+                PullRequestUpdateMethod::Rebase
+            } else {
+                PullRequestUpdateMethod::Merge
+            }),
+        ),
+        PrVerb::Lock(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Lock(args.reason.map(Into::into)),
+        ),
+        PrVerb::Unlock(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Unlock,
+        ),
+        PrVerb::Subscribe(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Subscribe(true),
+        ),
+        PrVerb::Unsubscribe(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Subscribe(false),
+        ),
+        PrVerb::AllowMaintainerEdits(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::SetMaintainerEdits(true),
+        ),
+        PrVerb::DisallowMaintainerEdits(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::SetMaintainerEdits(false),
+        ),
+        PrVerb::Revert(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Revert {
+                draft: args.draft,
+                title: args.title.unwrap_or_default(),
+                body: args.body.unwrap_or_default(),
             },
         ),
         PrVerb::Close(args) => mutate_pull_request(
@@ -125,212 +300,31 @@ pub(super) fn preview_pull_request_operation(
     pull_request: &PullRequest,
     operation: &PullRequestOperation,
 ) -> String {
-    let mut message = match operation {
-        PullRequestOperation::Merge { method, .. } => {
+    let (mut message, action) = match operation {
+        PullRequestOperation::Merge {
+            method,
+            mode: PullRequestMergeMode::Direct,
+            ..
+        } => {
             let mut text = String::from("Would ");
             text.push_str(method.preview_verb());
-            text
+            (text, "merge it.")
         }
-        PullRequestOperation::Close => String::from("Would close"),
-        PullRequestOperation::Reopen => String::from("Would reopen"),
+        PullRequestOperation::Close => (String::from("Would close"), "close it."),
+        PullRequestOperation::Reopen => (String::from("Would reopen"), "reopen it."),
+        _ => {
+            let mut text = String::from("Would ");
+            text.push_str(&operation.label().to_lowercase());
+            (text, "perform this action.")
+        }
     };
     message.push_str(" #");
     message.push_str(&pull_request.number.to_string());
     message.push_str(" (");
     message.push_str(&pull_request.title);
     message.push_str("). Pass --yes to ");
-    match operation {
-        PullRequestOperation::Merge { .. } => message.push_str("merge it."),
-        PullRequestOperation::Close => message.push_str("close it."),
-        PullRequestOperation::Reopen => message.push_str("reopen it."),
-    }
+    message.push_str(action);
     message
-}
-
-pub(super) fn watch_pull_request(
-    session: &mut Session,
-    out: &Emitter,
-    args: &PrWatchArgs,
-) -> Result<u8> {
-    watch::run(interval(args.interval, CHECK_WATCH_FLOOR), out.json, || {
-        let mut request = args.pull_request.clone();
-        request.refresh = true;
-        let snapshot = lookup_snapshot(session, out, &request)?;
-        Ok(watch::Frame {
-            text: render::pull_request(&snapshot.pull_request),
-            value: snapshot,
-            finished: false,
-            code: 0,
-        })
-    })
-}
-
-pub(super) fn watch_conversation(
-    session: &mut Session,
-    out: &Emitter,
-    args: &PrWatchArgs,
-) -> Result<u8> {
-    watch::run(interval(args.interval, CHECK_WATCH_FLOOR), out.json, || {
-        let mut lookup_args = args.pull_request.clone();
-        lookup_args.refresh = true;
-        let request = lookup_snapshot(session, out, &lookup_args)?.pull_request;
-        let conversation = session
-            .execute(Command::PullRequestConversation {
-                pull_request: Box::new(request),
-            })?
-            .conversation()?;
-        Ok(watch::Frame {
-            text: render::conversation(&conversation),
-            value: conversation,
-            finished: false,
-            code: 0,
-        })
-    })
-}
-
-pub(super) fn checks(session: &mut Session, out: &Emitter, args: &PrChecksArgs) -> Result<u8> {
-    let request = lookup(session, out, &args.pull_request)?;
-    if args.watch {
-        return watch::run(interval(args.interval, CHECK_WATCH_FLOOR), out.json, || {
-            let checks = session
-                .execute(Command::PullRequestChecks {
-                    pull_request: Box::new(request.clone()),
-                    refresh: true,
-                })?
-                .checks()?;
-            let settled = !checks.checks.iter().any(|check| check.status.is_running());
-            Ok(watch::Frame {
-                text: render::checks(&checks.checks),
-                finished: settled && !checks.checks.is_empty(),
-                code: exit_for(&checks.checks),
-                value: checks,
-            })
-        });
-    }
-    let checks = out
-        .execute(
-            session,
-            Command::PullRequestChecks {
-                pull_request: Box::new(request),
-                refresh: args.pull_request.refresh,
-            },
-        )?
-        .checks()?;
-    out.emit(&checks, || render::checks(&checks.checks))?;
-    Ok(if args.exit_code {
-        exit_for(&checks.checks)
-    } else {
-        0
-    })
-}
-
-pub(super) fn logs(session: &mut Session, out: &Emitter, args: &PrLogsArgs) -> Result<u8> {
-    let request = lookup(session, out, &args.pull_request)?;
-    let listing = out
-        .execute(
-            session,
-            Command::PullRequestChecks {
-                pull_request: Box::new(request.clone()),
-                refresh: args.pull_request.refresh,
-            },
-        )?
-        .checks()?;
-    let check = select_check(&listing.checks, &args.check)?;
-    if args.watch {
-        let name = check.name;
-        return watch::run(interval(args.interval, LOG_WATCH_FLOOR), out.json, || {
-            let listing = session
-                .execute(Command::PullRequestChecks {
-                    pull_request: Box::new(request.clone()),
-                    refresh: true,
-                })?
-                .checks()?;
-            let check = select_check(&listing.checks, &name)?;
-            let log = session
-                .execute(Command::CheckRunLog {
-                    pull_request: Box::new(request.clone()),
-                    check: Box::new(check.clone()),
-                })?
-                .check_log()?;
-            ensure_log_available(&log)?;
-            Ok(watch::Frame {
-                text: render::check_log(&check, &log),
-                finished: !check.status.is_running(),
-                code: u8::from(check.status == PullRequestCheckStatus::Failed),
-                value: log,
-            })
-        });
-    }
-    let log = out
-        .execute(
-            session,
-            Command::CheckRunLog {
-                pull_request: Box::new(request),
-                check: Box::new(check.clone()),
-            },
-        )?
-        .check_log()?;
-    ensure_log_available(&log)?;
-    out.emit(&log, || render::check_log(&check, &log))?;
-    Ok(0)
-}
-
-pub(super) fn ensure_log_available(log: &CheckRunLog) -> Result<()> {
-    log.unavailable.as_ref().map_or_else(
-        || Ok(()),
-        |reason| Err(Failure::new(EXIT_UNAVAILABLE, reason.clone()).into()),
-    )
-}
-
-pub(super) fn select_check(checks: &[PullRequestCheck], wanted: &str) -> Result<PullRequestCheck> {
-    let exact: Vec<&PullRequestCheck> =
-        checks.iter().filter(|check| check.name == wanted).collect();
-    if let Some(check) = exact.first() {
-        return Ok((*check).clone());
-    }
-    let partial: Vec<&PullRequestCheck> = checks
-        .iter()
-        .filter(|check| check.name.to_lowercase().contains(&wanted.to_lowercase()))
-        .collect();
-    match partial.as_slice() {
-        [only] => Ok((*only).clone()),
-        [] => Err(Failure::new(
-            EXIT_NOT_FOUND,
-            format!("no check on this pull request is called `{wanted}`"),
-        )
-        .hint(format!(
-            "the checks are: {}",
-            checks
-                .iter()
-                .map(|check| check.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ))
-        .into()),
-        _ => Err(Failure::new(
-            EXIT_NOT_FOUND,
-            format!("`{wanted}` matches more than one check"),
-        )
-        .hint(format!(
-            "name one of: {}",
-            partial
-                .iter()
-                .map(|check| check.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ))
-        .into()),
-    }
-}
-
-pub(super) fn exit_for(checks: &[PullRequestCheck]) -> u8 {
-    let unhappy = checks.iter().any(|check| {
-        matches!(
-            check.status,
-            PullRequestCheckStatus::Failed | PullRequestCheckStatus::Pending
-        )
-    });
-    u8::from(unhappy)
 }
 
 pub(super) fn lookup(session: &mut Session, out: &Emitter, args: &PrArgs) -> Result<PullRequest> {

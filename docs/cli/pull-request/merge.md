@@ -41,14 +41,14 @@ Would squash and merge #12 (Fix the thing). Pass --yes to merge it.
 With `--yes` it runs:
 
 ```text
-gh pr merge <number> --repo <url> --merge|--squash|--rebase [--delete-branch]
+gh pr merge <number> --repo <url> --merge|--squash|--rebase --match-head-commit <oid> [--delete-branch]
 ```
 
 using the same canonical repository URL every other `pr` verb uses. Failures
 from `gh` (draft restrictions, required checks, missing permissions) are
-surfaced as exit 1 with the GitHub CLI's message. This verb does not offer
-admin merge, auto-merge, or commit-message overrides; those remain `gh`
-concerns for now.
+surfaced as exit 1 with the GitHub CLI's message. Pinning the head commit keeps
+a force push that arrived after lookup from being merged unseen. Use
+`admin-merge` or `auto-merge` for GitHub's other merge modes.
 
 `--json` shape, one object with a single key:
 

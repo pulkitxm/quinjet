@@ -211,6 +211,68 @@ fn pull_request_live_and_browser_options_parse_at_their_leaf() {
 }
 
 #[test]
+fn pull_request_collaboration_actions_parse_without_prompts() {
+    let review = Cli::try_parse_from([
+        "quinjet",
+        "pr",
+        "review",
+        "24",
+        "--request-changes",
+        "--body",
+        "Needs tests",
+        "--yes",
+    ])
+    .unwrap();
+    assert!(matches!(
+        review.command,
+        Some(Verb::Pr {
+            command: PrVerb::Review(PrReviewArgs {
+                choice: PrReviewChoiceArgs {
+                    request_changes: true,
+                    ..
+                },
+                yes: true,
+                ..
+            })
+        })
+    ));
+
+    let edit = Cli::try_parse_from([
+        "quinjet",
+        "pr",
+        "edit",
+        "24",
+        "add-reviewer",
+        "octocat,hubot",
+        "--yes",
+    ])
+    .unwrap();
+    assert!(matches!(
+        edit.command,
+        Some(Verb::Pr {
+            command: PrVerb::Edit(PrEditArgs {
+                field: PrEditFieldArg::AddReviewer,
+                value: Some(value),
+                yes: true,
+                ..
+            })
+        }) if value == "octocat,hubot"
+    ));
+
+    let lock =
+        Cli::try_parse_from(["quinjet", "pr", "lock", "24", "--reason", "too-heated"]).unwrap();
+    assert!(matches!(
+        lock.command,
+        Some(Verb::Pr {
+            command: PrVerb::Lock(PrLockArgs {
+                reason: Some(PrLockReasonArg::TooHeated),
+                ..
+            })
+        })
+    ));
+}
+
+#[test]
 fn a_session_answers_a_status_command_with_the_working_tree() {
     let repository = TestRepository::new();
     fs::write(repository.path.join("added.txt"), "new\n").unwrap();

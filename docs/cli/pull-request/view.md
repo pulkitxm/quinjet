@@ -31,13 +31,14 @@ This is the lookup and nothing else, so it is the cheapest way to check that
 to fetch commits. Underneath it runs exactly one command:
 
 ```text
-gh pr view <number> --repo <canonical-url> \
-  --json number,title,body,author,state,isDraft,createdAt,updatedAt,url,baseRefName,baseRefOid,headRefName,headRefOid,headRepository,isCrossRepository,additions,deletions,changedFiles \
-  --jq '[(.number|tostring), .title, (.body // ""), (.author.login // "ghost"), ...] | @tsv'
+gh api graphql --hostname <host> -f owner=<owner> -f name=<name> \
+  -F number=<number> -f query=<pull-request-query> --jq '<38-field TSV>'
 ```
 
-The answer is one tab-separated line of 18 fields, cached under
-`pull-request-v3\n<repository url>\n<number>` for five minutes. Tabs, newlines,
+The answer is one tab-separated line of 38 fields, cached under
+`pull-request-v4\n<repository url>\n<number>` for five minutes. Alongside the
+displayed content and refs it carries viewer permissions, lock and subscription
+state, merge readiness, auto-merge, merge queue, and review decision. Tabs, newlines,
 carriage returns and backslashes inside the body arrive escaped and are put back
 before the record is parsed, which is what lets a multi-line description survive
 a one-line format.

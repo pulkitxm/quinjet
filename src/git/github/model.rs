@@ -51,6 +51,37 @@ pub(crate) struct PullRequest {
     pub additions: usize,
     pub deletions: usize,
     pub changed_files: usize,
+    #[serde(flatten)]
+    pub action_state: PullRequestActionState,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "GitHub exposes independent viewer permissions for each pull-request action"
+)]
+pub(crate) struct PullRequestActionState {
+    pub node_id: String,
+    pub is_locked: bool,
+    pub viewer_can_close: bool,
+    pub viewer_can_reopen: bool,
+    pub viewer_can_update: bool,
+    pub viewer_can_update_branch: bool,
+    pub viewer_can_subscribe: bool,
+    pub viewer_can_react: bool,
+    pub viewer_did_author: bool,
+    pub viewer_subscription: String,
+    pub merge_state: String,
+    pub mergeable: String,
+    pub maintainer_can_modify: bool,
+    pub viewer_can_merge_as_admin: bool,
+    pub auto_merge_method: String,
+    pub merge_queue_entry_id: String,
+    pub merge_queue_position: usize,
+    pub merge_queue_state: String,
+    pub merge_queue_id: String,
+    pub review_decision: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]

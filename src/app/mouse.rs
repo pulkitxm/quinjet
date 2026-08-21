@@ -65,7 +65,7 @@ impl App {
         }
         if matches!(
             self.modal,
-            Some(Modal::Commit { .. } | Modal::Confirm { .. })
+            Some(Modal::Commit { .. } | Modal::Confirm { .. } | Modal::PullRequestActions { .. })
         ) && event.kind == MouseEventKind::Down(MouseButton::Left)
         {
             if let Some(action) = self

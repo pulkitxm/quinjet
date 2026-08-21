@@ -12,6 +12,7 @@ impl App {
             modal @ (Modal::Help { .. }
             | Modal::Commit { .. }
             | Modal::Prompt { .. }
+            | Modal::PullRequestActions { .. }
             | Modal::Confirm { .. }
             | Modal::Conflict { .. }
             | Modal::Branches { .. }
