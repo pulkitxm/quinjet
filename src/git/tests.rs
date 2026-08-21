@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use super::support::same_path;
 use super::*;
 
 static TEST_REPOSITORY_ID: AtomicUsize = AtomicUsize::new(0);

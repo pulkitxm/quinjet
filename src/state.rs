@@ -167,7 +167,7 @@ mod tests {
     use std::process::Command;
 
     use super::*;
-    use crate::git::same_path;
+    use crate::git::support::same_path;
 
     #[test]
     fn records_one_project_per_common_directory() {
