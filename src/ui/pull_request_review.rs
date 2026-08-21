@@ -88,3 +88,46 @@ pub(super) fn draw_review_editor(
         theme,
     );
 }
+
+pub(super) fn draw_review_thread_actions(
+    frame: &mut Frame<'_>,
+    hits: &mut Vec<(Rect, ModalAction)>,
+    items: &[crate::app::PullRequestReviewThreadAction],
+    selected: usize,
+    theme: &Theme,
+) {
+    let width = items
+        .iter()
+        .map(|item| item.label().width())
+        .max()
+        .unwrap_or(24)
+        .saturating_add(6);
+    let height = items.len().saturating_add(3);
+    let area = centered_rect(
+        u16::try_from(width).unwrap_or(72).min(72),
+        u16::try_from(height).unwrap_or(20).min(20),
+        frame.area(),
+    );
+    frame.render_widget(Clear, area);
+    let block = modal_block(" Review Thread ", theme);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    for (index, item) in items.iter().enumerate() {
+        let row = Rect::new(
+            inner.x,
+            inner.y.saturating_add(u16::try_from(index).unwrap_or(0)),
+            inner.width,
+            1,
+        );
+        frame.render_widget(
+            Paragraph::new(format!("  {}", item.label())).style(if index == selected {
+                Style::default().fg(theme.text).bg(theme.selected)
+            } else {
+                Style::default().fg(theme.text).bg(theme.panel)
+            }),
+            row,
+        );
+        hits.push((row, ModalAction::PullRequestReviewThreadAction(index)));
+    }
+    draw_modal_hint(frame, area, "j/k select   Enter open   Esc cancel", theme);
+}

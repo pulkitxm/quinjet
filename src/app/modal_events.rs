@@ -10,12 +10,12 @@ impl App {
     ) -> Vec<AppEffect> {
         match modal {
             modal @ (Modal::PullRequestReviewComment { .. }
+            | Modal::PullRequestReviewThreadActions { .. }
             | Modal::PullRequestReviewSubmit { .. }) => self.handle_review_modal_key(modal, key),
             modal @ (Modal::Help { .. }
             | Modal::Commit { .. }
             | Modal::Prompt { .. }
             | Modal::PullRequestActions { .. }
-            | Modal::PullRequestReviewThreadActions { .. }
             | Modal::Confirm { .. }
             | Modal::Conflict { .. }
             | Modal::Branches { .. }

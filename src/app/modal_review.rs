@@ -7,6 +7,9 @@ impl App {
         mut modal: Modal,
         key: KeyEvent,
     ) -> Vec<AppEffect> {
+        if matches!(modal, Modal::PullRequestReviewThreadActions { .. }) {
+            return self.handle_review_thread_modal_key(modal, key);
+        }
         let mut effects = Vec::new();
         match &mut modal {
             Modal::PullRequestReviewComment { input, target } => {
@@ -117,6 +120,35 @@ impl App {
                 }
                 edit_text(input, key, true);
                 self.modal = Some(modal);
+            }
+            _ => self.modal = Some(modal),
+        }
+        effects
+    }
+
+    fn handle_review_thread_modal_key(
+        &mut self,
+        mut modal: Modal,
+        key: KeyEvent,
+    ) -> Vec<AppEffect> {
+        let mut effects = Vec::new();
+        let Modal::PullRequestReviewThreadActions { items, selected } = &mut modal else {
+            return effects;
+        };
+        match key.code {
+            KeyCode::Esc => {}
+            KeyCode::Up | KeyCode::Char('k') => {
+                *selected = previous_list_index(*selected, items.len());
+                self.modal = Some(modal);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                *selected = next_list_index(*selected, items.len());
+                self.modal = Some(modal);
+            }
+            KeyCode::Enter => {
+                if let Some(item) = items.get(*selected).cloned() {
+                    self.handle_review_thread_action(item, &mut effects);
+                }
             }
             _ => self.modal = Some(modal),
         }
