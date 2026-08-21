@@ -259,4 +259,5 @@ mod prefetch;
 mod projects;
 mod refresh;
 mod reviews;
+mod support;
 mod workflows;
