@@ -19,12 +19,24 @@ pub(super) fn draw_repository_tabs(
         Block::default().style(Style::default().bg(theme.panel)),
         area,
     );
-    let open_width = 5_u16.min(area.width);
+    let tab_row = Rect::new(area.x, area.y, area.width, 1_u16.min(area.height));
+    let separator = Rect::new(
+        area.x,
+        tab_row.bottom(),
+        area.width,
+        area.bottom().saturating_sub(tab_row.bottom()).min(1),
+    );
+    frame.render_widget(
+        Paragraph::new("─".repeat(usize::from(separator.width)))
+            .style(Style::default().fg(theme.border).bg(theme.panel)),
+        separator,
+    );
+    let open_width = 5_u16.min(tab_row.width);
     let open = Rect::new(
-        area.right().saturating_sub(open_width),
-        area.y,
+        tab_row.right().saturating_sub(open_width),
+        tab_row.y,
         open_width,
-        area.height,
+        tab_row.height,
     );
     frame.render_widget(
         Paragraph::new(" + ").alignment(Alignment::Center).style(
@@ -35,7 +47,7 @@ pub(super) fn draw_repository_tabs(
         ),
         open,
     );
-    let tab_region_width = area.width.saturating_sub(open_width);
+    let tab_region_width = tab_row.width.saturating_sub(open_width);
     if app.repository_tabs.is_empty() || tab_region_width == 0 {
         return (Vec::new(), open, Rect::default(), Rect::default());
     }
@@ -45,12 +57,12 @@ pub(super) fn draw_repository_tabs(
     let control_width = if overflow { 3 } else { 0 };
     let (previous, next) = if overflow {
         (
-            Rect::new(area.x, area.y, control_width, area.height),
+            Rect::new(tab_row.x, tab_row.y, control_width, tab_row.height),
             Rect::new(
                 open.x.saturating_sub(control_width),
-                area.y,
+                tab_row.y,
                 control_width,
-                area.height,
+                tab_row.height,
             ),
         )
     } else {
@@ -96,11 +108,11 @@ pub(super) fn draw_repository_tabs(
         .take(visible_count)
         .enumerate()
     {
-        let x = area
+        let x = tab_row
             .x
             .saturating_add(control_width)
             .saturating_add(cells(offset.saturating_mul(usize::from(tab_width))));
-        let tab_area = Rect::new(x, area.y, tab_width, area.height);
+        let tab_area = Rect::new(x, tab_row.y, tab_width, tab_row.height);
         let value = if tab.title.is_empty() {
             tab.root.display().to_string()
         } else {
@@ -157,7 +169,7 @@ pub(super) fn draw_repository_tabs(
             id: tab.id,
         });
     }
-    draw_repository_tab_drop_marker(frame, area, app, &hits, theme);
+    draw_repository_tab_drop_marker(frame, tab_row, app, &hits, theme);
     (hits, open, previous, next)
 }
 

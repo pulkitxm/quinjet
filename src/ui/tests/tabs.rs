@@ -75,6 +75,24 @@ fn repository_tabs_render_close_icons_and_a_drag_destination() {
 }
 
 #[test]
+fn repository_tab_strip_has_a_continuous_bottom_separator() {
+    let (mut app, _) = app_with_tabs(2, 1);
+    let theme = Theme::default();
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+
+    terminal
+        .draw(|frame| draw(frame, &mut app, &theme))
+        .unwrap();
+
+    for column in 0..80 {
+        let cell = &terminal.backend().buffer()[(column, 1)];
+        assert_eq!(cell.symbol(), "─");
+        assert_eq!(cell.fg, theme.border);
+    }
+    assert_eq!(app.geometry.changes_tab.y, 2);
+}
+
+#[test]
 fn repository_tab_strip_appears_only_for_multiple_tabs() {
     let (mut single, _) = app_with_tabs(1, 0);
     let mut single_terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
@@ -111,7 +129,7 @@ fn repository_tab_strip_appears_only_for_multiple_tabs() {
     );
     assert_eq!(multiple.geometry.repository_tab_previous, Rect::default());
     assert_eq!(multiple.geometry.repository_tab_next, Rect::default());
-    assert_eq!(multiple.geometry.changes_tab.y, 1);
+    assert_eq!(multiple.geometry.changes_tab.y, 2);
 }
 
 #[test]

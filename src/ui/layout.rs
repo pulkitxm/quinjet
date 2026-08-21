@@ -12,7 +12,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
         return;
     }
 
-    let repository_tabs_height = u16::from(app.repository_tabs.len() > 1);
+    let repository_tabs_height = u16::from(app.repository_tabs.len() > 1).saturating_mul(2);
     let [repository_tabs, tabs, main, footer] = Layout::vertical([
         Constraint::Length(repository_tabs_height),
         Constraint::Length(3),
