@@ -38,6 +38,25 @@ pkg-url = "{ repo }/releases/download/v{ version }/quinjet-macos-aarch64"
 [package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
 pkg-url = "{ repo }/releases/download/v{ version }/quinjet-windows-x86_64.exe"
 
+[package.metadata.deb]
+maintainer = "Pulkit <pulkitxm@users.noreply.github.com>"
+copyright = "2026, Pulkit"
+license-file = ["LICENSE", "0"]
+extended-description = "Quinjet is a live, keyboard-first Git source-control interface for the terminal. It combines repository status, syntax-highlighted diffs, commit history, branches, stashes, and pull requests in one executable."
+depends = "git"
+suggests = "gh"
+section = "vcs"
+priority = "optional"
+revision = ""
+assets = [
+  { source = "target/release/quinjet", dest = "usr/bin/", mode = "755" },
+  { dest = "usr/bin/q", link_name = "quinjet" },
+  { source = "target/release/quinjet.bash", dest = "usr/share/bash-completion/completions/quinjet", mode = "644" },
+  { source = "target/release/quinjet.fish", dest = "usr/share/fish/vendor_completions.d/quinjet.fish", mode = "644" },
+  { source = "target/release/quinjet.zsh", dest = "usr/share/zsh/vendor-completions/_quinjet", mode = "644" },
+  { source = "target/release/quinjet.1", dest = "usr/share/man/man1/quinjet.1", mode = "644" },
+]
+
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive", "string"] }

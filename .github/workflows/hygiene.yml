@@ -32,6 +32,8 @@ jobs:
           python3 scripts/check_rust_sizes.py
       - name: The Homebrew formula template renders
         run: python3 scripts/homebrew_formula.py --selftest
+      - name: The Winget manifest templates render
+        run: python3 scripts/winget_manifest.py --selftest
       - name: No committed secrets
         run: |
           python3 scripts/check_secrets.py --selftest
