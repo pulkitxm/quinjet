@@ -29,7 +29,9 @@ impl App {
             PaletteCommand::StashIncludeUntracked => self.prompt_stash(true, false),
             PaletteCommand::StashPop => self.queue_operation(GitOperation::StashPop(None), effects),
             PaletteCommand::ManageStashes => self.open_stashes(effects),
-            PaletteCommand::OpenProject => self.open_projects(effects),
+            PaletteCommand::OpenProject => {
+                self.open_projects(ProjectOpenMode::CurrentTab, effects);
+            }
             PaletteCommand::Branches => self.open_branches(effects),
             PaletteCommand::CompareBranch => self.open_compare_branches(effects),
             PaletteCommand::RenameCurrentBranch => {

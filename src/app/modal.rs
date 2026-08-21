@@ -356,6 +356,7 @@ pub(crate) enum Modal {
         selected: usize,
         query: TextBuffer,
         loading: bool,
+        mode: ProjectOpenMode,
     },
     PullRequestRepositories {
         items: Vec<GitHubRepository>,
@@ -379,6 +380,12 @@ pub(crate) enum Modal {
     Conflict {
         change: Change,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProjectOpenMode {
+    CurrentTab,
+    NewTab,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

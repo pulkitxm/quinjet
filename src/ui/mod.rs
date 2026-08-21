@@ -14,9 +14,10 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use crate::app::{
     App, ChangeRow, ChangeSection, CheckListRow, ContentFileHit, ContentReviewHit, ContentStepHit,
     DiffLayout, Focus, HelpHit, LinkHit, Modal, ModalAction, OpenTarget, PaletteCommand,
-    PrActionItem, PrMenuItem, PullRequestContentLink, PullRequestContentRow, PullRequestSection,
-    PullRequestTreeEntry, ScmAction, ScmActionHit, ScmMenuItem, SideBySideRow, SidebarHit,
-    SidebarHitArea, ToastLevel, UiGeometry, View,
+    PrActionItem, PrMenuItem, ProjectOpenMode, PullRequestContentLink, PullRequestContentRow,
+    PullRequestSection, PullRequestTreeEntry, RepositoryTabAction, RepositoryTabHit, ScmAction,
+    ScmActionHit, ScmMenuItem, SideBySideRow, SidebarHit, SidebarHitArea, ToastLevel, UiGeometry,
+    View,
 };
 use crate::convert::cells;
 use crate::date_time::format_local_timestamp;
@@ -131,6 +132,22 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
         description: "Changes / commit history / pull requests",
     },
     HelpRow::Shortcut {
+        keys: "Ctrl+Tab / Ctrl+Shift+Tab",
+        description: "Next / previous project tab",
+    },
+    HelpRow::Shortcut {
+        keys: "Ctrl+W",
+        description: "Close the active project tab",
+    },
+    HelpRow::Shortcut {
+        keys: "Right-click project tab",
+        description: "Open, close, or close other project tabs",
+    },
+    HelpRow::Shortcut {
+        keys: "N",
+        description: "Open a project or worktree in a new tab",
+    },
+    HelpRow::Shortcut {
         keys: "/",
         description: "Filter the active list",
     },
@@ -194,7 +211,7 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
     },
     HelpRow::Shortcut {
         keys: "w",
-        description: "Recent projects and their worktrees",
+        description: "Switch the current tab to another project or worktree",
     },
     HelpRow::Spacer,
     HelpRow::Section("Commits"),
@@ -439,6 +456,7 @@ mod pull_request_details;
 mod pull_request_files;
 mod pull_request_overview;
 mod pull_request_review;
+mod repository_tabs;
 mod side_by_side;
 mod sidebar_changes;
 mod sidebar_history;
@@ -476,6 +494,8 @@ use pull_request_files::*;
 use pull_request_overview::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use pull_request_review::*;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
+use repository_tabs::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use side_by_side::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]

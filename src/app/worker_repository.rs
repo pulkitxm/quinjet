@@ -317,6 +317,7 @@ impl App {
                             selected,
                             query,
                             loading,
+                            ..
                         }) = self.modal.as_mut()
                         {
                             let visible = Self::filtered_project_rows(&groups, &query.value);

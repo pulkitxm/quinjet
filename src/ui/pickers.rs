@@ -5,12 +5,17 @@ use super::*;
     clippy::too_many_lines,
     reason = "the picker renders headings and worktree rows in one pass"
 )]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the picker receives one value for each modal field plus its palette"
+)]
 pub(super) fn draw_projects(
     frame: &mut Frame<'_>,
     groups: &[ProjectGroup],
     selected: usize,
     query: &crate::app::TextBuffer,
     loading: bool,
+    mode: ProjectOpenMode,
     theme: &Theme,
 ) {
     let height = frame.area().height.saturating_sub(6).min(28);
@@ -20,7 +25,11 @@ pub(super) fn draw_projects(
         frame.area(),
     );
     frame.render_widget(Clear, area);
-    let block = modal_block(" Recent projects ", theme);
+    let title = match mode {
+        ProjectOpenMode::CurrentTab => " Switch project ",
+        ProjectOpenMode::NewTab => " Open in new tab ",
+    };
+    let block = modal_block(title, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let query_area = Rect::new(inner.x, inner.y, inner.width, 1);
@@ -153,12 +162,11 @@ pub(super) fn draw_projects(
             frame.render_widget(Paragraph::new(visible_lines), list_area);
         }
     }
-    draw_modal_hint(
-        frame,
-        area,
-        "Enter open   Delete forget project   Esc close",
-        theme,
-    );
+    let hint = match mode {
+        ProjectOpenMode::CurrentTab => "Enter switch tab   Delete forget project   Esc close",
+        ProjectOpenMode::NewTab => "Enter open in new tab   Delete forget project   Esc close",
+    };
+    draw_modal_hint(frame, area, hint, theme);
 }
 
 pub(super) fn draw_pull_request_repositories(

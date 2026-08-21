@@ -8,6 +8,9 @@ impl App {
     )]
     pub(crate) fn handle_key(&mut self, key: KeyEvent, now: Instant) -> Vec<AppEffect> {
         self.link_hover = None;
+        if let Some(effects) = self.handle_repository_tab_key(key) {
+            return effects;
+        }
         if let Some(modal) = self.modal.take() {
             return self.handle_modal_key(modal, key, now);
         }
@@ -128,7 +131,8 @@ impl App {
                 self.pr_menu_open = false;
             }
             KeyCode::Char('S') if self.view == View::Changes => self.open_stashes(&mut effects),
-            KeyCode::Char('w') => self.open_projects(&mut effects),
+            KeyCode::Char('w') => self.open_projects(ProjectOpenMode::CurrentTab, &mut effects),
+            KeyCode::Char('N') => self.open_projects(ProjectOpenMode::NewTab, &mut effects),
             KeyCode::Char('o') if self.view == View::PullRequests => {
                 self.open_pull_request_repositories(&mut effects);
             }

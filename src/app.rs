@@ -28,6 +28,7 @@ use crate::git::{
     Branch, ConflictChoice, GitOperation, HistoryBranch, LocalDiffRequest, ProjectGroup, Stash,
     Worktree,
 };
+use crate::tabs::{TabId, TabInfo};
 use crate::theme::{Appearance, AppearanceChoice, Theme, ThemeName};
 
 const PREVIEW_DEBOUNCE: Duration = Duration::from_millis(45);
@@ -145,6 +146,7 @@ mod pull_request_checks;
 mod pull_request_diff;
 mod pull_request_review;
 mod refresh;
+mod repository_tabs;
 mod scm;
 mod selection;
 mod support;
@@ -168,7 +170,13 @@ pub(crate) enum AppEffect {
     Copy(String),
     SetMouseCapture(bool),
     Open(OpenTarget),
-    OpenRepository(PathBuf),
+    SwitchRepository(PathBuf),
+    OpenRepositoryTab(PathBuf),
+    ActivateRepositoryTab(TabId),
+    ReorderRepositoryTab { source: TabId, target: TabId },
+    CloseRepositoryTab(TabId),
+    CloseOtherRepositoryTabs(TabId),
+    CloseAllRepositoryTabs,
     Quit,
 }
 
@@ -308,6 +316,10 @@ pub(crate) struct App {
     pub pull_request_loading: bool,
     pub last_refresh: Option<Instant>,
     pub geometry: UiGeometry,
+    pub repository_tabs: Vec<TabInfo>,
+    pub repository_tab_drag: Option<RepositoryTabDrag>,
+    pub repository_tab_menu: Option<RepositoryTabMenu>,
+    pub tab_active: bool,
     pub status_generation: u64,
     pub changes_diff_version: u64,
     pub diff_generation: u64,

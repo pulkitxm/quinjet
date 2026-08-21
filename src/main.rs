@@ -5,12 +5,15 @@ mod date_time;
 mod file_icons;
 mod git;
 mod state;
+mod tabs;
 mod theme;
 mod ui;
 mod watch;
 mod webhook;
 mod webhook_parser;
+mod workspace;
 
+use std::collections::VecDeque;
 use std::io::{self, IsTerminal};
 use std::process::ExitCode;
 use std::sync::OnceLock;
@@ -19,7 +22,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use crossbeam_channel::{Receiver, tick};
+use crossbeam_channel::tick;
 use crossterm::clipboard::CopyToClipboard;
 use crossterm::cursor::Show;
 use crossterm::event::{
@@ -34,12 +37,11 @@ use crossterm::terminal::{
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
-use crate::app::{App, AppEffect, ToastLevel};
+use crate::app::AppEffect;
 use crate::cli::{Launch, TerminalOptions};
 use crate::git::Repository;
-use crate::git::worker::GitWorker;
-use crate::watch::RepoWatcher;
 use crate::webhook::WebhookListener;
+use crate::workspace::{RepositoryWorkspace, RoutedEffects};
 
 fn main() -> ExitCode {
     match cli::dispatch() {
@@ -99,77 +101,82 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
     install_panic_hook();
     let repository = Repository::discover(&options.path)?;
     state::record_recent_project(repository.root());
-    let common_dir = repository.git_common_dir().ok();
-    let mut worker = GitWorker::start(repository.clone());
-    let mut watcher = RepoWatcher::with_extra(repository.root(), common_dir.as_deref()).ok();
     let webhooks = options
         .webhook_listen
         .as_deref()
         .map(WebhookListener::bind)
         .transpose()?;
-    let mut app = App::new(repository.root(), repository.name());
-    app.set_theme_selection(options.theme, options.appearance);
+    let mut workspace = RepositoryWorkspace::new(
+        &repository,
+        options.theme,
+        options.appearance,
+        !options.no_mouse,
+        webhooks.is_some(),
+    );
+    workspace.sync_tabs(Instant::now());
     let mut terminal = TerminalGuard::enter(!options.no_mouse)?;
     let render_tick = tick(Duration::from_millis(16));
     let periodic_refresh = tick(Duration::from_secs(10));
     let mut dirty = true;
     let mut running = true;
 
-    app.configure_mouse_capture(!options.no_mouse);
-    app.webhooks_listening = webhooks.is_some();
-    let effects = app.initial_effects();
-    running &= dispatch_effects(&mut worker, &mut watcher, &mut app, &mut terminal, effects);
-    if let Some(number) = options.pull_request {
-        let effects = app.open_pull_request_on_launch(number);
-        running &= dispatch_effects(&mut worker, &mut watcher, &mut app, &mut terminal, effects);
+    if let Some(effects) = workspace.initial_effects() {
+        running &= dispatch_effects(&mut workspace, &mut terminal, [effects]);
+    }
+    if let Some(number) = options.pull_request
+        && let Some(effects) = workspace.open_pull_request_on_launch(number)
+    {
+        running &= dispatch_effects(&mut workspace, &mut terminal, [effects]);
     }
     while running {
         if dirty {
+            let Some(app) = workspace.active_app_mut() else {
+                break;
+            };
             let theme = app.theme;
             let _ = terminal
                 .terminal
-                .draw(|frame| ui::draw(frame, &mut app, &theme))
+                .draw(|frame| ui::draw(frame, app, &theme))
                 .context("failed to render Quinjet")?;
             dirty = false;
         }
 
-        while let Ok(worker_event) = worker.events().try_recv() {
-            let effects = app.handle_worker_event(worker_event, Instant::now());
-            running &=
-                dispatch_effects(&mut worker, &mut watcher, &mut app, &mut terminal, effects);
+        let worker_effects = workspace.drain_worker_events(Instant::now());
+        if !worker_effects.is_empty() {
+            running &= dispatch_effects(&mut workspace, &mut terminal, worker_effects);
             dirty = true;
         }
 
-        if watcher_changed(watcher.as_ref().map(RepoWatcher::changes)) {
-            let mut effects = Vec::new();
-            app.filesystem_changed(&mut effects);
-            running &=
-                dispatch_effects(&mut worker, &mut watcher, &mut app, &mut terminal, effects);
+        let watcher_effects = workspace.poll_watchers();
+        if !watcher_effects.is_empty() {
+            running &= dispatch_effects(&mut workspace, &mut terminal, watcher_effects);
             dirty = true;
         }
 
         if webhook_delivered(webhooks.as_ref()) {
-            let effects = app.webhook_delivered(Instant::now());
-            running &=
-                dispatch_effects(&mut worker, &mut watcher, &mut app, &mut terminal, effects);
+            let effects = workspace.webhook_delivered(Instant::now());
+            running &= dispatch_effects(&mut workspace, &mut terminal, effects);
             dirty = true;
         }
 
         if render_tick.try_recv().is_ok() {
-            let (effects, changed) = app.tick(Instant::now());
-            running &=
-                dispatch_effects(&mut worker, &mut watcher, &mut app, &mut terminal, effects);
+            let (effects, changed) = workspace.tick(Instant::now());
+            running &= dispatch_effects(&mut workspace, &mut terminal, effects);
             dirty |= changed;
         }
         if periodic_refresh.try_recv().is_ok() {
-            let mut effects = Vec::new();
-            app.periodic_refresh(&mut effects);
-            running &=
-                dispatch_effects(&mut worker, &mut watcher, &mut app, &mut terminal, effects);
+            let effects = workspace.periodic_refresh();
+            running &= dispatch_effects(&mut workspace, &mut terminal, effects);
             dirty = true;
         }
 
         if event::poll(Duration::from_millis(8)).context("failed to poll terminal events")? {
+            let Some(id) = workspace.active_id() else {
+                break;
+            };
+            let Some(app) = workspace.app_mut(id) else {
+                break;
+            };
             let effects = match event::read().context("failed to read terminal event")? {
                 Event::Key(key) if key.kind != KeyEventKind::Release => {
                     app.handle_key(key, Instant::now())
@@ -181,24 +188,17 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
                 }
                 _ => Vec::new(),
             };
-            running &=
-                dispatch_effects(&mut worker, &mut watcher, &mut app, &mut terminal, effects);
+            workspace.propagate_preferences(id);
+            running &= dispatch_effects(
+                &mut workspace,
+                &mut terminal,
+                [RoutedEffects { id, effects }],
+            );
             dirty = true;
         }
     }
 
     Ok(())
-}
-
-fn watcher_changed(receiver: Option<&Receiver<()>>) -> bool {
-    let Some(receiver) = receiver else {
-        return false;
-    };
-    let mut changed = false;
-    while receiver.try_recv().is_ok() {
-        changed = true;
-    }
-    changed
 }
 
 #[doc = " Deliveries only say that something changed, so several arriving together"]
@@ -215,61 +215,53 @@ fn webhook_delivered(listener: Option<&WebhookListener>) -> bool {
 }
 
 fn dispatch_effects(
-    worker: &mut GitWorker,
-    watcher: &mut Option<RepoWatcher>,
-    app: &mut App,
+    workspace: &mut RepositoryWorkspace,
     terminal: &mut TerminalGuard,
-    effects: Vec<AppEffect>,
+    routed: impl IntoIterator<Item = RoutedEffects>,
 ) -> bool {
     let mut running = true;
-    for effect in effects {
-        match effect {
-            AppEffect::Git(command) => {
-                running &= worker.send(*command);
+    let mut pending = routed.into_iter().collect::<VecDeque<_>>();
+    while let Some(RoutedEffects { id, effects }) = pending.pop_front() {
+        for effect in effects {
+            match effect {
+                AppEffect::Git(command) => {
+                    running &= workspace.send(id, *command);
+                }
+                AppEffect::Copy(text) => terminal.copy_to_clipboard(&text),
+                AppEffect::SetMouseCapture(enabled) => terminal.set_mouse_capture(enabled),
+                AppEffect::Open(app::OpenTarget::Browser(url)) => drop(cli::open_url(&url)),
+                AppEffect::SwitchRepository(path) => {
+                    if let Some(effects) = workspace.switch_repository(id, &path, Instant::now()) {
+                        pending.push_back(effects);
+                    }
+                }
+                AppEffect::OpenRepositoryTab(path) => {
+                    if let Some(effects) = workspace.open_repository_tab(id, &path, Instant::now())
+                    {
+                        pending.push_back(effects);
+                    }
+                }
+                AppEffect::ActivateRepositoryTab(target) => {
+                    workspace.activate(target, Instant::now());
+                }
+                AppEffect::ReorderRepositoryTab { source, target } => {
+                    workspace.reorder(source, target, Instant::now());
+                }
+                AppEffect::CloseRepositoryTab(target) => {
+                    running &= workspace.close(target, Instant::now());
+                }
+                AppEffect::CloseOtherRepositoryTabs(target) => {
+                    workspace.close_others(target, Instant::now());
+                }
+                AppEffect::CloseAllRepositoryTabs => {
+                    workspace.close_all();
+                    running = false;
+                }
+                AppEffect::Quit => running = false,
             }
-            AppEffect::Copy(text) => terminal.copy_to_clipboard(&text),
-            AppEffect::SetMouseCapture(enabled) => terminal.set_mouse_capture(enabled),
-            AppEffect::Open(app::OpenTarget::Browser(url)) => drop(cli::open_url(&url)),
-            AppEffect::OpenRepository(path) => {
-                running &= bind_repository(worker, watcher, app, terminal, &path);
-            }
-            AppEffect::Quit => running = false,
         }
     }
     running
-}
-
-fn bind_repository(
-    worker: &mut GitWorker,
-    watcher: &mut Option<RepoWatcher>,
-    app: &mut App,
-    terminal: &mut TerminalGuard,
-    path: &std::path::Path,
-) -> bool {
-    let repository = match Repository::discover(path) {
-        Ok(repository) => repository,
-        Err(error) => {
-            app.show_toast(error.to_string(), ToastLevel::Error, Instant::now());
-            return true;
-        }
-    };
-    if repository.root() == app.repository_root {
-        return true;
-    }
-    state::record_recent_project(repository.root());
-    let theme_name = app.theme_name;
-    let appearance_choice = app.appearance_choice;
-    let mouse = app.mouse_capture_preference;
-    let webhooks_listening = app.webhooks_listening;
-    let common_dir = repository.git_common_dir().ok();
-    *worker = GitWorker::start(repository.clone());
-    *watcher = RepoWatcher::with_extra(repository.root(), common_dir.as_deref()).ok();
-    *app = App::new(repository.root(), repository.name());
-    app.set_theme_selection(theme_name, appearance_choice);
-    app.configure_mouse_capture(mouse);
-    app.webhooks_listening = webhooks_listening;
-    let effects = app.initial_effects();
-    dispatch_effects(worker, watcher, app, terminal, effects)
 }
 
 struct TerminalGuard {
