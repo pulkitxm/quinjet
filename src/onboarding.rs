@@ -199,11 +199,12 @@ impl Onboarding {
             frame.area(),
         );
         match self.panel {
-            OnboardingPanel::Projects => crate::ui::draw_project_picker(
+            OnboardingPanel::Projects => crate::ui::pickers::draw_projects(
                 frame,
                 &self.groups,
                 self.selected,
                 &self.query,
+                false,
                 ProjectOpenMode::Initial,
                 theme,
             ),

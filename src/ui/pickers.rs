@@ -9,7 +9,7 @@ use super::*;
     clippy::too_many_arguments,
     reason = "the picker receives one value for each modal field plus its palette"
 )]
-pub(super) fn draw_projects(
+pub(crate) fn draw_projects(
     frame: &mut Frame<'_>,
     groups: &[ProjectGroup],
     selected: usize,

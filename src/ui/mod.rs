@@ -420,7 +420,7 @@ mod help;
 mod layout;
 mod modal_branches;
 mod modals;
-mod pickers;
+pub(crate) mod pickers;
 mod prose;
 mod pull_request_checks;
 mod pull_request_conversation;
@@ -481,17 +481,6 @@ use sidebar_pull_requests::*;
 use style::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use unified_diff::*;
-
-pub(crate) fn draw_project_picker(
-    frame: &mut Frame<'_>,
-    groups: &[ProjectGroup],
-    selected: usize,
-    query: &crate::app::TextBuffer,
-    mode: ProjectOpenMode,
-    theme: &Theme,
-) {
-    draw_projects(frame, groups, selected, query, false, mode, theme);
-}
 
 #[cfg(test)]
 #[expect(
