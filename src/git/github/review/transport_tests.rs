@@ -168,7 +168,7 @@ fn every_review_operation_uses_the_graphql_transport() {
                 .unwrap(),
             expected
         );
-        assert!(!operation.label().is_empty());
+        assert_ne!(operation.label(), "");
     }
     let snapshot = repository.pull_request_review(&request).unwrap();
     assert_eq!(snapshot.unresolved_count(), 1);
