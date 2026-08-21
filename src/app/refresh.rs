@@ -158,6 +158,8 @@ impl App {
         {
             return;
         }
+        let preserve_document = same_changes_preview(self.local_diff_request.as_ref(), &request)
+            && self.document.file_count() > 0;
         let title = match &request {
             LocalDiffRequest::Changes { changes, .. } => changes
                 .first()
@@ -177,11 +179,13 @@ impl App {
         self.reset_local_diff_runtime();
         self.local_diff_request = Some(request.clone());
         self.document_loading = true;
-        self.selected_preview_file = None;
-        self.preview_file_cursor = 0;
-        self.collapsed_preview_files.clear();
-        self.expanded_preview_files.clear();
-        self.set_document(DiffDocument::empty(title, "Indexing changed files…"));
+        if !preserve_document {
+            self.selected_preview_file = None;
+            self.preview_file_cursor = 0;
+            self.collapsed_preview_files.clear();
+            self.expanded_preview_files.clear();
+            self.set_document(DiffDocument::empty(title, "Indexing changed files…"));
+        }
         effects.push(AppEffect::Git(Box::new(WorkerCommand::PrepareLocalDiff {
             generation,
             request: Box::new(request),
@@ -356,4 +360,22 @@ impl App {
         }
         self.change_cursor = self.change_cursor.min(visible.len().saturating_sub(1));
     }
+}
+
+fn same_changes_preview(current: Option<&LocalDiffRequest>, next: &LocalDiffRequest) -> bool {
+    matches!(
+        (current, next),
+        (
+            Some(LocalDiffRequest::Changes {
+                changes: current_changes,
+                expanded: current_expanded,
+                ..
+            }),
+            LocalDiffRequest::Changes {
+                changes: next_changes,
+                expanded: next_expanded,
+                ..
+            }
+        ) if current_changes == next_changes && current_expanded == next_expanded
+    )
 }

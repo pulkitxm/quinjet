@@ -1,6 +1,108 @@
 use super::*;
 
 #[test]
+fn refreshing_changes_keeps_the_loaded_diff_until_its_replacement_arrives() {
+    let mut app = app_with_changes();
+    let path = PathBuf::from("src/main.rs");
+    let index = DiffIndex {
+        title: "Current diff".to_owned(),
+        files: vec![crate::git::diff::DiffFileIndexEntry {
+            path: path.clone(),
+            old_path: None,
+            status: "modified".to_owned(),
+            counts: None,
+        }],
+        truncated: false,
+        commit_details: None,
+    };
+    let loaded = crate::git::diff::parse_diff(
+        b"diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1 @@\n-old\n+current\n",
+        "Current diff",
+        Some(&path),
+        false,
+    );
+    app.document = loaded.clone();
+    app.changes_diff_version = 3;
+    app.diff_generation = 5;
+    app.local_diff_request = Some(LocalDiffRequest::Changes {
+        changes: vec![app.status.changes[0].clone()],
+        version: 3,
+        expanded: false,
+    });
+    app.local_diff_workspace_generation = Some(5);
+    app.local_diff_index = Some(index.clone());
+    app.local_diff_single_loaded = true;
+    app.selected_preview_file = Some(path.clone());
+    let now = Instant::now();
+
+    let effects = app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE), now);
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        AppEffect::Git(command) if matches!(command.as_ref(), WorkerCommand::Refresh { .. })
+    )));
+    assert_eq!(app.document, loaded);
+
+    let effects = app.handle_worker_event(
+        WorkerEvent::Status {
+            generation: app.status_generation,
+            result: Ok(app.status.clone()),
+        },
+        now,
+    );
+    let generation = app.diff_generation;
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        AppEffect::Git(command)
+            if matches!(command.as_ref(), WorkerCommand::PrepareLocalDiff {
+                generation: command_generation,
+                ..
+            } if *command_generation == generation)
+    )));
+    assert_eq!(app.document, loaded);
+    assert!(app.document_loading);
+
+    let effects = app.handle_worker_event(
+        WorkerEvent::LocalDiffIndex {
+            generation,
+            result: Ok(index),
+        },
+        now,
+    );
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        AppEffect::Git(command)
+            if matches!(command.as_ref(), WorkerCommand::LoadLocalDiffFile {
+                generation: command_generation,
+                workspace_generation,
+                path: command_path,
+            } if *command_generation == generation
+                && *workspace_generation == generation
+                && command_path == &path)
+    )));
+    assert_eq!(app.document, loaded);
+    assert!(app.document_loading);
+
+    let replacement = crate::git::diff::parse_diff(
+        b"diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1 @@\n-old\n+replacement\n",
+        "Replacement diff",
+        Some(&path),
+        false,
+    );
+    drop(app.handle_worker_event(
+        WorkerEvent::LocalDiffFile {
+            generation,
+            workspace_generation: generation,
+            path,
+            result: Ok(replacement.clone()),
+        },
+        now,
+    ));
+
+    assert_eq!(app.document, replacement);
+    assert!(!app.document_loading);
+}
+
+#[test]
 fn scheduling_a_new_selection_immediately_invalidates_an_in_flight_preview() {
     let mut app = App::new("/tmp/repo", "repo");
     app.diff_generation = 7;

@@ -60,7 +60,10 @@ impl App {
                 if generation != self.diff_generation {
                     return effects;
                 }
-                self.document_loading = false;
+                let preserve_document = self.document_loading && self.document.file_count() > 0;
+                if !preserve_document {
+                    self.document_loading = false;
+                }
                 self.local_diff_loading_path = None;
                 match result {
                     Ok(index) => {
@@ -74,7 +77,9 @@ impl App {
                             .collect::<Vec<_>>();
                         self.local_diff_workspace_generation = Some(generation);
                         self.local_diff_documents.clear();
-                        self.reset_preview_file_folds(&paths);
+                        if !preserve_document {
+                            self.reset_preview_file_folds(&paths);
+                        }
                         self.selected_preview_file = selected_path
                             .or_else(|| index.files.first().map(|file| file.path.clone()));
                         self.preview_file_cursor = self
@@ -86,9 +91,11 @@ impl App {
                             .unwrap_or_default();
                         let first_path = self.selected_preview_file.clone();
                         self.local_diff_index = Some(index);
-                        self.rebuild_local_diff_document();
-                        self.content_scroll = 0;
-                        self.horizontal_scroll = 0;
+                        if !preserve_document {
+                            self.rebuild_local_diff_document();
+                            self.content_scroll = 0;
+                            self.horizontal_scroll = 0;
+                        }
                         let mut paths = self
                             .local_diff_index
                             .as_ref()
@@ -113,6 +120,7 @@ impl App {
                         }
                     }
                     Err(error) => {
+                        self.document_loading = false;
                         self.reset_local_diff_runtime();
                         self.set_document(DiffDocument::empty("Preview Error", error.clone()));
                         self.show_toast(error, ToastLevel::Error, now);

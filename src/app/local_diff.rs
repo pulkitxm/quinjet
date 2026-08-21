@@ -60,9 +60,12 @@ impl App {
         {
             self.set_document(document);
             self.local_diff_single_loaded = true;
+            self.document_loading = false;
         } else {
             drop(self.local_diff_documents.insert(path, document));
-            self.rebuild_local_diff_document();
+            if !self.document_loading {
+                self.rebuild_local_diff_document();
+            }
         }
     }
 
@@ -101,6 +104,10 @@ impl App {
                 self.request_local_diff_file(path, effects);
                 return;
             }
+        }
+        if self.document_loading && self.local_diff_index.is_some() {
+            self.document_loading = false;
+            self.rebuild_local_diff_document();
         }
     }
 }
