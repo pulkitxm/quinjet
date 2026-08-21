@@ -9,6 +9,8 @@ on:
       - 'packaging/apt/**'
       - 'scripts/build_apt_repository.sh'
       - '.github/workflows/pages.yml'
+  repository_dispatch:
+    types: [apt-release]
   workflow_dispatch:
 
 permissions:

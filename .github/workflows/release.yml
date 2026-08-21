@@ -225,7 +225,6 @@ jobs:
     runs-on: ubuntu-latest
     environment: crates-io
     permissions:
-      actions: write
       contents: write # push the version bump, tag and release assets
       id-token: write # authenticate through OIDC
       attestations: write # record the build provenance
@@ -326,4 +325,4 @@ jobs:
       - name: Deploy package repositories
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run pages.yml --ref main
+        run: gh api --method POST "repos/${GITHUB_REPOSITORY}/dispatches" -f event_type=apt-release
