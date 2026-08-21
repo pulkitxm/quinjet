@@ -29,7 +29,12 @@ impl App {
             PaletteCommand::StashIncludeUntracked => self.prompt_stash(true, false),
             PaletteCommand::StashPop => self.queue_operation(GitOperation::StashPop(None), effects),
             PaletteCommand::ManageStashes => self.open_stashes(effects),
-            PaletteCommand::OpenProject => self.open_projects(effects),
+            PaletteCommand::OpenProject => {
+                self.open_projects(ProjectOpenMode::CurrentTab, effects);
+            }
+            PaletteCommand::OpenProjectNewTab => {
+                self.open_projects(ProjectOpenMode::NewTab, effects);
+            }
             PaletteCommand::Branches => self.open_branches(effects),
             PaletteCommand::CompareBranch => self.open_compare_branches(effects),
             PaletteCommand::RenameCurrentBranch => {
@@ -156,31 +161,35 @@ impl App {
     }
 
     pub(super) fn switch_view(&mut self, view: View, effects: &mut Vec<AppEffect>) {
-        self.pull_request_lookup_active = false;
         if self.view == view {
             if view == View::PullRequests && self.pull_request.is_none() {
                 self.pull_request_lookup_active = self.recent_pull_requests.is_empty();
             }
             return;
         }
+        let leaving = self.view;
+        if leaving == View::PullRequests && self.document_loading {
+            self.pull_request_loading_path = None;
+        }
+        self.store_active_view();
+        self.invalidate_preview();
         self.view = view;
-        self.auxiliary_preview = None;
         self.scm_menu_open = false;
         self.pr_menu_open = false;
-        self.reset_local_diff_runtime();
-        self.selected_preview_file = None;
-        self.collapsed_preview_files.clear();
-        self.expanded_preview_files.clear();
-        self.set_focus(Focus::Sidebar, effects);
-        self.reset_sidebar_scroll();
-        self.content_scroll = 0;
-        self.horizontal_scroll = 0;
-        self.invalidate_preview();
-        self.set_document(self.loading_document_for_view(view));
+        self.text_selection = None;
+        self.resize_target = None;
+        let resume_preview = self.restore_view(view);
+        if view == View::PullRequests {
+            self.decorate_pull_request_review();
+        }
+        self.set_focus(self.focus, effects);
         self.schedule_pull_request_poll(Instant::now());
         if view == View::PullRequests && self.pull_request.is_none() {
             self.pull_request_lookup_active = self.recent_pull_requests.is_empty();
         } else {
+            if resume_preview && self.local_diff_index.is_some() {
+                self.request_next_local_diff_file(effects);
+            }
             self.preview_due = Some(Instant::now() + PREVIEW_DEBOUNCE);
         }
     }

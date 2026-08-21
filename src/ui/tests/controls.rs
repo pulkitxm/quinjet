@@ -158,6 +158,7 @@ fn help_catalog_covers_sections_and_previously_missing_bindings() {
         "gg / Home",
         "Ctrl+N",
         "Alt+A",
+        "Option/Alt+1..9",
         "Ctrl+Delete",
     ] {
         assert!(

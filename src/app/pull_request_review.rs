@@ -13,6 +13,9 @@ impl App {
     }
 
     pub(super) fn decorate_pull_request_review(&mut self) {
+        if !self.review_document_active() {
+            return;
+        }
         let Some(path) = self.pull_request_single_file.as_ref() else {
             return;
         };
@@ -102,10 +105,13 @@ impl App {
     }
 
     pub(crate) fn review_surface_active(&self) -> bool {
+        self.review_document_active() && self.focus == Focus::Content
+    }
+
+    fn review_document_active(&self) -> bool {
         self.view == View::PullRequests
             && self.pull_request_section == PullRequestSection::Files
             && self.pull_request_file_view == PullRequestFileView::SingleFile
-            && self.focus == Focus::Content
             && self.pull_request_single_file.is_some()
     }
 

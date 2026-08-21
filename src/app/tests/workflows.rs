@@ -183,6 +183,26 @@ fn command_palette_navigation_wraps() {
 }
 
 #[test]
+fn command_palette_exposes_new_project_tabs() {
+    let mut app = App::new("/tmp/repo", "repo");
+    let commands = app.palette_commands("new tab");
+
+    assert_eq!(commands, vec![PaletteCommand::OpenProjectNewTab]);
+    app.execute_palette(
+        PaletteCommand::OpenProjectNewTab,
+        &mut Vec::new(),
+        Instant::now(),
+    );
+    assert!(matches!(
+        app.modal,
+        Some(Modal::Projects {
+            mode: ProjectOpenMode::NewTab,
+            ..
+        })
+    ));
+}
+
+#[test]
 fn list_navigation_wraps_and_handles_empty_lists() {
     assert_eq!(previous_list_index(0, 3), 2);
     assert_eq!(next_list_index(2, 3), 0);

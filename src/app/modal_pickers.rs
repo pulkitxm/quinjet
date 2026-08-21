@@ -19,6 +19,7 @@ impl App {
                 selected,
                 query,
                 loading,
+                mode,
             } => {
                 if key.code == KeyCode::Esc {
                     return effects;
@@ -44,7 +45,12 @@ impl App {
                     }
                     KeyCode::Enter if !*loading => {
                         if let Some(tree) = selected_tree.filter(|tree| !tree.current) {
-                            effects.push(AppEffect::OpenRepository(tree.path));
+                            effects.push(match mode {
+                                ProjectOpenMode::Initial | ProjectOpenMode::CurrentTab => {
+                                    AppEffect::SwitchRepository(tree.path)
+                                }
+                                ProjectOpenMode::NewTab => AppEffect::OpenRepositoryTab(tree.path),
+                            });
                         }
                         return effects;
                     }

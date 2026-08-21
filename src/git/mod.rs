@@ -261,4 +261,4 @@ use support::*;
     unused_results,
     reason = "test helpers return values the assertions do not use"
 )]
-mod tests;
+pub(crate) mod tests;

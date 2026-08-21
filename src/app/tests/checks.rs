@@ -260,6 +260,44 @@ fn a_running_log_follows_its_own_tail_unless_the_reader_scrolled_up() {
 }
 
 #[test]
+fn a_background_check_refresh_does_not_reset_another_views_scroll() {
+    let mut app = App::new("/tmp/repo", "repo");
+    let now = Instant::now();
+    app.view = View::PullRequests;
+    let mut first = check("first", PullRequestCheckStatus::Passed);
+    first.link = "https://github.com/acme/widget/actions/runs/1/job/1".to_owned();
+    let mut selected = check("selected", PullRequestCheckStatus::Passed);
+    selected.link = "https://github.com/acme/widget/actions/runs/1/job/2".to_owned();
+    app.pull_request_checks = vec![first, selected.clone()];
+    app.pull_request_check_cursor = Some(1);
+    app.pull_request_checks_generation = 3;
+    app.content_scroll = 18;
+    app.horizontal_scroll = 4;
+    app.switch_view(View::History, &mut Vec::new());
+    app.content_scroll = 51;
+    app.horizontal_scroll = 9;
+
+    app.handle_worker_event(
+        WorkerEvent::PullRequestChecks {
+            generation: 3,
+            result: Ok(crate::git::github::PullRequestChecks {
+                checks: vec![selected],
+                from_cache: false,
+            }),
+        },
+        now,
+    );
+
+    assert_eq!(app.pull_request_check_cursor, Some(0));
+    assert_eq!(app.content_scroll, 51);
+    assert_eq!(app.horizontal_scroll, 9);
+
+    app.switch_view(View::PullRequests, &mut Vec::new());
+    assert_eq!(app.content_scroll, 0);
+    assert_eq!(app.horizontal_scroll, 0);
+}
+
+#[test]
 fn a_settled_pull_request_polls_less_often_than_a_running_one() {
     let mut app = App::new("/tmp/repo", "repo");
     app.view = View::PullRequests;

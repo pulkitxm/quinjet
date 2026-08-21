@@ -95,6 +95,53 @@ pub(crate) struct ScmActionHit {
     pub action: ScmAction,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepositoryTabAction {
+    OpenProject,
+    Close,
+    CloseOthers,
+    CloseAll,
+}
+
+impl RepositoryTabAction {
+    pub(crate) const ALL: [Self; 4] = [
+        Self::OpenProject,
+        Self::Close,
+        Self::CloseOthers,
+        Self::CloseAll,
+    ];
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::OpenProject => "Open Project...",
+            Self::Close => "Close",
+            Self::CloseOthers => "Close Others",
+            Self::CloseAll => "Close All",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RepositoryTabHit {
+    pub area: Rect,
+    pub close: Rect,
+    pub id: TabId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RepositoryTabDrag {
+    pub id: TabId,
+    pub target: Option<TabId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RepositoryTabMenu {
+    pub id: TabId,
+    pub column: u16,
+    pub row: u16,
+    pub selected: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AuxiliaryPreview {
     Branch(HistoryBranch),
@@ -113,6 +160,11 @@ pub(crate) enum ChangeTarget {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct UiGeometry {
+    pub repository_tab_hits: Vec<RepositoryTabHit>,
+    pub repository_tab_open: Rect,
+    pub repository_tab_previous: Rect,
+    pub repository_tab_next: Rect,
+    pub repository_tab_menu_hits: Vec<(Rect, RepositoryTabAction)>,
     pub changes_tab: Rect,
     pub history_tab: Rect,
     pub pull_requests_tab: Rect,
