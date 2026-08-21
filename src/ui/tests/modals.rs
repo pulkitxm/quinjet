@@ -1,7 +1,7 @@
-use super::*;
-
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+
+use super::*;
 
 #[test]
 fn repository_pick_lists_render_loaded_rows() {
