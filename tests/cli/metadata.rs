@@ -21,6 +21,7 @@ fn help_lists_every_group_verb() -> Result<()> {
         "stage",
         "unstage",
         "discard",
+        "remove",
         "commit",
         "fetch",
         "pull",
@@ -30,6 +31,7 @@ fn help_lists_every_group_verb() -> Result<()> {
         "show",
         "branch",
         "stash",
+        "worktree",
         "cherry-pick",
         "revert",
         "resolve",
@@ -41,6 +43,17 @@ fn help_lists_every_group_verb() -> Result<()> {
         "update",
     ] {
         ensure!(run.stdout.contains(verb), "--help does not mention {verb}");
+    }
+    Ok(())
+}
+
+#[test]
+fn visible_aliases_have_the_canonical_help_contract() -> Result<()> {
+    for (canonical, alias) in [("remove", "rm"), ("completions", "completion")] {
+        let canonical = run_in(None, &[canonical, "--help"])?.success()?;
+        let alias = run_in(None, &[alias, "--help"])?.success()?;
+        ensure!(alias.stdout == canonical.stdout);
+        ensure!(alias.stderr == canonical.stderr);
     }
     Ok(())
 }
@@ -63,6 +76,7 @@ fn tui_help_lists_every_theme_and_appearance() -> Result<()> {
         "tokyo-night",
         "ayu",
         "monokai",
+        "github",
     ] {
         ensure!(run.stdout.contains(theme), "tui help omitted {theme}");
     }
@@ -138,18 +152,61 @@ fn unknown_verbs_and_implicit_paths_are_usage_errors() -> Result<()> {
 }
 
 #[test]
-fn clap_rejects_incomplete_and_inert_arguments() -> Result<()> {
+fn clap_rejects_invalid_metadata_arguments_with_usage() -> Result<()> {
     for args in [
         &["stage"][..],
         &["unstage"][..],
         &["discard"][..],
+        &["remove"][..],
+        &["stage", "README.md", "--all"][..],
+        &["diff", "--staged", "--unstaged"][..],
         &["resolve", "README.md"][..],
+        &["resolve", "README.md", "--ours", "--theirs"][..],
+        &["stash", "push", "--staged", "--include-untracked"][..],
+        &["status", "--interval", "2"][..],
         &["status", "--interval", "0"][..],
+        &["pr", "view", "1", "--watch", "--interval", "1"][..],
+        &["pr", "conversation", "1", "--interval", "2"][..],
+        &["pr", "checks", "1", "--watch", "--interval", "1"][..],
         &["pr", "checks", "1", "--watch", "--exit-code"][..],
+        &["pr", "logs", "1", "lint", "--watch", "--interval", "2"][..],
+        &["pr", "merge", "1", "--merge", "--squash"][..],
+        &["pr", "review", "1"][..],
+        &["pr", "review", "1", "--approve", "--comment"][..],
+        &[
+            "pr", "reviews", "comment", "1", "file", "--line", "1", "-b", "note",
+        ][..],
+        &[
+            "pr", "reviews", "comment", "1", "file", "--file", "--line", "1", "--side", "right",
+            "-b", "note",
+        ][..],
+        &[
+            "pr",
+            "reviews",
+            "reply",
+            "1",
+            "thread",
+            "-b",
+            "note",
+            "--body-file",
+            "note.txt",
+        ][..],
+        &["pr", "reviews", "submit", "1", "-b", "note"][..],
+        &["pr", "reviews", "submit", "1", "--approve"][..],
+        &["completions"][..],
+        &["completions", "bash", "--automatic"][..],
+        &["tui", "--theme", "invalid"][..],
+        &["tui", "--appearance", "invalid"][..],
     ] {
         let run = run_in(None, args)?;
         ensure!(run.code == 2, "{args:?} exited {}", run.code);
-        ensure!(!run.stderr.is_empty(), "{args:?} produced no usage error");
+        ensure!(run.stdout.is_empty(), "{args:?} wrote to stdout");
+        ensure!(run.stderr.contains("error:"), "{args:?}: {}", run.stderr);
+        ensure!(
+            run.stderr.contains("Usage:") || run.stderr.contains("For more information"),
+            "{args:?}: {}",
+            run.stderr
+        );
     }
     Ok(())
 }
