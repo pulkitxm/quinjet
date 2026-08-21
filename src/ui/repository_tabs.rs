@@ -5,6 +5,10 @@ use super::*;
     clippy::integer_division,
     reason = "tab widths use whole terminal cells"
 )]
+#[expect(
+    clippy::too_many_lines,
+    reason = "tab layout and hit targets share one coordinate pass"
+)]
 pub(super) fn draw_repository_tabs(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -35,7 +39,7 @@ pub(super) fn draw_repository_tabs(
     if app.repository_tabs.is_empty() || tab_region_width == 0 {
         return (Vec::new(), open, Rect::default(), Rect::default());
     }
-    let minimum_width = 10_u16.min(tab_region_width.max(1));
+    let minimum_width = 12_u16.min(tab_region_width.max(1));
     let base_capacity = usize::from((tab_region_width / minimum_width).max(1));
     let overflow = app.repository_tabs.len() > base_capacity;
     let control_width = if overflow { 3 } else { 0 };
@@ -102,9 +106,10 @@ pub(super) fn draw_repository_tabs(
         } else {
             tab.title.clone()
         };
+        let label_width = tab_width.saturating_sub(4);
         let label = format!(
-            " {} ",
-            truncate_end(&value, usize::from(tab_width.saturating_sub(2)))
+            " {}",
+            truncate_end(&value, usize::from(label_width.saturating_sub(1)))
         );
         let style = if tab.active {
             Style::default()
@@ -112,20 +117,81 @@ pub(super) fn draw_repository_tabs(
                 .bg(theme.accent_soft)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(theme.muted).bg(theme.panel)
+            Style::default().fg(theme.muted).bg(theme.panel_alt)
         };
+        let label_area = Rect::new(tab_area.x, tab_area.y, label_width, tab_area.height);
+        let close = Rect::new(
+            tab_area.right().saturating_sub(4),
+            tab_area.y,
+            3_u16.min(tab_area.width),
+            tab_area.height,
+        );
         frame.render_widget(
             Paragraph::new(label)
+                .alignment(Alignment::Left)
+                .style(style),
+            label_area,
+        );
+        frame.render_widget(
+            Paragraph::new("×")
                 .alignment(Alignment::Center)
                 .style(style),
-            tab_area,
+            close,
+        );
+        frame.render_widget(
+            Paragraph::new("│").style(Style::default().fg(theme.border).bg(if tab.active {
+                theme.accent_soft
+            } else {
+                theme.panel_alt
+            })),
+            Rect::new(
+                tab_area.right().saturating_sub(1),
+                tab_area.y,
+                1,
+                tab_area.height,
+            ),
         );
         hits.push(RepositoryTabHit {
             area: tab_area,
+            close,
             id: tab.id,
         });
     }
+    draw_repository_tab_drop_marker(frame, area, app, &hits, theme);
     (hits, open, previous, next)
+}
+
+fn draw_repository_tab_drop_marker(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &App,
+    hits: &[RepositoryTabHit],
+    theme: &Theme,
+) {
+    let Some(drag) = app.repository_tab_drag else {
+        return;
+    };
+    let Some(target) = drag.target else {
+        return;
+    };
+    let Some(source_index) = app.repository_tabs.iter().position(|tab| tab.id == drag.id) else {
+        return;
+    };
+    let Some(target_index) = app.repository_tabs.iter().position(|tab| tab.id == target) else {
+        return;
+    };
+    let Some(target_hit) = hits.iter().find(|hit| hit.id == target) else {
+        return;
+    };
+    let column = if source_index < target_index {
+        target_hit.area.right().min(area.right().saturating_sub(1))
+    } else {
+        target_hit.area.x
+    };
+    frame.render_widget(
+        Paragraph::new("▏").style(Style::default().fg(Color::White).bg(theme.panel_alt)),
+        Rect::new(column, area.y, 1, area.height),
+    );
 }
 
 pub(super) fn draw_repository_tab_menu(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {

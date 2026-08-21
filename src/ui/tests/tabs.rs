@@ -5,7 +5,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
 use super::*;
-use crate::app::RepositoryTabMenu;
+use crate::app::{RepositoryTabDrag, RepositoryTabMenu};
 use crate::tabs::{RepositoryTabs, TabId};
 
 fn app_with_tabs(count: usize, active: usize) -> (App, Vec<TabId>) {
@@ -35,6 +35,11 @@ fn repository_tab_hits_follow_repository_order() {
         hits.iter()
             .all(|hit| hit.area.y == 0 && hit.area.height == 1)
     );
+    assert!(hits.iter().all(|hit| {
+        hit.close.width == 3
+            && hit.close.right() == hit.area.right().saturating_sub(1)
+            && hit.area.contains((hit.close.x, hit.close.y).into())
+    }));
     assert!(hits.windows(2).all(|pair| {
         let [left, right] = pair else {
             return false;
@@ -46,6 +51,27 @@ fn repository_tab_hits_follow_repository_order() {
         hits.last()
             .is_some_and(|hit| hit.area.right() <= app.geometry.repository_tab_open.x)
     );
+}
+
+#[test]
+fn repository_tabs_render_close_icons_and_a_drag_destination() {
+    let (mut app, ids) = app_with_tabs(3, 0);
+    app.repository_tab_drag = Some(RepositoryTabDrag {
+        id: ids[0],
+        target: Some(ids[2]),
+    });
+    let mut terminal = Terminal::new(TestBackend::new(120, 24)).unwrap();
+
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+
+    let row = terminal.backend().buffer().content()[..120]
+        .iter()
+        .map(ratatui::buffer::Cell::symbol)
+        .collect::<String>();
+    assert_eq!(row.matches('×').count(), 3);
+    assert!(row.contains('▏'));
 }
 
 #[test]
@@ -103,7 +129,7 @@ fn overflowing_repository_tabs_keep_the_active_tab_visible() {
         .iter()
         .map(|hit| hit.id)
         .collect::<Vec<_>>();
-    assert_eq!(visible, ids[3..9]);
+    assert_eq!(visible, ids[4..9]);
     assert!(visible.contains(&ids[8]));
     assert!(!visible.contains(&ids[9]));
     assert_eq!(app.geometry.repository_tab_previous, Rect::new(0, 0, 3, 1));

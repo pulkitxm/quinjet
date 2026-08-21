@@ -20,6 +20,7 @@ fn app_with_repository_tabs(tabs: &RepositoryTabs<()>) -> App {
         .enumerate()
         .map(|(index, tab)| RepositoryTabHit {
             area: Rect::new(cells(index.saturating_mul(12)), 0, 12, 1),
+            close: Rect::new(cells(index.saturating_mul(12).saturating_add(8)), 0, 3, 1),
             id: tab.id,
         })
         .collect();
@@ -179,7 +180,7 @@ fn clicking_a_repository_tab_activates_it_on_release() {
         app.repository_tab_drag,
         Some(RepositoryTabDrag {
             id: second,
-            moved: false,
+            target: None,
         })
     );
 
@@ -223,21 +224,38 @@ fn dragging_a_repository_tab_reorders_without_activating_on_release() {
             .is_empty()
     );
     let effects = app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), 26, 0), now);
+    assert!(effects.is_empty());
+    assert_eq!(
+        app.repository_tab_drag,
+        Some(RepositoryTabDrag {
+            id: first,
+            target: Some(third),
+        })
+    );
+
+    let effects = app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), 26, 0), now);
     assert!(matches!(
         effects.as_slice(),
         [AppEffect::ReorderRepositoryTab { source, target }]
             if *source == first && *target == third
     ));
-    assert_eq!(
-        app.repository_tab_drag,
-        Some(RepositoryTabDrag {
-            id: first,
-            moved: true,
-        })
+    assert_eq!(app.repository_tab_drag, None);
+}
+
+#[test]
+fn clicking_a_repository_tab_close_icon_closes_that_tab() {
+    let (tabs, _, second, _) = repository_tabs();
+    let mut app = app_with_repository_tabs(&tabs);
+
+    let effects = app.handle_mouse(
+        mouse(MouseEventKind::Down(MouseButton::Left), 21, 0),
+        Instant::now(),
     );
 
-    let effects = app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), 26, 0), now);
-    assert!(effects.is_empty());
+    assert!(matches!(
+        effects.as_slice(),
+        [AppEffect::CloseRepositoryTab(id)] if *id == second
+    ));
     assert_eq!(app.repository_tab_drag, None);
 }
 

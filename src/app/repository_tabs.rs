@@ -67,6 +67,10 @@ impl App {
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "tab pointer handling shares drag, close, overflow, and menu state"
+    )]
     pub(super) fn handle_repository_tab_mouse(
         &mut self,
         event: MouseEvent,
@@ -147,13 +151,22 @@ impl App {
                 Some(effects)
             }
             MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(id) = self
+                    .geometry
+                    .repository_tab_hits
+                    .iter()
+                    .find(|hit| hit.close.contains(point))
+                    .map(|hit| hit.id)
+                {
+                    return Some(vec![AppEffect::CloseRepositoryTab(id)]);
+                }
                 let id = self
                     .geometry
                     .repository_tab_hits
                     .iter()
                     .find(|hit| hit.area.contains(point))
                     .map(|hit| hit.id)?;
-                self.repository_tab_drag = Some(RepositoryTabDrag { id, moved: false });
+                self.repository_tab_drag = Some(RepositoryTabDrag { id, target: None });
                 Some(Vec::new())
             }
             MouseEventKind::Drag(MouseButton::Left) => {
@@ -163,25 +176,23 @@ impl App {
                     .repository_tab_hits
                     .iter()
                     .find(|hit| hit.area.contains(point))
-                    .map(|hit| hit.id)?;
-                if target == dragged {
-                    return Some(Vec::new());
-                }
+                    .map(|hit| hit.id);
                 if let Some(drag) = self.repository_tab_drag.as_mut() {
-                    drag.moved = true;
+                    drag.target = target.filter(|target| *target != dragged);
                 }
-                Some(vec![AppEffect::ReorderRepositoryTab {
-                    source: dragged,
-                    target,
-                }])
+                Some(Vec::new())
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 let drag = self.repository_tab_drag.take()?;
-                Some(if drag.moved {
-                    Vec::new()
-                } else {
-                    vec![AppEffect::ActivateRepositoryTab(drag.id)]
-                })
+                Some(drag.target.map_or_else(
+                    || vec![AppEffect::ActivateRepositoryTab(drag.id)],
+                    |target| {
+                        vec![AppEffect::ReorderRepositoryTab {
+                            source: drag.id,
+                            target,
+                        }]
+                    },
+                ))
             }
             _ => None,
         }

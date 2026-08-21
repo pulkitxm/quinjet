@@ -124,13 +124,14 @@ impl RepositoryTabAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RepositoryTabHit {
     pub area: Rect,
+    pub close: Rect,
     pub id: TabId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RepositoryTabDrag {
     pub id: TabId,
-    pub moved: bool,
+    pub target: Option<TabId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
