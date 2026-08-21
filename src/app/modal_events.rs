@@ -15,6 +15,7 @@ impl App {
             | Modal::Commit { .. }
             | Modal::Prompt { .. }
             | Modal::PullRequestActions { .. }
+            | Modal::PullRequestReviewThreadActions { .. }
             | Modal::Confirm { .. }
             | Modal::Conflict { .. }
             | Modal::Branches { .. }

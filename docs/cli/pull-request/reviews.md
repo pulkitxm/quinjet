@@ -73,6 +73,7 @@ highlighted and existing threads render immediately below their anchors.
 | `C` | Add a file-level comment. |
 | `a` | Reply to the thread on the selected line. |
 | `x` | Resolve or reopen the thread on the selected line. |
+| Click a thread | Open its permission-aware reply, copy, browser, edit, delete, and state actions. |
 | `Shift+V` | Choose comment, approve, or request changes and submit the review. |
 | `Ctrl+Enter` | Save the current comment or submit modal. |
 

@@ -12,11 +12,11 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget, Wra
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{
-    App, ChangeRow, ChangeSection, CheckListRow, ContentFileHit, ContentStepHit, DiffLayout, Focus,
-    HelpHit, LinkHit, Modal, ModalAction, OpenTarget, PaletteCommand, PrActionItem, PrMenuItem,
-    PullRequestContentLink, PullRequestContentRow, PullRequestSection, PullRequestTreeEntry,
-    ScmAction, ScmActionHit, ScmMenuItem, SideBySideRow, SidebarHit, SidebarHitArea, ToastLevel,
-    UiGeometry, View,
+    App, ChangeRow, ChangeSection, CheckListRow, ContentFileHit, ContentReviewHit, ContentStepHit,
+    DiffLayout, Focus, HelpHit, LinkHit, Modal, ModalAction, OpenTarget, PaletteCommand,
+    PrActionItem, PrMenuItem, PullRequestContentLink, PullRequestContentRow, PullRequestSection,
+    PullRequestTreeEntry, ScmAction, ScmActionHit, ScmMenuItem, SideBySideRow, SidebarHit,
+    SidebarHitArea, ToastLevel, UiGeometry, View,
 };
 use crate::convert::cells;
 use crate::date_time::format_local_timestamp;
@@ -243,6 +243,10 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
     HelpRow::Shortcut {
         keys: "a / x",
         description: "Reply to / resolve the selected review thread",
+    },
+    HelpRow::Shortcut {
+        keys: "Click review thread",
+        description: "Reply, copy, open, edit, delete, or change thread state",
     },
     HelpRow::Shortcut {
         keys: "Shift+V",

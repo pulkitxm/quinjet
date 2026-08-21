@@ -65,7 +65,12 @@ impl App {
         }
         if matches!(
             self.modal,
-            Some(Modal::Commit { .. } | Modal::Confirm { .. } | Modal::PullRequestActions { .. })
+            Some(
+                Modal::Commit { .. }
+                    | Modal::Confirm { .. }
+                    | Modal::PullRequestActions { .. }
+                    | Modal::PullRequestReviewThreadActions { .. }
+            )
         ) && event.kind == MouseEventKind::Down(MouseButton::Left)
         {
             if let Some(action) = self
@@ -263,6 +268,15 @@ impl App {
                         {
                             self.focus = Focus::Content;
                             self.toggle_check_step(step);
+                        } else if let Some(thread_id) = self
+                            .geometry
+                            .content_review_hits
+                            .iter()
+                            .find(|hit| hit.area.contains((event.column, event.row).into()))
+                            .map(|hit| hit.thread_id.clone())
+                        {
+                            self.focus = Focus::Content;
+                            self.open_review_thread_actions(&thread_id);
                         } else if let Some(path) = self
                             .geometry
                             .content_file_hits

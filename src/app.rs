@@ -235,6 +235,7 @@ pub(crate) struct App {
     pub pull_request_review_mutating: bool,
     pub pull_request_review_error: Option<String>,
     pub pull_request_review_cursor: Option<PullRequestReviewAnchor>,
+    pub pull_request_review_line_threads: HashMap<usize, String>,
     pub pull_request_check_log: Option<CheckRunLog>,
     pub pull_request_check_log_loading: bool,
     pub pull_request_check_log_error: Option<String>,

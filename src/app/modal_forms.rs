@@ -178,6 +178,23 @@ impl App {
                 }
                 _ => self.modal = Some(modal),
             },
+            Modal::PullRequestReviewThreadActions { items, selected } => match key.code {
+                KeyCode::Esc => {}
+                KeyCode::Up | KeyCode::Char('k') => {
+                    *selected = previous_list_index(*selected, items.len());
+                    self.modal = Some(modal);
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    *selected = next_list_index(*selected, items.len());
+                    self.modal = Some(modal);
+                }
+                KeyCode::Enter => {
+                    if let Some(item) = items.get(*selected).cloned() {
+                        self.handle_review_thread_action(item, &mut effects);
+                    }
+                }
+                _ => self.modal = Some(modal),
+            },
             Modal::Confirm { action, .. } => match key.code {
                 KeyCode::Enter | KeyCode::Char('y' | 'Y') => match action {
                     ConfirmAction::Operate(operation) => {
@@ -200,6 +217,9 @@ impl App {
                             operation.clone(),
                             &mut effects,
                         );
+                    }
+                    ConfirmAction::PullRequestReview(operation) => {
+                        self.queue_pull_request_review_operation(operation.clone(), &mut effects);
                     }
                 },
                 KeyCode::Esc | KeyCode::Char('n' | 'N') => {}

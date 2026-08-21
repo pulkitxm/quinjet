@@ -238,6 +238,7 @@ pub(crate) enum ConfirmAction {
         pull_request: Box<PullRequest>,
         operation: PullRequestOperation,
     },
+    PullRequestReview(PullRequestReviewOperation),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -285,6 +286,7 @@ pub(crate) enum ModalAction {
     ConfirmYes,
     ConfirmNo,
     PullRequestAction(usize),
+    PullRequestReviewThreadAction(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -301,6 +303,10 @@ pub(crate) enum Modal {
     PullRequestReviewComment {
         input: TextBuffer,
         target: PullRequestReviewTarget,
+    },
+    PullRequestReviewThreadActions {
+        items: Vec<PullRequestReviewThreadAction>,
+        selected: usize,
     },
     PullRequestReviewSubmit {
         input: TextBuffer,

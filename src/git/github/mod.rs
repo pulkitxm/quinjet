@@ -88,6 +88,8 @@ pub(crate) use operation::*;
 use parsing::*;
 pub(crate) use prepared::*;
 pub(crate) use process::{BoundedOutput, bounded_command_error, run_bounded_command};
+#[cfg(test)]
+pub(crate) use review::PullRequestReviewComment;
 pub(crate) use review::{
     PullRequestReviewDecision, PullRequestReviewOperation, PullRequestReviewSide,
     PullRequestReviewSnapshot, PullRequestReviewThread, PullRequestReviewThreadSubject,

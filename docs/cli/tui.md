@@ -173,8 +173,10 @@ existing review threads render below their anchors. `c` starts a pending line
 comment, `C` starts a file comment, `a` replies to the selected line's thread,
 and `x` resolves or reopens it. `Shift+V` opens the final review editor, where
 `Tab` chooses comment, approve, or request changes. Comment and review editors
-submit with `Ctrl+Enter`. Review traffic has its own worker lane and cannot
-block the diff or check-log workers.
+submit with `Ctrl+Enter`. Clicking an inline thread opens the actions GitHub
+permits for that thread: reply, copy or open the latest comment, edit or delete
+your latest comment, and resolve or reopen the thread. Review traffic has its
+own worker lane and cannot block the diff or check-log workers.
 
 ## `--webhook-listen`
 

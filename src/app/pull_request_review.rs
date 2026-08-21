@@ -8,6 +8,7 @@ impl App {
         self.pull_request_review_mutating = false;
         self.pull_request_review_error = None;
         self.pull_request_review_cursor = None;
+        self.pull_request_review_line_threads.clear();
         self.pull_request_review_generation = self.pull_request_review_generation.wrapping_add(1);
     }
 
@@ -18,6 +19,7 @@ impl App {
         self.document
             .lines
             .retain(|line| line.kind != DiffLineKind::Review);
+        self.pull_request_review_line_threads.clear();
         let threads = self
             .pull_request_review
             .threads
@@ -38,7 +40,14 @@ impl App {
                 .collect::<Vec<_>>();
             lines.push(line);
             for thread in anchored {
+                let start = lines.len();
                 lines.extend(review_thread_lines(thread));
+                for index in start..lines.len() {
+                    drop(
+                        self.pull_request_review_line_threads
+                            .insert(index, thread.id.clone()),
+                    );
+                }
             }
         }
         self.document.lines = lines;
@@ -206,6 +215,114 @@ impl App {
             input: TextBuffer::default(),
             target: PullRequestReviewTarget::Reply(thread_id),
         });
+    }
+
+    pub(super) fn open_review_thread_actions(&mut self, thread_id: &str) {
+        let Some(thread) = self
+            .pull_request_review
+            .threads
+            .iter()
+            .find(|thread| thread.id == thread_id)
+            .cloned()
+        else {
+            return;
+        };
+        self.pull_request_review_cursor =
+            thread
+                .line
+                .or(thread.original_line)
+                .map(|line| PullRequestReviewAnchor {
+                    path: thread.path.clone(),
+                    line,
+                    side: thread.side,
+                });
+        let mut items = Vec::new();
+        if thread.viewer_can_reply {
+            items.push(PullRequestReviewThreadAction::Reply {
+                thread_id: thread.id.clone(),
+            });
+        }
+        if let Some(comment) = thread.comments.last() {
+            items.push(PullRequestReviewThreadAction::CopyComment {
+                body: comment.body.clone(),
+            });
+            if !comment.url.is_empty() {
+                items.push(PullRequestReviewThreadAction::OpenComment {
+                    url: comment.url.clone(),
+                });
+            }
+            if comment.viewer_can_update {
+                items.push(PullRequestReviewThreadAction::EditComment {
+                    comment_id: comment.id.clone(),
+                    body: comment.body.clone(),
+                });
+            }
+            if comment.viewer_can_delete {
+                items.push(PullRequestReviewThreadAction::DeleteComment {
+                    comment_id: comment.id.clone(),
+                });
+            }
+        }
+        if thread.is_resolved && thread.viewer_can_unresolve {
+            items.push(PullRequestReviewThreadAction::Reopen {
+                thread_id: thread.id,
+            });
+        } else if !thread.is_resolved && thread.viewer_can_resolve {
+            items.push(PullRequestReviewThreadAction::Resolve {
+                thread_id: thread.id,
+            });
+        }
+        if !items.is_empty() {
+            self.modal = Some(Modal::PullRequestReviewThreadActions { items, selected: 0 });
+        }
+    }
+
+    pub(super) fn handle_review_thread_action(
+        &mut self,
+        action: PullRequestReviewThreadAction,
+        effects: &mut Vec<AppEffect>,
+    ) {
+        match action {
+            PullRequestReviewThreadAction::Reply { thread_id } => {
+                self.modal = Some(Modal::PullRequestReviewComment {
+                    input: TextBuffer::default(),
+                    target: PullRequestReviewTarget::Reply(thread_id),
+                });
+            }
+            PullRequestReviewThreadAction::CopyComment { body } => {
+                effects.push(AppEffect::Copy(body));
+            }
+            PullRequestReviewThreadAction::OpenComment { url } => {
+                effects.push(AppEffect::Open(OpenTarget::Browser(url)));
+            }
+            PullRequestReviewThreadAction::EditComment { comment_id, body } => {
+                self.modal = Some(Modal::PullRequestReviewComment {
+                    input: TextBuffer::new(body),
+                    target: PullRequestReviewTarget::Edit { comment_id },
+                });
+            }
+            PullRequestReviewThreadAction::DeleteComment { comment_id } => {
+                self.modal = Some(Modal::Confirm {
+                    title: "Delete Review Comment?".to_owned(),
+                    message: "Permanently delete this review comment?".to_owned(),
+                    action: ConfirmAction::PullRequestReview(
+                        PullRequestReviewOperation::DeleteComment { comment_id },
+                    ),
+                });
+            }
+            PullRequestReviewThreadAction::Resolve { thread_id } => {
+                self.queue_pull_request_review_operation(
+                    PullRequestReviewOperation::Resolve { thread_id },
+                    effects,
+                );
+            }
+            PullRequestReviewThreadAction::Reopen { thread_id } => {
+                self.queue_pull_request_review_operation(
+                    PullRequestReviewOperation::Unresolve { thread_id },
+                    effects,
+                );
+            }
+        }
     }
 }
 

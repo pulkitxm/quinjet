@@ -42,7 +42,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     if !app.sidebar_hidden {
         draw_main_divider(frame, sidebar_divider, app.resize_target.is_some(), theme);
     }
-    let (diff_divider, content_file_hits, content_step_hits) =
+    let (diff_divider, content_file_hits, content_step_hits, content_review_hits) =
         draw_content(frame, content_area, app, theme, &mut link_hits);
     if let Some(hit) = draw_jump_to_bottom(frame, content_area, app, theme) {
         scm_action_hits.push(hit);
@@ -63,6 +63,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
         modal_action_hits: Vec::new(),
         content_file_hits,
         content_step_hits,
+        content_review_hits,
         link_hits,
         help_hits: Vec::new(),
         project_hits,

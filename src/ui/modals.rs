@@ -28,8 +28,18 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
                 crate::app::PullRequestReviewTarget::Line(_) => " Review line ",
                 crate::app::PullRequestReviewTarget::File(_) => " Review file ",
                 crate::app::PullRequestReviewTarget::Reply(_) => " Reply to review thread ",
+                crate::app::PullRequestReviewTarget::Edit { .. } => " Edit review comment ",
             };
             draw_review_editor(frame, title, input, None, theme);
+        }
+        Some(Modal::PullRequestReviewThreadActions { items, selected }) => {
+            draw_review_thread_actions(
+                frame,
+                &mut app.geometry.modal_action_hits,
+                items,
+                *selected,
+                theme,
+            );
         }
         Some(Modal::PullRequestReviewSubmit { input, decision }) => {
             draw_review_editor(frame, " Submit review ", input, Some(*decision), theme);
@@ -369,6 +379,49 @@ fn draw_pr_actions(
             row,
         );
         hits.push((row, ModalAction::PullRequestAction(index)));
+    }
+    draw_modal_hint(frame, area, "j/k select   Enter open   Esc cancel", theme);
+}
+
+fn draw_review_thread_actions(
+    frame: &mut Frame<'_>,
+    hits: &mut Vec<(Rect, ModalAction)>,
+    items: &[crate::app::PullRequestReviewThreadAction],
+    selected: usize,
+    theme: &Theme,
+) {
+    let width = items
+        .iter()
+        .map(|item| item.label().width())
+        .max()
+        .unwrap_or(24)
+        .saturating_add(6);
+    let height = items.len().saturating_add(3);
+    let area = centered_rect(
+        u16::try_from(width).unwrap_or(72).min(72),
+        u16::try_from(height).unwrap_or(20).min(20),
+        frame.area(),
+    );
+    frame.render_widget(Clear, area);
+    let block = modal_block(" Review Thread ", theme);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    for (index, item) in items.iter().enumerate() {
+        let row = Rect::new(
+            inner.x,
+            inner.y.saturating_add(u16::try_from(index).unwrap_or(0)),
+            inner.width,
+            1,
+        );
+        frame.render_widget(
+            Paragraph::new(format!("  {}", item.label())).style(if index == selected {
+                Style::default().fg(theme.text).bg(theme.selected)
+            } else {
+                Style::default().fg(theme.text).bg(theme.panel)
+            }),
+            row,
+        );
+        hits.push((row, ModalAction::PullRequestReviewThreadAction(index)));
     }
     draw_modal_hint(frame, area, "j/k select   Enter open   Esc cancel", theme);
 }

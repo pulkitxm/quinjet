@@ -52,6 +52,12 @@ impl App {
                                 body,
                             }
                         }
+                        PullRequestReviewTarget::Edit { comment_id } => {
+                            PullRequestReviewOperation::UpdateComment {
+                                comment_id: comment_id.clone(),
+                                body,
+                            }
+                        }
                     };
                     self.queue_pull_request_review_operation(operation, &mut effects);
                     return effects;

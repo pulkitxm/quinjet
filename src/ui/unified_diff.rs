@@ -1,12 +1,17 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "diff rendering returns file hits while registering review hits"
+)]
 pub(super) fn draw_unified_diff(
     frame: &mut Frame<'_>,
     area: Rect,
     app: &App,
     rows: &[usize],
     diff_scroll: usize,
+    review_hits: &mut Vec<ContentReviewHit>,
     theme: &Theme,
 ) -> Vec<ContentFileHit> {
     let first_index = rows.get(diff_scroll).copied().unwrap_or_default();
@@ -48,6 +53,12 @@ pub(super) fn draw_unified_diff(
             continue;
         };
         let row_area = Rect::new(area.x, content_y + cells(offset), area.width, 1);
+        if let Some(thread_id) = app.pull_request_review_line_threads.get(&line_index) {
+            review_hits.push(ContentReviewHit {
+                area: row_area,
+                thread_id: thread_id.clone(),
+            });
+        }
         match line.kind {
             DiffLineKind::FileHeader => {
                 draw_file_header(frame, row_area, line, app, theme);

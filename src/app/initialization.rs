@@ -63,6 +63,7 @@ impl App {
             pull_request_review_mutating: false,
             pull_request_review_error: None,
             pull_request_review_cursor: None,
+            pull_request_review_line_threads: HashMap::new(),
             pull_request_check_log: None,
             pull_request_check_log_loading: false,
             pull_request_check_log_error: None,
