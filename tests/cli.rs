@@ -22,6 +22,14 @@ use anyhow::{Context, Result, ensure};
 
 static SCRATCH_ID: AtomicUsize = AtomicUsize::new(0);
 const GIT_NULL_DEVICE: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
+
+fn next_scratch_path(kind: &str) -> PathBuf {
+    let id = SCRATCH_ID.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "quinjet-blackbox-{kind}-{}-{id}",
+        std::process::id()
+    ))
+}
 fn isolate_git(command: &mut ProcessCommand) {
     for variable in [
         "GIT_ALTERNATE_OBJECT_DIRECTORIES",
@@ -45,6 +53,18 @@ fn isolate_git(command: &mut ProcessCommand) {
         .env("GIT_CONFIG_NOSYSTEM", "1");
 }
 
+fn isolate_quinjet(command: &mut ProcessCommand, root: &Path) {
+    command
+        .env("HOME", root)
+        .env("USERPROFILE", root)
+        .env("XDG_BIN_HOME", root.join("bin"))
+        .env("XDG_CACHE_HOME", root.join("cache"))
+        .env("XDG_CONFIG_HOME", root.join("config"))
+        .env("XDG_DATA_HOME", root.join("data"))
+        .env("XDG_STATE_HOME", root.join("state"))
+        .env("QUINJET_CACHE_DIR", root.join("quinjet-cache"));
+}
+
 #[cfg(not(windows))]
 fn copied_binary_output(command: &mut ProcessCommand, context: &str) -> Result<Output> {
     let mut retries = 20;
@@ -62,54 +82,93 @@ fn copied_binary_output(command: &mut ProcessCommand, context: &str) -> Result<O
 
 struct Scratch {
     path: PathBuf,
+    environment: PathBuf,
 }
 
 impl Scratch {
     fn repository() -> Result<Self> {
-        let scratch = Self::directory()?;
-        scratch.git(&["init", "--initial-branch=main"])?;
-        scratch.git(&["config", "user.name", "Quinjet Test"])?;
-        scratch.git(&["config", "user.email", "quinjet@example.com"])?;
-        scratch.git(&["config", "commit.gpgsign", "false"])?;
+        let scratch = Self::unborn_repository()?;
         scratch.write("README.md", "one\n")?;
         scratch.git(&["add", "README.md"])?;
         scratch.git(&["commit", "--message=base"])?;
         Ok(scratch)
     }
 
+    fn unborn_repository() -> Result<Self> {
+        let scratch = Self::directory()?;
+        scratch.git(&["init", "--initial-branch=main"])?;
+        scratch.git(&["config", "user.name", "Quinjet Test"])?;
+        scratch.git(&["config", "user.email", "quinjet@example.com"])?;
+        scratch.git(&["config", "commit.gpgsign", "false"])?;
+        Ok(scratch)
+    }
+
     fn directory() -> Result<Self> {
-        let id = SCRATCH_ID.fetch_add(1, Ordering::Relaxed);
-        let name = format!("quinjet-blackbox-{}-{id}", std::process::id());
-        // nosemgrep: rust.lang.security.temp-dir.temp-dir
-        let path = std::env::temp_dir().join(name);
+        let path = next_scratch_path("files");
+        let environment = next_scratch_path("environment");
         drop(fs::remove_dir_all(&path));
+        drop(fs::remove_dir_all(&environment));
         fs::create_dir_all(&path).context("failed to create the scratch directory")?;
-        Ok(Self { path })
+        fs::create_dir_all(&environment).context("failed to create the test environment")?;
+        Ok(Self { path, environment })
     }
 
     fn write(&self, name: &str, content: &str) -> Result<()> {
-        fs::write(self.path.join(name), content).with_context(|| format!("failed to write {name}"))
+        let path = self.path.join(name);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create the parent of {name}"))?;
+        }
+        fs::write(path, content).with_context(|| format!("failed to write {name}"))
     }
 
-    fn git(&self, args: &[&str]) -> Result<String> {
+    fn git_run(&self, args: &[&str]) -> Result<Run> {
         let mut command = ProcessCommand::new("git");
         command.arg("-C").arg(&self.path).args(args);
         isolate_git(&mut command);
-        let output = command.output().context("failed to run git")?;
-        ensure!(
-            output.status.success(),
-            "git {args:?} failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        Run::from(command.output().context("failed to run git")?)
+    }
+
+    fn git(&self, args: &[&str]) -> Result<String> {
+        let run = self.git_run(args)?.success()?;
+        Ok(run.stdout.trim().to_owned())
+    }
+
+    fn quinjet_command(&self, args: &[&str]) -> ProcessCommand {
+        command_in(Some(&self.path), args, &self.environment)
     }
 
     fn quinjet(&self, args: &[&str]) -> Result<Run> {
-        run_in(Some(&self.path), args)
+        let mut command = self.quinjet_command(args);
+        Run::from(
+            command
+                .output()
+                .context("failed to run the quinjet binary")?,
+        )
     }
 }
 
 impl Drop for Scratch {
+    fn drop(&mut self) {
+        drop(fs::remove_dir_all(&self.path));
+        drop(fs::remove_dir_all(&self.environment));
+    }
+}
+
+struct IsolatedEnvironment {
+    path: PathBuf,
+}
+
+impl IsolatedEnvironment {
+    fn new() -> Result<Self> {
+        let path = next_scratch_path("environment");
+        drop(fs::remove_dir_all(&path));
+        fs::create_dir_all(&path).context("failed to create the test environment")?;
+        Ok(Self { path })
+    }
+}
+
+impl Drop for IsolatedEnvironment {
     fn drop(&mut self) {
         drop(fs::remove_dir_all(&self.path));
     }
@@ -150,6 +209,15 @@ impl Run {
 }
 
 fn run_in(directory: Option<&Path>, args: &[&str]) -> Result<Run> {
+    let environment = IsolatedEnvironment::new()?;
+    let mut command = command_in(directory, args, &environment.path);
+    let output = command
+        .output()
+        .context("failed to run the quinjet binary")?;
+    Run::from(output)
+}
+
+fn command_in(directory: Option<&Path>, args: &[&str], environment: &Path) -> ProcessCommand {
     let mut command = ProcessCommand::new(env!("CARGO_BIN_EXE_quinjet"));
     if let Some(directory) = directory {
         command.current_dir(directory);
@@ -157,10 +225,8 @@ fn run_in(directory: Option<&Path>, args: &[&str]) -> Result<Run> {
     }
     command.args(args);
     isolate_git(&mut command);
-    let output = command
-        .output()
-        .context("failed to run the quinjet binary")?;
-    Run::from(output)
+    isolate_quinjet(&mut command, environment);
+    command
 }
 
 #[path = "cli/capabilities.rs"]
