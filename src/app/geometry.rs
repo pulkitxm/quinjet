@@ -161,6 +161,8 @@ pub(crate) enum ChangeTarget {
 pub(crate) struct UiGeometry {
     pub repository_tab_hits: Vec<RepositoryTabHit>,
     pub repository_tab_open: Rect,
+    pub repository_tab_previous: Rect,
+    pub repository_tab_next: Rect,
     pub repository_tab_menu_hits: Vec<(Rect, RepositoryTabAction)>,
     pub changes_tab: Rect,
     pub history_tab: Rect,

@@ -124,6 +124,22 @@ impl App {
         }
         match event.kind {
             MouseEventKind::Down(MouseButton::Left)
+                if self.geometry.repository_tab_previous.contains(point) =>
+            {
+                Some(
+                    self.neighbor_repository_tab(true)
+                        .map_or_else(Vec::new, |id| vec![AppEffect::ActivateRepositoryTab(id)]),
+                )
+            }
+            MouseEventKind::Down(MouseButton::Left)
+                if self.geometry.repository_tab_next.contains(point) =>
+            {
+                Some(
+                    self.neighbor_repository_tab(false)
+                        .map_or_else(Vec::new, |id| vec![AppEffect::ActivateRepositoryTab(id)]),
+                )
+            }
+            MouseEventKind::Down(MouseButton::Left)
                 if self.geometry.repository_tab_open.contains(point) =>
             {
                 let mut effects = Vec::new();

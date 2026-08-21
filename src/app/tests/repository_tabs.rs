@@ -192,6 +192,27 @@ fn clicking_a_repository_tab_activates_it_on_release() {
 }
 
 #[test]
+fn overflow_controls_cycle_to_hidden_repository_tabs() {
+    let (tabs, _, second, third) = repository_tabs();
+    let mut app = app_with_repository_tabs(&tabs);
+    app.geometry.repository_tab_previous = Rect::new(50, 0, 3, 1);
+    app.geometry.repository_tab_next = Rect::new(53, 0, 3, 1);
+    let now = Instant::now();
+
+    let effects = app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 51, 0), now);
+    assert!(matches!(
+        effects.as_slice(),
+        [AppEffect::ActivateRepositoryTab(id)] if *id == third
+    ));
+
+    let effects = app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 54, 0), now);
+    assert!(matches!(
+        effects.as_slice(),
+        [AppEffect::ActivateRepositoryTab(id)] if *id == second
+    ));
+}
+
+#[test]
 fn dragging_a_repository_tab_reorders_without_activating_on_release() {
     let (tabs, first, _, third) = repository_tabs();
     let mut app = app_with_repository_tabs(&tabs);

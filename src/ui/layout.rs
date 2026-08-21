@@ -33,11 +33,17 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
         .areas(main)
     };
 
-    let (repository_tab_hits, repository_tab_open) = if repository_tabs_height == 0 {
-        (Vec::new(), Rect::default())
-    } else {
-        draw_repository_tabs(frame, repository_tabs, app, theme)
-    };
+    let (repository_tab_hits, repository_tab_open, repository_tab_previous, repository_tab_next) =
+        if repository_tabs_height == 0 {
+            (
+                Vec::new(),
+                Rect::default(),
+                Rect::default(),
+                Rect::default(),
+            )
+        } else {
+            draw_repository_tabs(frame, repository_tabs, app, theme)
+        };
     let (changes_tab, history_tab, pull_requests_tab, mut link_hits, projects_hit) =
         draw_tabs(frame, tabs, app, theme);
     let mut project_hits: Vec<Rect> = projects_hit.into_iter().collect();
@@ -59,6 +65,8 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     app.geometry = UiGeometry {
         repository_tab_hits,
         repository_tab_open,
+        repository_tab_previous,
+        repository_tab_next,
         repository_tab_menu_hits: Vec::new(),
         changes_tab,
         history_tab,

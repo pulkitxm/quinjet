@@ -10,7 +10,7 @@ pub(super) fn draw_repository_tabs(
     area: Rect,
     app: &App,
     theme: &Theme,
-) -> (Vec<RepositoryTabHit>, Rect) {
+) -> (Vec<RepositoryTabHit>, Rect, Rect, Rect) {
     frame.render_widget(
         Block::default().style(Style::default().bg(theme.panel)),
         area,
@@ -31,11 +31,46 @@ pub(super) fn draw_repository_tabs(
         ),
         open,
     );
-    let available = area.width.saturating_sub(open_width);
-    if app.repository_tabs.is_empty() || available == 0 {
-        return (Vec::new(), open);
+    let tab_region_width = area.width.saturating_sub(open_width);
+    if app.repository_tabs.is_empty() || tab_region_width == 0 {
+        return (Vec::new(), open, Rect::default(), Rect::default());
     }
-    let minimum_width = 10_u16.min(available.max(1));
+    let minimum_width = 10_u16.min(tab_region_width.max(1));
+    let base_capacity = usize::from((tab_region_width / minimum_width).max(1));
+    let overflow = app.repository_tabs.len() > base_capacity;
+    let control_width = if overflow { 3 } else { 0 };
+    let (previous, next) = if overflow {
+        (
+            Rect::new(area.x, area.y, control_width, area.height),
+            Rect::new(
+                open.x.saturating_sub(control_width),
+                area.y,
+                control_width,
+                area.height,
+            ),
+        )
+    } else {
+        (Rect::default(), Rect::default())
+    };
+    if overflow {
+        let control_style = Style::default()
+            .fg(theme.accent)
+            .bg(theme.panel)
+            .add_modifier(Modifier::BOLD);
+        frame.render_widget(
+            Paragraph::new("‹")
+                .alignment(Alignment::Center)
+                .style(control_style),
+            previous,
+        );
+        frame.render_widget(
+            Paragraph::new("›")
+                .alignment(Alignment::Center)
+                .style(control_style),
+            next,
+        );
+    }
+    let available = tab_region_width.saturating_sub(control_width.saturating_mul(2));
     let capacity = usize::from((available / minimum_width).max(1));
     let active = app
         .repository_tabs
@@ -59,6 +94,7 @@ pub(super) fn draw_repository_tabs(
     {
         let x = area
             .x
+            .saturating_add(control_width)
             .saturating_add(cells(offset.saturating_mul(usize::from(tab_width))));
         let tab_area = Rect::new(x, area.y, tab_width, area.height);
         let value = if tab.title.is_empty() {
@@ -89,7 +125,7 @@ pub(super) fn draw_repository_tabs(
             id: tab.id,
         });
     }
-    (hits, open)
+    (hits, open, previous, next)
 }
 
 pub(super) fn draw_repository_tab_menu(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {

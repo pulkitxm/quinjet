@@ -59,6 +59,8 @@ fn repository_tab_strip_appears_only_for_multiple_tabs() {
 
     assert!(single.geometry.repository_tab_hits.is_empty());
     assert_eq!(single.geometry.repository_tab_open, Rect::default());
+    assert_eq!(single.geometry.repository_tab_previous, Rect::default());
+    assert_eq!(single.geometry.repository_tab_next, Rect::default());
     assert_eq!(single.geometry.changes_tab.y, 0);
 
     let (mut multiple, ids) = app_with_tabs(2, 1);
@@ -81,6 +83,8 @@ fn repository_tab_strip_appears_only_for_multiple_tabs() {
         multiple.geometry.repository_tab_open,
         Rect::new(75, 0, 5, 1)
     );
+    assert_eq!(multiple.geometry.repository_tab_previous, Rect::default());
+    assert_eq!(multiple.geometry.repository_tab_next, Rect::default());
     assert_eq!(multiple.geometry.changes_tab.y, 1);
 }
 
@@ -102,6 +106,8 @@ fn overflowing_repository_tabs_keep_the_active_tab_visible() {
     assert_eq!(visible, ids[3..9]);
     assert!(visible.contains(&ids[8]));
     assert!(!visible.contains(&ids[9]));
+    assert_eq!(app.geometry.repository_tab_previous, Rect::new(0, 0, 3, 1));
+    assert_eq!(app.geometry.repository_tab_next, Rect::new(64, 0, 3, 1));
 }
 
 #[test]
