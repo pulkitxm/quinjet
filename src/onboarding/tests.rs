@@ -41,8 +41,9 @@ fn home_screen_renders_actions_instead_of_a_repository_error() {
         Rect::new(0, 0, 100, 30),
     );
     let rendered = terminal.backend().to_string();
-    assert!(rendered.contains("Q U I N J E T"));
-    assert!(rendered.contains("No Git repository is open"));
+    assert!(rendered.contains("██████"));
+    assert!(rendered.contains("Open a project to get started"));
+    assert!(rendered.contains("Get started"));
     assert!(rendered.contains("Projects and worktrees"));
     assert!(rendered.contains("Open a repository path"));
     assert!(!rendered.contains("fatal:"));

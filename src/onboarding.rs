@@ -188,23 +188,16 @@ impl Onboarding {
             Self::draw_small(frame, theme);
             return;
         }
-        let width = frame.area().width.saturating_sub(8).min(72);
-        let height = frame.area().height.saturating_sub(4).min(24);
+        let width = frame.area().width.saturating_sub(8).min(76);
+        let height = frame.area().height.saturating_sub(4).min(22);
         let area = centered_rect(width, height, frame.area());
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(theme.border))
-            .style(Style::default().bg(theme.panel));
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
         let [header, body, footer] = Layout::vertical([
-            Constraint::Length(6),
-            Constraint::Min(6),
+            Constraint::Length(9),
+            Constraint::Min(9),
             Constraint::Length(3),
         ])
-        .areas(inner);
-        Self::draw_header(frame, header, theme);
+        .areas(area);
+        self.draw_header(frame, header, theme);
         match self.panel {
             OnboardingPanel::Home => self.draw_home(frame, body, theme),
             OnboardingPanel::Projects => self.draw_projects(frame, body, theme),
@@ -213,25 +206,43 @@ impl Onboarding {
         self.draw_footer(frame, footer, theme);
     }
 
-    fn draw_header(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+    fn draw_header(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+        let prompt = match self.panel {
+            OnboardingPanel::Home => "Open a project to get started",
+            OnboardingPanel::Projects => "Choose a project or worktree",
+            OnboardingPanel::Path => "Enter a repository path",
+        };
+        let logo = Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD);
         frame.render_widget(
             Paragraph::new(Text::from(vec![
-                Line::from(""),
                 Line::from(Span::styled(
-                    "Q U I N J E T",
-                    Style::default()
-                        .fg(theme.accent)
-                        .add_modifier(Modifier::BOLD),
+                    " ██████  ██    ██ ██ ███    ██      ██ ███████ ████████",
+                    logo,
+                )),
+                Line::from(Span::styled(
+                    "██    ██ ██    ██ ██ ████   ██      ██ ██         ██   ",
+                    logo,
+                )),
+                Line::from(Span::styled(
+                    "██    ██ ██    ██ ██ ██ ██  ██      ██ █████      ██   ",
+                    logo,
+                )),
+                Line::from(Span::styled(
+                    "██ ▄▄ ██ ██    ██ ██ ██  ██ ██ ██   ██ ██         ██   ",
+                    logo,
+                )),
+                Line::from(Span::styled(
+                    " ██████   ██████  ██ ██   ████  █████  ███████    ██   ",
+                    logo,
                 )),
                 Line::from(Span::styled(
                     "keyboard-first Git workspace",
                     Style::default().fg(theme.muted),
                 )),
                 Line::from(""),
-                Line::from(Span::styled(
-                    "No Git repository is open",
-                    Style::default().fg(theme.text),
-                )),
+                Line::from(Span::styled(prompt, Style::default().fg(theme.text))),
             ]))
             .alignment(Alignment::Center),
             area,
@@ -246,25 +257,42 @@ impl Onboarding {
         } else {
             format!("{} recent worktrees", self.projects.len())
         };
+        let card_area = centered_rect(62_u16.min(area.width), 9_u16.min(area.height), area);
+        let block = Block::default()
+            .title(Span::styled(
+                " Get started ",
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme.border_focus))
+            .style(Style::default().bg(theme.panel));
+        let inner = block.inner(card_area);
+        frame.render_widget(block, card_area);
         let rows = vec![
-            menu_line("w / N", "Projects and worktrees", theme),
             Line::from(""),
-            menu_line("o", "Open a repository path", theme),
-            Line::from(""),
-            menu_line("q", "Quit", theme),
+            menu_line("Projects and worktrees", "W / N", inner.width, theme),
+            menu_line("Open a repository path", "O", inner.width, theme),
+            menu_line("Quit", "Q", inner.width, theme),
             Line::from(""),
             Line::from(Span::styled(recent, Style::default().fg(theme.muted))),
         ];
         frame.render_widget(
-            Paragraph::new(rows).alignment(Alignment::Center),
-            inset(area, 2, 1),
+            Paragraph::new(rows)
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(theme.panel)),
+            inner,
         );
     }
 
     fn draw_projects(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
         if self.projects.is_empty() {
+            let card_area = centered_rect(62_u16.min(area.width), 7_u16.min(area.height), area);
             frame.render_widget(
                 Paragraph::new(Text::from(vec![
+                    Line::from(""),
                     Line::from(Span::styled(
                         "No recent projects",
                         Style::default().fg(theme.text),
@@ -275,8 +303,9 @@ impl Onboarding {
                         Style::default().fg(theme.muted),
                     )),
                 ]))
-                .alignment(Alignment::Center),
-                inset(area, 2, 2),
+                .alignment(Alignment::Center)
+                .block(panel_block(" Recent projects ", theme)),
+                card_area,
             );
             return;
         }
@@ -301,15 +330,17 @@ impl Onboarding {
             })
             .collect::<Vec<_>>();
         let mut state = ListState::default().with_selected(Some(self.selected));
+        let card_area = centered_rect(70_u16.min(area.width), area.height, area);
         frame.render_stateful_widget(
             List::new(items)
+                .block(panel_block(" Recent projects ", theme))
                 .highlight_style(
                     Style::default()
                         .bg(theme.selected)
                         .add_modifier(Modifier::BOLD),
                 )
                 .highlight_symbol("›"),
-            inset(area, 2, 0),
+            card_area,
             &mut state,
         );
     }
@@ -326,12 +357,7 @@ impl Onboarding {
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(theme.border_focus)),
         );
-        let input_area = Rect::new(
-            area.x.saturating_add(4),
-            area.y.saturating_add(2),
-            area.width.saturating_sub(8),
-            3,
-        );
+        let input_area = centered_rect(62_u16.min(area.width), 3, area);
         frame.render_widget(input, input_area);
         let cursor_offset = u16::try_from(self.path_input.chars().count()).unwrap_or(u16::MAX);
         frame.set_cursor_position((
@@ -342,7 +368,7 @@ impl Onboarding {
 
     fn draw_footer(&self, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
         let hint = match self.panel {
-            OnboardingPanel::Home => "Choose an option",
+            OnboardingPanel::Home => "",
             OnboardingPanel::Projects => "↑/↓ or j/k move   Enter open   Esc back",
             OnboardingPanel::Path => "Enter open   Esc back",
         };
@@ -370,7 +396,7 @@ impl Onboarding {
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "No Git repository is open",
+                    "Open a project to get started",
                     Style::default().fg(theme.text),
                 )),
                 Line::from(Span::styled(
@@ -401,25 +427,30 @@ fn home_path() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-fn menu_line<'a>(key: &'a str, label: &'a str, theme: &Theme) -> Line<'a> {
+fn menu_line<'a>(label: &'a str, key: &'a str, width: u16, theme: &Theme) -> Line<'a> {
+    let label_width = usize::from(width.saturating_sub(11));
     Line::from(vec![
+        Span::styled("  │  ", Style::default().fg(theme.accent)),
         Span::styled(
-            format!("{key:>7}  "),
+            format!("{label:<label_width$}"),
+            Style::default().fg(theme.text),
+        ),
+        Span::styled(
+            format!("{key:>6}"),
             Style::default()
                 .fg(theme.accent)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(label, Style::default().fg(theme.text)),
     ])
 }
 
-const fn inset(area: Rect, horizontal: u16, vertical: u16) -> Rect {
-    Rect::new(
-        area.x.saturating_add(horizontal),
-        area.y.saturating_add(vertical),
-        area.width.saturating_sub(horizontal.saturating_mul(2)),
-        area.height.saturating_sub(vertical.saturating_mul(2)),
-    )
+fn panel_block<'a>(title: &'a str, theme: &Theme) -> Block<'a> {
+    Block::default()
+        .title(Span::styled(title, Style::default().fg(theme.accent)))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.border))
+        .style(Style::default().bg(theme.panel))
 }
 
 #[expect(
