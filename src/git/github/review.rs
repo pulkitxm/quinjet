@@ -97,32 +97,19 @@ impl Repository {
     ) -> Result<String> {
         let snapshot = self.pull_request_review(pull_request)?;
         ensure_current_pending_review(&snapshot)?;
-        let thread = review_thread_input(draft)?;
-        if let Some(pending) = snapshot.pending_review {
-            let mut input = thread;
-            drop(input.insert("pullRequestReviewId".to_owned(), Value::String(pending.id)));
-            self.review_mutation(
-                pull_request,
-                "mutation($input: AddPullRequestReviewThreadInput!) { addPullRequestReviewThread(input: $input) { thread { id } } }",
-                &json!({ "input": input }),
-                "unable to add the review comment",
-                "Added pending review comment",
-            )
-        } else {
-            self.review_mutation(
-                pull_request,
-                "mutation($input: AddPullRequestReviewInput!) { addPullRequestReview(input: $input) { pullRequestReview { id } } }",
-                &json!({
-                    "input": {
-                        "pullRequestId": snapshot.pull_request_id,
-                        "commitOID": snapshot.head_oid,
-                        "threads": [thread],
-                    }
-                }),
-                "unable to start the pull-request review",
-                "Added pending review comment",
-            )
-        }
+        let pending = match snapshot.pending_review {
+            Some(pending) => pending,
+            None => self.create_pending_review(pull_request, &snapshot)?,
+        };
+        let mut input = review_thread_input(draft)?;
+        drop(input.insert("pullRequestReviewId".to_owned(), Value::String(pending.id)));
+        self.review_mutation(
+            pull_request,
+            "mutation($input: AddPullRequestReviewThreadInput!) { addPullRequestReviewThread(input: $input) { thread { id } } }",
+            &json!({ "input": input }),
+            "unable to add the review comment",
+            "Added pending review comment",
+        )
     }
 
     fn reply_review_thread(
