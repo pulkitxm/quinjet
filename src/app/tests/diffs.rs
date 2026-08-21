@@ -406,3 +406,65 @@ fn sidebar_wheel_scroll_pans_without_moving_the_selection() {
     assert!(!app.sidebar_free_scroll, "a selection change reattaches");
     assert_eq!(app.sidebar_offset, 1, "the window follows the selection");
 }
+
+#[test]
+fn sidebar_wheel_scroll_loads_more_history_near_the_end() {
+    let mut app = App::new("/tmp/repo", "repo");
+    app.view = View::History;
+    app.geometry.sidebar = Rect::new(0, 0, 30, 10);
+    app.history = vec![
+        Commit {
+            id: "a".repeat(40),
+            short_id: "aaaaaaa".to_owned(),
+            parent_ids: Vec::new(),
+            author: String::new(),
+            author_email: String::new(),
+            authored_at: String::new(),
+            committer: String::new(),
+            committer_email: String::new(),
+            committed_at: String::new(),
+            relative_date: String::new(),
+            subject: "Commit".to_owned(),
+            decorations: Vec::new(),
+        };
+        HISTORY_PAGE_SIZE
+    ];
+    app.sidebar_offset = HISTORY_PAGE_SIZE - 31;
+
+    let first = app.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 2,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        },
+        Instant::now(),
+    );
+    assert!(
+        first.is_empty(),
+        "pagination waits until the viewport nears the end"
+    );
+
+    let second = app.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 2,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        },
+        Instant::now(),
+    );
+    assert!(matches!(
+        second.as_slice(),
+        [AppEffect::Git(command)] if matches!(
+            command.as_ref(),
+            WorkerCommand::LoadHistory {
+                skip: HISTORY_PAGE_SIZE,
+                limit: HISTORY_PAGE_SIZE,
+                ..
+            }
+        )
+    ));
+    assert_eq!(app.history_cursor, 0, "the selected commit stays put");
+    assert!(app.history_loading);
+}
