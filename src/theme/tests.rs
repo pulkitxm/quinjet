@@ -28,6 +28,74 @@ fn system_appearance_maps_light_and_dark() {
 }
 
 #[test]
+fn theme_and_appearance_catalogs_are_unique_and_defaulted() {
+    assert_eq!(ThemeName::default(), ThemeName::Quinjet);
+    assert_eq!(AppearanceChoice::default(), AppearanceChoice::System);
+    let theme_labels = ThemeName::ALL.map(ThemeName::label);
+    let appearance_labels = AppearanceChoice::ALL.map(AppearanceChoice::label);
+    assert!(theme_labels.iter().all(|label| !label.is_empty()));
+    assert!(appearance_labels.iter().all(|label| !label.is_empty()));
+    assert_eq!(
+        theme_labels
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        ThemeName::ALL.len()
+    );
+    assert_eq!(
+        appearance_labels
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        AppearanceChoice::ALL.len()
+    );
+}
+
+#[test]
+fn every_syntax_role_selects_its_stable_array_slot() {
+    let theme = Theme::default();
+    for (index, role) in [
+        SyntaxColor::Text,
+        SyntaxColor::Comment,
+        SyntaxColor::Red,
+        SyntaxColor::Orange,
+        SyntaxColor::Yellow,
+        SyntaxColor::Green,
+        SyntaxColor::Cyan,
+        SyntaxColor::Blue,
+        SyntaxColor::Purple,
+        SyntaxColor::Brown,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert_eq!(theme.syntax(role), theme.syntax[index]);
+    }
+}
+
+#[test]
+fn rgb_conversion_and_blending_cover_endpoints_and_midpoint() {
+    assert_eq!(color(0x12_34_56), Color::Rgb(0x12, 0x34, 0x56));
+    assert_eq!(color_value(Color::Rgb(0x12, 0x34, 0x56)), 0x12_34_56);
+    assert_eq!(color_value(Color::Reset), 0);
+    assert_eq!(blend(0xff_00_00, 0x00_00_ff, 0), color(0x00_00_ff));
+    assert_eq!(blend(0xff_00_00, 0x00_00_ff, 100), color(0xff_00_00));
+    assert_eq!(blend(0xff_00_00, 0x00_00_ff, 50), color(0x7f_00_7f));
+}
+
+#[test]
+fn contrast_is_symmetric_and_matches_black_white_bounds() {
+    let black = color(0x00_00_00);
+    let white = color(0xff_ff_ff);
+    assert!((contrast(black, white) - 21.0).abs() < f64::EPSILON);
+    assert!((contrast(black, white) - contrast(white, black)).abs() < f64::EPSILON);
+    assert!((contrast(black, black) - 1.0).abs() < f64::EPSILON);
+    assert!(luminance(Color::Reset).abs() < f64::EPSILON);
+    assert!(linear_channel(0).abs() < f64::EPSILON);
+    assert!((linear_channel(255) - 1.0).abs() < f64::EPSILON);
+}
+
+#[test]
 fn every_theme_has_distinct_light_and_dark_surfaces() {
     for name in ThemeName::ALL {
         let light = Theme::new(name, Appearance::Light);

@@ -127,3 +127,97 @@ pub(crate) fn bounded_command_error(context: &str, output: &BoundedOutput) -> St
         format!("{context}: {details}")
     }
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stdout_limits_handle_zero_exact_and_oversized_output() {
+        let cases: [(usize, &[u8], bool); 3] =
+            [(0, b"", true), (4, b"data", false), (3, b"dat", true)];
+
+        for (limit, expected, truncated) in cases {
+            let mut command = shell("printf data");
+            let output = run_bounded_command(&mut command, limit, 32).unwrap();
+            assert_eq!(output.stdout, expected, "limit {limit}");
+            assert_eq!(output.stdout_truncated, truncated, "limit {limit}");
+        }
+    }
+
+    #[test]
+    fn stdin_is_forwarded_without_text_conversion() {
+        let input = b"first\n\0\xfflast";
+        let mut command = shell("cat");
+
+        let output = run_bounded_command_with_input(&mut command, input, input.len(), 32).unwrap();
+
+        assert!(output.status.success());
+        assert_eq!(output.stdout, input);
+        assert!(!output.stdout_truncated);
+        assert_eq!(output.stderr, b"");
+    }
+
+    #[test]
+    fn stdout_and_stderr_are_drained_simultaneously() {
+        const CHUNK: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        const REPEATS: usize = 2_048;
+        let expected_output = CHUNK.repeat(REPEATS).into_bytes();
+        let expected = expected_output.len();
+        let script = format!(
+            "chunk={CHUNK}; i=0; while [ \"$i\" -lt {REPEATS} ]; do printf '%s' \"$chunk\"; printf '%s' \"$chunk\" >&2; i=$((i + 1)); done"
+        );
+        let mut command = shell(&script);
+
+        let output = run_bounded_command(&mut command, expected, expected).unwrap();
+
+        assert!(output.status.success());
+        assert!(!output.stdout_truncated);
+        assert_eq!(output.stdout.len(), expected);
+        assert_eq!(output.stderr.len(), expected);
+        assert_eq!(output.stdout, expected_output);
+        assert_eq!(output.stderr, expected_output);
+    }
+
+    #[test]
+    fn nonzero_status_keeps_bounded_stdout_and_stderr() {
+        let mut command = shell("printf output; printf error >&2; exit 7");
+
+        let output = run_bounded_command(&mut command, 6, 5).unwrap();
+
+        assert_eq!(output.status.code(), Some(7));
+        assert_eq!(output.stdout, b"output");
+        assert_eq!(output.stderr, b"error");
+        assert!(!output.stdout_truncated);
+    }
+
+    #[test]
+    fn command_errors_prefer_stderr_then_stdout_then_status() {
+        let mut command = shell("printf 'stdout detail'; printf 'stderr detail' >&2; exit 7");
+        let both = run_bounded_command(&mut command, 64, 64).unwrap();
+        assert_eq!(
+            bounded_command_error("failed", &both),
+            "failed: stderr detail"
+        );
+
+        let mut command = shell("printf 'stdout detail'; printf '  \\n' >&2; exit 8");
+        let stdout = run_bounded_command(&mut command, 64, 64).unwrap();
+        assert_eq!(
+            bounded_command_error("failed", &stdout),
+            "failed: stdout detail"
+        );
+
+        let mut command = shell("exit 9");
+        let status = run_bounded_command(&mut command, 64, 64).unwrap();
+        assert_eq!(
+            bounded_command_error("failed", &status),
+            format!("failed (exit status {})", status.status)
+        );
+    }
+
+    fn shell(script: &str) -> Command {
+        let mut command = Command::new("sh");
+        let _ = command.arg("-c").arg(script);
+        command
+    }
+}
