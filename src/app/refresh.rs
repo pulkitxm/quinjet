@@ -170,10 +170,15 @@ impl App {
             next_change_section,
         ) && self.document.file_count() > 0;
         let preserved_paths = if preserve_document {
-            self.local_diff_index.as_ref().map_or_else(
-                || self.local_diff_preserved_paths.clone(),
-                |index| index.files.iter().map(|file| file.path.clone()).collect(),
-            )
+            if self.local_diff_preserved_paths.is_empty() {
+                self.local_diff_index
+                    .as_ref()
+                    .map_or_else(HashSet::new, |index| {
+                        index.files.iter().map(|file| file.path.clone()).collect()
+                    })
+            } else {
+                self.local_diff_preserved_paths.clone()
+            }
         } else {
             HashSet::new()
         };

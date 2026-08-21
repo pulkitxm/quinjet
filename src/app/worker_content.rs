@@ -77,47 +77,40 @@ impl App {
                             .collect::<Vec<_>>();
                         self.local_diff_workspace_generation = Some(generation);
                         self.local_diff_documents.clear();
-                        if preserve_document {
-                            self.reconcile_refreshed_preview_file_folds(&paths);
-                        } else {
-                            self.reset_preview_file_folds(&paths);
-                        }
-                        self.selected_preview_file = selected_path
-                            .or_else(|| index.files.first().map(|file| file.path.clone()));
-                        self.preview_file_cursor = self
-                            .selected_preview_file
-                            .as_ref()
-                            .and_then(|selected| {
-                                index.files.iter().position(|file| &file.path == selected)
-                            })
-                            .unwrap_or_default();
-                        let first_path = self.selected_preview_file.clone();
                         self.local_diff_index = Some(index);
+                        if !preserve_document {
+                            self.reset_preview_file_folds(&paths);
+                            self.selected_preview_file =
+                                selected_path.clone().or_else(|| paths.first().cloned());
+                            self.preview_file_cursor = self
+                                .selected_preview_file
+                                .as_ref()
+                                .and_then(|selected| paths.iter().position(|path| path == selected))
+                                .unwrap_or_default();
+                        }
+                        let first_path = selected_path.or_else(|| paths.first().cloned());
                         if !preserve_document {
                             self.rebuild_local_diff_document();
                             self.content_scroll = 0;
                             self.horizontal_scroll = 0;
                         }
-                        let mut paths = self
-                            .local_diff_index
-                            .as_ref()
-                            .map(|index| {
-                                index
-                                    .files
-                                    .iter()
-                                    .filter(|file| {
-                                        !self.preview_file_collapsed(&file.path.to_string_lossy())
-                                    })
-                                    .map(|file| file.path.clone())
-                                    .collect::<Vec<_>>()
+                        let mut load_paths = paths
+                            .iter()
+                            .filter(|path| {
+                                if preserve_document {
+                                    !self.refreshed_preview_file_collapsed(path, paths.len())
+                                } else {
+                                    !self.preview_file_collapsed(&path.to_string_lossy())
+                                }
                             })
-                            .unwrap_or_default();
+                            .cloned()
+                            .collect::<Vec<_>>();
                         if let Some(path) = first_path
-                            && !paths.contains(&path)
+                            && !load_paths.contains(&path)
                         {
-                            paths.insert(0, path);
+                            load_paths.insert(0, path);
                         }
-                        for path in paths {
+                        for path in load_paths {
                             self.request_local_diff_file(path, &mut effects);
                         }
                         if self.local_diff_loading_path.is_none()

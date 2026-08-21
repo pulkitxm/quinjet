@@ -114,6 +114,10 @@ impl App {
             return self.pull_request_file_view == PullRequestFileView::AllFiles
                 && self.pull_request_files.len() > 1;
         }
+        let rendered_files = self.document.file_count();
+        if self.document_loading && rendered_files > 0 {
+            return rendered_files > 1;
+        }
         if let Some(index) = self.local_diff_index.as_ref() {
             return index.files.len() > 1;
         }
@@ -146,8 +150,31 @@ impl App {
         }
     }
 
-    pub(super) fn reconcile_refreshed_preview_file_folds(&mut self, paths: &[PathBuf]) {
-        self.invalidate_diff_rows();
+    pub(super) fn refreshed_preview_file_collapsed(&self, path: &Path, total: usize) -> bool {
+        if total <= 1 {
+            return false;
+        }
+        if self.files_collapsed {
+            return !self.expanded_preview_files.contains(path);
+        }
+        self.collapsed_preview_files.contains(path)
+            || (!self.collapse_preference_set
+                && (self.local_diff_preserved_paths.len() <= 1
+                    || !self.local_diff_preserved_paths.contains(path)))
+    }
+
+    pub(super) fn finalize_refreshed_preview_state(&mut self) {
+        let paths = self
+            .local_diff_index
+            .as_ref()
+            .map(|index| {
+                index
+                    .files
+                    .iter()
+                    .map(|file| file.path.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         let indexed = paths.iter().cloned().collect::<HashSet<_>>();
         self.collapsed_preview_files
             .retain(|path| indexed.contains(path));
@@ -165,6 +192,16 @@ impl App {
                 );
             }
         }
+        self.selected_preview_file = self
+            .selected_preview_file
+            .clone()
+            .filter(|selected| indexed.contains(selected))
+            .or_else(|| paths.first().cloned());
+        self.preview_file_cursor = self
+            .selected_preview_file
+            .as_ref()
+            .and_then(|selected| paths.iter().position(|path| path == selected))
+            .unwrap_or_default();
         self.local_diff_preserved_paths.clear();
     }
 

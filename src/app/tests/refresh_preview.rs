@@ -1,6 +1,6 @@
 use super::*;
 
-fn loaded_changes_preview() -> (App, PathBuf, DiffIndex, DiffDocument) {
+pub(super) fn loaded_changes_preview() -> (App, PathBuf, DiffIndex, DiffDocument) {
     let mut app = app_with_changes();
     let path = PathBuf::from("src/main.rs");
     let index = DiffIndex {
@@ -35,7 +35,7 @@ fn loaded_changes_preview() -> (App, PathBuf, DiffIndex, DiffDocument) {
     (app, path, index, document)
 }
 
-fn parsed_change_document(path: &Path, title: &str, value: &str) -> DiffDocument {
+pub(super) fn parsed_change_document(path: &Path, title: &str, value: &str) -> DiffDocument {
     let source = format!(
         "diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n-old\n+{value}\n",
         path = path.display()
@@ -43,7 +43,7 @@ fn parsed_change_document(path: &Path, title: &str, value: &str) -> DiffDocument
     crate::git::diff::parse_diff(source.as_bytes(), title, Some(path), false)
 }
 
-fn loaded_two_file_changes_preview() -> (App, [PathBuf; 2], DiffIndex, DiffDocument) {
+pub(super) fn loaded_two_file_changes_preview() -> (App, [PathBuf; 2], DiffIndex, DiffDocument) {
     let mut app = app_with_changes();
     for change in &mut app.status.changes {
         change.area = ChangeArea::Unstaged;
@@ -77,12 +77,15 @@ fn loaded_two_file_changes_preview() -> (App, [PathBuf; 2], DiffIndex, DiffDocum
             parsed_change_document(&readme_path, "Current diff", "current readme"),
         ),
     ]);
+    app.changes_diff_version = 3;
+    if let Some(request) = app.local_diff_request_for_view() {
+        app.prepare_local_diff(request, &mut Vec::new());
+    }
+    assert_eq!(app.local_diff_change_section, Some(ChangeSection::Unstaged));
     let document = index.document(&documents);
     app.document.clone_from(&document);
-    app.changes_diff_version = 3;
+    app.document_loading = false;
     app.diff_generation = 5;
-    app.local_diff_request = app.local_diff_request_for_view();
-    app.local_diff_change_section = Some(ChangeSection::Unstaged);
     app.local_diff_workspace_generation = Some(5);
     app.local_diff_index = Some(index.clone());
     app.local_diff_documents = documents;
@@ -94,7 +97,11 @@ fn loaded_two_file_changes_preview() -> (App, [PathBuf; 2], DiffIndex, DiffDocum
     (app, paths, index, document)
 }
 
-fn refresh_with_status(app: &mut App, status: RepoStatus, now: Instant) -> Vec<AppEffect> {
+pub(super) fn refresh_with_status(
+    app: &mut App,
+    status: RepoStatus,
+    now: Instant,
+) -> Vec<AppEffect> {
     drop(app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE), now));
     app.handle_worker_event(
         WorkerEvent::Status {
@@ -302,111 +309,6 @@ fn a_two_file_refresh_replaces_the_preserved_diff_atomically() {
     assert!(app.files_collapsed);
     assert_eq!(app.content_scroll, 17);
     assert_eq!(app.horizontal_scroll, 4);
-}
-
-#[test]
-fn a_selected_section_preserves_its_diff_when_membership_changes() {
-    let (mut app, [main_path, readme_path], mut index, loaded) = loaded_two_file_changes_preview();
-    let now = Instant::now();
-    app.files_collapsed = false;
-    app.collapse_preference_set = false;
-    app.expanded_preview_files.clear();
-    app.collapsed_preview_files = HashSet::from([readme_path.clone()]);
-    let mut status = app.status.clone();
-    let new_path = PathBuf::from("src/new.rs");
-    status.changes.push(Change {
-        path: new_path.clone(),
-        original_path: None,
-        area: ChangeArea::Unstaged,
-        status: ChangeStatus::Added,
-    });
-
-    let effects = refresh_with_status(&mut app, status, now);
-
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        AppEffect::Git(command)
-            if matches!(command.as_ref(), WorkerCommand::PrepareLocalDiff {
-                request,
-                ..
-            } if matches!(request.as_ref(), LocalDiffRequest::Changes { changes, .. }
-                if changes.len() == 3))
-    )));
-    assert_eq!(app.document, loaded);
-    assert!(app.document_loading);
-    assert_eq!(app.local_diff_change_section, Some(ChangeSection::Unstaged));
-    index.files.push(crate::git::diff::DiffFileIndexEntry {
-        path: new_path.clone(),
-        old_path: None,
-        status: "added".to_owned(),
-        counts: None,
-    });
-
-    let effects = app.handle_worker_event(
-        WorkerEvent::LocalDiffIndex {
-            generation: app.diff_generation,
-            result: Ok(index),
-        },
-        now,
-    );
-
-    assert_eq!(app.document, loaded);
-    assert!(!app.collapsed_preview_files.contains(&main_path));
-    assert!(app.collapsed_preview_files.contains(&readme_path));
-    assert!(app.collapsed_preview_files.contains(&new_path));
-    assert!(effects.iter().all(|effect| !matches!(
-        effect,
-        AppEffect::Git(command)
-            if matches!(command.as_ref(), WorkerCommand::LoadLocalDiffFile { path, .. }
-                if path == &new_path)
-    )));
-}
-
-#[test]
-fn an_individual_change_preserves_its_diff_when_its_status_changes() {
-    let (mut app, _, _, loaded) = loaded_changes_preview();
-    let now = Instant::now();
-    let mut status = app.status.clone();
-    if let Some(change) = status
-        .changes
-        .iter_mut()
-        .find(|change| change.path == Path::new("src/main.rs"))
-    {
-        change.status = ChangeStatus::TypeChanged;
-    }
-
-    let effects = refresh_with_status(&mut app, status, now);
-
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        AppEffect::Git(command)
-            if matches!(command.as_ref(), WorkerCommand::PrepareLocalDiff { .. })
-    )));
-    assert_eq!(app.document, loaded);
-    assert!(app.document_loading);
-}
-
-#[test]
-fn selecting_a_different_change_does_not_preserve_the_previous_diff() {
-    let (mut app, _, _, loaded) = loaded_changes_preview();
-    let now = Instant::now();
-    let mut status = app.status.clone();
-    status
-        .changes
-        .retain(|change| change.path == Path::new("README.md"));
-
-    let effects = refresh_with_status(&mut app, status, now);
-
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        AppEffect::Git(command)
-            if matches!(command.as_ref(), WorkerCommand::PrepareLocalDiff { .. })
-    )));
-    assert_ne!(app.document, loaded);
-    assert!(app.document_loading);
-    assert!(app.selected_preview_file.is_none());
-    assert!(app.collapsed_preview_files.is_empty());
-    assert!(app.expanded_preview_files.is_empty());
 }
 
 #[test]

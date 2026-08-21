@@ -60,9 +60,12 @@ impl App {
             .as_ref()
             .is_some_and(|index| index.files.len() == 1)
         {
-            self.set_document(document);
+            if self.document_loading && self.document.file_count() > 0 {
+                self.finalize_refreshed_preview_state();
+            }
             self.local_diff_single_loaded = true;
             self.document_loading = false;
+            self.set_document(document);
         } else {
             drop(self.local_diff_documents.insert(path, document));
             if !self.document_loading {
@@ -108,6 +111,9 @@ impl App {
             }
         }
         if self.document_loading && self.local_diff_index.is_some() {
+            if self.document.file_count() > 0 {
+                self.finalize_refreshed_preview_state();
+            }
             self.document_loading = false;
             self.rebuild_local_diff_document();
         }
