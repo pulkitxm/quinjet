@@ -232,7 +232,7 @@ fn url_path_encoding_preserves_only_path_safe_bytes() {
         ("[branch]", "%5Bbranch%5D"),
         ("a\\b", "a%5Cb"),
         ("line\nbreak\t", "line%0Abreak%09"),
-        ("café/東京", "caf%C3%A9/%E6%9D%B1%E4%BA%AC"),
+        ("résumé/東京", "r%C3%A9sum%C3%A9/%E6%9D%B1%E4%BA%AC"),
         ("🙂", "%F0%9F%99%82"),
     ];
 
@@ -299,8 +299,8 @@ fn repository_branch_targets_validate_and_encode_components() {
             Some("https://github.com/acme/widget/tree/fix%3F%23%25"),
         ),
         (
-            ("https://github.com/acme/widget", "café/東京"),
-            Some("https://github.com/acme/widget/tree/caf%C3%A9/%E6%9D%B1%E4%BA%AC"),
+            ("https://github.com/acme/widget", "résumé/東京"),
+            Some("https://github.com/acme/widget/tree/r%C3%A9sum%C3%A9/%E6%9D%B1%E4%BA%AC"),
         ),
     ];
 
