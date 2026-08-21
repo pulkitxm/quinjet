@@ -94,7 +94,7 @@ impl CacheStore {
     pub(super) fn read(&self, key: &str, limit: usize) -> Option<CacheEntry> {
         let path = self.path(key);
         let metadata = fs::metadata(&path).ok()?;
-        if metadata.len() > limit as u64 + CACHE_MAGIC.len() as u64 {
+        if metadata.len() > (limit as u64).saturating_add(CACHE_MAGIC.len() as u64) {
             drop(fs::remove_file(path));
             return None;
         }
@@ -294,4 +294,142 @@ pub(super) fn stable_cache_hash(value: &[u8]) -> (u64, u64) {
         right = right.wrapping_mul(0x0100_0000_01b3).rotate_left(5);
     }
     (left, right)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cache_limits_accept_exact_data_and_reject_oversized_data() {
+        let (directory, cache) = cache_store();
+        cache.write("empty", b"", 0).unwrap();
+        cache.write("exact", b"data", 4).unwrap();
+        cache.write("write-over", b"large", 4).unwrap();
+
+        assert_eq!(cache.read("empty", 0).unwrap().data, b"");
+        assert_eq!(cache.read("exact", 4).unwrap().data, b"data");
+        assert!(!cache.path("write-over").exists());
+
+        let mut oversized = CACHE_MAGIC.to_vec();
+        oversized.extend_from_slice(b"large");
+        write_raw(&cache, "read-over", &oversized);
+        assert!(cache.read("read-over", 4).is_none());
+        assert!(!cache.path("read-over").exists());
+        assert!(directory.path().exists());
+    }
+
+    #[test]
+    fn invalid_and_truncated_magic_are_rejected() {
+        let (_directory, cache) = cache_store();
+        let cases = [
+            ("empty-file", Vec::new()),
+            ("truncated", CACHE_MAGIC[..CACHE_MAGIC.len() - 1].to_vec()),
+            ("wrong", b"quinjet-gh-cache-v2\nbody".to_vec()),
+        ];
+
+        for (key, data) in cases {
+            write_raw(&cache, key, &data);
+            assert!(cache.read(key, usize::MAX).is_none(), "{key}");
+        }
+
+        write_raw(&cache, "magic-only", CACHE_MAGIC);
+        assert_eq!(cache.read("magic-only", 0).unwrap().data, b"");
+    }
+
+    #[test]
+    fn overwrite_replaces_data_and_failed_rename_cleans_temporary_file() {
+        let (_directory, cache) = cache_store();
+        cache.write("same", b"old", 16).unwrap();
+        cache.write("same", b"new", 16).unwrap();
+        assert_eq!(cache.read("same", 16).unwrap().data, b"new");
+        assert!(temporary_paths(&cache.root).is_empty());
+
+        fs::create_dir_all(cache.path("blocked")).unwrap();
+        assert!(cache.write("blocked", b"data", 16).is_err());
+        assert!(temporary_paths(&cache.root).is_empty());
+    }
+
+    #[test]
+    fn stable_hashes_and_paths_are_fixed() {
+        assert_eq!(
+            stable_cache_hash(b""),
+            (0xcbf2_9ce4_8422_2325, 0x8422_2325_cbf2_9ce4)
+        );
+        assert_eq!(
+            stable_cache_hash(b"repo\npage 1"),
+            (0x3001_1e10_6f1a_b939, 0xb1ee_1cac_8bc6_e6c9)
+        );
+        let (_directory, cache) = cache_store();
+        assert_eq!(
+            cache
+                .path("repo\npage 1")
+                .file_name()
+                .and_then(OsStr::to_str),
+            Some("30011e106f1ab939b1ee1cac8bc6e6c9.cache")
+        );
+        assert_ne!(cache.path("same"), cache.path("different"));
+    }
+
+    #[test]
+    fn pull_request_urls_require_an_exact_repository_and_number() {
+        let repository =
+            repository_from_pull_request_url("https://github.example.com/Acme/Widget/pull/42", 42)
+                .unwrap();
+        assert_eq!(repository.name_with_owner, "Acme/Widget");
+        assert_eq!(repository.url, "https://github.example.com/Acme/Widget");
+        assert_eq!(repository.remotes, Vec::<String>::new());
+
+        for url in [
+            "github.com/acme/widget/pull/42",
+            "https://github.com/acme/pull/42",
+            "https://github.com/acme/widget/extra/pull/42",
+            "https://github.com/acme/widget/pull/41",
+            "https://github.com/acme/widget/pull/42/files",
+            "https://github.com/acme/widget/pull/42?diff=split",
+            "https://github.com//widget/pull/42",
+        ] {
+            assert!(repository_from_pull_request_url(url, 42).is_none(), "{url}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cache_directories_and_files_are_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (_directory, cache) = cache_store();
+        cache.write("private", b"data", 4).unwrap();
+        let directory_mode = fs::metadata(&cache.root).unwrap().permissions().mode();
+        let file_mode = fs::metadata(cache.path("private"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(directory_mode & 0o777, 0o700);
+        assert_eq!(file_mode & 0o077, 0);
+    }
+
+    fn cache_store() -> (tempfile::TempDir, CacheStore) {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = CacheStore::at(directory.path().join("github"));
+        (directory, cache)
+    }
+
+    fn write_raw(cache: &CacheStore, key: &str, data: &[u8]) {
+        fs::create_dir_all(&cache.root).unwrap();
+        fs::write(cache.path(key), data).unwrap();
+    }
+
+    fn temporary_paths(root: &Path) -> Vec<PathBuf> {
+        fs::read_dir(root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(OsStr::to_str)
+                    .is_some_and(|name| name.starts_with(".write-"))
+            })
+            .collect()
+    }
 }
