@@ -383,7 +383,7 @@ mod tests {
 
     #[test]
     fn malformed_ignored_and_empty_records_are_skipped() {
-        let input = b"\0! ignored.txt\0x unknown\01 too-short\02 R. too-short\0old.txt\0u UU too-short\0? kept.txt\0";
+        let input = b"\0! ignored.txt\0x unknown\x001 too-short\x002 R. too-short\0old.txt\0u UU too-short\0? kept.txt\0";
         let status = parse_porcelain_v2(input);
 
         assert_eq!(status.changes.len(), 1);
@@ -393,7 +393,7 @@ mod tests {
 
     #[test]
     fn changes_sort_by_area_then_lossy_path_and_keep_dual_renames() {
-        let input = b"? zeta.txt\0? \xff-invalid.txt\01 .D N... 100644 100644 000000 aaaaaaa aaaaaaa alpha.txt\02 RM N... 100644 100644 100644 aaaaaaa bbbbbbb R100 renamed.txt\0original.txt\0u DD N... 100644 100644 000000 100644 aaaaaaa bbbbbbb ccccccc conflict with spaces.txt\0";
+        let input = b"? zeta.txt\0? \xff-invalid.txt\x001 .D N... 100644 100644 000000 aaaaaaa aaaaaaa alpha.txt\x002 RM N... 100644 100644 100644 aaaaaaa bbbbbbb R100 renamed.txt\0original.txt\0u DD N... 100644 100644 000000 100644 aaaaaaa bbbbbbb ccccccc conflict with spaces.txt\0";
         let status = parse_porcelain_v2(input);
 
         assert_eq!(status.changes.len(), 6);
