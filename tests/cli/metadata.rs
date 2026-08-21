@@ -93,8 +93,20 @@ fn tui_accepts_theme_and_appearance_before_claiming_the_terminal() -> Result<()>
 
 #[test]
 fn every_subcommand_answers_help() -> Result<()> {
-    for path in COMMAND_PATHS {
-        let mut args = path.to_vec();
+    let capabilities = run_in(None, &["capabilities", "--json"])?
+        .success()?
+        .json()?;
+    let commands = capabilities["commands"]
+        .as_array()
+        .context("capabilities commands were not an array")?;
+    for command in commands {
+        let path = command["path"]
+            .as_str()
+            .context("a capability command omitted its path")?;
+        let Some(path) = path.strip_prefix("quinjet ") else {
+            continue;
+        };
+        let mut args = path.split_whitespace().collect::<Vec<_>>();
         args.push("--help");
         let run = run_in(None, &args)?;
         ensure!(run.code == 0, "{path:?} --help exited {}", run.code);
