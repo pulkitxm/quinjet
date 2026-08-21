@@ -225,7 +225,7 @@ impl Repository {
             .context("there is no pending review to discard")?;
         self.review_mutation(
             pull_request,
-            "mutation($input: DeletePullRequestReviewInput!) { deletePullRequestReview(input: $input) { pullRequest { id } } }",
+            "mutation($input: DeletePullRequestReviewInput!) { deletePullRequestReview(input: $input) { pullRequestReview { id } } }",
             &json!({ "input": { "pullRequestReviewId": pending.id } }),
             "unable to discard the pending review",
             "Discarded pending review",
