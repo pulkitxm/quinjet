@@ -182,6 +182,38 @@ impl Repository {
             )
         })
     }
+
+    pub(super) fn run_gh_with_input<I, S>(
+        &self,
+        args: I,
+        input: &[u8],
+        stdout_limit: usize,
+    ) -> Result<BoundedOutput>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let mut command = Command::new("gh");
+        let _ = command
+            .current_dir(&self.root)
+            .args(args)
+            .env("GH_PROMPT_DISABLED", "1")
+            .env("GH_PAGER", "cat")
+            .env("GH_NO_UPDATE_NOTIFIER", "1")
+            .env("NO_COLOR", "1");
+        process::run_bounded_command_with_input(
+            &mut command,
+            input,
+            stdout_limit,
+            MAX_GH_ERROR_BYTES,
+        )
+        .with_context(|| {
+            format!(
+                "failed to execute GitHub CLI (`gh`) in {}; install it and run `gh auth login`",
+                self.root.display()
+            )
+        })
+    }
 }
 
 #[expect(

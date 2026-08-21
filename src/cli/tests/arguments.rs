@@ -273,6 +273,72 @@ fn pull_request_collaboration_actions_parse_without_prompts() {
 }
 
 #[test]
+fn pull_request_review_verbs_parse_at_their_leaf() {
+    let comment = Cli::try_parse_from([
+        "quinjet",
+        "pr",
+        "reviews",
+        "comment",
+        "24",
+        "src/main.rs",
+        "--line",
+        "42",
+        "--side",
+        "right",
+        "--body",
+        "Fix this",
+    ])
+    .unwrap();
+    assert!(matches!(
+        comment.command,
+        Some(Verb::Pr {
+            command: PrVerb::Reviews {
+                command: PrReviewVerb::Comment(PrReviewCommentArgs {
+                    line: Some(42),
+                    side: Some(PrReviewSideArg::Right),
+                    ..
+                })
+            }
+        })
+    ));
+
+    let submit = Cli::try_parse_from([
+        "quinjet",
+        "pr",
+        "reviews",
+        "submit",
+        "24",
+        "--approve",
+        "--body-file",
+        "review.md",
+    ])
+    .unwrap();
+    assert!(matches!(
+        submit.command,
+        Some(Verb::Pr {
+            command: PrVerb::Reviews {
+                command: PrReviewVerb::Submit(PrReviewSubmitArgs {
+                    decision: PrReviewDecisionArgs { approve: true, .. },
+                    ..
+                })
+            }
+        })
+    ));
+
+    Cli::try_parse_from([
+        "quinjet",
+        "pr",
+        "reviews",
+        "comment",
+        "24",
+        "src/main.rs",
+        "--body",
+        "Missing coordinates",
+    ])
+    .unwrap_err();
+}
+
+#[test]
 fn a_session_answers_a_status_command_with_the_working_tree() {
     let repository = TestRepository::new();
     fs::write(repository.path.join("added.txt"), "new\n").unwrap();

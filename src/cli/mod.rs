@@ -1,7 +1,9 @@
 pub(crate) mod command;
 mod completion;
 mod package_manager;
+mod pr_verbs;
 mod render;
+mod review;
 mod update;
 mod watch;
 
@@ -21,12 +23,16 @@ pub(crate) use command::{Command, Outcome, Session};
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use serde::Serialize;
 
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
+use pr_verbs::*;
+
 use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
     CheckRunLog, GitHubRepository, PullRequest, PullRequestCheck, PullRequestCheckStatus,
     PullRequestCommentMode, PullRequestDiffIndex, PullRequestEdit, PullRequestLockReason,
-    PullRequestMergeMethod, PullRequestMergeMode, PullRequestOperation, PullRequestReviewKind,
-    PullRequestSnapshot, PullRequestUpdateMethod,
+    PullRequestMergeMethod, PullRequestMergeMode, PullRequestOperation, PullRequestReviewDecision,
+    PullRequestReviewKind, PullRequestReviewOperation, PullRequestReviewSide,
+    PullRequestReviewThreadSubject, PullRequestSnapshot, PullRequestUpdateMethod,
 };
 use crate::git::status::{Change, ChangeArea};
 use crate::git::{ConflictChoice, GitOperation, LocalDiffRequest, Repository};
@@ -234,6 +240,9 @@ impl Verb {
             Self::Pr {
                 command: PrVerb::Merge(_) | PrVerb::Close(_) | PrVerb::Reopen(_),
             } => Some("Updating pull request"),
+            Self::Pr {
+                command: PrVerb::Reviews { .. },
+            } => Some("Updating pull-request review"),
             Self::Pr { .. } => Some("Loading pull request"),
             Self::Update(_) => Some("Checking for updates"),
         }
@@ -430,6 +439,8 @@ use output::*;
 use pull_request::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use repository::*;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
+use review::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use support::*;
 pub(crate) use support::{open_url, report, stdout_is_terminal};

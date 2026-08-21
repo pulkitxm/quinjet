@@ -8,17 +8,48 @@ pub(crate) struct BoundedOutput {
     pub stdout_truncated: bool,
 }
 
-#[expect(
-    clippy::large_stack_arrays,
-    reason = "the read buffer is deliberately one page of stack"
-)]
 pub(crate) fn run_bounded_command(
     command: &mut Command,
     stdout_limit: usize,
     stderr_limit: usize,
 ) -> Result<BoundedOutput> {
+    let _ = command.stdin(Stdio::null());
+    run_bounded_command_inner(command, None, stdout_limit, stderr_limit)
+}
+
+pub(super) fn run_bounded_command_with_input(
+    command: &mut Command,
+    input: &[u8],
+    stdout_limit: usize,
+    stderr_limit: usize,
+) -> Result<BoundedOutput> {
+    let _ = command.stdin(Stdio::piped());
+    run_bounded_command_inner(command, Some(input), stdout_limit, stderr_limit)
+}
+
+#[expect(
+    clippy::large_stack_arrays,
+    reason = "the read buffer is deliberately one page of stack"
+)]
+fn run_bounded_command_inner(
+    command: &mut Command,
+    input: Option<&[u8]>,
+    stdout_limit: usize,
+    stderr_limit: usize,
+) -> Result<BoundedOutput> {
     let _ = command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = command.spawn()?;
+    if let Some(input) = input {
+        let mut stdin = child
+            .stdin
+            .take()
+            .context("child process did not expose stdin")?;
+        if let Err(error) = stdin.write_all(input) {
+            drop(child.kill());
+            drop(child.wait());
+            return Err(error.into());
+        }
+    }
     let mut stdout = child
         .stdout
         .take()
