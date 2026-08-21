@@ -9,8 +9,10 @@ on:
       - 'Cargo.lock'
       - 'README.md'
       - 'Formula/quinjet.rb'
+      - 'packaging/winget/**'
       - 'scripts/homebrew_formula.py'
       - 'scripts/update_homebrew_tap.sh'
+      - 'scripts/winget_manifest.py'
       - '.github/workflows/release.yml'
   workflow_dispatch:
 
@@ -259,9 +261,24 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Prepare Winget executable
+        run: cp dist/quinjet-windows-x86_64.exe dist/quinjet.exe
       - name: Generate checksums
         working-directory: dist
         run: sha256sum quinjet-* > SHA256SUMS
+      - name: Render Winget manifests
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          manifests="${RUNNER_TEMP}/winget-manifests"
+          python3 scripts/winget_manifest.py \
+            --version "${VERSION}" \
+            --release-date "$(date -u +%F)" \
+            --checksums dist/SHA256SUMS \
+            --output-dir "${manifests}"
+          (cd "${manifests}" && zip -9 "${GITHUB_WORKSPACE}/dist/quinjet-winget-manifests.zip" ./*.yaml)
+          (cd dist && sha256sum quinjet-* >SHA256SUMS)
       - uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780 # v2
         with:
           tool: syft
