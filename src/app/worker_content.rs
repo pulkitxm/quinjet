@@ -44,12 +44,17 @@ impl App {
                         {
                             self.request_history(true, &mut effects);
                         }
-                        if self.view == View::Changes {
+                        if self.view == View::Changes && !self.refresh_again {
                             self.preview_due = None;
                             self.request_preview(&mut effects);
                         }
                     }
-                    Err(error) => self.show_toast(error, ToastLevel::Error, now),
+                    Err(error) => {
+                        if self.local_diff_preserving_document && !self.document_loading {
+                            self.abort_preserved_local_diff_refresh();
+                        }
+                        self.show_toast(error, ToastLevel::Error, now);
+                    }
                 }
                 if self.refresh_again {
                     self.refresh_again = false;
@@ -60,7 +65,10 @@ impl App {
                 if generation != self.diff_generation {
                     return effects;
                 }
-                self.document_loading = false;
+                let preserve_document = self.local_diff_preserving_document;
+                if !preserve_document {
+                    self.document_loading = false;
+                }
                 self.local_diff_loading_path = None;
                 match result {
                     Ok(index) => {
@@ -74,47 +82,56 @@ impl App {
                             .collect::<Vec<_>>();
                         self.local_diff_workspace_generation = Some(generation);
                         self.local_diff_documents.clear();
-                        self.reset_preview_file_folds(&paths);
-                        self.selected_preview_file = selected_path
-                            .or_else(|| index.files.first().map(|file| file.path.clone()));
-                        self.preview_file_cursor = self
-                            .selected_preview_file
-                            .as_ref()
-                            .and_then(|selected| {
-                                index.files.iter().position(|file| &file.path == selected)
-                            })
-                            .unwrap_or_default();
-                        let first_path = self.selected_preview_file.clone();
                         self.local_diff_index = Some(index);
-                        self.rebuild_local_diff_document();
-                        self.content_scroll = 0;
-                        self.horizontal_scroll = 0;
-                        let mut paths = self
-                            .local_diff_index
-                            .as_ref()
-                            .map(|index| {
-                                index
-                                    .files
-                                    .iter()
-                                    .filter(|file| {
-                                        !self.preview_file_collapsed(&file.path.to_string_lossy())
-                                    })
-                                    .map(|file| file.path.clone())
-                                    .collect::<Vec<_>>()
-                            })
-                            .unwrap_or_default();
-                        if let Some(path) = first_path
-                            && !paths.contains(&path)
-                        {
-                            paths.insert(0, path);
+                        if !preserve_document {
+                            self.reset_preview_file_folds(&paths);
+                            self.selected_preview_file =
+                                selected_path.clone().or_else(|| paths.first().cloned());
+                            self.preview_file_cursor = self
+                                .selected_preview_file
+                                .as_ref()
+                                .and_then(|selected| paths.iter().position(|path| path == selected))
+                                .unwrap_or_default();
                         }
-                        for path in paths {
+                        let first_path = selected_path.or_else(|| paths.first().cloned());
+                        if !preserve_document {
+                            self.rebuild_local_diff_document();
+                            self.content_scroll = 0;
+                            self.horizontal_scroll = 0;
+                        }
+                        let mut load_paths = paths
+                            .iter()
+                            .filter(|path| {
+                                if preserve_document {
+                                    !self.refreshed_preview_file_collapsed(path, paths.len())
+                                } else {
+                                    !self.preview_file_collapsed(&path.to_string_lossy())
+                                }
+                            })
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        if let Some(path) = first_path
+                            && !load_paths.contains(&path)
+                        {
+                            load_paths.insert(0, path);
+                        }
+                        for path in load_paths {
                             self.request_local_diff_file(path, &mut effects);
+                        }
+                        if self.local_diff_loading_path.is_none()
+                            && self.local_diff_pending_paths.is_empty()
+                        {
+                            self.request_next_local_diff_file(&mut effects);
                         }
                     }
                     Err(error) => {
-                        self.reset_local_diff_runtime();
-                        self.set_document(DiffDocument::empty("Preview Error", error.clone()));
+                        if preserve_document {
+                            self.abort_preserved_local_diff_refresh();
+                        } else {
+                            self.document_loading = false;
+                            self.reset_local_diff_runtime();
+                            self.set_document(DiffDocument::empty("Preview Error", error.clone()));
+                        }
                         self.show_toast(error, ToastLevel::Error, now);
                     }
                 }
@@ -138,6 +155,10 @@ impl App {
                 self.local_diff_loading_path = None;
                 match result {
                     Ok(document) => self.store_local_diff_document(path, document),
+                    Err(error) if self.local_diff_preserving_document => {
+                        self.abort_preserved_local_diff_refresh();
+                        self.show_toast(error, ToastLevel::Error, now);
+                    }
                     Err(error) => {
                         let title = self.local_diff_index.as_ref().map_or_else(
                             || "Preview Error".to_owned(),

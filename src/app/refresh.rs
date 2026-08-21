@@ -17,6 +17,7 @@ impl App {
             self.changes_diff_version = self.changes_diff_version.wrapping_add(1);
             self.invalidate_preview();
             self.local_diff_loading_path = None;
+            self.local_diff_pending_paths.clear();
         }
         self.request_refresh(effects);
         if !self.history_branches_loading {
@@ -158,6 +159,30 @@ impl App {
         {
             return;
         }
+        let next_change_section = if matches!(&request, LocalDiffRequest::Changes { .. }) {
+            self.selected_change_section
+        } else {
+            None
+        };
+        let preserve_document = same_changes_preview(
+            self.local_diff_request.as_ref(),
+            &request,
+            self.local_diff_change_section,
+            next_change_section,
+        ) && self.document.file_count() > 0;
+        let preserved_paths = if preserve_document {
+            if self.local_diff_preserved_paths.is_empty() {
+                self.local_diff_index
+                    .as_ref()
+                    .map_or_else(HashSet::new, |index| {
+                        index.files.iter().map(|file| file.path.clone()).collect()
+                    })
+            } else {
+                self.local_diff_preserved_paths.clone()
+            }
+        } else {
+            HashSet::new()
+        };
         let title = match &request {
             LocalDiffRequest::Changes { changes, .. } => changes
                 .first()
@@ -176,12 +201,17 @@ impl App {
         let generation = self.diff_generation;
         self.reset_local_diff_runtime();
         self.local_diff_request = Some(request.clone());
+        self.local_diff_change_section = next_change_section;
+        self.local_diff_preserving_document = preserve_document;
+        self.local_diff_preserved_paths = preserved_paths;
         self.document_loading = true;
-        self.selected_preview_file = None;
-        self.preview_file_cursor = 0;
-        self.collapsed_preview_files.clear();
-        self.expanded_preview_files.clear();
-        self.set_document(DiffDocument::empty(title, "Indexing changed files…"));
+        if !preserve_document {
+            self.selected_preview_file = None;
+            self.preview_file_cursor = 0;
+            self.collapsed_preview_files.clear();
+            self.expanded_preview_files.clear();
+            self.set_document(DiffDocument::empty(title, "Indexing changed files…"));
+        }
         effects.push(AppEffect::Git(Box::new(WorkerCommand::PrepareLocalDiff {
             generation,
             request: Box::new(request),
@@ -355,5 +385,39 @@ impl App {
             }
         }
         self.change_cursor = self.change_cursor.min(visible.len().saturating_sub(1));
+    }
+}
+
+fn same_changes_preview(
+    current: Option<&LocalDiffRequest>,
+    next: &LocalDiffRequest,
+    current_section: Option<ChangeSection>,
+    next_section: Option<ChangeSection>,
+) -> bool {
+    let (
+        Some(LocalDiffRequest::Changes {
+            changes: current_changes,
+            expanded: current_expanded,
+            ..
+        }),
+        LocalDiffRequest::Changes {
+            changes: next_changes,
+            expanded: next_expanded,
+            ..
+        },
+    ) = (current, next)
+    else {
+        return false;
+    };
+    if current_expanded != next_expanded {
+        return false;
+    }
+    match (current_section, next_section) {
+        (Some(current), Some(next)) => current == next,
+        (None, None) => matches!(
+            (current_changes.as_slice(), next_changes.as_slice()),
+            ([current], [next]) if current.path == next.path && current.area == next.area
+        ),
+        _ => false,
     }
 }

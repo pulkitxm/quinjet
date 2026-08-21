@@ -114,6 +114,10 @@ impl App {
             return self.pull_request_file_view == PullRequestFileView::AllFiles
                 && self.pull_request_files.len() > 1;
         }
+        let rendered_files = self.document.file_count();
+        if self.local_diff_preserving_document {
+            return rendered_files > 1;
+        }
         if let Some(index) = self.local_diff_index.as_ref() {
             return index.files.len() > 1;
         }
@@ -144,6 +148,62 @@ impl App {
         if paths.len() > 1 && !self.files_collapsed && !self.collapse_preference_set {
             self.collapsed_preview_files.extend(paths.iter().cloned());
         }
+    }
+
+    pub(super) fn refreshed_preview_file_collapsed(&self, path: &Path, total: usize) -> bool {
+        if total <= 1 {
+            return false;
+        }
+        if self.files_collapsed {
+            return !self.expanded_preview_files.contains(path);
+        }
+        self.collapsed_preview_files.contains(path)
+            || (!self.collapse_preference_set
+                && (self.local_diff_preserved_paths.len() <= 1
+                    || !self.local_diff_preserved_paths.contains(path)))
+    }
+
+    pub(super) fn finalize_refreshed_preview_state(&mut self) {
+        let paths = self
+            .local_diff_index
+            .as_ref()
+            .map(|index| {
+                index
+                    .files
+                    .iter()
+                    .map(|file| file.path.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let indexed = paths.iter().cloned().collect::<HashSet<_>>();
+        self.collapsed_preview_files
+            .retain(|path| indexed.contains(path));
+        self.expanded_preview_files
+            .retain(|path| indexed.contains(path));
+        if !self.files_collapsed && !self.collapse_preference_set && paths.len() > 1 {
+            if self.local_diff_preserved_paths.len() <= 1 {
+                self.collapsed_preview_files.extend(paths.iter().cloned());
+            } else {
+                self.collapsed_preview_files.extend(
+                    paths
+                        .iter()
+                        .filter(|path| !self.local_diff_preserved_paths.contains(*path))
+                        .cloned(),
+                );
+            }
+        }
+        self.selected_preview_file = self
+            .selected_preview_file
+            .clone()
+            .filter(|selected| indexed.contains(selected))
+            .or_else(|| paths.first().cloned());
+        self.preview_file_cursor = self
+            .selected_preview_file
+            .as_ref()
+            .and_then(|selected| paths.iter().position(|path| path == selected))
+            .unwrap_or_default();
+        self.local_diff_preserving_document = false;
+        self.local_diff_preserved_paths.clear();
     }
 
     pub(super) fn visible_preview_paths(&self, paths: &[PathBuf]) -> HashSet<PathBuf> {
@@ -178,7 +238,15 @@ impl App {
         if self.files_collapsed {
             self.local_diff_pending_paths.clear();
         } else {
-            for path in self.preview_file_paths() {
+            let paths = if self.view != View::PullRequests && self.local_diff_preserving_document {
+                self.local_diff_index.as_ref().map_or_else(
+                    || self.preview_file_paths(),
+                    |index| index.files.iter().map(|file| file.path.clone()).collect(),
+                )
+            } else {
+                self.preview_file_paths()
+            };
+            for path in paths {
                 self.request_local_diff_file(path, effects);
             }
         }
