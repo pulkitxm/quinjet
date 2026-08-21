@@ -1,6 +1,10 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the match is the exhaustive pull-request command routing table"
+)]
 pub(super) fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb) -> Result<u8> {
     match command {
         PrVerb::View(args) => {
@@ -78,7 +82,158 @@ pub(super) fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb
             args.yes,
             PullRequestOperation::Merge {
                 method: args.method.method(),
+                mode: PullRequestMergeMode::Direct,
                 delete_branch: args.delete_branch,
+            },
+        ),
+        PrVerb::AdminMerge(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Merge {
+                method: args.method.method(),
+                mode: PullRequestMergeMode::Admin,
+                delete_branch: args.delete_branch,
+            },
+        ),
+        PrVerb::AutoMerge(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Merge {
+                method: args.method.method(),
+                mode: PullRequestMergeMode::Auto,
+                delete_branch: args.delete_branch,
+            },
+        ),
+        PrVerb::DisableAutoMerge(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::DisableAutoMerge,
+        ),
+        PrVerb::Dequeue(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Dequeue,
+        ),
+        PrVerb::Ready(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::SetDraft(false),
+        ),
+        PrVerb::Draft(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::SetDraft(true),
+        ),
+        PrVerb::Review(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Review {
+                kind: args.choice.kind(),
+                body: args.body.unwrap_or_default(),
+            },
+        ),
+        PrVerb::Comment(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Comment {
+                mode: PullRequestCommentMode::Create,
+                body: args.body,
+            },
+        ),
+        PrVerb::EditLastComment(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Comment {
+                mode: PullRequestCommentMode::EditLast,
+                body: args.body,
+            },
+        ),
+        PrVerb::DeleteLastComment(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Comment {
+                mode: PullRequestCommentMode::DeleteLast,
+                body: String::new(),
+            },
+        ),
+        PrVerb::Edit(args) => {
+            let edit = args.edit()?;
+            mutate_pull_request(
+                session,
+                out,
+                &args.pull_request,
+                args.yes,
+                PullRequestOperation::Edit(edit),
+            )
+        }
+        PrVerb::UpdateBranch(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::UpdateBranch(if args.rebase {
+                PullRequestUpdateMethod::Rebase
+            } else {
+                PullRequestUpdateMethod::Merge
+            }),
+        ),
+        PrVerb::Lock(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Lock(args.reason.map(Into::into)),
+        ),
+        PrVerb::Unlock(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Unlock,
+        ),
+        PrVerb::Subscribe(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Subscribe(true),
+        ),
+        PrVerb::Unsubscribe(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Subscribe(false),
+        ),
+        PrVerb::Revert(args) => mutate_pull_request(
+            session,
+            out,
+            &args.pull_request,
+            args.yes,
+            PullRequestOperation::Revert {
+                draft: args.draft,
+                title: args.title.unwrap_or_default(),
+                body: args.body.unwrap_or_default(),
             },
         ),
         PrVerb::Close(args) => mutate_pull_request(
@@ -125,25 +280,30 @@ pub(super) fn preview_pull_request_operation(
     pull_request: &PullRequest,
     operation: &PullRequestOperation,
 ) -> String {
-    let mut message = match operation {
-        PullRequestOperation::Merge { method, .. } => {
+    let (mut message, action) = match operation {
+        PullRequestOperation::Merge {
+            method,
+            mode: PullRequestMergeMode::Direct,
+            ..
+        } => {
             let mut text = String::from("Would ");
             text.push_str(method.preview_verb());
-            text
+            (text, "merge it.")
         }
-        PullRequestOperation::Close => String::from("Would close"),
-        PullRequestOperation::Reopen => String::from("Would reopen"),
+        PullRequestOperation::Close => (String::from("Would close"), "close it."),
+        PullRequestOperation::Reopen => (String::from("Would reopen"), "reopen it."),
+        _ => {
+            let mut text = String::from("Would ");
+            text.push_str(&operation.label().to_lowercase());
+            (text, "perform this action.")
+        }
     };
     message.push_str(" #");
     message.push_str(&pull_request.number.to_string());
     message.push_str(" (");
     message.push_str(&pull_request.title);
     message.push_str("). Pass --yes to ");
-    match operation {
-        PullRequestOperation::Merge { .. } => message.push_str("merge it."),
-        PullRequestOperation::Close => message.push_str("close it."),
-        PullRequestOperation::Reopen => message.push_str("reopen it."),
-    }
+    message.push_str(action);
     message
 }
 

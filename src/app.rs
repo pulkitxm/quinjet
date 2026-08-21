@@ -15,7 +15,8 @@ use crate::git::diff::{DiffDocument, DiffIndex, DiffLineCounts, DiffLineKind, Pu
 use crate::git::github::{
     CheckRunLog, GitHubRepository, PullRequest, PullRequestCheck, PullRequestCheckStatus,
     PullRequestConversation, PullRequestDiffIndex, PullRequestFile, PullRequestFileStatus,
-    PullRequestMergeMethod, PullRequestOperation, PullRequestProgress, RecentPullRequest,
+    PullRequestMergeMethod, PullRequestMergeMode, PullRequestOperation, PullRequestProgress,
+    RecentPullRequest,
 };
 use crate::git::history::Commit;
 use crate::git::status::{Change, ChangeArea, ChangeStatus, RepoStatus};

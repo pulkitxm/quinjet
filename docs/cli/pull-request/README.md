@@ -1,13 +1,13 @@
 # `quinjet pr`
 
-`quinjet pr` reads one pull request by number, and can also merge, close, or
-reopen it. Ten verbs cover the metadata, the changed files, the patch, the
-conversation, the checks, one check run's log, handing the URL to a browser,
-and the three write actions. There is no listing verb and Quinjet never checks
-a pull request out, comments on it, or opens a new one. Reach for this group
-when you want the answer in a pipe rather than on screen, and reach for the
-pull-request pane of [the terminal interface](../tui.md) when you want to move
-around inside it.
+`quinjet pr` reads and operates on one pull request by number. Its read verbs
+cover metadata, changed files, patches, the conversation, checks, one check
+run's log, and browser opening. Its write verbs cover the full existing-PR
+workflow exposed by GitHub CLI, plus merge-queue removal and notification
+subscriptions through GitHub's GraphQL API. There is no listing, checkout, or
+creation verb. Reach for this group when you want the same operations in a pipe,
+and reach for the pull-request pane of [the terminal interface](../tui.md) when
+you want to work interactively.
 
 Every verb begins with the same lookup, so understanding that one step explains
 most of the group's behavior. Quinjet first works out which GitHub repositories
@@ -18,17 +18,17 @@ recognize as `github.com` on its own. It then runs one command for the pull
 request itself:
 
 ```text
-gh pr view <number> --repo <url> \
-  --json number,title,body,author,state,isDraft,createdAt,updatedAt,url,baseRefName,baseRefOid,headRefName,headRefOid,headRepository,isCrossRepository,additions,deletions,changedFiles \
+gh api graphql --hostname <host> -f owner=<owner> -f name=<name> \
+  -F number=<number> -f query=<pull-request-query> \
   --jq '[...] | @tsv'
 ```
 
-The `--jq` program flattens the record to one tab-separated line of exactly 18
-fields, which is why a malformed answer is reported as a field-count error
-rather than as a JSON parse failure. The repository passed to `--repo` is the
-canonical URL rather than `owner/name`, so a GitHub Enterprise host stays
-attached to the number and a pull request can never be looked up against the
-wrong host. `--repo owner/name` on the command line selects among the
+The query reads content, refs, viewer permissions, review state, merge state,
+auto-merge, merge queue, lock, and subscription data in one response. Its `--jq`
+program flattens the record to one tab-separated line of exactly 38 fields. The
+canonical repository identity supplies the GraphQL host, owner, and name, so a
+GitHub Enterprise host stays attached to the number. `--repo owner/name` on the
+command line selects among the
 repositories discovery found, matching case-insensitively on `owner/name` or on
 a URL suffix; when nothing matches, the verb exits 3 and points at
 [`quinjet repos`](../remotes/README.md).
@@ -78,6 +78,19 @@ when their check state settles.
 | `quinjet pr logs` | Prints one check run's steps and its GitHub Actions log. |
 | `quinjet pr open` | Hands the pull request URL, or one selected check URL, to the desktop browser. |
 | `quinjet pr merge` | Merges the pull request with `--merge`, `--squash`, or `--rebase` after `--yes`. |
+| `quinjet pr admin-merge` | Uses administrator privileges to merge despite unmet requirements. |
+| `quinjet pr auto-merge` | Enables automatic merging with the selected merge method. |
+| `quinjet pr disable-auto-merge` | Disables an active automatic merge request. |
+| `quinjet pr dequeue` | Removes the pull request from its merge queue. |
+| `quinjet pr ready` / `draft` | Changes whether an open pull request is ready for review. |
+| `quinjet pr review` | Approves, comments on, or requests changes on the pull request. |
+| `quinjet pr comment` | Adds a conversation comment. |
+| `quinjet pr edit-last-comment` / `delete-last-comment` | Updates or removes the viewer's latest conversation comment. |
+| `quinjet pr edit` | Changes title, description, base, assignees, labels, projects, reviewers, or milestone. |
+| `quinjet pr update-branch` | Merges or rebases the base branch into the pull request branch. |
+| `quinjet pr lock` / `unlock` | Changes whether the conversation accepts new comments. |
+| `quinjet pr subscribe` / `unsubscribe` | Changes notification subscription state. |
+| `quinjet pr revert` | Creates a pull request that reverts a merged pull request. |
 | `quinjet pr close` | Closes the pull request without merging, after `--yes`. |
 | `quinjet pr reopen` | Reopens a closed pull request that has not been merged, after `--yes`. |
 
@@ -91,6 +104,23 @@ when their check state settles.
 - [`quinjet pr logs`](./logs.md)
 - [`quinjet pr open`](./open.md)
 - [`quinjet pr merge`](./merge.md)
+- [`quinjet pr admin-merge`](./admin-merge.md)
+- [`quinjet pr auto-merge`](./auto-merge.md)
+- [`quinjet pr disable-auto-merge`](./disable-auto-merge.md)
+- [`quinjet pr dequeue`](./dequeue.md)
+- [`quinjet pr ready`](./ready.md)
+- [`quinjet pr draft`](./draft.md)
+- [`quinjet pr review`](./review.md)
+- [`quinjet pr comment`](./comment.md)
+- [`quinjet pr edit-last-comment`](./edit-last-comment.md)
+- [`quinjet pr delete-last-comment`](./delete-last-comment.md)
+- [`quinjet pr edit`](./edit.md)
+- [`quinjet pr update-branch`](./update-branch.md)
+- [`quinjet pr lock`](./lock.md)
+- [`quinjet pr unlock`](./unlock.md)
+- [`quinjet pr subscribe`](./subscribe.md)
+- [`quinjet pr unsubscribe`](./unsubscribe.md)
+- [`quinjet pr revert`](./revert.md)
 - [`quinjet pr close`](./close.md)
 - [`quinjet pr reopen`](./reopen.md)
 
@@ -98,8 +128,8 @@ when their check state settles.
 
 | Code | When this group produces it |
 | --- | --- |
-| 0 | The verb printed its answer. Also `pr checks --watch` when every check settled and none failed, `pr logs --watch` when the run finished without failing, `--help` on the group or any verb, and a merge/close/reopen preview that printed what it would do without `--yes`. |
-| 1 | The lookup failed: `gh` is missing or unauthenticated, no configured fetch or push remote resolves to a GitHub repository, the number does not exist (`Could not resolve to a PullRequest with the number of 99999`), or the number was `0` (`Pull-request numbers must be positive integers`). Also `files` and `diff` when the merge base could not be found within 4,096 commits, `checks --exit-code` when any check failed or is pending, `checks --watch` when the settled result contains a failure, `logs --watch` when the run ended failed, `open` when the desktop opener could not be spawned, and `merge` / `close` / `reopen` when `gh` rejected the write. |
+| 0 | The verb printed its answer. Also `pr checks --watch` when every check settled and none failed, `pr logs --watch` when the run finished without failing, `--help` on the group or any verb, and any write preview that printed what it would do without `--yes`. |
+| 1 | The lookup failed: `gh` is missing or unauthenticated, no configured fetch or push remote resolves to a GitHub repository, the number does not exist, or the number was `0`. Also `files` and `diff` when preparation failed, check and log verdict failures, browser-opening failures, and any write GitHub rejected because of state, permissions, protection rules, or an unsupported repository feature. |
 | 2 | clap rejected the command line: a missing `<NUMBER>`, a `<NUMBER>` that is not an unsigned integer, `quinjet pr` with no verb, `pr merge` without exactly one of `--merge` / `--squash` / `--rebase`, or an unknown flag. |
 | 3 | `--repo` matched none of the discovered repositories, `pr diff <n> <path>` named a path that is not part of the pull request, or a check name passed to `pr logs` or `pr open --check` matched zero checks or more than one. Every one of these prints a `hint:` listing the valid choices. |
 | 4 | `pr logs` found a check with no readable log, in either one-shot or watch mode, or `pr open --check` found a check with no browser URL. |
@@ -170,7 +200,7 @@ leaves stdout empty.
   `pr-numstat-v1` and `pr-patch-v1` (all keyed by merge base and head),
   `conversation-timeline-v1` and `conversation-comments-v1` (keyed by GitHub's
   `updatedAt` stamp), and `check-log-v1` and `check-steps-v1` for a settled job.
-  The timed keys are `repository` at 24 hours, `pull-request-v3` at 5 minutes,
+  The timed keys are `repository` at 24 hours, `pull-request-v4` at 5 minutes,
   and `checks-v1` at 30 seconds. `--refresh` skips only the timed ones.
 - A single file's patch is cached only when it is at most 1 MiB, so one enormous
   generated file cannot evict the rest of a pull request from the cache.
@@ -236,12 +266,11 @@ leaves stdout empty.
 - Titles longer than 16 KiB and descriptions longer than 256 KiB are cut at a
   character boundary and end in `…`.
 - `pr open` hands a URL to a platform opener (`open` on macOS, `explorer` on
-  Windows, `xdg-open` elsewhere) and does not wait on the child. `pr merge`,
-  `pr close`, and `pr reopen` are the write verbs: without `--yes` they only
-  print what they would do, and with `--yes` they run
-  `gh pr merge|close|reopen` against the same canonical `--repo <url>` the
-  lookup used. They do not offer admin merge, auto-merge, review, comment, or
-  checkout.
+  Windows, `xdg-open` elsewhere) and does not wait on the child. Every write
+  verb is preview-first and needs `--yes`. Existing pull-request actions use
+  non-interactive `gh pr` commands. Queue and subscription changes use GraphQL
+  mutations keyed by the node identity from the same lookup. Checkout and new
+  pull-request creation remain outside this group.
 - `pr open --check <name>` resolves the check by exact name first and then by a
   unique case-insensitive substring, using the same selection rule as
   `pr logs`. It opens the check's `link`; a selected check with no link exits 4.

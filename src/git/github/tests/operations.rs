@@ -12,6 +12,7 @@ fn pull_request_operation_messages_name_the_number_and_title() {
     );
     let merge = PullRequestOperation::Merge {
         method: PullRequestMergeMethod::Squash,
+        mode: PullRequestMergeMode::Direct,
         delete_branch: false,
     };
     assert_eq!(
@@ -29,6 +30,80 @@ fn pull_request_operation_messages_name_the_number_and_title() {
     assert_eq!(
         PullRequestOperation::Reopen.success_message(&pull_request),
         "Reopened #12"
+    );
+}
+
+#[test]
+fn pull_request_operations_map_to_non_interactive_gh_commands() {
+    let mut pull_request = pull_request(
+        repository(
+            "pulkitxm/quinjet",
+            "https://github.com/pulkitxm/quinjet",
+            &[],
+        ),
+        12,
+    );
+    pull_request.head_oid = "abc123".to_owned();
+    pull_request.action_state.node_id = "PR_node".to_owned();
+    let args = |operation: &PullRequestOperation| {
+        api::pull_request_operation_args(&pull_request, operation)
+            .into_iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        args(&PullRequestOperation::Merge {
+            method: PullRequestMergeMethod::Squash,
+            mode: PullRequestMergeMode::Auto,
+            delete_branch: true,
+        }),
+        [
+            "pr",
+            "merge",
+            "12",
+            "--repo",
+            "https://github.com/pulkitxm/quinjet",
+            "--squash",
+            "--auto",
+            "--match-head-commit",
+            "abc123",
+            "--delete-branch",
+        ]
+    );
+    assert!(args(&PullRequestOperation::SetDraft(true)).ends_with(&["--undo".to_owned()]));
+    assert!(
+        args(&PullRequestOperation::Review {
+            kind: PullRequestReviewKind::RequestChanges,
+            body: "Needs tests".to_owned(),
+        })
+        .ends_with(&[
+            "--request-changes".to_owned(),
+            "--body".to_owned(),
+            "Needs tests".to_owned(),
+        ])
+    );
+    assert!(
+        args(&PullRequestOperation::Edit(PullRequestEdit::AddReviewer(
+            "octocat".to_owned(),
+        )))
+        .ends_with(&["--add-reviewer".to_owned(), "octocat".to_owned()])
+    );
+    assert!(
+        args(&PullRequestOperation::Dequeue)
+            .iter()
+            .any(|arg| arg.contains("dequeuePullRequest"))
+    );
+    assert!(
+        args(&PullRequestOperation::Subscribe(false))
+            .iter()
+            .any(|arg| arg == "state=UNSUBSCRIBED")
+    );
+    assert!(
+        args(&PullRequestOperation::Comment {
+            mode: PullRequestCommentMode::DeleteLast,
+            body: String::new(),
+        })
+        .ends_with(&["--delete-last".to_owned(), "--yes".to_owned()])
     );
 }
 

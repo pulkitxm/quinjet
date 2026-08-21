@@ -104,6 +104,7 @@ impl App {
             PrPrimaryAction::Merge(method) => {
                 self.confirm_pull_request_operation(PullRequestOperation::Merge {
                     method,
+                    mode: PullRequestMergeMode::Direct,
                     delete_branch: false,
                 });
             }
@@ -120,6 +121,7 @@ impl App {
                 self.preferred_merge_method = method;
                 self.confirm_pull_request_operation(PullRequestOperation::Merge {
                     method,
+                    mode: PullRequestMergeMode::Direct,
                     delete_branch: false,
                 });
             }

@@ -144,6 +144,40 @@ pub(super) enum PrVerb {
     Open(PrOpenArgs),
     /// Merge a pull request
     Merge(PrMergeArgs),
+    /// Merge despite branch protections
+    AdminMerge(PrMergeArgs),
+    /// Merge automatically after requirements pass
+    AutoMerge(PrMergeArgs),
+    /// Disable automatic merging
+    DisableAutoMerge(PrMutateArgs),
+    /// Remove a pull request from its merge queue
+    Dequeue(PrMutateArgs),
+    /// Mark a draft pull request ready for review
+    Ready(PrMutateArgs),
+    /// Convert an open pull request to a draft
+    Draft(PrMutateArgs),
+    /// Submit an approval, comment, or change request
+    Review(PrReviewArgs),
+    /// Add a conversation comment
+    Comment(PrTextMutateArgs),
+    /// Edit your latest conversation comment
+    EditLastComment(PrTextMutateArgs),
+    /// Delete your latest conversation comment
+    DeleteLastComment(PrMutateArgs),
+    /// Edit pull-request metadata
+    Edit(PrEditArgs),
+    /// Bring the head branch up to date with its base
+    UpdateBranch(PrUpdateBranchArgs),
+    /// Lock the conversation
+    Lock(PrLockArgs),
+    /// Unlock the conversation
+    Unlock(PrMutateArgs),
+    /// Subscribe to notifications
+    Subscribe(PrMutateArgs),
+    /// Unsubscribe from notifications
+    Unsubscribe(PrMutateArgs),
+    /// Create a pull request that reverts a merged pull request
+    Revert(PrRevertArgs),
     /// Close a pull request
     Close(PrMutateArgs),
     /// Reopen a closed pull request
@@ -235,6 +269,181 @@ pub(super) struct PrMergeArgs {
 pub(super) struct PrMutateArgs {
     #[command(flatten)]
     pub(super) pull_request: PrArgs,
+    /// Confirm; without it the command reports what it would do
+    #[arg(long)]
+    pub(super) yes: bool,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct PrTextMutateArgs {
+    #[command(flatten)]
+    pub(super) pull_request: PrArgs,
+    /// Text to submit
+    #[arg(value_name = "BODY", value_hint = ValueHint::Other)]
+    pub(super) body: String,
+    /// Confirm; without it the command reports what it would do
+    #[arg(long)]
+    pub(super) yes: bool,
+}
+
+#[derive(Debug, Args)]
+#[group(required = true, multiple = false)]
+pub(super) struct PrReviewChoiceArgs {
+    /// Approve the pull request
+    #[arg(long)]
+    pub(super) approve: bool,
+    /// Submit a review without a verdict
+    #[arg(long)]
+    pub(super) comment: bool,
+    /// Request changes before merging
+    #[arg(long)]
+    pub(super) request_changes: bool,
+}
+
+impl PrReviewChoiceArgs {
+    pub(super) const fn kind(&self) -> PullRequestReviewKind {
+        if self.approve {
+            PullRequestReviewKind::Approve
+        } else if self.request_changes {
+            PullRequestReviewKind::RequestChanges
+        } else {
+            PullRequestReviewKind::Comment
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+pub(super) struct PrReviewArgs {
+    #[command(flatten)]
+    pub(super) pull_request: PrArgs,
+    #[command(flatten)]
+    pub(super) choice: PrReviewChoiceArgs,
+    /// Optional review body
+    #[arg(long, value_name = "TEXT", value_hint = ValueHint::Other)]
+    pub(super) body: Option<String>,
+    /// Confirm; without it the command reports what it would do
+    #[arg(long)]
+    pub(super) yes: bool,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(super) enum PrEditFieldArg {
+    Title,
+    Body,
+    Base,
+    AddAssignee,
+    RemoveAssignee,
+    AddLabel,
+    RemoveLabel,
+    AddProject,
+    RemoveProject,
+    AddReviewer,
+    RemoveReviewer,
+    Milestone,
+    RemoveMilestone,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct PrEditArgs {
+    #[command(flatten)]
+    pub(super) pull_request: PrArgs,
+    /// Metadata field or relationship to change
+    #[arg(value_enum, value_name = "FIELD")]
+    pub(super) field: PrEditFieldArg,
+    /// New value, or a comma-separated list for relationship fields
+    #[arg(value_name = "VALUE", value_hint = ValueHint::Other)]
+    pub(super) value: Option<String>,
+    /// Confirm; without it the command reports what it would do
+    #[arg(long)]
+    pub(super) yes: bool,
+}
+
+impl PrEditArgs {
+    pub(super) fn edit(&self) -> Result<PullRequestEdit> {
+        if matches!(self.field, PrEditFieldArg::RemoveMilestone) {
+            if self.value.is_some() {
+                return Err(anyhow::anyhow!("remove-milestone does not take a value"));
+            }
+            return Ok(PullRequestEdit::RemoveMilestone);
+        }
+        let value = self
+            .value
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("the selected edit field needs a value"))?;
+        Ok(match self.field {
+            PrEditFieldArg::Title => PullRequestEdit::Title(value),
+            PrEditFieldArg::Body => PullRequestEdit::Body(value),
+            PrEditFieldArg::Base => PullRequestEdit::Base(value),
+            PrEditFieldArg::AddAssignee => PullRequestEdit::AddAssignee(value),
+            PrEditFieldArg::RemoveAssignee => PullRequestEdit::RemoveAssignee(value),
+            PrEditFieldArg::AddLabel => PullRequestEdit::AddLabel(value),
+            PrEditFieldArg::RemoveLabel => PullRequestEdit::RemoveLabel(value),
+            PrEditFieldArg::AddProject => PullRequestEdit::AddProject(value),
+            PrEditFieldArg::RemoveProject => PullRequestEdit::RemoveProject(value),
+            PrEditFieldArg::AddReviewer => PullRequestEdit::AddReviewer(value),
+            PrEditFieldArg::RemoveReviewer => PullRequestEdit::RemoveReviewer(value),
+            PrEditFieldArg::Milestone => PullRequestEdit::SetMilestone(value),
+            PrEditFieldArg::RemoveMilestone => return Ok(PullRequestEdit::RemoveMilestone),
+        })
+    }
+}
+
+#[derive(Debug, Args)]
+pub(super) struct PrUpdateBranchArgs {
+    #[command(flatten)]
+    pub(super) pull_request: PrArgs,
+    /// Rebase onto the base branch instead of merging it
+    #[arg(long)]
+    pub(super) rebase: bool,
+    /// Confirm; without it the command reports what it would do
+    #[arg(long)]
+    pub(super) yes: bool,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(super) enum PrLockReasonArg {
+    OffTopic,
+    Resolved,
+    Spam,
+    TooHeated,
+}
+
+impl From<PrLockReasonArg> for PullRequestLockReason {
+    fn from(value: PrLockReasonArg) -> Self {
+        match value {
+            PrLockReasonArg::OffTopic => Self::OffTopic,
+            PrLockReasonArg::Resolved => Self::Resolved,
+            PrLockReasonArg::Spam => Self::Spam,
+            PrLockReasonArg::TooHeated => Self::TooHeated,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+pub(super) struct PrLockArgs {
+    #[command(flatten)]
+    pub(super) pull_request: PrArgs,
+    /// Why the conversation is being locked
+    #[arg(long, value_enum)]
+    pub(super) reason: Option<PrLockReasonArg>,
+    /// Confirm; without it the command reports what it would do
+    #[arg(long)]
+    pub(super) yes: bool,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct PrRevertArgs {
+    #[command(flatten)]
+    pub(super) pull_request: PrArgs,
+    /// Title for the revert pull request
+    #[arg(long, value_name = "TEXT", value_hint = ValueHint::Other)]
+    pub(super) title: Option<String>,
+    /// Description for the revert pull request
+    #[arg(long, value_name = "TEXT", value_hint = ValueHint::Other)]
+    pub(super) body: Option<String>,
+    /// Create the revert pull request as a draft
+    #[arg(long)]
+    pub(super) draft: bool,
     /// Confirm; without it the command reports what it would do
     #[arg(long)]
     pub(super) yes: bool,
