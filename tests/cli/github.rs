@@ -1,5 +1,6 @@
-use super::*;
 use std::os::unix::fs::PermissionsExt;
+
+use super::*;
 
 const GH_SCRIPT: &str = r#"#!/bin/sh
 {
