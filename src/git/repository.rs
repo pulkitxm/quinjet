@@ -23,6 +23,7 @@ impl Repository {
 
         Ok(Self {
             root: PathBuf::from(root),
+            github_cli: None,
         })
     }
 

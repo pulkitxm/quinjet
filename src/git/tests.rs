@@ -37,6 +37,7 @@ impl TestRepository {
     fn repository(&self) -> Repository {
         Repository {
             root: self.path.clone(),
+            github_cli: None,
         }
     }
 }

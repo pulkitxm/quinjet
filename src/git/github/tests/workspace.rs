@@ -69,6 +69,7 @@ fn locally_available_pr_objects_avoid_disposable_fetches() {
     let head_oid = source.git(&["rev-parse", "HEAD"]);
     let git_repository = Repository {
         root: source.0.clone(),
+        github_cli: None,
     };
     let mut request = pull_request(
         repository(
@@ -126,6 +127,7 @@ fn disposable_pr_workspace_indexes_all_files_and_does_not_mutate_the_source() {
     let before_refs = source.git(&["show-ref"]);
     let git_repository = Repository {
         root: source.0.clone(),
+        github_cli: None,
     };
     let mut request = pull_request(
         repository("acme/widget", remote.0.to_str().unwrap(), &["test-origin"]),

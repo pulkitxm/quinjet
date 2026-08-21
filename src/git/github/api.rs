@@ -9,6 +9,13 @@ pub(super) struct ApiPage {
 }
 
 impl Repository {
+    fn github_command(&self) -> Command {
+        if let Some(path) = &self.github_cli {
+            return Command::new(path);
+        }
+        Command::new("gh")
+    }
+
     pub(crate) fn perform_pull_request_operation(
         &self,
         pull_request: &PullRequest,
@@ -167,7 +174,7 @@ impl Repository {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let mut command = Command::new("gh");
+        let mut command = self.github_command();
         let _ = command
             .current_dir(&self.root)
             .args(args)
@@ -176,6 +183,38 @@ impl Repository {
             .env("GH_NO_UPDATE_NOTIFIER", "1")
             .env("NO_COLOR", "1");
         run_bounded_command(&mut command, stdout_limit, MAX_GH_ERROR_BYTES).with_context(|| {
+            format!(
+                "failed to execute GitHub CLI (`gh`) in {}; install it and run `gh auth login`",
+                self.root.display()
+            )
+        })
+    }
+
+    pub(super) fn run_gh_with_input<I, S>(
+        &self,
+        args: I,
+        input: &[u8],
+        stdout_limit: usize,
+    ) -> Result<BoundedOutput>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let mut command = self.github_command();
+        let _ = command
+            .current_dir(&self.root)
+            .args(args)
+            .env("GH_PROMPT_DISABLED", "1")
+            .env("GH_PAGER", "cat")
+            .env("GH_NO_UPDATE_NOTIFIER", "1")
+            .env("NO_COLOR", "1");
+        process::run_bounded_command_with_input(
+            &mut command,
+            input,
+            stdout_limit,
+            MAX_GH_ERROR_BYTES,
+        )
+        .with_context(|| {
             format!(
                 "failed to execute GitHub CLI (`gh`) in {}; install it and run `gh auth login`",
                 self.root.display()

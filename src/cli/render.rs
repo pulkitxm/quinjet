@@ -3,7 +3,7 @@ use crate::git::diff::{DiffDocument, DiffLineKind};
 use crate::git::github::{
     CheckRunLog, CheckStep, ConversationKind, GitHubRepository, PullRequest, PullRequestCheck,
     PullRequestCheckStatus, PullRequestConversation, PullRequestDiffIndex, PullRequestFileStatus,
-    unix_now,
+    PullRequestReviewSide, PullRequestReviewSnapshot, PullRequestReviewThreadSubject, unix_now,
 };
 use crate::git::history::Commit;
 use crate::git::status::{ChangeArea, RepoStatus};

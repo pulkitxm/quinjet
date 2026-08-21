@@ -136,6 +136,7 @@ fn discovers_distinct_fetch_and_push_repositories_for_each_remote() {
     ]);
     let repository = Repository {
         root: directory.0.clone(),
+        github_cli: None,
     };
 
     let (urls, warnings) = repository.remote_urls().unwrap();

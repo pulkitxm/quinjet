@@ -88,6 +88,7 @@ fn the_read_only_views_have_verbs_too() {
         ["pr", "conversation"].as_slice(),
         ["pr", "logs"].as_slice(),
         ["pr", "open"].as_slice(),
+        ["pr", "reviews", "show"].as_slice(),
         ["tui"].as_slice(),
         ["completions"].as_slice(),
         ["man"].as_slice(),

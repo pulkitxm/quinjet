@@ -74,6 +74,62 @@ pub(crate) fn pull_request(pull_request: &PullRequest) -> String {
     out.finish()
 }
 
+pub(crate) fn pull_request_review(review: &PullRequestReviewSnapshot) -> String {
+    let mut out = Report::default();
+    let decision = review.review_decision.as_deref().unwrap_or("NONE");
+    out.line(&format!(
+        "Review: {decision}  · {} unresolved  · {} pending",
+        review.unresolved_count(),
+        review.pending_comment_count()
+    ));
+    if let Some(pending) = &review.pending_review {
+        out.line(&format!("Pending review: {}", pending.id));
+    }
+    for thread in &review.threads {
+        let location = match thread.subject {
+            PullRequestReviewThreadSubject::File => thread.path.display().to_string(),
+            PullRequestReviewThreadSubject::Line | PullRequestReviewThreadSubject::Unknown => {
+                let side = match thread.side {
+                    PullRequestReviewSide::Left => "left",
+                    PullRequestReviewSide::Right => "right",
+                    PullRequestReviewSide::Unknown => "unknown",
+                };
+                format!(
+                    "{}:{}:{side}",
+                    thread.path.display(),
+                    thread.line.or(thread.original_line).unwrap_or_default()
+                )
+            }
+        };
+        let state = if thread.is_resolved {
+            "resolved"
+        } else if thread.is_outdated {
+            "outdated"
+        } else {
+            "unresolved"
+        };
+        out.line(&format!("\n[{state}] {location}  {}", thread.id));
+        for comment in &thread.comments {
+            out.line(&format!(
+                "  @{}  {}  ({})",
+                comment.author,
+                comment.state.to_lowercase(),
+                format_local_timestamp(&comment.created_at)
+            ));
+            for line in comment.body.trim_end().lines() {
+                out.line(&format!("    {line}"));
+            }
+        }
+        if thread.comments_truncated {
+            out.line("  [older replies were truncated]");
+        }
+    }
+    if review.truncated {
+        out.line("\n[the review reached Quinjet's size cap and was truncated]");
+    }
+    out.finish()
+}
+
 pub(crate) fn pull_request_files(index: &PullRequestDiffIndex) -> String {
     let mut out = Report::default();
     for file in &index.files {

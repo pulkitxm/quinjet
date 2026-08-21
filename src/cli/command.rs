@@ -6,7 +6,8 @@ use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
     CheckRunLog, GitHubRepository, PreparedPullRequest, PullRequest, PullRequestCheck,
     PullRequestChecks, PullRequestConversation, PullRequestDiffIndex, PullRequestOperation,
-    PullRequestProgress, PullRequestSnapshot,
+    PullRequestProgress, PullRequestReviewOperation, PullRequestReviewSnapshot,
+    PullRequestSnapshot,
 };
 use crate::git::history::Commit;
 use crate::git::status::RepoStatus;
@@ -65,6 +66,9 @@ pub(crate) enum Command {
     PullRequestConversation {
         pull_request: Box<PullRequest>,
     },
+    PullRequestReview {
+        pull_request: Box<PullRequest>,
+    },
     CheckRunLog {
         pull_request: Box<PullRequest>,
         check: Box<PullRequestCheck>,
@@ -77,6 +81,10 @@ pub(crate) enum Command {
     OperatePullRequest {
         pull_request: Box<PullRequest>,
         operation: PullRequestOperation,
+    },
+    OperatePullRequestReview {
+        pull_request: Box<PullRequest>,
+        operation: PullRequestReviewOperation,
     },
 }
 
@@ -99,10 +107,12 @@ impl Command {
             }
             Self::PullRequestChecks { .. } => "Fetching pull-request checks",
             Self::PullRequestConversation { .. } => "Fetching pull-request conversation",
+            Self::PullRequestReview { .. } => "Fetching pull-request review threads",
             Self::CheckRunLog { .. } => "Fetching check-run log",
             Self::WarmCheckRunLogs { .. } => "Caching check-run logs",
             Self::Operate(operation) => operation.label(),
             Self::OperatePullRequest { operation, .. } => operation.label(),
+            Self::OperatePullRequestReview { operation, .. } => operation.label(),
         }
     }
 }
@@ -132,6 +142,7 @@ pub(crate) enum Outcome {
     PullRequestDiffBatch(Vec<(PathBuf, DiffDocument)>),
     Checks(Box<PullRequestChecks>),
     Conversation(Box<PullRequestConversation>),
+    Review(Box<PullRequestReviewSnapshot>),
     CheckLog(Box<CheckRunLog>),
     Warmed,
     Operation {
@@ -173,6 +184,8 @@ answers! {
     checks, Checks -> PullRequestChecks, |value: Box<PullRequestChecks>| *value;
     conversation, Conversation -> PullRequestConversation,
         |value: Box<PullRequestConversation>| *value;
+    review, Review -> PullRequestReviewSnapshot,
+        |value: Box<PullRequestReviewSnapshot>| *value;
     check_log, CheckLog -> CheckRunLog, |value: Box<CheckRunLog>| *value;
     local_github_repository, LocalGitHubRepository -> Option<GitHubRepository>,
         |value: Option<Box<GitHubRepository>>| value.map(|repository| *repository);
@@ -331,6 +344,9 @@ impl Session {
             Command::PullRequestConversation { pull_request } => Ok(Outcome::Conversation(
                 Box::new(self.repository.pull_request_conversation(&pull_request)?),
             )),
+            Command::PullRequestReview { pull_request } => Ok(Outcome::Review(Box::new(
+                self.repository.pull_request_review(&pull_request)?,
+            ))),
             Command::CheckRunLog {
                 pull_request,
                 check,
@@ -365,6 +381,20 @@ impl Session {
                 let message = self
                     .repository
                     .perform_pull_request_operation(&pull_request, &operation)?;
+                Ok(Outcome::Operation {
+                    label,
+                    changes_history: false,
+                    message,
+                })
+            }
+            Command::OperatePullRequestReview {
+                pull_request,
+                operation,
+            } => {
+                let label = operation.label().to_owned();
+                let message = self
+                    .repository
+                    .perform_pull_request_review_operation(&pull_request, &operation)?;
                 Ok(Outcome::Operation {
                     label,
                     changes_history: false,

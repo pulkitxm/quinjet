@@ -270,6 +270,7 @@ pub(super) fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb
             args.yes,
             PullRequestOperation::Reopen,
         ),
+        PrVerb::Reviews { command } => review(session, out, command),
     }
 }
 
