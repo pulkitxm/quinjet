@@ -1,4 +1,3 @@
-
 use super::*;
 
 fn check(link: &str) -> PullRequestCheck {

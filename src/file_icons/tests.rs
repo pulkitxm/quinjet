@@ -1,4 +1,3 @@
-
 use unicode_width::UnicodeWidthStr;
 
 use super::*;

@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::git::github::PullRequestCheckStatus;
 use crate::git::status::{BranchState, ChangeStatus};
