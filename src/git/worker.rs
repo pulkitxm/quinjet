@@ -61,10 +61,10 @@ pub(crate) enum WorkerCommand {
         workspace_generation: u64,
         path: PathBuf,
     },
-    /// Background fill for the rest of a prepared pull request. It carries no
-    /// preview generation because it never replaces what the reader is looking
-    /// at; the workspace it was prepared against is the only thing that can
-    /// make its results stale.
+    #[doc = " Background fill for the rest of a prepared pull request. It carries no"]
+    #[doc = " preview generation because it never replaces what the reader is looking"]
+    #[doc = " at; the workspace it was prepared against is the only thing that can"]
+    #[doc = " make its results stale."]
     LoadPullRequestFileBatch {
         workspace_generation: u64,
         paths: Vec<PathBuf>,
@@ -92,8 +92,8 @@ pub(crate) enum WorkerCommand {
         pull_request: Box<PullRequest>,
         check: Box<PullRequestCheck>,
     },
-    /// Warm every finished run's log so that opening any of them is instant.
-    /// It carries no generation because it changes nothing on screen.
+    #[doc = " Warm every finished run's log so that opening any of them is instant."]
+    #[doc = " It carries no generation because it changes nothing on screen."]
     PrefetchCheckRunLogs {
         generation: u64,
         pull_request: Box<PullRequest>,

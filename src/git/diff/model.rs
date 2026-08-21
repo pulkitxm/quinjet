@@ -93,9 +93,9 @@ pub(crate) struct DiffFileIndexEntry {
     pub path: PathBuf,
     pub old_path: Option<PathBuf>,
     pub status: String,
-    /// Exact per-file totals read from `git diff --numstat` while the index is
-    /// built. Known counts let a file header render its real `+n -n` before the
-    /// patch for that file has been produced.
+    #[doc = " Exact per-file totals read from `git diff --numstat` while the index is"]
+    #[doc = " built. Known counts let a file header render its real `+n -n` before the"]
+    #[doc = " patch for that file has been produced."]
     pub counts: Option<DiffLineCounts>,
 }
 
@@ -137,9 +137,9 @@ impl DiffFileIndexEntry {
     }
 }
 
-/// Parse `git diff --numstat -z` output into per-path totals. Renames emit an
-/// empty path field followed by the pre-image and post-image records, so the
-/// scanner has to consume those two extra records instead of assuming one.
+#[doc = " Parse `git diff --numstat -z` output into per-path totals. Renames emit an"]
+#[doc = " empty path field followed by the pre-image and post-image records, so the"]
+#[doc = " scanner has to consume those two extra records instead of assuming one."]
 pub(crate) fn parse_numstat(output: &[u8]) -> HashMap<PathBuf, DiffLineCounts> {
     let records: Vec<&[u8]> = output
         .split(|byte| *byte == 0)

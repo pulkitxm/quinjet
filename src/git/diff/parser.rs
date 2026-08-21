@@ -5,9 +5,9 @@ use super::*;
     clippy::too_many_lines,
     reason = "the draw pass reads better as one top-to-bottom pass"
 )]
-/// Parse a unified diff and highlight code on the old and new sides independently.
-/// Keeping two parser states avoids additions corrupting the old-file syntax state and
-/// removals corrupting the new-file state.
+#[doc = " Parse a unified diff and highlight code on the old and new sides independently."]
+#[doc = " Keeping two parser states avoids additions corrupting the old-file syntax state and"]
+#[doc = " removals corrupting the new-file state."]
 pub(crate) fn parse_diff(
     raw: &[u8],
     title: impl Into<String>,
@@ -208,9 +208,9 @@ pub(crate) fn parse_diff(
     clippy::similar_names,
     reason = "the names follow the Git vocabulary they model"
 )]
-/// Cut a multi-file patch at its `diff --git` boundaries and key each section by
-/// the paths in that header. One Git invocation can then answer for many files
-/// while each file still parses and renders as its own document.
+#[doc = " Cut a multi-file patch at its `diff --git` boundaries and key each section by"]
+#[doc = " the paths in that header. One Git invocation can then answer for many files"]
+#[doc = " while each file still parses and renders as its own document."]
 pub(crate) fn split_patch_by_file(patch: &[u8]) -> Vec<PatchSection<'_>> {
     let mut starts = Vec::new();
     let mut offset = 0;

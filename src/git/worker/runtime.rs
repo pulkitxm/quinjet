@@ -17,9 +17,9 @@ pub(super) fn shutdown_mailbox(mailbox: &SharedMailbox) {
     mailbox.ready.notify_one();
 }
 
-/// The warm-up lane runs one job at a time and answers to nothing but its own
-/// generation, so a pull request the reader has left stops costing requests as
-/// soon as another one asks to be warmed.
+#[doc = " The warm-up lane runs one job at a time and answers to nothing but its own"]
+#[doc = " generation, so a pull request the reader has left stops costing requests as"]
+#[doc = " soon as another one asks to be warmed."]
 pub(super) fn run_warm_worker(
     repository: &Repository,
     mailbox: &Arc<SharedMailbox>,

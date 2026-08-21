@@ -178,9 +178,9 @@ pub(super) fn changed_files_in_repository(
     Ok((files, truncated))
 }
 
-/// Read exact per-file totals alongside the changed-path listing. One extra
-/// `--numstat` pass over the same range lets every file header render its real
-/// `+n -n` immediately, so the list never fills in unevenly as patches load.
+#[doc = " Read exact per-file totals alongside the changed-path listing. One extra"]
+#[doc = " `--numstat` pass over the same range lets every file header render its real"]
+#[doc = " `+n -n` immediately, so the list never fills in unevenly as patches load."]
 pub(super) fn numstat_counts(
     repository: &Path,
     merge_base: &str,
@@ -209,8 +209,8 @@ pub(super) fn numstat_counts(
         .unwrap_or_default()
 }
 
-/// A status that reports success, for feeding cached bytes back through the
-/// same path a real command's output takes.
+#[doc = " A status that reports success, for feeding cached bytes back through the"]
+#[doc = " same path a real command's output takes."]
 pub(super) fn successful_status() -> ExitStatus {
     #[cfg(unix)]
     {

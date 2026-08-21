@@ -164,8 +164,8 @@ pub(super) fn check_run_rows(app: &App, width: usize, theme: &Theme) -> Vec<Cont
     rows
 }
 
-/// A step reads as one row: fold state, outcome, name, and how long it took,
-/// with the duration pushed to the right edge the way a run page shows it.
+#[doc = " A step reads as one row: fold state, outcome, name, and how long it took,"]
+#[doc = " with the duration pushed to the right edge the way a run page shows it."]
 pub(super) fn check_step_row(
     step: &CheckStep,
     expanded: bool,

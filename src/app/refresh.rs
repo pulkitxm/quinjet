@@ -49,9 +49,9 @@ impl App {
         }
     }
 
-    /// A `silent` lookup is a background poll: it keeps the loaded pull request,
-    /// its section, its cursors and its diff on screen, and only replaces them
-    /// once fresher metadata actually arrives.
+    #[doc = " A `silent` lookup is a background poll: it keeps the loaded pull request,"]
+    #[doc = " its section, its cursors and its diff on screen, and only replaces them"]
+    #[doc = " once fresher metadata actually arrives."]
     pub(super) fn request_pull_request_lookup(
         &mut self,
         number: u64,
@@ -302,8 +302,8 @@ impl App {
         }
     }
 
-    /// Queue the isolated diff workspace unless one is already prepared or in
-    /// flight. Returns whether the caller still has to wait for its index.
+    #[doc = " Queue the isolated diff workspace unless one is already prepared or in"]
+    #[doc = " flight. Returns whether the caller still has to wait for its index."]
     pub(super) fn prepare_pull_request_workspace(
         &mut self,
         pull_request: &PullRequest,

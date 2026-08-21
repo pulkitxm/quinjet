@@ -112,9 +112,9 @@ impl Repository {
         }
     }
 
-    /// Working-tree changes are already known from the status snapshot, so the
-    /// index needs only their totals. One `--numstat` read per populated area
-    /// keeps that to at most two extra Git calls regardless of file count.
+    #[doc = " Working-tree changes are already known from the status snapshot, so the"]
+    #[doc = " index needs only their totals. One `--numstat` read per populated area"]
+    #[doc = " keeps that to at most two extra Git calls regardless of file count."]
     pub(super) fn apply_worktree_counts(
         &self,
         files: &mut [DiffFileIndexEntry],
@@ -158,8 +158,8 @@ impl Repository {
         }
     }
 
-    /// Counts are a rendering enhancement, never a correctness requirement, so a
-    /// failed or bounded read simply leaves the affected headers unresolved.
+    #[doc = " Counts are a rendering enhancement, never a correctness requirement, so a"]
+    #[doc = " failed or bounded read simply leaves the affected headers unresolved."]
     pub(super) fn numstat_counts(&self, args: Vec<OsString>) -> HashMap<PathBuf, DiffLineCounts> {
         self.checked_bounded(args, MAX_DIFF_INDEX_BYTES)
             .map(|(output, _)| parse_numstat(&output))
