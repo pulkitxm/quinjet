@@ -261,10 +261,15 @@ pub(super) fn run_worker(
                 result: answer(
                     session
                         .execute(Command::OperatePullRequestReview {
-                            pull_request,
+                            pull_request: pull_request.clone(),
                             operation,
                         })
-                        .and_then(Outcome::review),
+                        .and_then(Outcome::operation)
+                        .and_then(|_| {
+                            session
+                                .execute(Command::PullRequestReview { pull_request })
+                                .and_then(Outcome::review)
+                        }),
                 ),
             },
             WorkerCommand::LoadCheckRunLog {
