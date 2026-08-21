@@ -244,6 +244,7 @@ impl GitOperation {
 #[derive(Debug, Clone)]
 pub(crate) struct Repository {
     root: PathBuf,
+    github_cli: Option<PathBuf>,
 }
 
 mod local_diff;
