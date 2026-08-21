@@ -105,6 +105,21 @@ impl App {
         })));
     }
 
+    pub(super) fn request_history_near_end(
+        &mut self,
+        visible_end: usize,
+        effects: &mut Vec<AppEffect>,
+    ) {
+        if self.view == View::History
+            && visible_end.saturating_add(20) >= self.history.len()
+            && !self.history_loading
+            && !self.history_complete
+            && self.filter.is_empty()
+        {
+            self.request_history(false, effects);
+        }
+    }
+
     pub(super) fn local_diff_request_for_view(&self) -> Option<LocalDiffRequest> {
         match self.view {
             View::Changes => {
@@ -226,14 +241,7 @@ impl App {
         if let Some(request) = self.local_diff_request_for_view() {
             self.prepare_local_diff(request, effects);
             if self.view == View::History {
-                let visible_len = self.visible_commit_indices().len();
-                if self.history_cursor + 20 >= visible_len
-                    && !self.history_loading
-                    && !self.history_complete
-                    && self.filter.is_empty()
-                {
-                    self.request_history(false, effects);
-                }
+                self.request_history_near_end(self.history_cursor, effects);
             }
             return;
         }

@@ -329,6 +329,10 @@ impl App {
                     self.focus = Focus::Sidebar;
                     self.sidebar_free_scroll = true;
                     self.sidebar_offset = self.sidebar_offset.saturating_add(2);
+                    let visible_height =
+                        usize::from(self.geometry.sidebar.height.saturating_sub(2));
+                    let visible_end = self.sidebar_offset.saturating_add(visible_height);
+                    self.request_history_near_end(visible_end, &mut effects);
                 } else {
                     self.focus = Focus::Content;
                     self.content_scroll = self.content_scroll.saturating_add(2);
