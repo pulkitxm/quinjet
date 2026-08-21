@@ -1,6 +1,13 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
+#[derive(Debug, Args)]
+pub(super) struct ReposArgs {
+    /// Read the remotes again instead of answering from the cache
+    #[arg(long)]
+    pub(super) refresh: bool,
+}
+
 pub(super) fn run(session: &mut Session, out: &Emitter, verb: Verb) -> Result<u8> {
     match verb {
         Verb::Tui(_) => Err(Failure::new(

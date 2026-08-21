@@ -64,14 +64,23 @@ pub(super) fn count_patch_lines(output: &[u8], marker: u8) -> usize {
 }
 
 pub(super) fn pull_request_view_args(repository: &GitHubRepository, number: u64) -> Vec<OsString> {
+    let (owner, name) = repository
+        .name_with_owner
+        .split_once('/')
+        .unwrap_or((repository.name_with_owner.as_str(), ""));
     vec![
-        OsString::from("pr"),
-        OsString::from("view"),
-        OsString::from(number.to_string()),
-        OsString::from("--repo"),
-        OsString::from(repository.selector()),
-        OsString::from("--json"),
-        OsString::from(PULL_REQUEST_FIELDS),
+        OsString::from("api"),
+        OsString::from("graphql"),
+        OsString::from("--hostname"),
+        OsString::from(repository.host()),
+        OsString::from("-f"),
+        OsString::from(format!("owner={owner}")),
+        OsString::from("-f"),
+        OsString::from(format!("name={name}")),
+        OsString::from("-F"),
+        OsString::from(format!("number={number}")),
+        OsString::from("-f"),
+        OsString::from(format!("query={PULL_REQUEST_QUERY}")),
         OsString::from("--jq"),
         OsString::from(PULL_REQUEST_VIEW_TSV_JQ),
     ]
@@ -104,6 +113,7 @@ pub(super) fn parse_pull_request_fields(
     repositories: &[GitHubRepository],
 ) -> Result<PullRequest> {
     let [
+        node_id,
         number,
         title,
         description,
@@ -122,6 +132,25 @@ pub(super) fn parse_pull_request_fields(
         base_oid,
         head_oid,
         created_at,
+        is_locked,
+        viewer_can_close,
+        viewer_can_reopen,
+        viewer_can_update,
+        viewer_can_update_branch,
+        viewer_can_subscribe,
+        viewer_can_react,
+        viewer_did_author,
+        viewer_subscription,
+        merge_state,
+        mergeable,
+        maintainer_can_modify,
+        viewer_can_merge_as_admin,
+        auto_merge_method,
+        merge_queue_entry_id,
+        merge_queue_position,
+        merge_queue_state,
+        merge_queue_id,
+        review_decision,
     ] = fields;
     let head_repository = (!head_repository_name.is_empty()).then_some(head_repository_name);
     let head_remotes = head_repository
@@ -149,6 +178,37 @@ pub(super) fn parse_pull_request_fields(
         base_oid,
         head_oid,
         created_at,
+        action_state: PullRequestActionState {
+            node_id,
+            is_locked: parse_field(&is_locked, "conversation lock state")?,
+            viewer_can_close: parse_field(&viewer_can_close, "close permission")?,
+            viewer_can_reopen: parse_field(&viewer_can_reopen, "reopen permission")?,
+            viewer_can_update: parse_field(&viewer_can_update, "update permission")?,
+            viewer_can_update_branch: parse_field(
+                &viewer_can_update_branch,
+                "branch update permission",
+            )?,
+            viewer_can_subscribe: parse_field(&viewer_can_subscribe, "subscription permission")?,
+            viewer_can_react: parse_field(&viewer_can_react, "reaction permission")?,
+            viewer_did_author: parse_field(&viewer_did_author, "authorship state")?,
+            viewer_subscription,
+            merge_state,
+            mergeable,
+            maintainer_can_modify: parse_field(
+                &maintainer_can_modify,
+                "maintainer modification state",
+            )?,
+            viewer_can_merge_as_admin: parse_field(
+                &viewer_can_merge_as_admin,
+                "administrator merge permission",
+            )?,
+            auto_merge_method,
+            merge_queue_entry_id,
+            merge_queue_position: parse_field(&merge_queue_position, "merge queue position")?,
+            merge_queue_state,
+            merge_queue_id,
+            review_decision,
+        },
     })
 }
 

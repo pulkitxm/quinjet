@@ -167,6 +167,7 @@ fn local_previews_are_routed_away_from_slow_metadata_and_pr_work() {
         additions: 0,
         deletions: 0,
         changed_files: 0,
+        action_state: crate::git::github::PullRequestActionState::default(),
     };
     let pr_preview = WorkerCommand::PreparePullRequest {
         generation: 3,

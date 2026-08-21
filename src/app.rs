@@ -14,8 +14,10 @@ use crate::convert::{count, offset};
 use crate::git::diff::{DiffDocument, DiffIndex, DiffLineCounts, DiffLineKind, PullRequestDetails};
 use crate::git::github::{
     CheckRunLog, GitHubRepository, PullRequest, PullRequestCheck, PullRequestCheckStatus,
-    PullRequestConversation, PullRequestDiffIndex, PullRequestFile, PullRequestFileStatus,
-    PullRequestMergeMethod, PullRequestOperation, PullRequestProgress, RecentPullRequest,
+    PullRequestCommentMode, PullRequestConversation, PullRequestDiffIndex, PullRequestEdit,
+    PullRequestFile, PullRequestFileStatus, PullRequestLockReason, PullRequestMergeMethod,
+    PullRequestMergeMode, PullRequestOperation, PullRequestProgress, PullRequestReviewKind,
+    PullRequestUpdateMethod, RecentPullRequest,
 };
 use crate::git::history::Commit;
 use crate::git::status::{Change, ChangeArea, ChangeStatus, RepoStatus};
@@ -135,6 +137,7 @@ mod modal_pickers;
 mod mouse;
 mod operations;
 mod palette;
+mod pull_request_actions;
 mod pull_request_checks;
 mod pull_request_diff;
 mod refresh;
@@ -148,6 +151,7 @@ mod worker_repository;
 
 pub(crate) use geometry::*;
 pub(crate) use modal::*;
+pub(crate) use pull_request_actions::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use support::*;
 pub(crate) use view::*;

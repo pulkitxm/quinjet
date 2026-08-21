@@ -84,3 +84,40 @@ fn repository_pick_lists_render_loaded_rows() {
         assert!(rendered.contains(expected));
     }
 }
+
+#[test]
+fn pull_request_action_picker_renders_every_choice_as_a_hit_target() {
+    let mut app = App::new("/tmp/repo", "repo");
+    app.modal = Some(Modal::PullRequestActions {
+        title: "Submit Review".to_owned(),
+        items: vec![
+            PrActionItem::Review(crate::git::github::PullRequestReviewKind::Approve),
+            PrActionItem::Review(crate::git::github::PullRequestReviewKind::Comment),
+            PrActionItem::Review(crate::git::github::PullRequestReviewKind::RequestChanges),
+        ],
+        selected: 1,
+    });
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+    let rendered: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(ratatui::buffer::Cell::symbol)
+        .collect();
+    assert!(rendered.contains("Submit Review"));
+    assert!(rendered.contains("Approve pull request"));
+    assert!(rendered.contains("Submit review comment"));
+    assert!(rendered.contains("Request changes"));
+    assert_eq!(app.geometry.modal_action_hits.len(), 3);
+    assert!(
+        app.geometry
+            .modal_action_hits
+            .iter()
+            .any(|(_, action)| *action == ModalAction::PullRequestAction(1))
+    );
+}

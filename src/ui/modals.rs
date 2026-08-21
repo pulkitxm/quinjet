@@ -26,6 +26,18 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
         Some(Modal::Prompt { title, input, .. }) => {
             draw_prompt(frame, title, input, theme);
         }
+        Some(Modal::PullRequestActions {
+            title,
+            items,
+            selected,
+        }) => draw_pr_actions(
+            frame,
+            &mut app.geometry.modal_action_hits,
+            title,
+            items,
+            *selected,
+            theme,
+        ),
         Some(Modal::Confirm { title, message, .. }) => {
             let title = title.clone();
             let message = message.clone();
@@ -292,6 +304,62 @@ pub(super) fn draw_prompt(
     );
     set_text_cursor(frame, input_area, input, false);
     draw_modal_hint(frame, area, "Enter accept   Esc cancel", theme);
+}
+
+fn draw_pr_actions(
+    frame: &mut Frame<'_>,
+    hits: &mut Vec<(Rect, ModalAction)>,
+    title: &str,
+    items: &[PrActionItem],
+    selected: usize,
+    theme: &Theme,
+) {
+    let width = items
+        .iter()
+        .map(|item| item.label().width())
+        .max()
+        .unwrap_or(24)
+        .saturating_add(6);
+    let height = items.len().saturating_add(3);
+    let area = centered_rect(
+        u16::try_from(width).unwrap_or(72).min(72),
+        u16::try_from(height).unwrap_or(20).min(20),
+        frame.area(),
+    );
+    frame.render_widget(Clear, area);
+    let block = modal_block(&format!(" {title} "), theme);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let visible = inner.height.saturating_sub(1) as usize;
+    let offset = selected
+        .saturating_add(1)
+        .saturating_sub(visible)
+        .min(items.len().saturating_sub(visible));
+    for (row, (index, item)) in items
+        .iter()
+        .enumerate()
+        .skip(offset)
+        .take(visible)
+        .enumerate()
+    {
+        let active = index == selected;
+        let row = Rect::new(
+            inner.x,
+            inner.y.saturating_add(u16::try_from(row).unwrap_or(0)),
+            inner.width,
+            1,
+        );
+        frame.render_widget(
+            Paragraph::new(format!("  {}", item.label())).style(if active {
+                Style::default().fg(theme.text).bg(theme.selected)
+            } else {
+                Style::default().fg(theme.text).bg(theme.panel)
+            }),
+            row,
+        );
+        hits.push((row, ModalAction::PullRequestAction(index)));
+    }
+    draw_modal_hint(frame, area, "j/k select   Enter open   Esc cancel", theme);
 }
 
 pub(super) fn draw_confirm(

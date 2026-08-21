@@ -53,7 +53,7 @@ quinjet update --check           check the latest stable release
 
 | Page | What it covers |
 | --- | --- |
-| [`quinjet pr`](./pull-request/README.md) | Metadata, changed files, patches, the conversation, checks, run logs, merge/close/reopen, and `--watch` |
+| [`quinjet pr`](./pull-request/README.md) | Metadata, files, conversation, checks, reviews, lifecycle, merge, metadata editing, and notifications |
 
 ## About Quinjet itself
 

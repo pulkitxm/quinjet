@@ -217,12 +217,12 @@ pub(super) fn cached_pull_request_at(path: &Path) -> Option<RecentPullRequest> {
         .split(|byte| *byte == b'\n')
         .find(|record| !record.is_empty())?;
     let fields = parse_tsv_record::<PULL_REQUEST_TSV_FIELDS>(record).ok()?;
-    let number = fields.first()?.parse::<u64>().ok()?;
-    let url = fields.get(7)?;
+    let number = fields.get(1)?.parse::<u64>().ok()?;
+    let url = fields.get(8)?;
     let repository = repository_from_pull_request_url(url, number)?;
     Some(RecentPullRequest {
         number,
-        title: bounded_text(fields.get(1)?, MAX_PULL_REQUEST_TITLE_BYTES),
+        title: bounded_text(fields.get(2)?, MAX_PULL_REQUEST_TITLE_BYTES),
         repository,
     })
 }

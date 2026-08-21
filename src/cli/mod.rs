@@ -14,7 +14,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use clap::{Args, CommandFactory, Parser, Subcommand, ValueHint};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
 use clap_mangen::Man;
 pub(crate) use command::{Command, Outcome, Session};
@@ -24,7 +24,9 @@ use serde::Serialize;
 use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
     CheckRunLog, GitHubRepository, PullRequest, PullRequestCheck, PullRequestCheckStatus,
-    PullRequestDiffIndex, PullRequestMergeMethod, PullRequestOperation, PullRequestSnapshot,
+    PullRequestCommentMode, PullRequestDiffIndex, PullRequestEdit, PullRequestLockReason,
+    PullRequestMergeMethod, PullRequestMergeMode, PullRequestOperation, PullRequestReviewKind,
+    PullRequestSnapshot, PullRequestUpdateMethod,
 };
 use crate::git::status::{Change, ChangeArea};
 use crate::git::{ConflictChoice, GitOperation, LocalDiffRequest, Repository};

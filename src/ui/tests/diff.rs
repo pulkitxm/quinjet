@@ -219,7 +219,7 @@ fn pull_request_preview_renders_cross_remote_metadata_and_diff() {
     app.pull_request_section = PullRequestSection::Files;
     app.pull_request_exact_number = Some(42);
     app.pull_request_lookup = crate::app::TextBuffer::new("42");
-    app.pull_request = Some(crate::git::github::PullRequest {
+    app.pull_request = Some(PullRequest {
         number: 42,
         title: "Ship the rocket".to_owned(),
         description:
@@ -246,6 +246,7 @@ fn pull_request_preview_renders_cross_remote_metadata_and_diff() {
         additions: 101,
         deletions: 20,
         changed_files: 1,
+        action_state: crate::git::github::PullRequestActionState::default(),
     });
     app.pull_request_repository = Some(GitHubRepository {
         name_with_owner: "acme/widget".to_owned(),
