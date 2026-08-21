@@ -6,7 +6,12 @@ on:
     paths:
       - 'install.sh'
       - 'install.ps1'
+      - 'packaging/apt/**'
+      - 'scripts/build_apt_repository.sh'
       - '.github/workflows/pages.yml'
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -19,6 +24,7 @@ concurrency:
 jobs:
   deploy:
     name: Deploy installers
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read # read the checkout
@@ -30,11 +36,70 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: main
           persist-credentials: false
+      - name: Find Debian packages
+        id: packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          count=$(gh release view --json assets \
+            --jq '[.assets[] | select(.name | endswith(".deb"))] | length')
+          echo "count=${count}" >>"${GITHUB_OUTPUT}"
+      - name: Download Debian packages
+        if: steps.packages.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download --pattern '*.deb' --dir "${RUNNER_TEMP}/quinjet-debs"
+      - name: Import apt signing key
+        if: steps.packages.outputs.count != '0'
+        id: signing
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "${APT_SIGNING_KEY}"
+          install -d -m 0700 "${RUNNER_TEMP}/quinjet-gpg"
+          printf '%s' "${APT_SIGNING_KEY}" \
+            | gpg --batch --homedir "${RUNNER_TEMP}/quinjet-gpg" --import
+          fingerprint=$(gpg --batch --homedir "${RUNNER_TEMP}/quinjet-gpg" \
+            --with-colons --list-secret-keys \
+            | awk -F: '$1 == "fpr" { print $10; exit }')
+          public_fingerprint=$(gpg --batch --show-keys --with-colons \
+            packaging/apt/quinjet.asc \
+            | awk -F: '$1 == "fpr" { print $10; exit }')
+          test -n "${fingerprint}"
+          test "${fingerprint}" = "${public_fingerprint}"
+          echo "fingerprint=${fingerprint}" >>"${GITHUB_OUTPUT}"
       - name: Prepare Pages artifact
         run: |
           mkdir _site
           cp install.sh install.ps1 _site/
+      - name: Build apt repository
+        if: steps.packages.outputs.count != '0'
+        env:
+          FINGERPRINT: ${{ steps.signing.outputs.fingerprint }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes apt-utils dpkg-dev
+          sh scripts/build_apt_repository.sh \
+            "${RUNNER_TEMP}/quinjet-debs" _site/apt \
+            "${RUNNER_TEMP}/quinjet-gpg" "${FINGERPRINT}"
+      - name: Verify apt repository
+        if: steps.packages.outputs.count != '0'
+        run: |
+          set -euo pipefail
+          source_list="${RUNNER_TEMP}/quinjet.list"
+          repository="file:${GITHUB_WORKSPACE}/_site/apt"
+          echo "deb [signed-by=${GITHUB_WORKSPACE}/_site/apt/quinjet.asc] ${repository} stable main" \
+            >"${source_list}"
+          sudo apt-get update \
+            -o Dir::Etc::sourcelist="${source_list}" \
+            -o Dir::Etc::sourceparts=- \
+            -o APT::Get::List-Cleanup=0
+          apt-get download quinjet \
+            -o Dir::Etc::sourcelist="${source_list}" \
+            -o Dir::Etc::sourceparts=-
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
