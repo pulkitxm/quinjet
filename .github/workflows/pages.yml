@@ -89,7 +89,9 @@ jobs:
           set -euo pipefail
           source_list="${RUNNER_TEMP}/quinjet.list"
           repository="file:${GITHUB_WORKSPACE}/_site/apt"
-          echo "deb [signed-by=${GITHUB_WORKSPACE}/_site/apt/quinjet.asc] ${repository} stable main" \
+          sudo install -D -m 0644 _site/apt/quinjet.asc \
+            /etc/apt/keyrings/quinjet.asc
+          echo "deb [signed-by=/etc/apt/keyrings/quinjet.asc] ${repository} stable main" \
             >"${source_list}"
           sudo apt-get update \
             -o Dir::Etc::sourcelist="${source_list}" \
