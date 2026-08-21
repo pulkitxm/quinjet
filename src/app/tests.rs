@@ -258,6 +258,7 @@ mod interaction;
 mod prefetch;
 mod projects;
 mod refresh;
+mod refresh_preview;
 mod reviews;
 mod support;
 mod workflows;
