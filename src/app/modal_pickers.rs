@@ -46,7 +46,7 @@ impl App {
                     KeyCode::Enter if !*loading => {
                         if let Some(tree) = selected_tree.filter(|tree| !tree.current) {
                             effects.push(match mode {
-                                ProjectOpenMode::CurrentTab => {
+                                ProjectOpenMode::Initial | ProjectOpenMode::CurrentTab => {
                                     AppEffect::SwitchRepository(tree.path)
                                 }
                                 ProjectOpenMode::NewTab => AppEffect::OpenRepositoryTab(tree.path),

@@ -384,6 +384,7 @@ pub(crate) enum Modal {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProjectOpenMode {
+    Initial,
     CurrentTab,
     NewTab,
 }

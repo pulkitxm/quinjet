@@ -26,6 +26,7 @@ pub(super) fn draw_projects(
     );
     frame.render_widget(Clear, area);
     let title = match mode {
+        ProjectOpenMode::Initial => " Open a project ",
         ProjectOpenMode::CurrentTab => " Switch project ",
         ProjectOpenMode::NewTab => " Open in new tab ",
     };
@@ -153,9 +154,13 @@ pub(super) fn draw_projects(
             .take(list_area.height as usize)
             .collect();
         if visible_lines.is_empty() {
+            let empty = if groups.is_empty() && mode == ProjectOpenMode::Initial {
+                "No recent projects. Press Ctrl+O to enter a repository path."
+            } else {
+                "No projects match this filter"
+            };
             frame.render_widget(
-                Paragraph::new("No projects match this filter")
-                    .style(Style::default().fg(theme.muted)),
+                Paragraph::new(empty).style(Style::default().fg(theme.muted)),
                 list_area,
             );
         } else {
@@ -163,6 +168,7 @@ pub(super) fn draw_projects(
         }
     }
     let hint = match mode {
+        ProjectOpenMode::Initial => "Enter open   Ctrl+O path   Esc quit",
         ProjectOpenMode::CurrentTab => "Enter switch tab   Delete forget project   Esc close",
         ProjectOpenMode::NewTab => "Enter open in new tab   Delete forget project   Esc close",
     };

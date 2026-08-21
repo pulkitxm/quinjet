@@ -482,6 +482,17 @@ use style::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use unified_diff::*;
 
+pub(crate) fn draw_project_picker(
+    frame: &mut Frame<'_>,
+    groups: &[ProjectGroup],
+    selected: usize,
+    query: &crate::app::TextBuffer,
+    mode: ProjectOpenMode,
+    theme: &Theme,
+) {
+    draw_projects(frame, groups, selected, query, false, mode, theme);
+}
+
 #[cfg(test)]
 #[expect(
     unused_results,
