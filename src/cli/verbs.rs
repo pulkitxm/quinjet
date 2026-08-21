@@ -1,13 +1,6 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
-#[derive(Debug, Args)]
-pub(super) struct ReposArgs {
-    /// Read the remotes again instead of answering from the cache
-    #[arg(long)]
-    pub(super) refresh: bool,
-}
-
 #[derive(Debug, Subcommand)]
 pub(super) enum BranchVerb {
     /// List local branches

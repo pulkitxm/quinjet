@@ -137,6 +137,7 @@ mod modal_pickers;
 mod mouse;
 mod operations;
 mod palette;
+mod pull_request_actions;
 mod pull_request_checks;
 mod pull_request_diff;
 mod refresh;
@@ -150,6 +151,7 @@ mod worker_repository;
 
 pub(crate) use geometry::*;
 pub(crate) use modal::*;
+pub(crate) use pull_request_actions::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use support::*;
 pub(crate) use view::*;
