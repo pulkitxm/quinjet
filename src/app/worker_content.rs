@@ -44,7 +44,7 @@ impl App {
                         {
                             self.request_history(true, &mut effects);
                         }
-                        if self.view == View::Changes {
+                        if self.view == View::Changes && !self.refresh_again {
                             self.preview_due = None;
                             self.request_preview(&mut effects);
                         }
