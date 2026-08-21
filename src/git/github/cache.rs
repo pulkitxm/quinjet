@@ -343,11 +343,11 @@ mod tests {
         cache.write("same", b"old", 16).unwrap();
         cache.write("same", b"new", 16).unwrap();
         assert_eq!(cache.read("same", 16).unwrap().data, b"new");
-        assert!(temporary_paths(&cache.root).is_empty());
+        assert_eq!(temporary_paths(&cache.root), Vec::<PathBuf>::new());
 
         fs::create_dir_all(cache.path("blocked")).unwrap();
         assert!(cache.write("blocked", b"data", 16).is_err());
-        assert!(temporary_paths(&cache.root).is_empty());
+        assert_eq!(temporary_paths(&cache.root), Vec::<PathBuf>::new());
     }
 
     #[test]

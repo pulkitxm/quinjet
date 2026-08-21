@@ -162,7 +162,8 @@ mod tests {
     fn stdout_and_stderr_are_drained_simultaneously() {
         const CHUNK: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         const REPEATS: usize = 2_048;
-        let expected = CHUNK.len() * REPEATS;
+        let expected_output = CHUNK.repeat(REPEATS).into_bytes();
+        let expected = expected_output.len();
         let script = format!(
             "chunk={CHUNK}; i=0; while [ \"$i\" -lt {REPEATS} ]; do printf '%s' \"$chunk\"; printf '%s' \"$chunk\" >&2; i=$((i + 1)); done"
         );
@@ -174,18 +175,8 @@ mod tests {
         assert!(!output.stdout_truncated);
         assert_eq!(output.stdout.len(), expected);
         assert_eq!(output.stderr.len(), expected);
-        assert!(
-            output
-                .stdout
-                .chunks_exact(CHUNK.len())
-                .all(|chunk| chunk == CHUNK.as_bytes())
-        );
-        assert!(
-            output
-                .stderr
-                .chunks_exact(CHUNK.len())
-                .all(|chunk| chunk == CHUNK.as_bytes())
-        );
+        assert_eq!(output.stdout, expected_output);
+        assert_eq!(output.stderr, expected_output);
     }
 
     #[test]
