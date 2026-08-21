@@ -144,6 +144,46 @@ pub(crate) enum PullRequestFileView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PullRequestReviewAnchor {
+    pub path: PathBuf,
+    pub line: usize,
+    pub side: PullRequestReviewSide,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PullRequestReviewTarget {
+    Line(PullRequestReviewAnchor),
+    File(PathBuf),
+    Reply(String),
+    Edit { comment_id: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PullRequestReviewThreadAction {
+    Reply { thread_id: String },
+    CopyComment { body: String },
+    OpenComment { url: String },
+    EditComment { comment_id: String, body: String },
+    DeleteComment { comment_id: String },
+    Resolve { thread_id: String },
+    Reopen { thread_id: String },
+}
+
+impl PullRequestReviewThreadAction {
+    pub(crate) const fn label(&self) -> &'static str {
+        match self {
+            Self::Reply { .. } => "Reply",
+            Self::CopyComment { .. } => "Copy latest comment",
+            Self::OpenComment { .. } => "Open latest on GitHub",
+            Self::EditComment { .. } => "Edit latest comment",
+            Self::DeleteComment { .. } => "Delete latest comment",
+            Self::Resolve { .. } => "Resolve thread",
+            Self::Reopen { .. } => "Reopen thread",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PullRequestTreeEntry {
     Directory {
         path: PathBuf,

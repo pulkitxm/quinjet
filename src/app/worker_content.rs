@@ -212,6 +212,7 @@ impl App {
                                 self.preview_file_cursor = 0;
                                 self.content_scroll = 0;
                                 self.horizontal_scroll = 0;
+                                self.decorate_pull_request_review();
                             }
                         }
                     }
@@ -377,6 +378,31 @@ impl App {
                 if self.pull_request_conversation_refresh_again {
                     self.pull_request_conversation_refresh_again = false;
                     self.request_pull_request_conversation(true, &mut effects);
+                }
+            }
+            WorkerEvent::PullRequestReview { generation, result } => {
+                if generation != self.pull_request_review_generation {
+                    return effects;
+                }
+                self.pull_request_review_loading = false;
+                let mutated = std::mem::take(&mut self.pull_request_review_mutating);
+                match result {
+                    Ok(review) => {
+                        self.pull_request_review = review;
+                        self.pull_request_review_error = None;
+                        self.decorate_pull_request_review();
+                        if mutated {
+                            self.show_toast(
+                                "Pull request review updated".to_owned(),
+                                ToastLevel::Success,
+                                now,
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        self.pull_request_review_error = Some(error.clone());
+                        self.show_toast(error, ToastLevel::Error, now);
+                    }
                 }
             }
             _ => {}

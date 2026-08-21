@@ -142,6 +142,35 @@ impl App {
                     });
                 }
             }
+            KeyCode::Char('c') if self.review_surface_active() => {
+                self.open_review_comment(false);
+            }
+            KeyCode::Char('C') if self.review_surface_active() => {
+                self.open_review_comment(true);
+            }
+            KeyCode::Char('a') if self.review_surface_active() => self.open_review_reply(),
+            KeyCode::Char('V') if self.review_surface_active() => {
+                self.modal = Some(Modal::PullRequestReviewSubmit {
+                    input: TextBuffer::default(),
+                    decision: PullRequestReviewDecision::Comment,
+                });
+            }
+            KeyCode::Char('x') if self.review_surface_active() => {
+                if let Some(thread) = self.selected_review_thread() {
+                    let operation = if thread.is_resolved && thread.viewer_can_unresolve {
+                        PullRequestReviewOperation::Unresolve {
+                            thread_id: thread.id.clone(),
+                        }
+                    } else if !thread.is_resolved && thread.viewer_can_resolve {
+                        PullRequestReviewOperation::Resolve {
+                            thread_id: thread.id.clone(),
+                        }
+                    } else {
+                        return effects;
+                    };
+                    self.queue_pull_request_review_operation(operation, &mut effects);
+                }
+            }
             KeyCode::Char('a') if self.view == View::Changes => {
                 self.handle_scm_menu_item(ScmMenuItem::StageAll, &mut effects);
             }
@@ -279,6 +308,12 @@ impl App {
             {
                 self.move_recent_pull_request_cursor(1);
             }
+            KeyCode::Up | KeyCode::Char('k') if self.review_surface_active() => {
+                self.move_review_cursor(-1);
+            }
+            KeyCode::Down | KeyCode::Char('j') if self.review_surface_active() => {
+                self.move_review_cursor(1);
+            }
             KeyCode::Up | KeyCode::Char('k') => self.navigate(-1, now),
             KeyCode::Down | KeyCode::Char('j') => self.navigate(1, now),
             KeyCode::PageUp => self.page(-1, now),
@@ -369,6 +404,8 @@ impl App {
         }
         if let Some(
             Modal::Commit { input, .. }
+            | Modal::PullRequestReviewComment { input, .. }
+            | Modal::PullRequestReviewSubmit { input, .. }
             | Modal::Prompt { input, .. }
             | Modal::CommandPalette { query: input, .. }
             | Modal::Branches { query: input, .. }

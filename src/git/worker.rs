@@ -9,7 +9,8 @@ use crossbeam_channel::{Receiver, Sender, unbounded};
 use super::diff::DiffDocument;
 use super::github::{
     CheckRunLog, PullRequest, PullRequestCheck, PullRequestChecks, PullRequestConversation,
-    PullRequestDiffIndex, PullRequestOperation, PullRequestProgress, PullRequestSnapshot,
+    PullRequestDiffIndex, PullRequestOperation, PullRequestProgress, PullRequestReviewOperation,
+    PullRequestReviewSnapshot, PullRequestSnapshot,
 };
 use super::history::Commit;
 use super::status::RepoStatus;
@@ -76,6 +77,15 @@ pub(crate) enum WorkerCommand {
     LoadPullRequestConversation {
         generation: u64,
         pull_request: Box<PullRequest>,
+    },
+    LoadPullRequestReview {
+        generation: u64,
+        pull_request: Box<PullRequest>,
+    },
+    OperatePullRequestReview {
+        generation: u64,
+        pull_request: Box<PullRequest>,
+        operation: PullRequestReviewOperation,
     },
     LoadCheckRunLog {
         generation: u64,
@@ -173,6 +183,10 @@ pub(crate) enum WorkerEvent {
         generation: u64,
         result: Result<PullRequestConversation, String>,
     },
+    PullRequestReview {
+        generation: u64,
+        result: Result<PullRequestReviewSnapshot, String>,
+    },
     CheckRunLog {
         generation: u64,
         result: Result<CheckRunLog, String>,
@@ -219,6 +233,7 @@ struct Mailbox {
     prefetch: Option<WorkerCommand>,
     checks: Option<WorkerCommand>,
     conversation: Option<WorkerCommand>,
+    review: Option<WorkerCommand>,
     check_log: Option<WorkerCommand>,
     warm: Option<WorkerCommand>,
     shutdown: bool,
@@ -227,8 +242,9 @@ struct Mailbox {
 impl Mailbox {
     fn push(&mut self, command: WorkerCommand) {
         match command {
-            command
-            @ (WorkerCommand::Operate { .. } | WorkerCommand::OperatePullRequest { .. }) => {
+            command @ (WorkerCommand::Operate { .. }
+            | WorkerCommand::OperatePullRequest { .. }
+            | WorkerCommand::OperatePullRequestReview { .. }) => {
                 self.operations.push_back(command);
             }
             command @ (WorkerCommand::LoadBranches { .. }
@@ -258,6 +274,7 @@ impl Mailbox {
             command @ WorkerCommand::LoadPullRequestConversation { .. } => {
                 self.conversation = Some(command);
             }
+            command @ WorkerCommand::LoadPullRequestReview { .. } => self.review = Some(command),
             command @ WorkerCommand::LoadCheckRunLog { .. } => self.check_log = Some(command),
             command @ WorkerCommand::PrefetchCheckRunLogs { .. } => {
                 self.warm = Some(command);
@@ -278,6 +295,7 @@ impl Mailbox {
             .or_else(|| self.check_log.take())
             .or_else(|| self.checks.take())
             .or_else(|| self.conversation.take())
+            .or_else(|| self.review.take())
             .or_else(|| self.history.take())
             .or_else(|| self.prefetch.take())
             .or_else(|| self.warm.take())
@@ -296,6 +314,7 @@ enum WorkerLane {
     Conversation,
     LocalPreview,
     PullRequestPreview,
+    Review,
     Warm,
 }
 
@@ -309,6 +328,8 @@ const fn worker_lane(command: &WorkerCommand) -> WorkerLane {
         | WorkerCommand::LoadPullRequestChecks { .. }
         | WorkerCommand::LoadCheckRunLog { .. } => WorkerLane::GitHubMetadata,
         WorkerCommand::LoadPullRequestConversation { .. } => WorkerLane::Conversation,
+        WorkerCommand::LoadPullRequestReview { .. }
+        | WorkerCommand::OperatePullRequestReview { .. } => WorkerLane::Review,
         WorkerCommand::PrefetchCheckRunLogs { .. } => WorkerLane::Warm,
         WorkerCommand::PreparePullRequest { .. }
         | WorkerCommand::LoadPullRequestFile { .. }

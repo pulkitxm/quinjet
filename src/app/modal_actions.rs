@@ -65,6 +65,9 @@ impl App {
                     } => {
                         self.queue_pull_request_operation(*pull_request, operation, effects);
                     }
+                    ConfirmAction::PullRequestReview(operation) => {
+                        self.queue_pull_request_review_operation(operation, effects);
+                    }
                 }
             }
             ModalAction::PullRequestAction(index) => {
@@ -73,6 +76,15 @@ impl App {
                 };
                 if let Some(item) = items.get(index).copied() {
                     self.handle_pr_action_item(item);
+                }
+            }
+            ModalAction::PullRequestReviewThreadAction(index) => {
+                let Some(Modal::PullRequestReviewThreadActions { items, .. }) = self.modal.take()
+                else {
+                    return;
+                };
+                if let Some(item) = items.get(index).cloned() {
+                    self.handle_review_thread_action(item, effects);
                 }
             }
         }

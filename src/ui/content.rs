@@ -11,10 +11,15 @@ pub(super) fn draw_content(
     app: &mut App,
     theme: &Theme,
     link_hits: &mut Vec<LinkHit>,
-) -> (Option<Rect>, Vec<ContentFileHit>, Vec<ContentStepHit>) {
+) -> (
+    Option<Rect>,
+    Vec<ContentFileHit>,
+    Vec<ContentStepHit>,
+    Vec<ContentReviewHit>,
+) {
     if app.view == View::PullRequests && app.pull_request_section == PullRequestSection::Overview {
         let step_hits = draw_pull_request_overview(frame, area, app, theme, link_hits);
-        return (None, Vec::new(), step_hits);
+        return (None, Vec::new(), step_hits, Vec::new());
     }
     let file_action = if app.preview_files_collapsible() {
         if app.preview_files_all_collapsed() {
@@ -24,6 +29,18 @@ pub(super) fn draw_content(
         }
     } else {
         ""
+    };
+    let review_action = if app.review_surface_active() {
+        if app.pull_request_review_loading {
+            "  [review loading]".to_owned()
+        } else {
+            format!(
+                "  [c Comment · V Submit · {} pending]",
+                app.pull_request_review.pending_comment_count()
+            )
+        }
+    } else {
+        String::new()
     };
     let loading = app.pull_request_progress.map_or_else(
         || {
@@ -40,12 +57,14 @@ pub(super) fn draw_content(
     let title_width = (area.width as usize)
         .saturating_sub(loading.width())
         .saturating_sub(file_action.width())
+        .saturating_sub(review_action.width())
         .saturating_sub(4);
     let title = format!(
-        " {}{}{} ",
+        " {}{}{}{} ",
         truncate_middle(&app.document.title, title_width),
         loading,
         file_action,
+        review_action,
     );
     let block = panel_block(
         title,
@@ -55,7 +74,7 @@ pub(super) fn draw_content(
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {
-        return (None, Vec::new(), Vec::new());
+        return (None, Vec::new(), Vec::new(), Vec::new());
     }
 
     let details_rows = if app.document.commit_details.is_some() {
@@ -131,6 +150,7 @@ pub(super) fn draw_content(
         diff_area.width.saturating_sub(1),
         diff_area.height,
     );
+    let mut content_review_hits = Vec::new();
     let (divider, content_file_hits) = if render_area.width < 2 || render_area.height == 0 {
         (None, Vec::new())
     } else if side_by_side {
@@ -140,6 +160,7 @@ pub(super) fn draw_content(
             app,
             &app.side_by_side_diff_rows,
             diff_scroll,
+            &mut content_review_hits,
             theme,
         );
         (Some(divider), hits)
@@ -150,12 +171,13 @@ pub(super) fn draw_content(
             app,
             &app.unified_diff_rows,
             diff_scroll,
+            &mut content_review_hits,
             theme,
         );
         (None, hits)
     };
     draw_scrollbar(frame, inner, app.content_scroll, visual_length, theme);
-    (divider, content_file_hits, Vec::new())
+    (divider, content_file_hits, Vec::new(), content_review_hits)
 }
 
 /// A clickable shortcut to the end of whatever the content pane holds, shown on

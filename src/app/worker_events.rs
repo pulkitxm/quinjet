@@ -16,7 +16,8 @@ impl App {
             | WorkerEvent::PullRequestDiffBatch { .. }
             | WorkerEvent::PullRequestChecks { .. }
             | WorkerEvent::CheckRunLog { .. }
-            | WorkerEvent::PullRequestConversation { .. }) => {
+            | WorkerEvent::PullRequestConversation { .. }
+            | WorkerEvent::PullRequestReview { .. }) => {
                 self.handle_content_worker_event(event, now)
             }
             event => self.handle_repository_worker_event(event, now),

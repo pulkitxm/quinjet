@@ -201,6 +201,9 @@ impl App {
                             &mut effects,
                         );
                     }
+                    ConfirmAction::PullRequestReview(operation) => {
+                        self.queue_pull_request_review_operation(operation.clone(), &mut effects);
+                    }
                 },
                 KeyCode::Esc | KeyCode::Char('n' | 'N') => {}
                 _ => self.modal = Some(modal),

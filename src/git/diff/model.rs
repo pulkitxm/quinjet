@@ -7,6 +7,7 @@ pub(crate) enum DiffLineKind {
     FileHeader,
     FileFooter,
     HunkHeader,
+    Review,
     Context,
     Added,
     Removed,
@@ -43,6 +44,15 @@ pub(crate) struct DiffLine {
 }
 
 impl DiffLine {
+    pub(crate) fn review(text: impl Into<String>) -> Self {
+        Self {
+            kind: DiffLineKind::Review,
+            old_line: None,
+            new_line: None,
+            spans: vec![HighlightSpan::plain(text)],
+        }
+    }
+
     pub(crate) fn text(&self) -> String {
         if self.kind == DiffLineKind::FileHeader {
             self.spans

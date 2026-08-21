@@ -5,6 +5,9 @@ cover metadata, changed files, patches, the conversation, checks, one check
 run's log, and browser opening. Its write verbs cover the full existing-PR
 workflow exposed by GitHub CLI, plus merge-queue removal, notification
 subscriptions, and fork maintainer-edit access through GitHub's GraphQL API.
+The `reviews` family adds threaded line and file feedback, replies, pending
+review state, and thread resolution without replacing the one-shot `review`
+verb.
 There is no listing, checkout, or creation verb. Reach for this group when you
 want the same operations in a pipe, and reach for the pull-request pane of
 [the terminal interface](../tui.md) when you want to work interactively.
@@ -84,6 +87,7 @@ when their check state settles.
 | `quinjet pr dequeue` | Removes the pull request from its merge queue. |
 | `quinjet pr ready` / `draft` | Changes whether an open pull request is ready for review. |
 | `quinjet pr review` | Approves, comments on, or requests changes on the pull request. |
+| `quinjet pr reviews` | Reads review threads and authors, submits, or resolves pending review feedback. |
 | `quinjet pr comment` | Adds a conversation comment. |
 | `quinjet pr edit-last-comment` / `delete-last-comment` | Updates or removes the viewer's latest conversation comment. |
 | `quinjet pr edit` | Changes title, description, base, assignees, labels, projects, reviewers, or milestone. |
@@ -112,6 +116,7 @@ when their check state settles.
 - [`quinjet pr ready`](./ready.md)
 - [`quinjet pr draft`](./draft.md)
 - [`quinjet pr review`](./review.md)
+- [`quinjet pr reviews`](./reviews.md)
 - [`quinjet pr comment`](./comment.md)
 - [`quinjet pr edit-last-comment`](./edit-last-comment.md)
 - [`quinjet pr delete-last-comment`](./delete-last-comment.md)
