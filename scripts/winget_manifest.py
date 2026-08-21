@@ -16,7 +16,7 @@ TEMPLATES = ROOT / "packaging" / "winget" / "templates"
 VERSION = re.compile(r"^\d+\.\d+\.\d+$")
 CHECKSUM = re.compile(r"^[0-9a-f]{64}$")
 PLACEHOLDER = re.compile(r"@[A-Z0-9_]+@")
-WINDOWS_ASSET = "quinjet.exe"
+WINDOWS_ASSET = "quinjet-windows-x86_64.zip"
 MANIFEST_COUNT = 3
 
 

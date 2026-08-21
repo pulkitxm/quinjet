@@ -28,9 +28,9 @@ pub(super) fn manager(executable: &Path) -> Option<Manager> {
     path_manager(path).or_else(|| apt_manages(path).then_some(APT))
 }
 
-pub(super) fn manages_running_executable() -> bool {
+pub(super) fn owns_integrations_for_running_executable() -> bool {
     std::env::current_exe() // nosemgrep: rust.lang.security.current-exe.current-exe
-        .is_ok_and(|executable| manager(&executable).is_some())
+        .is_ok_and(|executable| manager(&executable).is_some_and(|manager| manager != WINGET))
 }
 
 fn path_manager(path: &Path) -> Option<Manager> {

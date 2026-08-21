@@ -120,7 +120,7 @@ fn shell_from_path(shell: &OsStr) -> Option<Shell> {
 }
 
 pub(super) fn auto_install() {
-    if development_binary() || package_manager::manages_running_executable() {
+    if development_binary() || package_manager::owns_integrations_for_running_executable() {
         return;
     }
     let active = detected_shell();

@@ -1,16 +1,23 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
 PackageIdentifier: Pulkitxm.Quinjet
 PackageVersion: "@VERSION@"
-InstallerType: portable
+InstallerType: zip
+NestedInstallerType: portable
 Commands:
   - quinjet
+  - q
 Dependencies:
   PackageDependencies:
     - PackageIdentifier: Git.Git
 ReleaseDate: "@RELEASE_DATE@"
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/pulkitxm/quinjet/releases/download/v@VERSION@/quinjet.exe
+    NestedInstallerFiles:
+      - RelativeFilePath: quinjet.exe
+        PortableCommandAlias: quinjet
+      - RelativeFilePath: q.exe
+        PortableCommandAlias: q
+    InstallerUrl: https://github.com/pulkitxm/quinjet/releases/download/v@VERSION@/quinjet-windows-x86_64.zip
     InstallerSha256: "@SHA256_WINDOWS_X86_64@"
 ManifestType: installer
 ManifestVersion: 1.12.0
