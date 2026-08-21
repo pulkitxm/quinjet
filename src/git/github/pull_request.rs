@@ -114,7 +114,7 @@ impl Repository {
     ) -> Result<(PullRequest, CacheDisposition)> {
         let response = self.checked_cached_gh(
             &format!(
-                "pull-request-v3\n{}\n{number}",
+                "pull-request-v4\n{}\n{number}",
                 repository.url.trim_end_matches('/')
             ),
             CacheLife::Ttl(PULL_REQUEST_CACHE_TTL),

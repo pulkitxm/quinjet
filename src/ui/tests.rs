@@ -30,6 +30,7 @@ fn overview_app() -> App {
         additions: 101,
         deletions: 20,
         changed_files: 3,
+        action_state: crate::git::github::PullRequestActionState::default(),
     });
     app.pull_request_checks = vec![PullRequestCheck {
         name: "Format, lint, and test".to_owned(),

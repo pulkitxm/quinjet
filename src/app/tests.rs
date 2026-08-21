@@ -41,6 +41,7 @@ fn pull_request(number: u64, title: &str, repository: &str) -> PullRequest {
         additions: usize::try_from(number).unwrap_or(usize::MAX),
         deletions: 1,
         changed_files: 2,
+        action_state: crate::git::github::PullRequestActionState::default(),
     }
 }
 

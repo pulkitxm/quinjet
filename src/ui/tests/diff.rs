@@ -246,6 +246,7 @@ fn pull_request_preview_renders_cross_remote_metadata_and_diff() {
         additions: 101,
         deletions: 20,
         changed_files: 1,
+        action_state: crate::git::github::PullRequestActionState::default(),
     });
     app.pull_request_repository = Some(GitHubRepository {
         name_with_owner: "acme/widget".to_owned(),
