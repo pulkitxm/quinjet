@@ -314,3 +314,126 @@ fn completion_json_matches_plain_scripts_for_every_shell() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn every_repository_leaf_fails_cleanly_outside_a_repository() -> Result<()> {
+    let scratch = Scratch::directory()?;
+    let cases = "
+status|diff|stage file|unstage file|discard file|remove file|commit -m message
+fetch|pull|push|sync|log|show
+branch list|branch switch main|branch create topic|branch rename old new|branch delete old|branch compare main
+stash list|stash push|stash apply stash@{0}|stash pop|stash drop stash@{0}|stash clear|stash show stash@{0}
+worktree list|cherry-pick HEAD|revert HEAD|resolve file --stage|repos
+pr view 1|pr files 1|pr diff 1|pr conversation 1|pr checks 1|pr logs 1 check|pr open 1
+pr merge 1 --merge|pr admin-merge 1 --squash|pr auto-merge 1 --rebase
+pr disable-auto-merge 1|pr dequeue 1|pr ready 1|pr draft 1
+pr review 1 --approve|pr comment 1 note|pr edit-last-comment 1 note|pr delete-last-comment 1
+pr edit 1 remove-milestone|pr update-branch 1|pr lock 1|pr unlock 1
+pr subscribe 1|pr unsubscribe 1|pr allow-maintainer-edits 1|pr disallow-maintainer-edits 1
+pr revert 1|pr close 1|pr reopen 1
+pr reviews show 1|pr reviews comment 1 file --file -b note|pr reviews reply 1 thread -b note
+pr reviews edit 1 comment -b note|pr reviews delete 1 comment|pr reviews submit 1 --approve -b note
+pr reviews discard 1|pr reviews resolve 1 thread|pr reviews unresolve 1 thread
+";
+    let mut count = 0;
+    for arguments in cases
+        .split(['|', '\n'])
+        .map(str::trim)
+        .filter(|arguments| !arguments.is_empty())
+    {
+        let args = arguments.split_ascii_whitespace().collect::<Vec<_>>();
+        let run = scratch.quinjet(&args)?;
+        ensure!(run.code == 1, "{arguments} exited {}", run.code);
+        ensure!(run.stdout.is_empty(), "{arguments} wrote: {}", run.stdout);
+        ensure!(
+            run.stderr.contains("error:") && run.stderr.contains("Not a Git repository"),
+            "{arguments} reported: {}",
+            run.stderr
+        );
+        count += 1;
+    }
+    ensure!(
+        count == 69,
+        "expected 69 repository leaves, exercised {count}"
+    );
+    Ok(())
+}
+
+#[test]
+fn missing_names_share_the_not_found_exit_contract() -> Result<()> {
+    let scratch = Scratch::repository()?;
+    for args in [
+        &["show", "missing", "--json"][..],
+        &["log", "missing", "--json"][..],
+        &["branch", "compare", "missing", "--json"][..],
+    ] {
+        let run = scratch.quinjet(args)?;
+        ensure!(run.code == 3, "{args:?} exited {}", run.code);
+        ensure!(run.stdout.is_empty(), "{args:?} wrote: {}", run.stdout);
+        ensure!(run.stderr.contains("error:"), "{args:?}: {}", run.stderr);
+        ensure!(run.stderr.contains("hint:"), "{args:?}: {}", run.stderr);
+    }
+    Ok(())
+}
+
+#[test]
+fn failed_mutations_preserve_head_index_and_worktree() -> Result<()> {
+    let scratch = Scratch::repository()?;
+    let head = scratch.git(&["rev-parse", "HEAD"])?;
+    let tree = scratch.git(&["write-tree"])?;
+    let status = scratch.git(&["status", "--porcelain"])?;
+    for args in [
+        &["commit", "-m", "nothing staged"][..],
+        &["branch", "switch", "missing"][..],
+        &["branch", "create", "bad..name"][..],
+        &["branch", "delete", "main", "--yes"][..],
+        &["stash", "apply", "stash@{0}"][..],
+        &["resolve", "missing.txt", "--stage"][..],
+    ] {
+        let run = scratch.quinjet(args)?;
+        ensure!(run.code == 1, "{args:?} exited {}", run.code);
+        ensure!(run.stdout.is_empty(), "{args:?} wrote: {}", run.stdout);
+        ensure!(run.stderr.contains("error:"), "{args:?}: {}", run.stderr);
+        ensure!(scratch.git(&["rev-parse", "HEAD"])? == head, "{args:?}");
+        ensure!(scratch.git(&["write-tree"])? == tree, "{args:?}");
+        ensure!(
+            scratch.git(&["status", "--porcelain"])? == status,
+            "{args:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn mutation_json_is_always_a_single_message_document() -> Result<()> {
+    let scratch = Scratch::repository()?;
+    scratch.write("feature.txt", "feature\n")?;
+    assert_message_document(scratch.quinjet(&["stage", "feature.txt", "--json"])?)?;
+    assert_message_document(scratch.quinjet(&["unstage", "feature.txt", "--json"])?)?;
+    assert_message_document(scratch.quinjet(&["stage", "feature.txt", "--json"])?)?;
+    assert_message_document(scratch.quinjet(&["commit", "-m", "feature", "--json"])?)?;
+    assert_message_document(scratch.quinjet(&["branch", "create", "topic", "--json"])?)?;
+    assert_message_document(scratch.quinjet(&["branch", "switch", "main", "--json"])?)?;
+    assert_message_document(scratch.quinjet(&["branch", "delete", "topic", "--yes", "--json"])?)?;
+    scratch.write("README.md", "changed\n")?;
+    assert_message_document(scratch.quinjet(&["stash", "push", "-m", "saved", "--json"])?)?;
+    assert_message_document(scratch.quinjet(&["stash", "pop", "--json"])?)?;
+    Ok(())
+}
+
+fn assert_message_document(run: Run) -> Result<()> {
+    let run = run.success()?;
+    ensure!(run.stderr.is_empty(), "operation wrote: {}", run.stderr);
+    let document = run.json()?;
+    let object = document
+        .as_object()
+        .context("operation JSON was not an object")?;
+    ensure!(object.len() == 1, "unexpected operation JSON: {document}");
+    ensure!(
+        object
+            .get("message")
+            .is_some_and(serde_json::Value::is_string),
+        "missing message: {document}"
+    );
+    Ok(())
+}
