@@ -334,4 +334,92 @@ mod tests {
         );
         assert_eq!(status.changes[0].status, ChangeStatus::Renamed);
     }
+
+    #[test]
+    fn maps_every_xy_code_in_both_tree_positions() {
+        for (code, expected) in [
+            ('A', ChangeStatus::Added),
+            ('M', ChangeStatus::Modified),
+            ('D', ChangeStatus::Deleted),
+            ('R', ChangeStatus::Renamed),
+            ('C', ChangeStatus::Copied),
+            ('T', ChangeStatus::TypeChanged),
+            ('U', ChangeStatus::Conflicted),
+            ('X', ChangeStatus::Modified),
+        ] {
+            for (xy, area) in [
+                (format!("{code}."), ChangeArea::Staged),
+                (format!(".{code}"), ChangeArea::Unstaged),
+            ] {
+                let record =
+                    format!("1 {xy} N... 100644 100644 100644 aaaaaaa bbbbbbb path-{code}\0");
+                let status = parse_porcelain_v2(record.as_bytes());
+                assert_eq!(status.changes.len(), 1, "{xy}");
+                assert_eq!(status.changes[0].area, area, "{xy}");
+                assert_eq!(status.changes[0].status, expected, "{xy}");
+            }
+        }
+    }
+
+    #[test]
+    fn branch_headers_cover_initial_detached_and_malformed_divergence() {
+        let initial = parse_porcelain_v2(
+            b"# branch.oid (initial)\0# branch.head topic\0# branch.ab +bad -4\0",
+        );
+        assert_eq!(initial.branch.head, "topic");
+        assert_eq!(initial.branch.oid, None);
+        assert_eq!((initial.branch.ahead, initial.branch.behind), (0, 4));
+        assert!(!initial.branch.detached);
+
+        let detached = parse_porcelain_v2(
+            b"# branch.oid 0123456789abcdef\0# branch.head (detached)\0# branch.upstream fork/main\0# branch.ab +7 -broken\0",
+        );
+        assert_eq!(detached.branch.head, "01234567");
+        assert_eq!(detached.branch.oid.as_deref(), Some("0123456789abcdef"));
+        assert_eq!(detached.branch.upstream.as_deref(), Some("fork/main"));
+        assert_eq!((detached.branch.ahead, detached.branch.behind), (7, 0));
+        assert!(detached.branch.detached);
+    }
+
+    #[test]
+    fn malformed_ignored_and_empty_records_are_skipped() {
+        let input = b"\0! ignored.txt\0x unknown\01 too-short\02 R. too-short\0old.txt\0u UU too-short\0? kept.txt\0";
+        let status = parse_porcelain_v2(input);
+
+        assert_eq!(status.changes.len(), 1);
+        assert_eq!(status.changes[0].path, Path::new("kept.txt"));
+        assert_eq!(status.changes[0].status, ChangeStatus::Untracked);
+    }
+
+    #[test]
+    fn changes_sort_by_area_then_lossy_path_and_keep_dual_renames() {
+        let input = b"? zeta.txt\0? \xff-invalid.txt\01 .D N... 100644 100644 000000 aaaaaaa aaaaaaa alpha.txt\02 RM N... 100644 100644 100644 aaaaaaa bbbbbbb R100 renamed.txt\0original.txt\0u DD N... 100644 100644 000000 100644 aaaaaaa bbbbbbb ccccccc conflict with spaces.txt\0";
+        let status = parse_porcelain_v2(input);
+
+        assert_eq!(status.changes.len(), 6);
+        assert_eq!(status.changes[0].area, ChangeArea::Conflict);
+        assert_eq!(
+            status.changes[0].path,
+            Path::new("conflict with spaces.txt")
+        );
+        assert_eq!(status.changes[1].area, ChangeArea::Staged);
+        assert_eq!(status.changes[1].status, ChangeStatus::Renamed);
+        assert_eq!(
+            status.changes[1].original_path.as_deref(),
+            Some(Path::new("original.txt"))
+        );
+        assert!(
+            status
+                .changes
+                .iter()
+                .filter(|change| change.path == Path::new("renamed.txt"))
+                .all(|change| change.original_path.as_deref() == Some(Path::new("original.txt")))
+        );
+        assert!(status.changes.iter().any(|change| {
+            change
+                .path
+                .to_string_lossy()
+                .contains("\u{fffd}-invalid.txt")
+        }));
+    }
 }
