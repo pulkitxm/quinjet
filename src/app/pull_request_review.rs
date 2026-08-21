@@ -197,6 +197,7 @@ impl App {
     pub(super) fn open_review_reply(&mut self) {
         let Some(thread_id) = self
             .selected_review_thread()
+            .filter(|thread| thread.viewer_can_reply)
             .map(|thread| thread.id.clone())
         else {
             return;

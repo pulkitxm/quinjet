@@ -157,14 +157,16 @@ impl App {
             }
             KeyCode::Char('x') if self.review_surface_active() => {
                 if let Some(thread) = self.selected_review_thread() {
-                    let operation = if thread.is_resolved {
+                    let operation = if thread.is_resolved && thread.viewer_can_unresolve {
                         PullRequestReviewOperation::Unresolve {
                             thread_id: thread.id.clone(),
                         }
-                    } else {
+                    } else if !thread.is_resolved && thread.viewer_can_resolve {
                         PullRequestReviewOperation::Resolve {
                             thread_id: thread.id.clone(),
                         }
+                    } else {
+                        return effects;
                     };
                     self.queue_pull_request_review_operation(operation, &mut effects);
                 }
