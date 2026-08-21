@@ -118,6 +118,11 @@ impl App {
                         for path in paths {
                             self.request_local_diff_file(path, &mut effects);
                         }
+                        if self.local_diff_loading_path.is_none()
+                            && self.local_diff_pending_paths.is_empty()
+                        {
+                            self.request_next_local_diff_file(&mut effects);
+                        }
                     }
                     Err(error) => {
                         self.document_loading = false;
