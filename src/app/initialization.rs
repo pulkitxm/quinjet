@@ -184,9 +184,9 @@ impl App {
         self.invalidate_pull_request_content_rows();
     }
 
-    /// Launch straight into one pull request: the `--pr` flag arrives here
-    /// before the first frame, so the lookup races the initial status reads
-    /// instead of waiting for them.
+    #[doc = " Launch straight into one pull request: the `--pr` flag arrives here"]
+    #[doc = " before the first frame, so the lookup races the initial status reads"]
+    #[doc = " instead of waiting for them."]
     pub(crate) fn open_pull_request_on_launch(&mut self, number: u64) -> Vec<AppEffect> {
         let mut effects = Vec::new();
         self.switch_view(View::PullRequests, &mut effects);

@@ -44,10 +44,10 @@ impl TemporaryBareRepository {
         bail!("unable to allocate a unique disposable Git repository")
     }
 
-    /// Let the disposable workspace read the opened repository's objects. A
-    /// merged or locally built pull request usually already has most of its
-    /// blobs on disk under other refs, so lazy blob reads resolve from the
-    /// local store instead of the network. The opened repository is only read.
+    #[doc = " Let the disposable workspace read the opened repository's objects. A"]
+    #[doc = " merged or locally built pull request usually already has most of its"]
+    #[doc = " blobs on disk under other refs, so lazy blob reads resolve from the"]
+    #[doc = " local store instead of the network. The opened repository is only read."]
     pub(super) fn borrow_local_objects(&self, repository: &Repository) {
         let Ok(common) = repository.git_common_dir() else {
             return;

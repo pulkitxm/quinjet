@@ -2,10 +2,10 @@
 use super::*;
 
 impl Repository {
-    /// `gh pr checks` exits non-zero when any run failed, so a useful response
-    /// has to be recognized by its content rather than by the exit status. That
-    /// is why this reads `gh` directly instead of going through the cached
-    /// helper, and caches the accepted body itself.
+    #[doc = " `gh pr checks` exits non-zero when any run failed, so a useful response"]
+    #[doc = " has to be recognized by its content rather than by the exit status. That"]
+    #[doc = " is why this reads `gh` directly instead of going through the cached"]
+    #[doc = " helper, and caches the accepted body itself."]
     pub(crate) fn pull_request_checks(
         &self,
         pull_request: &PullRequest,
@@ -50,14 +50,14 @@ impl Repository {
         })
     }
 
-    /// Read a check run's steps and its raw log, then attach every log line to
-    /// the step whose run window contains it. Runner output is timestamped in
-    /// UTC and the steps API reports the same clock, so the ranges map exactly
-    /// without guessing at group headings.
-    ///
-    /// The log endpoint serves whatever a running job has written so far, so
-    /// repeating this call while a job runs is what makes the view tail it. Only
-    /// the first seconds of a job answer 404, before the blob exists at all.
+    #[doc = " Read a check run's steps and its raw log, then attach every log line to"]
+    #[doc = " the step whose run window contains it. Runner output is timestamped in"]
+    #[doc = " UTC and the steps API reports the same clock, so the ranges map exactly"]
+    #[doc = " without guessing at group headings."]
+    #[doc = ""]
+    #[doc = " The log endpoint serves whatever a running job has written so far, so"]
+    #[doc = " repeating this call while a job runs is what makes the view tail it. Only"]
+    #[doc = " the first seconds of a job answer 404, before the blob exists at all."]
     pub(crate) fn pull_request_check_log(
         &self,
         pull_request: &PullRequest,
@@ -93,10 +93,10 @@ impl Repository {
         })
     }
 
-    /// Read every finished run into the cache so that selecting any of them is
-    /// answered from disk. Runs still in progress are skipped: their output is
-    /// not cacheable, and re-reading it here would spend requests the live tail
-    /// is about to spend anyway.
+    #[doc = " Read every finished run into the cache so that selecting any of them is"]
+    #[doc = " answered from disk. Runs still in progress are skipped: their output is"]
+    #[doc = " not cacheable, and re-reading it here would spend requests the live tail"]
+    #[doc = " is about to spend anyway."]
     pub(crate) fn prefetch_check_run_logs(
         &self,
         pull_request: &PullRequest,

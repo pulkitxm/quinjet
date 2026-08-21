@@ -10,3 +10,13 @@ rules:
   adhoc-packages:
     ignore:
       - nightly.yml
+  undocumented-permissions:
+    ignore:
+      - labeler.yml
+      - nightly.yml
+      - pages.yml
+      - pr.yml
+      - release.yml
+      - security.yml
+      - stale.yml
+      - wiki.yml

@@ -1,9 +1,8 @@
-//! Black-box tests that run the shipped binary the way a shell would.
-//!
-//! Everything here goes through `CARGO_BIN_EXE_quinjet` argv, a scratch
-//! repository, and captured stdout, so argument parsing, dispatch, exit
-//! codes, and the shape of both output faces are covered end to end.
-
+#![doc = " Black-box tests that run the shipped binary the way a shell would."]
+#![doc = ""]
+#![doc = " Everything here goes through `CARGO_BIN_EXE_quinjet` argv, a scratch"]
+#![doc = " repository, and captured stdout, so argument parsing, dispatch, exit"]
+#![doc = " codes, and the shape of both output faces are covered end to end."]
 #![expect(
     unused_results,
     reason = "test helpers return values the assertions do not use"

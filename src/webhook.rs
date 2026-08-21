@@ -21,7 +21,7 @@ pub(crate) struct WebhookListener {
 }
 
 impl WebhookListener {
-    /// Bind a listener for `gh webhook forward --url http://<address>/`.
+    #[doc = " Bind a listener for `gh webhook forward --url http://<address>/`."]
     pub(crate) fn bind(target: &str) -> Result<Self> {
         let address = parse_listen_address(target)?;
         let listener = TcpListener::bind(address)
@@ -55,9 +55,9 @@ impl Drop for WebhookListener {
     }
 }
 
-/// Accept only local connections. `gh webhook forward` runs beside Quinjet, so
-/// a remote peer is never a legitimate source and is refused before its request
-/// is read at all.
+#[doc = " Accept only local connections. `gh webhook forward` runs beside Quinjet, so"]
+#[doc = " a remote peer is never a legitimate source and is refused before its request"]
+#[doc = " is read at all."]
 fn serve(listener: &TcpListener, sender: &Sender<WebhookDelivery>, stopped: &AtomicBool) {
     for stream in listener.incoming() {
         if stopped.load(Ordering::Relaxed) {
@@ -119,8 +119,8 @@ fn read_head(reader: &mut BufReader<TcpStream>) -> Option<String> {
     }
 }
 
-/// Accept either a full socket address or a bare port, which is what anyone
-/// pairing this with `gh webhook forward` reaches for first.
+#[doc = " Accept either a full socket address or a bare port, which is what anyone"]
+#[doc = " pairing this with `gh webhook forward` reaches for first."]
 fn parse_listen_address(target: &str) -> Result<SocketAddr> {
     let target = target.trim();
     if let Ok(address) = target.parse::<SocketAddr>() {

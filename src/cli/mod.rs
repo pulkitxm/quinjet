@@ -112,7 +112,7 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Verb>,
 
-    /// Repository to run a subcommand against
+    #[doc = " Repository to run a subcommand against"]
     #[arg(
         short = 'C',
         long = "path",
@@ -123,82 +123,82 @@ struct Cli {
     )]
     repository: PathBuf,
 
-    /// Print one JSON document on stdout instead of text
+    #[doc = " Print one JSON document on stdout instead of text"]
     #[arg(long, global = true)]
     json: bool,
 
-    /// Open the terminal interface focused on this pull request
+    #[doc = " Open the terminal interface focused on this pull request"]
     #[arg(long = "pr", value_name = "NUMBER")]
     pull_request: Option<u64>,
 }
 
 #[derive(Debug, Subcommand)]
 enum Verb {
-    /// Open the terminal interface
+    #[doc = " Open the terminal interface"]
     Tui(TuiArgs),
-    /// Show the working tree, the index and the branch
+    #[doc = " Show the working tree, the index and the branch"]
     Status(WatchableArgs),
-    /// Print the working-tree diff
+    #[doc = " Print the working-tree diff"]
     Diff(DiffArgs),
-    /// Stage paths, or everything
+    #[doc = " Stage paths, or everything"]
     Stage(SelectionArgs),
-    /// Unstage paths, or everything
+    #[doc = " Unstage paths, or everything"]
     Unstage(SelectionArgs),
-    /// Throw away changes to paths
+    #[doc = " Throw away changes to paths"]
     Discard(DiscardArgs),
-    /// Delete paths from the working tree and the index
+    #[doc = " Delete paths from the working tree and the index"]
     #[command(visible_alias = "rm")]
     Remove(RemoveArgs),
-    /// Record the staged changes
+    #[doc = " Record the staged changes"]
     Commit(CommitArgs),
-    /// Fetch every remote and prune deleted refs
+    #[doc = " Fetch every remote and prune deleted refs"]
     Fetch,
-    /// Pull the current branch
+    #[doc = " Pull the current branch"]
     Pull,
-    /// Push the current branch
+    #[doc = " Push the current branch"]
     Push,
-    /// Pull, then push
+    #[doc = " Pull, then push"]
     Sync,
-    /// List commits
+    #[doc = " List commits"]
     Log(LogArgs),
-    /// Show one commit and its patch
+    #[doc = " Show one commit and its patch"]
     Show(ShowArgs),
-    /// Work with branches
+    #[doc = " Work with branches"]
     Branch {
         #[command(subcommand)]
         command: BranchVerb,
     },
-    /// Work with stashes
+    #[doc = " Work with stashes"]
     Stash {
         #[command(subcommand)]
         command: StashVerb,
     },
-    /// List linked worktrees
+    #[doc = " List linked worktrees"]
     Worktree {
         #[command(subcommand)]
         command: WorktreeVerb,
     },
-    /// Apply a commit onto the current branch
+    #[doc = " Apply a commit onto the current branch"]
     CherryPick(RevisionArgs),
-    /// Record a commit that undoes another
+    #[doc = " Record a commit that undoes another"]
     Revert(RevisionArgs),
-    /// Take one side of a merge conflict
+    #[doc = " Take one side of a merge conflict"]
     Resolve(ResolveArgs),
-    /// List the GitHub repositories this checkout points at
+    #[doc = " List the GitHub repositories this checkout points at"]
     Repos(ReposArgs),
-    /// Read or update a pull request
+    #[doc = " Read or update a pull request"]
     Pr {
         #[command(subcommand)]
         command: PrVerb,
     },
-    /// Print or install shell completions
+    #[doc = " Print or install shell completions"]
     #[command(visible_alias = "completion")]
     Completions(CompletionsArgs),
-    /// Print the manual page, or write one page per command
+    #[doc = " Print the manual page, or write one page per command"]
     Man(ManArgs),
-    /// Describe commands and arguments for automation
+    #[doc = " Describe commands and arguments for automation"]
     Capabilities,
-    /// Update this executable to the latest stable release
+    #[doc = " Update this executable to the latest stable release"]
     Update(UpdateArgs),
 }
 
@@ -250,10 +250,10 @@ impl Verb {
 
 #[derive(Debug, Args)]
 struct CompletionsArgs {
-    /// Shell to write or install a completion script for
+    #[doc = " Shell to write or install a completion script for"]
     #[arg(value_enum, required_unless_present = "install")]
     shell: Option<Shell>,
-    /// Install completions and a q launcher on PATH
+    #[doc = " Install completions and a q launcher on PATH"]
     #[arg(long)]
     install: bool,
     #[arg(long, hide = true, requires = "install")]
@@ -262,46 +262,46 @@ struct CompletionsArgs {
 
 #[derive(Debug, Args)]
 struct ManArgs {
-    /// Write one page per command into this directory instead of printing one
+    #[doc = " Write one page per command into this directory instead of printing one"]
     #[arg(long, value_name = "DIR", value_hint = ValueHint::DirPath)]
     dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
 struct UpdateArgs {
-    /// Check for a newer release without installing it
+    #[doc = " Check for a newer release without installing it"]
     #[arg(long)]
     check: bool,
 }
 
 #[derive(Debug, Args)]
 struct TuiArgs {
-    /// Git repository to open
+    #[doc = " Git repository to open"]
     #[arg(default_value = ".", value_hint = ValueHint::DirPath)]
     path: PathBuf,
-    /// Disable mouse capture
+    #[doc = " Disable mouse capture"]
     #[arg(long)]
     no_mouse: bool,
-    /// Listen for forwarded GitHub webhooks on a port or host:port
+    #[doc = " Listen for forwarded GitHub webhooks on a port or host:port"]
     #[arg(long, value_name = "ADDRESS")]
     webhook_listen: Option<String>,
-    /// Color palette to use throughout the interface
+    #[doc = " Color palette to use throughout the interface"]
     #[arg(long, value_enum, default_value_t)]
     theme: ThemeName,
-    /// Use the system, light, or dark variant of the palette
+    #[doc = " Use the system, light, or dark variant of the palette"]
     #[arg(long, value_enum, default_value_t)]
     appearance: AppearanceChoice,
-    /// Open the interface focused on this pull request
+    #[doc = " Open the interface focused on this pull request"]
     #[arg(long = "pr", value_name = "NUMBER")]
     pull_request: Option<u64>,
 }
 
 #[derive(Debug, Args)]
 struct WatchableArgs {
-    /// Keep the reading on screen and refresh it
+    #[doc = " Keep the reading on screen and refresh it"]
     #[arg(long)]
     watch: bool,
-    /// Seconds between refreshes
+    #[doc = " Seconds between refreshes"]
     #[arg(
         long,
         value_name = "SECONDS",
@@ -315,16 +315,16 @@ struct WatchableArgs {
 
 #[derive(Debug, Args)]
 struct DiffArgs {
-    /// Limit the diff to these paths
+    #[doc = " Limit the diff to these paths"]
     #[arg(value_name = "PATH", value_hint = ValueHint::AnyPath)]
     paths: Vec<PathBuf>,
-    /// Only what is staged
+    #[doc = " Only what is staged"]
     #[arg(long)]
     staged: bool,
-    /// Only what is not staged
+    #[doc = " Only what is not staged"]
     #[arg(long, conflicts_with = "staged")]
     unstaged: bool,
-    /// Print whole files instead of three lines of context
+    #[doc = " Print whole files instead of three lines of context"]
     #[arg(long)]
     expanded: bool,
 }
@@ -332,10 +332,10 @@ struct DiffArgs {
 #[derive(Debug, Args)]
 #[group(required = true, multiple = false)]
 struct SelectionArgs {
-    /// Paths to act on
+    #[doc = " Paths to act on"]
     #[arg(value_name = "PATH", value_hint = ValueHint::AnyPath)]
     paths: Vec<PathBuf>,
-    /// Act on every change instead
+    #[doc = " Act on every change instead"]
     #[arg(long, conflicts_with = "paths")]
     all: bool,
 }
@@ -344,7 +344,7 @@ struct SelectionArgs {
 struct DiscardArgs {
     #[command(flatten)]
     selection: SelectionArgs,
-    /// Confirm; without it the command reports what it would discard
+    #[doc = " Confirm; without it the command reports what it would discard"]
     #[arg(long)]
     yes: bool,
 }
@@ -353,57 +353,57 @@ struct DiscardArgs {
 struct RemoveArgs {
     #[command(flatten)]
     selection: SelectionArgs,
-    /// Confirm; without it the command reports what it would remove
+    #[doc = " Confirm; without it the command reports what it would remove"]
     #[arg(long)]
     yes: bool,
 }
 
 #[derive(Debug, Args)]
 struct CommitArgs {
-    /// Commit message
+    #[doc = " Commit message"]
     #[arg(short, long)]
     message: String,
-    /// Replace the previous commit
+    #[doc = " Replace the previous commit"]
     #[arg(long)]
     amend: bool,
 }
 
 #[derive(Debug, Args)]
 struct LogArgs {
-    /// Branch, tag, or commit to read from
+    #[doc = " Branch, tag, or commit to read from"]
     #[arg(default_value = "HEAD", value_name = "REVISION", value_hint = ValueHint::Other)]
     revision: String,
-    /// Commits to skip
+    #[doc = " Commits to skip"]
     #[arg(long, default_value_t = 0, value_hint = ValueHint::Other)]
     skip: usize,
-    /// Commits to print
+    #[doc = " Commits to print"]
     #[arg(long, short = 'n', default_value_t = 30, value_hint = ValueHint::Other)]
     limit: usize,
 }
 
 #[derive(Debug, Args)]
 struct ShowArgs {
-    /// Commit to show
+    #[doc = " Commit to show"]
     #[arg(default_value = "HEAD", value_name = "REVISION", value_hint = ValueHint::Other)]
     revision: String,
-    /// Print whole files instead of three lines of context
+    #[doc = " Print whole files instead of three lines of context"]
     #[arg(long)]
     expanded: bool,
 }
 
 #[derive(Debug, Args)]
 struct RevisionArgs {
-    /// Commit to act on
+    #[doc = " Commit to act on"]
     #[arg(value_name = "REVISION", value_hint = ValueHint::Other)]
     revision: String,
-    /// Confirm; without it the command reports what it would do
+    #[doc = " Confirm; without it the command reports what it would do"]
     #[arg(long)]
     yes: bool,
 }
 
 #[derive(Debug, Args)]
 struct ResolveArgs {
-    /// Conflicted path
+    #[doc = " Conflicted path"]
     #[arg(value_name = "PATH", value_hint = ValueHint::AnyPath)]
     path: PathBuf,
     #[command(flatten)]
@@ -413,13 +413,13 @@ struct ResolveArgs {
 #[derive(Debug, Args)]
 #[group(required = true, multiple = false)]
 struct ConflictSide {
-    /// Keep the version already on this branch
+    #[doc = " Keep the version already on this branch"]
     #[arg(long)]
     ours: bool,
-    /// Keep the version being merged in
+    #[doc = " Keep the version being merged in"]
     #[arg(long)]
     theirs: bool,
-    /// Accept the file as it stands and stage it
+    #[doc = " Accept the file as it stands and stage it"]
     #[arg(long)]
     stage: bool,
 }

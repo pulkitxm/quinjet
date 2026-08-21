@@ -3,47 +3,47 @@ use super::*;
 
 #[derive(Debug, Subcommand)]
 pub(super) enum BranchVerb {
-    /// List local branches
+    #[doc = " List local branches"]
     List(BranchListArgs),
-    /// Switch to a branch
+    #[doc = " Switch to a branch"]
     Switch {
-        /// Branch to switch to
+        #[doc = " Branch to switch to"]
         #[arg(value_name = "BRANCH", value_hint = ValueHint::Other)]
         name: String,
     },
-    /// Create a branch and switch to it
+    #[doc = " Create a branch and switch to it"]
     Create {
-        /// New branch name
+        #[doc = " New branch name"]
         #[arg(value_name = "BRANCH", value_hint = ValueHint::Other)]
         name: String,
-        /// Commit to branch from
+        #[doc = " Commit to branch from"]
         #[arg(value_name = "START", value_hint = ValueHint::Other)]
         start: Option<String>,
     },
-    /// Rename a branch
+    #[doc = " Rename a branch"]
     Rename {
-        /// Existing branch name
+        #[doc = " Existing branch name"]
         #[arg(value_name = "OLD", value_hint = ValueHint::Other)]
         old: String,
-        /// New branch name
+        #[doc = " New branch name"]
         #[arg(value_name = "NEW", value_hint = ValueHint::Other)]
         new: String,
     },
-    /// Delete a branch
+    #[doc = " Delete a branch"]
     Delete {
-        /// Branch to delete
+        #[doc = " Branch to delete"]
         #[arg(value_name = "BRANCH", value_hint = ValueHint::Other)]
         name: String,
-        /// Confirm; without it the command reports what it would delete
+        #[doc = " Confirm; without it the command reports what it would delete"]
         #[arg(long)]
         yes: bool,
     },
-    /// Diff a branch against the current one without checking anything out
+    #[doc = " Diff a branch against the current one without checking anything out"]
     Compare {
-        /// Local or remote-tracking branch to compare
+        #[doc = " Local or remote-tracking branch to compare"]
         #[arg(value_name = "BRANCH", value_hint = ValueHint::Other)]
         reference: String,
-        /// Print whole files instead of three lines of context
+        #[doc = " Print whole files instead of three lines of context"]
         #[arg(long)]
         expanded: bool,
     },
@@ -51,69 +51,69 @@ pub(super) enum BranchVerb {
 
 #[derive(Debug, Args)]
 pub(super) struct BranchListArgs {
-    /// Include remote-tracking branches
+    #[doc = " Include remote-tracking branches"]
     #[arg(long)]
     pub(super) all: bool,
 }
 
 #[derive(Debug, Clone, Copy, Subcommand)]
 pub(super) enum WorktreeVerb {
-    /// List this repository's worktrees
+    #[doc = " List this repository's worktrees"]
     List,
 }
 
 #[derive(Debug, Subcommand)]
 pub(super) enum StashVerb {
-    /// List stashes
+    #[doc = " List stashes"]
     List,
-    /// Stash the current changes
+    #[doc = " Stash the current changes"]
     Push {
-        /// Message to record
+        #[doc = " Message to record"]
         #[arg(short, long, default_value = "")]
         message: String,
-        /// Include untracked files
+        #[doc = " Include untracked files"]
         #[arg(long)]
         include_untracked: bool,
-        /// Stash only what is staged
+        #[doc = " Stash only what is staged"]
         #[arg(long, conflicts_with = "include_untracked")]
         staged: bool,
-        /// Limit the stash to these paths
+        #[doc = " Limit the stash to these paths"]
         #[arg(value_name = "PATH", value_hint = ValueHint::AnyPath)]
         paths: Vec<PathBuf>,
     },
-    /// Apply a stash and keep it
+    #[doc = " Apply a stash and keep it"]
     Apply {
-        /// Stash reference to apply
+        #[doc = " Stash reference to apply"]
         #[arg(value_name = "STASH", value_hint = ValueHint::Other)]
         reference: String,
     },
-    /// Apply a stash and drop it
+    #[doc = " Apply a stash and drop it"]
     Pop {
-        /// Stash reference to apply and drop
+        #[doc = " Stash reference to apply and drop"]
         #[arg(value_name = "STASH", value_hint = ValueHint::Other)]
         reference: Option<String>,
     },
-    /// Drop a stash
+    #[doc = " Drop a stash"]
     Drop {
-        /// Stash reference to drop
+        #[doc = " Stash reference to drop"]
         #[arg(value_name = "STASH", value_hint = ValueHint::Other)]
         reference: String,
-        /// Confirm; without it the command reports what it would drop
+        #[doc = " Confirm; without it the command reports what it would drop"]
         #[arg(long)]
         yes: bool,
     },
-    /// Drop every stash
+    #[doc = " Drop every stash"]
     Clear {
-        /// Confirm; without it the command reports what it would drop
+        #[doc = " Confirm; without it the command reports what it would drop"]
         #[arg(long)]
         yes: bool,
     },
-    /// Print a stash as a patch
+    #[doc = " Print a stash as a patch"]
     Show {
-        /// Stash reference to print
+        #[doc = " Stash reference to print"]
         #[arg(value_name = "STASH", value_hint = ValueHint::Other)]
         reference: String,
-        /// Print whole files instead of three lines of context
+        #[doc = " Print whole files instead of three lines of context"]
         #[arg(long)]
         expanded: bool,
     },
@@ -121,13 +121,13 @@ pub(super) enum StashVerb {
 
 #[derive(Debug, Args, Clone)]
 pub(super) struct PrArgs {
-    /// Pull-request number
+    #[doc = " Pull-request number"]
     #[arg(value_name = "NUMBER", value_hint = ValueHint::Other)]
     pub(super) number: u64,
-    /// Repository the number belongs to, as owner/name
+    #[doc = " Repository the number belongs to, as owner/name"]
     #[arg(long, value_name = "OWNER/NAME", value_hint = ValueHint::Other)]
     pub(super) repo: Option<String>,
-    /// Ask GitHub again instead of answering from the cache
+    #[doc = " Ask GitHub again instead of answering from the cache"]
     #[arg(long)]
     pub(super) refresh: bool,
 }
@@ -136,10 +136,10 @@ pub(super) struct PrArgs {
 pub(super) struct PrWatchArgs {
     #[command(flatten)]
     pub(super) pull_request: PrArgs,
-    /// Keep the reading on screen and refresh it
+    #[doc = " Keep the reading on screen and refresh it"]
     #[arg(long)]
     pub(super) watch: bool,
-    /// Seconds between refreshes
+    #[doc = " Seconds between refreshes"]
     #[arg(
         long,
         value_name = "SECONDS",
@@ -155,7 +155,7 @@ pub(super) struct PrWatchArgs {
 pub(super) struct PrOpenArgs {
     #[command(flatten)]
     pub(super) pull_request: PrArgs,
-    /// Open a matching check run instead of the pull request
+    #[doc = " Open a matching check run instead of the pull request"]
     #[arg(long, value_name = "NAME", value_hint = ValueHint::Other)]
     pub(super) check: Option<String>,
 }
@@ -163,13 +163,13 @@ pub(super) struct PrOpenArgs {
 #[derive(Debug, Args)]
 #[group(required = true, multiple = false)]
 pub(super) struct PrMergeMethodArgs {
-    /// Create a merge commit
+    #[doc = " Create a merge commit"]
     #[arg(long)]
     pub(super) merge: bool,
-    /// Squash commits into one and merge
+    #[doc = " Squash commits into one and merge"]
     #[arg(long)]
     pub(super) squash: bool,
-    /// Rebase commits onto the base branch and merge
+    #[doc = " Rebase commits onto the base branch and merge"]
     #[arg(long)]
     pub(super) rebase: bool,
 }
@@ -192,10 +192,10 @@ pub(super) struct PrMergeArgs {
     pub(super) pull_request: PrArgs,
     #[command(flatten)]
     pub(super) method: PrMergeMethodArgs,
-    /// Delete the head branch after merging
+    #[doc = " Delete the head branch after merging"]
     #[arg(long)]
     pub(super) delete_branch: bool,
-    /// Confirm; without it the command reports what it would do
+    #[doc = " Confirm; without it the command reports what it would do"]
     #[arg(long)]
     pub(super) yes: bool,
 }
@@ -204,7 +204,7 @@ pub(super) struct PrMergeArgs {
 pub(super) struct PrMutateArgs {
     #[command(flatten)]
     pub(super) pull_request: PrArgs,
-    /// Confirm; without it the command reports what it would do
+    #[doc = " Confirm; without it the command reports what it would do"]
     #[arg(long)]
     pub(super) yes: bool,
 }
@@ -213,10 +213,10 @@ pub(super) struct PrMutateArgs {
 pub(super) struct PrTextMutateArgs {
     #[command(flatten)]
     pub(super) pull_request: PrArgs,
-    /// Text to submit
+    #[doc = " Text to submit"]
     #[arg(value_name = "BODY", value_hint = ValueHint::Other)]
     pub(super) body: String,
-    /// Confirm; without it the command reports what it would do
+    #[doc = " Confirm; without it the command reports what it would do"]
     #[arg(long)]
     pub(super) yes: bool,
 }
@@ -224,13 +224,13 @@ pub(super) struct PrTextMutateArgs {
 #[derive(Debug, Args)]
 #[group(required = true, multiple = false)]
 pub(super) struct PrReviewChoiceArgs {
-    /// Approve the pull request
+    #[doc = " Approve the pull request"]
     #[arg(long)]
     pub(super) approve: bool,
-    /// Submit a review without a verdict
+    #[doc = " Submit a review without a verdict"]
     #[arg(long)]
     pub(super) comment: bool,
-    /// Request changes before merging
+    #[doc = " Request changes before merging"]
     #[arg(long)]
     pub(super) request_changes: bool,
 }
@@ -253,10 +253,10 @@ pub(super) struct PrReviewArgs {
     pub(super) pull_request: PrArgs,
     #[command(flatten)]
     pub(super) choice: PrReviewChoiceArgs,
-    /// Optional review body
+    #[doc = " Optional review body"]
     #[arg(long, value_name = "TEXT", value_hint = ValueHint::Other)]
     pub(super) body: Option<String>,
-    /// Confirm; without it the command reports what it would do
+    #[doc = " Confirm; without it the command reports what it would do"]
     #[arg(long)]
     pub(super) yes: bool,
 }
@@ -282,13 +282,13 @@ pub(super) enum PrEditFieldArg {
 pub(super) struct PrEditArgs {
     #[command(flatten)]
     pub(super) pull_request: PrArgs,
-    /// Metadata field or relationship to change
+    #[doc = " Metadata field or relationship to change"]
     #[arg(value_enum, value_name = "FIELD")]
     pub(super) field: PrEditFieldArg,
-    /// New value, or a comma-separated list for relationship fields
+    #[doc = " New value, or a comma-separated list for relationship fields"]
     #[arg(value_name = "VALUE", value_hint = ValueHint::Other)]
     pub(super) value: Option<String>,
-    /// Confirm; without it the command reports what it would do
+    #[doc = " Confirm; without it the command reports what it would do"]
     #[arg(long)]
     pub(super) yes: bool,
 }
@@ -327,10 +327,10 @@ impl PrEditArgs {
 pub(super) struct PrUpdateBranchArgs {
     #[command(flatten)]
     pub(super) pull_request: PrArgs,
-    /// Rebase onto the base branch instead of merging it
+    #[doc = " Rebase onto the base branch instead of merging it"]
     #[arg(long)]
     pub(super) rebase: bool,
-    /// Confirm; without it the command reports what it would do
+    #[doc = " Confirm; without it the command reports what it would do"]
     #[arg(long)]
     pub(super) yes: bool,
 }
@@ -358,10 +358,10 @@ impl From<PrLockReasonArg> for PullRequestLockReason {
 pub(super) struct PrLockArgs {
     #[command(flatten)]
     pub(super) pull_request: PrArgs,
-    /// Why the conversation is being locked
+    #[doc = " Why the conversation is being locked"]
     #[arg(long, value_enum)]
     pub(super) reason: Option<PrLockReasonArg>,
-    /// Confirm; without it the command reports what it would do
+    #[doc = " Confirm; without it the command reports what it would do"]
     #[arg(long)]
     pub(super) yes: bool,
 }
@@ -370,16 +370,16 @@ pub(super) struct PrLockArgs {
 pub(super) struct PrRevertArgs {
     #[command(flatten)]
     pub(super) pull_request: PrArgs,
-    /// Title for the revert pull request
+    #[doc = " Title for the revert pull request"]
     #[arg(long, value_name = "TEXT", value_hint = ValueHint::Other)]
     pub(super) title: Option<String>,
-    /// Description for the revert pull request
+    #[doc = " Description for the revert pull request"]
     #[arg(long, value_name = "TEXT", value_hint = ValueHint::Other)]
     pub(super) body: Option<String>,
-    /// Create the revert pull request as a draft
+    #[doc = " Create the revert pull request as a draft"]
     #[arg(long)]
     pub(super) draft: bool,
-    /// Confirm; without it the command reports what it would do
+    #[doc = " Confirm; without it the command reports what it would do"]
     #[arg(long)]
     pub(super) yes: bool,
 }
@@ -388,7 +388,7 @@ pub(super) struct PrRevertArgs {
 pub(super) struct PrDiffArgs {
     #[command(flatten)]
     pub(super) pull_request: PrArgs,
-    /// Limit the patch to one path
+    #[doc = " Limit the patch to one path"]
     #[arg(value_name = "PATH", value_hint = ValueHint::AnyPath)]
     pub(super) path: Option<PathBuf>,
 }
@@ -397,10 +397,10 @@ pub(super) struct PrDiffArgs {
 pub(super) struct PrChecksArgs {
     #[command(flatten)]
     pub(super) pull_request: PrArgs,
-    /// Keep reading until every check has settled
+    #[doc = " Keep reading until every check has settled"]
     #[arg(long)]
     pub(super) watch: bool,
-    /// Seconds between reads while watching
+    #[doc = " Seconds between reads while watching"]
     #[arg(
         long,
         value_name = "SECONDS",
@@ -410,7 +410,7 @@ pub(super) struct PrChecksArgs {
         value_hint = ValueHint::Other
     )]
     pub(super) interval: u64,
-    /// Exit 1 when a check has not passed
+    #[doc = " Exit 1 when a check has not passed"]
     #[arg(long, conflicts_with = "watch")]
     pub(super) exit_code: bool,
 }
@@ -419,13 +419,13 @@ pub(super) struct PrChecksArgs {
 pub(super) struct PrLogsArgs {
     #[command(flatten)]
     pub(super) pull_request: PrArgs,
-    /// Check run to read, by name
+    #[doc = " Check run to read, by name"]
     #[arg(value_name = "CHECK", value_hint = ValueHint::Other)]
     pub(super) check: String,
-    /// Keep reading while the run is still going
+    #[doc = " Keep reading while the run is still going"]
     #[arg(long)]
     pub(super) watch: bool,
-    /// Seconds between reads while watching
+    #[doc = " Seconds between reads while watching"]
     #[arg(
         long,
         value_name = "SECONDS",

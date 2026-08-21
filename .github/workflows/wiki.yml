@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read # read the checkout
+  contents: read
 
 concurrency:
   group: wiki-sync
@@ -23,14 +23,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write # push the generated pages to the wiki repository
+      contents: write
     steps:
       - name: Require main for a manual sync
         if: github.event_name == 'workflow_dispatch'
         run: >-
           test "$GITHUB_REF" = refs/heads/main
           || { echo "sync blocked: select the main branch" >&2; exit 1; }
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Verify optimization reference

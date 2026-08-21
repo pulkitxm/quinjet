@@ -180,9 +180,9 @@ pub(super) fn draw_content(
     (divider, content_file_hits, Vec::new(), content_review_hits)
 }
 
-/// A clickable shortcut to the end of whatever the content pane holds, shown on
-/// its bottom border whenever the reader is not already there. On a huge diff
-/// or conversation it replaces paging through thousands of rows.
+#[doc = " A clickable shortcut to the end of whatever the content pane holds, shown on"]
+#[doc = " its bottom border whenever the reader is not already there. On a huge diff"]
+#[doc = " or conversation it replaces paging through thousands of rows."]
 pub(super) fn draw_jump_to_bottom(
     frame: &mut Frame<'_>,
     content: Rect,

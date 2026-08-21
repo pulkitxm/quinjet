@@ -1,15 +1,11 @@
-# Reference repositories and scratch research
 extras/
 
-# Rust build artifacts
 /target/
 
-# Editor / OS files
 .DS_Store
 *.swp
 
 
-# Added by cargo
 
 /target
 /.github/tools/node_modules/
@@ -17,15 +13,12 @@ extras/
 /fuzz/corpus/
 /fuzz/target/
 
-# pty harness virtualenv (see scripts/drive.py)
 .venv/
 __pycache__/
 
-# wiki sync scratch space
 .wiki-build/
 .wiki-clone/
 
-# Check output
 lcov.info
 mutants.out/
 mutants.out.old/

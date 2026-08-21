@@ -201,8 +201,8 @@ fn watcher_changed(receiver: Option<&Receiver<()>>) -> bool {
     changed
 }
 
-/// Deliveries only say that something changed, so several arriving together
-/// collapse into the single refresh they would each have asked for.
+#[doc = " Deliveries only say that something changed, so several arriving together"]
+#[doc = " collapse into the single refresh they would each have asked for."]
 fn webhook_delivered(listener: Option<&WebhookListener>) -> bool {
     let Some(listener) = listener else {
         return false;

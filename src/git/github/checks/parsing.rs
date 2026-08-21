@@ -1,9 +1,9 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
-/// GitHub answers the log endpoint with 404 until a job has finished writing
-/// its archive, and with 410 once retention expires. Neither is a failure worth
-/// showing: the run itself is still readable from its steps.
+#[doc = " GitHub answers the log endpoint with 404 until a job has finished writing"]
+#[doc = " its archive, and with 410 once retention expires. Neither is a failure worth"]
+#[doc = " showing: the run itself is still readable from its steps."]
 pub(super) fn log_not_published(output: &BoundedOutput) -> bool {
     let error = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
     ["404", "410", "not found", "gone"]
@@ -94,9 +94,9 @@ pub(super) fn parse_check_steps(output: &[u8]) -> Result<Vec<CheckStep>> {
     Ok(steps)
 }
 
-/// Runner logs are one timestamped line per row, carrying ANSI color and
-/// `##[...]` workflow commands. Both are stripped here so the renderer only
-/// deals with text plus a severity.
+#[doc = " Runner logs are one timestamped line per row, carrying ANSI color and"]
+#[doc = " `##[...]` workflow commands. Both are stripped here so the renderer only"]
+#[doc = " deals with text plus a severity."]
 pub(super) fn parse_check_log(raw: &[u8]) -> (Vec<CheckLogLine>, bool) {
     let text = String::from_utf8_lossy(raw);
     let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
@@ -190,14 +190,14 @@ pub(super) fn split_log_marker(value: &str) -> (CheckLogSeverity, String) {
     (CheckLogSeverity::Normal, value.to_owned())
 }
 
-/// Distribute timestamped lines across steps in a single forward pass, moving on
-/// as soon as the next step has started. Comparing whole seconds matters:
-/// runner lines carry sub-second precision while the steps API reports whole
-/// seconds, and comparing those as text puts everything written during a step's
-/// final second into the step before it.
-///
-/// Output from before the first step or after the last one is returned loose,
-/// which is where provisioning and teardown failures live.
+#[doc = " Distribute timestamped lines across steps in a single forward pass, moving on"]
+#[doc = " as soon as the next step has started. Comparing whole seconds matters:"]
+#[doc = " runner lines carry sub-second precision while the steps API reports whole"]
+#[doc = " seconds, and comparing those as text puts everything written during a step's"]
+#[doc = " final second into the step before it."]
+#[doc = ""]
+#[doc = " Output from before the first step or after the last one is returned loose,"]
+#[doc = " which is where provisioning and teardown failures live."]
 pub(super) fn assign_lines_to_steps(
     steps: &mut [CheckStep],
     lines: Vec<CheckLogLine>,
@@ -246,8 +246,8 @@ pub(super) fn assign_lines_to_steps(
     loose
 }
 
-/// Render an elapsed span between two RFC 3339 stamps, or nothing when either
-/// is missing or the pair does not describe a forward span.
+#[doc = " Render an elapsed span between two RFC 3339 stamps, or nothing when either"]
+#[doc = " is missing or the pair does not describe a forward span."]
 pub(super) fn elapsed_label(started_at: &str, completed_at: &str) -> String {
     elapsed_seconds(started_at, completed_at).map_or_else(String::new, format_elapsed)
 }
@@ -266,8 +266,8 @@ pub(super) fn format_elapsed(seconds: i64) -> String {
     }
 }
 
-/// Both stamps are RFC 3339 in UTC, so a fixed-width field comparison is enough
-/// to measure an elapsed span without pulling in a date library.
+#[doc = " Both stamps are RFC 3339 in UTC, so a fixed-width field comparison is enough"]
+#[doc = " to measure an elapsed span without pulling in a date library."]
 pub(super) fn elapsed_seconds(started_at: &str, completed_at: &str) -> Option<i64> {
     let start = timestamp_seconds(started_at)?;
     let end = timestamp_seconds(completed_at)?;
@@ -288,8 +288,8 @@ pub(super) fn timestamp_seconds(value: &str) -> Option<i64> {
     Some(days_from_civil(year, month, day) * 86_400 + hour * 3_600 + minute * 60 + second)
 }
 
-/// Howard Hinnant's civil-to-days algorithm, valid across the proleptic
-/// Gregorian calendar.
+#[doc = " Howard Hinnant's civil-to-days algorithm, valid across the proleptic"]
+#[doc = " Gregorian calendar."]
 #[expect(
     clippy::integer_division,
     reason = "the civil-to-days algorithm is defined in truncating arithmetic"

@@ -14,9 +14,9 @@ pub(super) enum CacheDisposition {
     Stale,
 }
 
-/// How long an entry stays usable. `Immutable` is for content whose identity is
-/// already in its key: a finished run's log, or a patch between two fixed
-/// commits. Such an entry can never become wrong, only evicted.
+#[doc = " How long an entry stays usable. `Immutable` is for content whose identity is"]
+#[doc = " already in its key: a finished run's log, or a patch between two fixed"]
+#[doc = " commits. Such an entry can never become wrong, only evicted."]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CacheLife {
     Immutable,

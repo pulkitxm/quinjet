@@ -24,8 +24,8 @@ impl TextBuffer {
         self.cursor += text.len();
     }
 
-    /// The text on each side of the cursor, never panicking when the cursor
-    /// sits between two bytes of the same character.
+    #[doc = " The text on each side of the cursor, never panicking when the cursor"]
+    #[doc = " sits between two bytes of the same character."]
     pub(crate) fn before_cursor(&self) -> &str {
         self.value.get(..self.cursor).unwrap_or_default()
     }

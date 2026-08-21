@@ -38,8 +38,8 @@ pub(crate) struct Branch {
     pub short_id: String,
 }
 
-/// A local or remote-tracking branch that can be inspected without changing HEAD.
-/// `reference` is always a full ref emitted by Git and is used only as a revision.
+#[doc = " A local or remote-tracking branch that can be inspected without changing HEAD."]
+#[doc = " `reference` is always a full ref emitted by Git and is used only as a revision."]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HistoryBranch {

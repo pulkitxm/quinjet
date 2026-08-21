@@ -62,9 +62,9 @@ pub(crate) enum DiffLayout {
     SideBySide,
 }
 
-/// The two halves of the pull-request view. `Overview` lists the pull request's
-/// checks beside its conversation; `Files` lists the changed files beside their
-/// diffs.
+#[doc = " The two halves of the pull-request view. `Overview` lists the pull request's"]
+#[doc = " checks beside its conversation; `Files` lists the changed files beside their"]
+#[doc = " diffs."]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PullRequestSection {
     Overview,

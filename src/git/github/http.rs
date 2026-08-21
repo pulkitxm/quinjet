@@ -1,13 +1,13 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
-/// A validated read: GitHub is asked whether the answer changed, and answers
-/// `304 Not Modified` when it did not. That reply carries no body and costs
-/// nothing against the rate limit, which is what lets an unchanged thread be
-/// re-checked as often as it is worth checking.
-///
-/// The entry holds the validator on its first line and the body after it, so
-/// the two can never be stored out of step with each other.
+#[doc = " A validated read: GitHub is asked whether the answer changed, and answers"]
+#[doc = " `304 Not Modified` when it did not. That reply carries no body and costs"]
+#[doc = " nothing against the rate limit, which is what lets an unchanged thread be"]
+#[doc = " re-checked as often as it is worth checking."]
+#[doc = ""]
+#[doc = " The entry holds the validator on its first line and the body after it, so"]
+#[doc = " the two can never be stored out of step with each other."]
 pub(crate) struct ValidatedRead {
     pub data: Vec<u8>,
     pub unchanged: bool,
@@ -66,7 +66,7 @@ impl Repository {
     }
 }
 
-/// Split the stored entry into its validator and the body it validates.
+#[doc = " Split the stored entry into its validator and the body it validates."]
 pub(super) fn split_validator(entry: &[u8]) -> (Option<String>, &[u8]) {
     entry
         .iter()
@@ -80,7 +80,7 @@ pub(super) fn split_validator(entry: &[u8]) -> (Option<String>, &[u8]) {
         })
 }
 
-/// `gh api -i` prints the response head, a blank line, then the body.
+#[doc = " `gh api -i` prints the response head, a blank line, then the body."]
 pub(super) fn split_http_response(output: &[u8]) -> (Cow<'_, str>, &[u8]) {
     let separator = [b"\r\n\r\n".as_slice(), b"\n\n".as_slice()]
         .into_iter()
@@ -117,8 +117,8 @@ pub(super) fn has_next_page(head: &str) -> bool {
     })
 }
 
-/// The page number GitHub advertises as `rel="last"`, when the response is one
-/// page of a longer listing.
+#[doc = " The page number GitHub advertises as `rel=\"last\"`, when the response is one"]
+#[doc = " page of a longer listing."]
 pub(super) fn last_page(head: &str) -> Option<usize> {
     let link = header_value(head, "link")?;
     link.split(',').find_map(|segment| {

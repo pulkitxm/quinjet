@@ -42,9 +42,9 @@ impl App {
             .unwrap_or("◐")
     }
 
-    /// A GitHub webhook was forwarded to this session. The payload is only a
-    /// hint that something changed, so the poller runs immediately rather than
-    /// trying to apply the delivery itself.
+    #[doc = " A GitHub webhook was forwarded to this session. The payload is only a"]
+    #[doc = " hint that something changed, so the poller runs immediately rather than"]
+    #[doc = " trying to apply the delivery itself."]
     pub(crate) fn webhook_delivered(&mut self, now: Instant) -> Vec<AppEffect> {
         let mut effects = Vec::new();
         if self.pull_request.is_some() {
@@ -53,9 +53,9 @@ impl App {
         effects
     }
 
-    /// Whether any pull-request read is on its way. The view shows one status
-    /// label for all of them, because the reader cares that it is refreshing,
-    /// not which of four endpoints is answering.
+    #[doc = " Whether any pull-request read is on its way. The view shows one status"]
+    #[doc = " label for all of them, because the reader cares that it is refreshing,"]
+    #[doc = " not which of four endpoints is answering."]
     pub(crate) const fn pull_request_refreshing(&self) -> bool {
         self.pull_request_loading
             || self.pull_request_checks_loading
@@ -64,10 +64,10 @@ impl App {
             || self.pull_request_check_log_loading
     }
 
-    /// Whether the pull request itself was answered from disk rather than the
-    /// network. Check state is deliberately held for only thirty seconds, so
-    /// including it here made the answer almost always false and the label
-    /// never appeared at all.
+    #[doc = " Whether the pull request itself was answered from disk rather than the"]
+    #[doc = " network. Check state is deliberately held for only thirty seconds, so"]
+    #[doc = " including it here made the answer almost always false and the label"]
+    #[doc = " never appeared at all."]
     pub(crate) const fn pull_request_served_from_cache(&self) -> bool {
         self.pull_request.is_some()
             && self.pull_request_from_cache
@@ -75,9 +75,9 @@ impl App {
             && !self.pull_request_refreshing()
     }
 
-    /// Watch a running pull request closely and a settled one loosely. The
-    /// interval also stretches when the reader is somewhere else, so a loaded
-    /// pull request stays fresh without spending requests on an unseen pane.
+    #[doc = " Watch a running pull request closely and a settled one loosely. The"]
+    #[doc = " interval also stretches when the reader is somewhere else, so a loaded"]
+    #[doc = " pull request stays fresh without spending requests on an unseen pane."]
     pub(super) fn pull_request_poll_interval(&self) -> Duration {
         if self.view != View::PullRequests {
             return PULL_REQUEST_BACKGROUND_POLL;
@@ -100,12 +100,12 @@ impl App {
             .then(|| now + self.pull_request_poll_interval());
     }
 
-    /// Run whichever live reads are due. `force` is a webhook delivery saying
-    /// something definitely changed, so every stream reads at once.
-    ///
-    /// Each read is independent, so a single failing endpoint never stalls the
-    /// others, and every one of them coalesces if a previous poll is still in
-    /// flight.
+    #[doc = " Run whichever live reads are due. `force` is a webhook delivery saying"]
+    #[doc = " something definitely changed, so every stream reads at once."]
+    #[doc = ""]
+    #[doc = " Each read is independent, so a single failing endpoint never stalls the"]
+    #[doc = " others, and every one of them coalesces if a previous poll is still in"]
+    #[doc = " flight."]
     pub(super) fn refresh_pull_request_live(
         &mut self,
         now: Instant,
@@ -171,8 +171,8 @@ impl App {
         self.request_refresh(effects);
     }
 
-    /// The repository heartbeat. Pull-request liveness is separate because it
-    /// paces itself against GitHub rather than the local working tree.
+    #[doc = " The repository heartbeat. Pull-request liveness is separate because it"]
+    #[doc = " paces itself against GitHub rather than the local working tree."]
     pub(crate) fn periodic_refresh(&mut self, effects: &mut Vec<AppEffect>) {
         self.request_refresh(effects);
     }

@@ -1,9 +1,9 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
-/// Direct cache access for readers that cannot express themselves as a single
-/// `gh` invocation: a response judged by its body rather than its exit status,
-/// or bytes produced by Git rather than by GitHub.
+#[doc = " Direct cache access for readers that cannot express themselves as a single"]
+#[doc = " `gh` invocation: a response judged by its body rather than its exit status,"]
+#[doc = " or bytes produced by Git rather than by GitHub."]
 pub(crate) fn cache_read(key: &str, life: CacheLife) -> Option<Vec<u8>> {
     cache_read_bounded(key, life, MAX_GH_METADATA_BYTES)
 }

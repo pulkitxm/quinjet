@@ -58,8 +58,9 @@ along with a broad restriction set, so `unwrap`, `expect`, `panic`, indexing, an
 to stdout all fail the build. Reach for a scoped `#[expect(lint, reason = "...")]` when a
 lint is genuinely wrong for a piece of code, rather than relaxing it repository-wide.
 
-Comments are checked too. Doc comments (`///`, `//!`) stay because clap and rustdoc render
-them; ordinary `//` comments fail the build, so let names and structure carry the meaning.
+Every tracked file is checked for comments. Only exact machine-read directives such as
+shebangs and linter controls are accepted. Use names and structure for explanation, and
+use attributes when Rust or clap needs documentation metadata.
 
 Add focused tests for behavior changes, especially status parsing, destructive Git operations, input editing, scrolling, and pane geometry.
 

@@ -1,8 +1,8 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
-/// A pre-wrapped content row, optionally anchored to a check step so a click or
-/// the step cursor can find it after scrolling.
+#[doc = " A pre-wrapped content row, optionally anchored to a check step so a click or"]
+#[doc = " the step cursor can find it after scrolling."]
 pub(super) type ContentRow = PullRequestContentRow;
 
 pub(super) type ContentLink = PullRequestContentLink;

@@ -35,7 +35,6 @@ BINARY = os.environ.get("QUINJET", os.path.expanduser("~/.cargo/bin/quinjet"))
 class Session:
     def __init__(self, repository):
         master, slave = pty.openpty()
-        # Without a window size ratatui has no room and draws nothing at all.
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
         self.master = master
         self.process = subprocess.Popen(
@@ -97,7 +96,6 @@ class Session:
         self.type("\x7f" * 8, settle=0.04)
         self.type(str(number))
         self.pump(0.5)
-        # The field can swallow the first Enter while a lookup is still settling.
         for _ in range(4):
             os.write(self.master, b"\r")
             self.pump(1.5)
@@ -120,8 +118,6 @@ def command_open(repository, number):
         if not session.open_pull_request(number):
             print("the pane never opened")
             return 1
-        # Timed from the pane opening, not from the first keystroke: the driver
-        # paces its own input and that pacing is not the app's latency.
         opened = time.time()
         for _ in range(60):
             session.pump(0.25)

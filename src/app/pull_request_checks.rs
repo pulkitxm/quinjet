@@ -2,8 +2,8 @@
 use super::*;
 
 impl App {
-    /// `refresh` separates a live poll from merely arriving in the section: the
-    /// latter reuses what is already loaded rather than spending a request.
+    #[doc = " `refresh` separates a live poll from merely arriving in the section: the"]
+    #[doc = " latter reuses what is already loaded rather than spending a request."]
     pub(super) fn request_pull_request_checks(
         &mut self,
         refresh: bool,
@@ -29,8 +29,8 @@ impl App {
         )));
     }
 
-    /// The overview sidebar is the pull request itself, then status sections and
-    /// their checks, so the cursor walks that composed list.
+    #[doc = " The overview sidebar is the pull request itself, then status sections and"]
+    #[doc = " their checks, so the cursor walks that composed list."]
     pub(super) fn move_check_cursor(&mut self, amount: isize) {
         let targets = self.check_list_targets();
         if targets.is_empty() {
@@ -51,8 +51,8 @@ impl App {
         }
     }
 
-    /// Every row in the overview sidebar shows a different document on the right,
-    /// so a new selection always starts at the top of it.
+    #[doc = " Every row in the overview sidebar shows a different document on the right,"]
+    #[doc = " so a new selection always starts at the top of it."]
     pub(super) fn set_check_cursor(&mut self, cursor: Option<usize>) -> bool {
         let next = cursor.filter(|index| *index < self.pull_request_checks.len());
         if next.is_some() {
@@ -69,9 +69,9 @@ impl App {
         true
     }
 
-    /// The sidebar viewport for this frame. Wheel scrolling detaches the
-    /// window from the selection so the list can be browsed without changing
-    /// the preview; any selection movement reattaches it.
+    #[doc = " The sidebar viewport for this frame. Wheel scrolling detaches the"]
+    #[doc = " window from the selection so the list can be browsed without changing"]
+    #[doc = " the preview; any selection movement reattaches it."]
     pub(crate) fn sidebar_viewport(&mut self, cursor: usize, height: usize, length: usize) {
         if self.sidebar_last_cursor != Some(cursor) {
             self.sidebar_last_cursor = Some(cursor);
@@ -158,9 +158,9 @@ impl App {
         self.invalidate_pull_request_content_rows();
     }
 
-    /// Move between steps the way `[` and `]` move between diff hunks, so a long
-    /// log can be walked without scrolling through it.
-    /// Move the step selection and ask the next draw to bring it into view.
+    #[doc = " Move between steps the way `[` and `]` move between diff hunks, so a long"]
+    #[doc = " log can be walked without scrolling through it."]
+    #[doc = " Move the step selection and ask the next draw to bring it into view."]
     pub(super) const fn reveal_check_step(&mut self, step: usize) {
         self.pull_request_step_cursor = step;
         self.pull_request_step_reveal = true;
@@ -197,11 +197,11 @@ impl App {
         }
     }
 
-    /// Fetch the selected check's steps and log. A selection change starts from a
-    /// clean slate; a live refresh of the same run updates in place so the reader
-    /// keeps their scroll position while a job is still writing output. A log
-    /// already held for the selected run is only re-read when `refresh` asks for
-    /// it, so redrawing or re-entering the section costs nothing.
+    #[doc = " Fetch the selected check's steps and log. A selection change starts from a"]
+    #[doc = " clean slate; a live refresh of the same run updates in place so the reader"]
+    #[doc = " keeps their scroll position while a job is still writing output. A log"]
+    #[doc = " already held for the selected run is only re-read when `refresh` asks for"]
+    #[doc = " it, so redrawing or re-entering the section costs nothing."]
     pub(super) fn request_check_run_log(&mut self, refresh: bool, effects: &mut Vec<AppEffect>) {
         let (Some(pull_request), Some(check)) = (
             self.pull_request.clone(),
@@ -245,9 +245,9 @@ impl App {
         })));
     }
 
-    /// Warm every finished run's log once per pull request. Selecting a check
-    /// then costs a disk read rather than a round trip, which is the difference
-    /// between the list being browsable and being a series of waits.
+    #[doc = " Warm every finished run's log once per pull request. Selecting a check"]
+    #[doc = " then costs a disk read rather than a round trip, which is the difference"]
+    #[doc = " between the list being browsable and being a series of waits."]
     pub(super) fn request_check_log_prefetch(&mut self, effects: &mut Vec<AppEffect>) {
         let Some(pull_request) = self.pull_request.clone() else {
             return;

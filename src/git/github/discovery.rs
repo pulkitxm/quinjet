@@ -239,8 +239,8 @@ impl Repository {
         clippy::too_many_arguments,
         reason = "the renderer needs the whole row context in one call"
     )]
-    /// `limit` bounds both the response Quinjet will read and the entry it will
-    /// keep, so a check log can use the cache without letting metadata grow.
+    #[doc = " `limit` bounds both the response Quinjet will read and the entry it will"]
+    #[doc = " keep, so a check log can use the cache without letting metadata grow."]
     pub(super) fn checked_cached_gh_bounded<I, S>(
         &self,
         cache_key: &str,

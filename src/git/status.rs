@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
-/// Where a change lives in Git's three-tree model.
+#[doc = " Where a change lives in Git's three-tree model."]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum ChangeArea {
@@ -119,7 +119,7 @@ impl RepoStatus {
     }
 }
 
-/// Parse `git status --porcelain=v2 --branch -z` without depending on localized output.
+#[doc = " Parse `git status --porcelain=v2 --branch -z` without depending on localized output."]
 pub(crate) fn parse_porcelain_v2(output: &[u8]) -> RepoStatus {
     let mut status = RepoStatus::default();
     let records: Vec<&[u8]> = output.split(|byte| *byte == 0).collect();

@@ -1,10 +1,10 @@
-/// A GitHub delivery forwarded to this session, reduced to the event name.
-///
-/// Quinjet treats a delivery purely as a signal that something changed and then
-/// re-reads the pull request through `gh`. Nothing from the request body is
-/// trusted or displayed, which is what makes an unauthenticated loopback
-/// listener safe: the worst a forged request can do is trigger a refresh that
-/// would have happened on the next poll anyway.
+#[doc = " A GitHub delivery forwarded to this session, reduced to the event name."]
+#[doc = ""]
+#[doc = " Quinjet treats a delivery purely as a signal that something changed and then"]
+#[doc = " re-reads the pull request through `gh`. Nothing from the request body is"]
+#[doc = " trusted or displayed, which is what makes an unauthenticated loopback"]
+#[doc = " listener safe: the worst a forged request can do is trigger a refresh that"]
+#[doc = " would have happened on the next poll anyway."]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WebhookDelivery {
     pub event: String,

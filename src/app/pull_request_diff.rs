@@ -2,8 +2,8 @@
 use super::*;
 
 impl App {
-    /// Drop only the prepared diff. The section, cursors, checks and
-    /// conversation stay exactly where the reader left them.
+    #[doc = " Drop only the prepared diff. The section, cursors, checks and"]
+    #[doc = " conversation stay exactly where the reader left them."]
     pub(super) fn reset_pull_request_diff_runtime(&mut self) {
         self.pull_request_workspace_generation = None;
         self.pull_request_documents.clear();
@@ -283,16 +283,16 @@ impl App {
         )));
     }
 
-    /// A path still needs its patch unless it is already cached, already in
-    /// flight, or currently occupying the single-file document.
+    #[doc = " A path still needs its patch unless it is already cached, already in"]
+    #[doc = " flight, or currently occupying the single-file document."]
     pub(super) fn pull_request_file_needs_patch(&self, path: &Path) -> bool {
         !self.pull_request_documents.contains_key(path)
             && self.pull_request_loading_path.as_deref() != Some(path)
             && self.pull_request_single_file.as_deref() != Some(path)
     }
 
-    /// A finished patch knows its real totals, so a file whose counts GitHub
-    /// could not report fills its header in as soon as its document arrives.
+    #[doc = " A finished patch knows its real totals, so a file whose counts GitHub"]
+    #[doc = " could not report fills its header in as soon as its document arrives."]
     pub(super) fn backfill_pull_request_counts(
         &mut self,
         path: &Path,
@@ -325,9 +325,9 @@ impl App {
         true
     }
 
-    /// Where background fill should start: the first file visible in the
-    /// Files tree, so patches land where the reader is looking and then wrap
-    /// around the rest of the index in order.
+    #[doc = " Where background fill should start: the first file visible in the"]
+    #[doc = " Files tree, so patches land where the reader is looking and then wrap"]
+    #[doc = " around the rest of the index in order."]
     pub(super) fn prefetch_anchor_index(&self) -> usize {
         if self.view != View::PullRequests || self.pull_request_section != PullRequestSection::Files
         {
@@ -343,9 +343,9 @@ impl App {
             .unwrap_or(0)
     }
 
-    /// Walk the index in batches until every file has a patch. Each batch is one
-    /// Git invocation and lands as soon as it is parsed, so the diff fills in
-    /// progressively instead of a file at a time on demand.
+    #[doc = " Walk the index in batches until every file has a patch. Each batch is one"]
+    #[doc = " Git invocation and lands as soon as it is parsed, so the diff fills in"]
+    #[doc = " progressively instead of a file at a time on demand."]
     pub(super) fn request_pull_request_prefetch(&mut self, effects: &mut Vec<AppEffect>) {
         if self.pull_request_prefetching {
             return;
