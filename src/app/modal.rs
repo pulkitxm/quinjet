@@ -298,6 +298,14 @@ pub(crate) enum Modal {
         input: TextBuffer,
         amend: bool,
     },
+    PullRequestReviewComment {
+        input: TextBuffer,
+        target: PullRequestReviewTarget,
+    },
+    PullRequestReviewSubmit {
+        input: TextBuffer,
+        decision: PullRequestReviewDecision,
+    },
     Prompt {
         title: String,
         input: TextBuffer,

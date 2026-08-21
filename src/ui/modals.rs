@@ -23,6 +23,17 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
                 theme,
             );
         }
+        Some(Modal::PullRequestReviewComment { input, target }) => {
+            let title = match target {
+                crate::app::PullRequestReviewTarget::Line(_) => " Review line ",
+                crate::app::PullRequestReviewTarget::File(_) => " Review file ",
+                crate::app::PullRequestReviewTarget::Reply(_) => " Reply to review thread ",
+            };
+            draw_review_editor(frame, title, input, None, theme);
+        }
+        Some(Modal::PullRequestReviewSubmit { input, decision }) => {
+            draw_review_editor(frame, " Submit review ", input, Some(*decision), theme);
+        }
         Some(Modal::Prompt { title, input, .. }) => {
             draw_prompt(frame, title, input, theme);
         }

@@ -144,6 +144,20 @@ pub(crate) enum PullRequestFileView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PullRequestReviewAnchor {
+    pub path: PathBuf,
+    pub line: usize,
+    pub side: PullRequestReviewSide,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PullRequestReviewTarget {
+    Line(PullRequestReviewAnchor),
+    File(PathBuf),
+    Reply(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PullRequestTreeEntry {
     Directory {
         path: PathBuf,

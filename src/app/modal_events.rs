@@ -9,6 +9,8 @@ impl App {
         now: Instant,
     ) -> Vec<AppEffect> {
         match modal {
+            modal @ (Modal::PullRequestReviewComment { .. }
+            | Modal::PullRequestReviewSubmit { .. }) => self.handle_review_modal_key(modal, key),
             modal @ (Modal::Help { .. }
             | Modal::Commit { .. }
             | Modal::Prompt { .. }

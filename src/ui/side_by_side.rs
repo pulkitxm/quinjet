@@ -99,6 +99,7 @@ pub(super) fn draw_side_by_side_diff(
                     true,
                     app.horizontal_scroll,
                     old_emphasis.as_ref(),
+                    old_line.is_some_and(|line| review_line_selected(app, line, Some(true))),
                     theme,
                 );
                 frame.render_widget(
@@ -112,6 +113,7 @@ pub(super) fn draw_side_by_side_diff(
                     false,
                     app.horizontal_scroll,
                     new_emphasis.as_ref(),
+                    new_line.is_some_and(|line| review_line_selected(app, line, Some(false))),
                     theme,
                 );
             }
@@ -152,7 +154,7 @@ pub(super) fn side_by_side_rows(document: &DiffDocument, app: &App) -> Vec<SideB
             DiffLineKind::HunkHeader => {
                 index += 1;
             }
-            DiffLineKind::Meta => {
+            DiffLineKind::Meta | DiffLineKind::Review => {
                 rows.push(SideBySideRow::Full {
                     index,
                     boxed: in_file,

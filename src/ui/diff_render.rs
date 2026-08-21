@@ -21,7 +21,7 @@ pub(super) fn draw_full_width_diff_line(
         theme,
     ));
     frame.render_widget(
-        Paragraph::new(Line::from(spans)).style(line_background(line.kind, theme)),
+        Paragraph::new(Line::from(spans)).style(line_background(line.kind, false, theme)),
         content_area,
     );
 }
@@ -37,6 +37,7 @@ pub(super) fn draw_diff_side(
     old_side: bool,
     horizontal_scroll: usize,
     emphasis: Option<&Range<usize>>,
+    selected: bool,
     theme: &Theme,
 ) {
     let Some(line) = line else {
@@ -66,7 +67,7 @@ pub(super) fn draw_diff_side(
         theme,
     ));
     frame.render_widget(
-        Paragraph::new(Line::from(spans)).style(line_background(line.kind, theme)),
+        Paragraph::new(Line::from(spans)).style(line_background(line.kind, selected, theme)),
         area,
     );
 }
@@ -205,6 +206,12 @@ pub(super) fn marker_for(kind: DiffLineKind, theme: &Theme) -> (&'static str, St
                 .fg(theme.accent)
                 .add_modifier(Modifier::BOLD),
         ),
+        DiffLineKind::Review => (
+            "│ ",
+            Style::default()
+                .fg(theme.modified)
+                .add_modifier(Modifier::BOLD),
+        ),
         DiffLineKind::Context | DiffLineKind::Meta => ("  ", Style::default().fg(theme.muted)),
         DiffLineKind::FileHeader | DiffLineKind::FileFooter => {
             ("", Style::default().fg(theme.muted))
@@ -212,11 +219,15 @@ pub(super) fn marker_for(kind: DiffLineKind, theme: &Theme) -> (&'static str, St
     }
 }
 
-pub(super) fn line_background(kind: DiffLineKind, theme: &Theme) -> Style {
+pub(super) fn line_background(kind: DiffLineKind, selected: bool, theme: &Theme) -> Style {
+    if selected {
+        return Style::default().bg(theme.selected);
+    }
     match kind {
         DiffLineKind::Added => Style::default().bg(theme.added_background),
         DiffLineKind::Removed => Style::default().bg(theme.removed_background),
         DiffLineKind::HunkHeader => Style::default().bg(theme.panel_alt).fg(theme.accent),
+        DiffLineKind::Review => Style::default().bg(theme.panel_alt),
         _ => Style::default().bg(theme.panel),
     }
 }

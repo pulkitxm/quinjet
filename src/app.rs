@@ -16,7 +16,9 @@ use crate::git::github::{
     CheckRunLog, GitHubRepository, PullRequest, PullRequestCheck, PullRequestCheckStatus,
     PullRequestCommentMode, PullRequestConversation, PullRequestDiffIndex, PullRequestEdit,
     PullRequestFile, PullRequestFileStatus, PullRequestLockReason, PullRequestMergeMethod,
-    PullRequestMergeMode, PullRequestOperation, PullRequestProgress, PullRequestReviewKind,
+    PullRequestMergeMode, PullRequestOperation, PullRequestProgress, PullRequestReviewDecision,
+    PullRequestReviewKind, PullRequestReviewOperation, PullRequestReviewSide,
+    PullRequestReviewSnapshot, PullRequestReviewThread, PullRequestReviewThreadSubject,
     PullRequestUpdateMethod, RecentPullRequest,
 };
 use crate::git::history::Commit;
@@ -134,12 +136,14 @@ mod modal_actions;
 mod modal_events;
 mod modal_forms;
 mod modal_pickers;
+mod modal_review;
 mod mouse;
 mod operations;
 mod palette;
 mod pull_request_actions;
 mod pull_request_checks;
 mod pull_request_diff;
+mod pull_request_review;
 mod refresh;
 mod scm;
 mod selection;
@@ -226,6 +230,11 @@ pub(crate) struct App {
     pub pull_request_conversation_loading: bool,
     pub pull_request_conversation_refresh_again: bool,
     pub pull_request_conversation_error: Option<String>,
+    pub pull_request_review: PullRequestReviewSnapshot,
+    pub pull_request_review_loading: bool,
+    pub pull_request_review_mutating: bool,
+    pub pull_request_review_error: Option<String>,
+    pub pull_request_review_cursor: Option<PullRequestReviewAnchor>,
     pub pull_request_check_log: Option<CheckRunLog>,
     pub pull_request_check_log_loading: bool,
     pub pull_request_check_log_error: Option<String>,
@@ -318,6 +327,7 @@ pub(crate) struct App {
     pub pull_request_prefetch_retrying: bool,
     pub pull_request_checks_generation: u64,
     pub pull_request_conversation_generation: u64,
+    pub pull_request_review_generation: u64,
     pub pull_request_check_log_generation: u64,
     pub pull_request_check_log_target: Option<String>,
     pub local_diff_request: Option<LocalDiffRequest>,

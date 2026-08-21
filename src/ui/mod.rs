@@ -233,6 +233,22 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
         description: "Select the conversation, a check, a file, or a folder",
     },
     HelpRow::Shortcut {
+        keys: "j / k in a file",
+        description: "Select a reviewable diff line",
+    },
+    HelpRow::Shortcut {
+        keys: "c / C",
+        description: "Add a line comment / file comment to a pending review",
+    },
+    HelpRow::Shortcut {
+        keys: "a / x",
+        description: "Reply to / resolve the selected review thread",
+    },
+    HelpRow::Shortcut {
+        keys: "Shift+V",
+        description: "Submit a comment, approval, or change request",
+    },
+    HelpRow::Shortcut {
         keys: "Space",
         description: "Collapse / expand the selected folder, or open a recent PR",
     },
@@ -418,6 +434,7 @@ mod pull_request_conversation;
 mod pull_request_details;
 mod pull_request_files;
 mod pull_request_overview;
+mod pull_request_review;
 mod side_by_side;
 mod sidebar_changes;
 mod sidebar_history;
@@ -453,6 +470,8 @@ use pull_request_details::*;
 use pull_request_files::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use pull_request_overview::*;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
+use pull_request_review::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use side_by_side::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]

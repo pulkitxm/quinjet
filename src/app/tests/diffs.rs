@@ -362,7 +362,14 @@ fn pull_request_defaults_to_all_files_then_files_tab_restores_it_from_single_fil
         now,
     );
 
-    assert!(effects.is_empty(), "the prefetched first file is cached");
+    assert!(
+        !effects.iter().any(|effect| matches!(
+            effect,
+            AppEffect::Git(command)
+                if matches!(command.as_ref(), WorkerCommand::LoadPullRequestFile { .. })
+        )),
+        "the prefetched first file is cached"
+    );
     assert_eq!(app.pull_request_file_view, PullRequestFileView::AllFiles);
     assert_eq!(app.document.file_count(), 2);
     assert!(app.preview_files_all_collapsed());

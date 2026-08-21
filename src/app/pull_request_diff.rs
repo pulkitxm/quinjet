@@ -18,6 +18,7 @@ impl App {
 
     pub(super) fn reset_pull_request_runtime(&mut self) {
         self.reset_pull_request_diff_runtime();
+        self.reset_pull_request_review();
         self.pull_request_section = PullRequestSection::Overview;
         self.pull_request_file_view = PullRequestFileView::AllFiles;
         self.pull_request_files.clear();
@@ -142,7 +143,10 @@ impl App {
         if self.pull_request_documents.contains_key(&path) {
             return;
         }
-        let document = std::mem::take(&mut self.document);
+        let mut document = std::mem::take(&mut self.document);
+        document
+            .lines
+            .retain(|line| line.kind != DiffLineKind::Review);
         self.invalidate_diff_rows();
         self.cache_pull_request_document(path, document);
     }
@@ -218,6 +222,7 @@ impl App {
             self.content_scroll = 0;
             self.horizontal_scroll = 0;
             self.show_pull_request_all_files();
+            self.request_pull_request_review(false, effects);
             self.request_preview(effects);
             return;
         }
@@ -231,6 +236,7 @@ impl App {
         self.horizontal_scroll = 0;
         self.request_pull_request_checks(false, effects);
         self.request_pull_request_conversation(false, effects);
+        self.request_pull_request_review(false, effects);
         self.request_check_run_log(false, effects);
     }
 
@@ -253,6 +259,7 @@ impl App {
                 self.pull_request_single_file = Some(path);
                 self.selected_preview_file = None;
                 self.preview_file_cursor = 0;
+                self.decorate_pull_request_review();
                 return;
             }
         } else if self.pull_request_documents.contains_key(&path) {

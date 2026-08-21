@@ -47,6 +47,8 @@ pub(crate) enum PullRequestReviewDecision {
 }
 
 impl PullRequestReviewDecision {
+    pub(crate) const ALL: [Self; 3] = [Self::Comment, Self::Approve, Self::RequestChanges];
+
     pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::Comment => "Comment",

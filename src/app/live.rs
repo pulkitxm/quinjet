@@ -60,6 +60,7 @@ impl App {
         self.pull_request_loading
             || self.pull_request_checks_loading
             || self.pull_request_conversation_loading
+            || self.pull_request_review_loading
             || self.pull_request_check_log_loading
     }
 
@@ -143,6 +144,7 @@ impl App {
             let issued = effects.len();
             self.request_pull_request_lookup(number, true, true, effects);
             self.request_pull_request_conversation(true, effects);
+            self.request_pull_request_review(true, effects);
             if effects.len() > issued {
                 self.pull_request_detail_read_at = Some(now);
             }

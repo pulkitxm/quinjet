@@ -70,6 +70,7 @@ pub(super) fn draw_unified_diff(
                 in_file,
                 app.horizontal_scroll,
                 emphasis.get(&line_index),
+                review_line_selected(app, line, None),
                 theme,
             ),
         }
@@ -88,6 +89,7 @@ pub(super) fn draw_unified_line(
     _boxed: bool,
     horizontal_scroll: usize,
     emphasis: Option<&Range<usize>>,
+    selected: bool,
     theme: &Theme,
 ) {
     let content_area = area;
@@ -112,7 +114,7 @@ pub(super) fn draw_unified_line(
         theme,
     ));
     frame.render_widget(
-        Paragraph::new(Line::from(spans)).style(line_background(line.kind, theme)),
+        Paragraph::new(Line::from(spans)).style(line_background(line.kind, selected, theme)),
         content_area,
     );
 }

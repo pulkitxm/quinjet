@@ -25,6 +25,18 @@ pub(super) fn draw_content(
     } else {
         ""
     };
+    let review_action = if app.review_surface_active() {
+        if app.pull_request_review_loading {
+            "  [review loading]".to_owned()
+        } else {
+            format!(
+                "  [c Comment · V Submit · {} pending]",
+                app.pull_request_review.pending_comment_count()
+            )
+        }
+    } else {
+        String::new()
+    };
     let loading = app.pull_request_progress.map_or_else(
         || {
             if app.document_loading
@@ -40,12 +52,14 @@ pub(super) fn draw_content(
     let title_width = (area.width as usize)
         .saturating_sub(loading.width())
         .saturating_sub(file_action.width())
+        .saturating_sub(review_action.width())
         .saturating_sub(4);
     let title = format!(
-        " {}{}{} ",
+        " {}{}{}{} ",
         truncate_middle(&app.document.title, title_width),
         loading,
         file_action,
+        review_action,
     );
     let block = panel_block(
         title,

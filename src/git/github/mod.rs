@@ -90,7 +90,7 @@ pub(crate) use prepared::*;
 pub(crate) use process::{BoundedOutput, bounded_command_error, run_bounded_command};
 pub(crate) use review::{
     PullRequestReviewDecision, PullRequestReviewOperation, PullRequestReviewSide,
-    PullRequestReviewSnapshot, PullRequestReviewThreadSubject,
+    PullRequestReviewSnapshot, PullRequestReviewThread, PullRequestReviewThreadSubject,
 };
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use temporary::*;
