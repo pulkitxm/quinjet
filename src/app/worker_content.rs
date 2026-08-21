@@ -49,7 +49,12 @@ impl App {
                             self.request_preview(&mut effects);
                         }
                     }
-                    Err(error) => self.show_toast(error, ToastLevel::Error, now),
+                    Err(error) => {
+                        if self.local_diff_preserving_document && !self.document_loading {
+                            self.abort_preserved_local_diff_refresh();
+                        }
+                        self.show_toast(error, ToastLevel::Error, now);
+                    }
                 }
                 if self.refresh_again {
                     self.refresh_again = false;
@@ -60,7 +65,7 @@ impl App {
                 if generation != self.diff_generation {
                     return effects;
                 }
-                let preserve_document = self.document_loading && self.document.file_count() > 0;
+                let preserve_document = self.local_diff_preserving_document;
                 if !preserve_document {
                     self.document_loading = false;
                 }
@@ -120,9 +125,13 @@ impl App {
                         }
                     }
                     Err(error) => {
-                        self.document_loading = false;
-                        self.reset_local_diff_runtime();
-                        self.set_document(DiffDocument::empty("Preview Error", error.clone()));
+                        if preserve_document {
+                            self.abort_preserved_local_diff_refresh();
+                        } else {
+                            self.document_loading = false;
+                            self.reset_local_diff_runtime();
+                            self.set_document(DiffDocument::empty("Preview Error", error.clone()));
+                        }
                         self.show_toast(error, ToastLevel::Error, now);
                     }
                 }
@@ -146,6 +155,10 @@ impl App {
                 self.local_diff_loading_path = None;
                 match result {
                     Ok(document) => self.store_local_diff_document(path, document),
+                    Err(error) if self.local_diff_preserving_document => {
+                        self.abort_preserved_local_diff_refresh();
+                        self.show_toast(error, ToastLevel::Error, now);
+                    }
                     Err(error) => {
                         let title = self.local_diff_index.as_ref().map_or_else(
                             || "Preview Error".to_owned(),

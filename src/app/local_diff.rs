@@ -5,7 +5,19 @@ impl App {
     pub(super) fn reset_local_diff_runtime(&mut self) {
         self.local_diff_request = None;
         self.local_diff_change_section = None;
+        self.local_diff_preserving_document = false;
         self.local_diff_preserved_paths.clear();
+        self.local_diff_workspace_generation = None;
+        self.local_diff_index = None;
+        self.local_diff_documents.clear();
+        self.local_diff_loading_path = None;
+        self.local_diff_pending_paths.clear();
+        self.local_diff_single_loaded = false;
+    }
+
+    pub(super) fn abort_preserved_local_diff_refresh(&mut self) {
+        self.document_loading = false;
+        self.local_diff_preserving_document = false;
         self.local_diff_workspace_generation = None;
         self.local_diff_index = None;
         self.local_diff_documents.clear();
@@ -19,7 +31,7 @@ impl App {
             && self.pull_request_file_view == PullRequestFileView::AllFiles
         {
             self.rebuild_pull_request_all_files_document();
-        } else if self.local_diff_index.is_some() {
+        } else if self.local_diff_index.is_some() && !self.local_diff_preserving_document {
             self.rebuild_local_diff_document();
         }
     }
@@ -60,7 +72,7 @@ impl App {
             .as_ref()
             .is_some_and(|index| index.files.len() == 1)
         {
-            if self.document_loading && self.document.file_count() > 0 {
+            if self.local_diff_preserving_document {
                 self.finalize_refreshed_preview_state();
             }
             self.local_diff_single_loaded = true;
@@ -68,7 +80,7 @@ impl App {
             self.set_document(document);
         } else {
             drop(self.local_diff_documents.insert(path, document));
-            if !self.document_loading {
+            if !self.document_loading && !self.local_diff_preserving_document {
                 self.rebuild_local_diff_document();
             }
         }
@@ -78,6 +90,9 @@ impl App {
         let Some(workspace_generation) = self.local_diff_workspace_generation else {
             return;
         };
+        if self.local_diff_preserving_document && workspace_generation != self.diff_generation {
+            return;
+        }
         let indexed = self
             .local_diff_index
             .as_ref()
@@ -111,7 +126,7 @@ impl App {
             }
         }
         if self.document_loading && self.local_diff_index.is_some() {
-            if self.document.file_count() > 0 {
+            if self.local_diff_preserving_document {
                 self.finalize_refreshed_preview_state();
             }
             self.document_loading = false;

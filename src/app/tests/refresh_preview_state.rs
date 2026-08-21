@@ -168,8 +168,25 @@ fn moving_the_same_path_to_another_area_does_not_preserve_its_diff() {
 }
 
 #[test]
+fn moving_a_selected_section_to_another_area_does_not_preserve_its_diff() {
+    let (mut app, _, _, _) = loaded_two_file_changes_preview();
+    let now = Instant::now();
+    let mut status = app.status.clone();
+    for change in &mut status.changes {
+        change.area = ChangeArea::Staged;
+    }
+
+    let effects = refresh_with_status(&mut app, status, now);
+
+    assert_prepare_local_diff(&effects);
+    assert_eq!(app.selected_change_section, Some(ChangeSection::Staged));
+    assert_indexing_placeholder(&app);
+}
+
+#[test]
 fn a_superseded_index_cannot_change_the_rendered_selection_or_folds() {
     let (mut app, [main_path, readme_path], index, loaded) = loaded_two_file_changes_preview();
+    app.expanded_preview_files.remove(&readme_path);
     let now = Instant::now();
     let status = app.status.clone();
     drop(refresh_with_status(&mut app, status, now));
@@ -189,14 +206,17 @@ fn a_superseded_index_cannot_change_the_rendered_selection_or_folds() {
 
     assert_eq!(app.document, loaded);
     assert_eq!(app.selected_preview_file, Some(readme_path.clone()));
-    assert!(app.expanded_preview_files.contains(&readme_path));
-    assert!(!app.preview_file_collapsed(&readme_path.to_string_lossy()));
+    assert!(!app.expanded_preview_files.contains(&readme_path));
+    assert!(app.preview_file_collapsed(&readme_path.to_string_lossy()));
     let mut refresh_effects = Vec::new();
     app.filesystem_changed(&mut refresh_effects);
     assert!(refresh_effects.iter().any(|effect| matches!(
         effect,
         AppEffect::Git(command) if matches!(command.as_ref(), WorkerCommand::Refresh { .. })
     )));
+    assert_eq!(app.document, loaded);
+    assert_eq!(app.selected_preview_file, Some(readme_path.clone()));
+    assert!(app.preview_file_collapsed(&readme_path.to_string_lossy()));
     let effects = app.handle_worker_event(
         WorkerEvent::Status {
             generation: app.status_generation,
@@ -216,30 +236,14 @@ fn a_superseded_index_cannot_change_the_rendered_selection_or_folds() {
 
     assert_eq!(app.document, loaded);
     assert_eq!(app.selected_preview_file, Some(readme_path.clone()));
-    assert!(app.expanded_preview_files.contains(&readme_path));
+    assert!(!app.expanded_preview_files.contains(&readme_path));
     assert_eq!(
         app.local_diff_preserved_paths,
         HashSet::from([main_path.clone(), readme_path.clone()])
     );
-    let replacement_main = parsed_change_document(&main_path, "Current diff", "replacement main");
-    let effects = app.handle_worker_event(
-        WorkerEvent::LocalDiffFile {
-            generation: final_generation,
-            workspace_generation: final_generation,
-            path: main_path.clone(),
-            result: Ok(replacement_main.clone()),
-        },
-        now,
-    );
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        AppEffect::Git(command)
-            if matches!(command.as_ref(), WorkerCommand::LoadLocalDiffFile { path, .. }
-                if path == &readme_path)
-    )));
     let replacement_readme =
         parsed_change_document(&readme_path, "Current diff", "replacement readme");
-    drop(app.handle_worker_event(
+    let effects = app.handle_worker_event(
         WorkerEvent::LocalDiffFile {
             generation: final_generation,
             workspace_generation: final_generation,
@@ -247,16 +251,35 @@ fn a_superseded_index_cannot_change_the_rendered_selection_or_folds() {
             result: Ok(replacement_readme.clone()),
         },
         now,
+    );
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        AppEffect::Git(command)
+            if matches!(command.as_ref(), WorkerCommand::LoadLocalDiffFile { path, .. }
+                if path == &main_path)
+    )));
+    let replacement_main = parsed_change_document(&main_path, "Current diff", "replacement main");
+    drop(app.handle_worker_event(
+        WorkerEvent::LocalDiffFile {
+            generation: final_generation,
+            workspace_generation: final_generation,
+            path: main_path.clone(),
+            result: Ok(replacement_main.clone()),
+        },
+        now,
     ));
-    let replacement = index.document(&HashMap::from([
-        (main_path, replacement_main),
-        (readme_path.clone(), replacement_readme),
-    ]));
+    let replacement = index.document_with_visibility(
+        &HashMap::from([
+            (main_path.clone(), replacement_main),
+            (readme_path.clone(), replacement_readme),
+        ]),
+        |path| path == main_path,
+    );
 
     assert_eq!(app.document, replacement);
     assert_eq!(app.selected_preview_file, Some(readme_path.clone()));
-    assert!(app.expanded_preview_files.contains(&readme_path));
-    assert!(!app.preview_file_collapsed(&readme_path.to_string_lossy()));
+    assert!(!app.expanded_preview_files.contains(&readme_path));
+    assert!(app.preview_file_collapsed(&readme_path.to_string_lossy()));
 }
 
 #[test]

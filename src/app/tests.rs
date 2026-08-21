@@ -259,6 +259,7 @@ mod prefetch;
 mod projects;
 mod refresh;
 mod refresh_preview;
+mod refresh_preview_interaction;
 mod refresh_preview_state;
 mod reviews;
 mod support;

@@ -149,6 +149,7 @@ impl App {
             pull_request_check_log_target: None,
             local_diff_request: None,
             local_diff_change_section: None,
+            local_diff_preserving_document: false,
             local_diff_preserved_paths: HashSet::new(),
             local_diff_workspace_generation: None,
             local_diff_index: None,

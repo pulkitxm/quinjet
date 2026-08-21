@@ -115,7 +115,7 @@ impl App {
                 && self.pull_request_files.len() > 1;
         }
         let rendered_files = self.document.file_count();
-        if self.document_loading && rendered_files > 0 {
+        if self.local_diff_preserving_document {
             return rendered_files > 1;
         }
         if let Some(index) = self.local_diff_index.as_ref() {
@@ -202,6 +202,7 @@ impl App {
             .as_ref()
             .and_then(|selected| paths.iter().position(|path| path == selected))
             .unwrap_or_default();
+        self.local_diff_preserving_document = false;
         self.local_diff_preserved_paths.clear();
     }
 
@@ -237,7 +238,15 @@ impl App {
         if self.files_collapsed {
             self.local_diff_pending_paths.clear();
         } else {
-            for path in self.preview_file_paths() {
+            let paths = if self.view != View::PullRequests && self.local_diff_preserving_document {
+                self.local_diff_index.as_ref().map_or_else(
+                    || self.preview_file_paths(),
+                    |index| index.files.iter().map(|file| file.path.clone()).collect(),
+                )
+            } else {
+                self.preview_file_paths()
+            };
+            for path in paths {
                 self.request_local_diff_file(path, effects);
             }
         }

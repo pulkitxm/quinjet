@@ -17,6 +17,7 @@ impl App {
             self.changes_diff_version = self.changes_diff_version.wrapping_add(1);
             self.invalidate_preview();
             self.local_diff_loading_path = None;
+            self.local_diff_pending_paths.clear();
         }
         self.request_refresh(effects);
         if !self.history_branches_loading {
@@ -201,6 +202,7 @@ impl App {
         self.reset_local_diff_runtime();
         self.local_diff_request = Some(request.clone());
         self.local_diff_change_section = next_change_section;
+        self.local_diff_preserving_document = preserve_document;
         self.local_diff_preserved_paths = preserved_paths;
         self.document_loading = true;
         if !preserve_document {

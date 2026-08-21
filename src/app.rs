@@ -333,6 +333,7 @@ pub(crate) struct App {
     pub pull_request_check_log_target: Option<String>,
     pub local_diff_request: Option<LocalDiffRequest>,
     pub local_diff_change_section: Option<ChangeSection>,
+    pub local_diff_preserving_document: bool,
     pub local_diff_preserved_paths: HashSet<PathBuf>,
     pub local_diff_workspace_generation: Option<u64>,
     pub local_diff_index: Option<DiffIndex>,
