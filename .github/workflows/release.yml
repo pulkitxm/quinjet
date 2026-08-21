@@ -9,8 +9,10 @@ on:
       - 'Cargo.lock'
       - 'README.md'
       - 'Formula/quinjet.rb'
+      - 'packaging/winget/**'
       - 'scripts/homebrew_formula.py'
       - 'scripts/update_homebrew_tap.sh'
+      - 'scripts/winget_manifest.py'
       - '.github/workflows/release.yml'
   workflow_dispatch:
 
@@ -107,10 +109,12 @@ jobs:
             target: x86_64-unknown-linux-musl
             artifact: quinjet-linux-x86_64
             binary: quinjet
+            deb_arch: amd64
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
             artifact: quinjet-linux-aarch64
             binary: quinjet
+            deb_arch: arm64
           - os: macos-15-intel
             target: x86_64-apple-darwin
             artifact: quinjet-macos-x86_64
@@ -138,6 +142,10 @@ jobs:
       - uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780 # v2
         with:
           tool: cargo-auditable
+      - uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780 # v2
+        if: runner.os == 'Linux'
+        with:
+          tool: cargo-deb@3.7.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Build with an embedded dependency list
         shell: bash
@@ -170,10 +178,46 @@ jobs:
         env:
           ARTIFACT: ${{ matrix.artifact }}
         run: '& "./$env:ARTIFACT" --version'
+      - name: Build Debian package
+        if: runner.os == 'Linux'
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.version.outputs.version }}
+          DEB_ARCH: ${{ matrix.deb_arch }}
+        run: |
+          set -euo pipefail
+          binary="target/${TARGET}/release/quinjet"
+          "${binary}" completions bash >"target/${TARGET}/release/quinjet.bash"
+          "${binary}" completions fish >"target/${TARGET}/release/quinjet.fish"
+          "${binary}" completions zsh >"target/${TARGET}/release/quinjet.zsh"
+          "${binary}" man >"target/${TARGET}/release/quinjet.1"
+          cargo deb --no-build --no-strip --target "${TARGET}" \
+            --output "quinjet_${VERSION}_${DEB_ARCH}.deb"
+      - name: Smoke test Debian package
+        if: runner.os == 'Linux'
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          DEB_ARCH: ${{ matrix.deb_arch }}
+        run: |
+          set -euo pipefail
+          package="quinjet_${VERSION}_${DEB_ARCH}.deb"
+          dpkg-deb --info "${package}"
+          sudo apt-get install --yes "./${package}"
+          quinjet --version
+          q --version
+          test -s /usr/share/bash-completion/completions/quinjet
+          test -s /usr/share/fish/vendor_completions.d/quinjet.fish
+          test -s /usr/share/zsh/vendor-completions/_quinjet
+          test -s /usr/share/man/man1/quinjet.1
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: runner.os == 'Linux'
+        with:
+          name: quinjet-deb-${{ matrix.deb_arch }}
+          path: quinjet_${{ needs.version.outputs.version }}_${{ matrix.deb_arch }}.deb
 
   publish:
     name: Publish crate and release
@@ -217,9 +261,30 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Prepare Winget archive
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/winget-archive"
+          mkdir "${archive}"
+          cp dist/quinjet-windows-x86_64.exe "${archive}/quinjet.exe"
+          cp dist/quinjet-windows-x86_64.exe "${archive}/q.exe"
+          (cd "${archive}" && zip -9 "${GITHUB_WORKSPACE}/dist/quinjet-windows-x86_64.zip" ./*.exe)
       - name: Generate checksums
         working-directory: dist
         run: sha256sum quinjet-* > SHA256SUMS
+      - name: Render Winget manifests
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          manifests="${RUNNER_TEMP}/winget-manifests"
+          python3 scripts/winget_manifest.py \
+            --version "${VERSION}" \
+            --release-date "$(date -u +%F)" \
+            --checksums dist/SHA256SUMS \
+            --output-dir "${manifests}"
+          (cd "${manifests}" && zip -9 "${GITHUB_WORKSPACE}/dist/quinjet-winget-manifests.zip" ./*.yaml)
+          (cd dist && sha256sum quinjet-* >SHA256SUMS)
       - uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780 # v2
         with:
           tool: syft
@@ -257,3 +322,7 @@ jobs:
           git -C tap push origin HEAD:main
           test "$(git -C tap ls-remote origin refs/heads/main | cut -f1)" = "$(git -C tap rev-parse HEAD)" \
             || { echo "release blocked: the tap did not take ${TAG}" >&2; exit 1; }
+      - name: Deploy package repositories
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --method POST "repos/${GITHUB_REPOSITORY}/dispatches" -f event_type=apt-release

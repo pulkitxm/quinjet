@@ -41,6 +41,34 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 
 ## Installation
 
+### apt
+
+On Debian or Ubuntu, add the signed Quinjet repository once:
+
+```bash
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://quinjet.pulkit.page/apt/quinjet.asc | sudo tee /etc/apt/keyrings/quinjet.asc >/dev/null
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/quinjet.asc] https://quinjet.pulkit.page/apt stable main" | sudo tee /etc/apt/sources.list.d/quinjet.list >/dev/null
+sudo apt update
+sudo apt install quinjet
+```
+
+The repository publishes x86-64 and ARM64 packages. Upgrade with
+`sudo apt update && sudo apt install --only-upgrade quinjet`. See the
+[apt guide](docs/guides/apt.md) for package contents, verification, and removal.
+
+### Winget
+
+On Windows:
+
+```powershell
+winget install Pulkitxm.Quinjet
+```
+
+Winget installs the `quinjet` and `q` commands and installs Git when it is
+missing. Upgrade with `winget upgrade Pulkitxm.Quinjet`. See the
+[Winget guide](docs/guides/winget.md) for inspection and removal commands.
+
 ### Homebrew
 
 On macOS or Linux:
@@ -80,8 +108,8 @@ curl --proto '=https' --tlsv1.2 -LsSf https://quinjet.pulkit.page/install.sh | s
 
 The equivalent PowerShell environment variables are `QUINJET_VERSION` and `QUINJET_INSTALL_DIR`.
 
-Whichever installation path you chose, Quinjet can check for and install the
-latest stable release itself:
+Script, Cargo, cargo-binstall, and copied-binary installations can check for and
+install the latest stable release themselves:
 
 ```bash
 quinjet update --check
@@ -95,6 +123,11 @@ the download to one release, verifies the published SHA-256 checksum before
 replacing anything, and refreshes the installed shell completions with the new
 executable. It leaves a completion or `q` shortcut alone when you removed it
 after the first installation.
+
+Homebrew, apt, and Winget installations stay under their package manager.
+`quinjet update` refuses to replace those executables and prints the matching
+package-manager upgrade command instead. `quinjet update --check` remains
+available everywhere.
 
 ### Cargo
 

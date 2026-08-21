@@ -18,13 +18,15 @@ Options:
 | `-C, --path <DIR>` | path | `.` | Accepted as a global option but unused because updating is not a repository operation. |
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |
 
-A Homebrew installation is the one case `update` refuses to touch. When the
-resolved executable sits inside a Homebrew Cellar, `update` prints that Homebrew
-owns the executable, hints `brew upgrade quinjet`, and exits 4 without any
-network request. Replacing a file inside the Cellar would leave Homebrew's
-records describing a version that is no longer installed. `update --check` is
-unaffected and still reports whether a newer release exists. See
-[the Homebrew guide](../guides/homebrew.md).
+Package-manager installations are the cases `update` refuses to touch. It
+recognizes a resolved executable inside a Homebrew Cellar, an apt-owned
+`/usr/bin/quinjet`, or a Winget package directory. It prints which manager owns
+the executable, gives the matching upgrade command, and exits 4 without a
+network request. Replacing the file directly would leave that manager's records
+describing a version that is no longer installed. `update --check` is
+unaffected and still reports whether a newer release exists. See the
+[Homebrew](../guides/homebrew.md), [apt](../guides/apt.md), and
+[Winget](../guides/winget.md) guides.
 
 Beyond that, `update` does not try to infer whether the binary came from `cargo install`,
 cargo-binstall, `install.sh`, `install.ps1`, or a copied release artifact. Those

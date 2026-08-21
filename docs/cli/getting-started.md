@@ -30,6 +30,27 @@ than repeating them.
 
 ## Installing
 
+On Debian or Ubuntu, add the signed apt repository and install the package:
+
+```bash
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://quinjet.pulkit.page/apt/quinjet.asc | sudo tee /etc/apt/keyrings/quinjet.asc >/dev/null
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/quinjet.asc] https://quinjet.pulkit.page/apt stable main" | sudo tee /etc/apt/sources.list.d/quinjet.list >/dev/null
+sudo apt update
+sudo apt install quinjet
+```
+
+See the [apt guide](../guides/apt.md) for upgrades, package contents, and
+repository verification.
+
+On Windows, Winget installs Quinjet and its Git dependency:
+
+```text
+winget install Pulkitxm.Quinjet
+```
+
+See the [Winget guide](../guides/winget.md) for upgrades and removal.
+
 On macOS or Linux, Homebrew is one command and keeps the installation under
 `brew --prefix`:
 
@@ -123,7 +144,8 @@ supported shell.
 
 ### Updating an installation
 
-Every installation method can use the built-in updater:
+Script, Cargo, cargo-binstall, and copied-binary installations can use the
+built-in updater:
 
 ```bash
 quinjet update --check
@@ -137,6 +159,12 @@ covers `cargo install`, cargo-binstall, both release scripts, custom Cargo
 roots, and custom installer directories. A later
 `cargo install --force` or cargo-binstall run can still replace that binary and
 update Cargo's own bookkeeping.
+
+Homebrew, apt, and Winget own their installed executables and must also own
+their upgrades. `quinjet update` detects those installations, exits 4 without
+a network request, and prints the matching `brew upgrade`, `apt install
+--only-upgrade`, or `winget upgrade` command. `quinjet update --check` still
+works because it does not replace anything.
 
 The updater reads GitHub's latest stable release, compares semantic versions,
 and never downgrades. For a newer release it selects the same platform artifact

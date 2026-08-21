@@ -8,7 +8,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::{EXIT_UNAVAILABLE, Emitter, Failure, completion, homebrew};
+use super::{EXIT_UNAVAILABLE, Emitter, Failure, completion, package_manager};
 
 const API_URL: &str = "https://api.github.com/repos/pulkitxm/quinjet/releases/latest";
 const RELEASES_URL: &str = "https://github.com/pulkitxm/quinjet/releases";
@@ -21,12 +21,18 @@ const USER_AGENT: &str = concat!("quinjet/", env!("CARGO_PKG_VERSION"));
 
 pub(super) fn run(out: &Emitter, check_only: bool) -> Result<u8> {
     let executable = running_executable()?;
-    if !check_only && homebrew::manages(&executable) {
+    if let Some(manager) = (!check_only)
+        .then(|| package_manager::manager(&executable))
+        .flatten()
+    {
         return Err(Failure::new(
             EXIT_UNAVAILABLE,
-            "Homebrew owns this executable, so Quinjet will not replace it",
+            format!(
+                "{} owns this executable, so Quinjet will not replace it",
+                manager.name
+            ),
         )
-        .hint("run `brew upgrade quinjet` instead")
+        .hint(format!("run `{}` instead", manager.upgrade))
         .into());
     }
     let context = UpdateContext {

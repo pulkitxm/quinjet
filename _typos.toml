@@ -1,5 +1,5 @@
 [files]
-extend-exclude = ["Cargo.lock", "target/", "extras/"]
+extend-exclude = ["Cargo.lock", "target/", "extras/", "packaging/apt/*.asc"]
 
 [default]
 locale = "en-us"
