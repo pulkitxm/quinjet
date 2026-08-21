@@ -147,6 +147,27 @@ fn control_tab_cycles_and_control_w_closes_the_active_repository_tab() {
 }
 
 #[test]
+fn control_w_edits_an_open_text_modal_instead_of_closing_its_tab() {
+    let (tabs, _, _, _) = repository_tabs();
+    let mut app = app_with_repository_tabs(&tabs);
+    app.modal = Some(Modal::Commit {
+        input: TextBuffer::new("keep this draft"),
+        amend: false,
+    });
+
+    let effects = app.handle_key(
+        KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL),
+        Instant::now(),
+    );
+
+    assert!(effects.is_empty());
+    assert!(matches!(
+        app.modal,
+        Some(Modal::Commit { input, .. }) if input.value == "keep this "
+    ));
+}
+
+#[test]
 fn clicking_a_repository_tab_activates_it_on_release() {
     let (tabs, _, second, _) = repository_tabs();
     let mut app = app_with_repository_tabs(&tabs);

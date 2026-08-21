@@ -8,14 +8,17 @@ impl App {
     )]
     pub(crate) fn handle_key(&mut self, key: KeyEvent, now: Instant) -> Vec<AppEffect> {
         self.link_hover = None;
-        if let Some(effects) = self.handle_repository_tab_key(key) {
-            return effects;
+        if self.repository_tab_menu.is_some() {
+            return self.handle_repository_tab_key(key).unwrap_or_default();
         }
         if let Some(modal) = self.modal.take() {
             return self.handle_modal_key(modal, key, now);
         }
         if self.pull_request_lookup_active {
             return self.handle_pull_request_lookup_key(key, now);
+        }
+        if let Some(effects) = self.handle_repository_tab_key(key) {
+            return effects;
         }
 
         let mut effects = Vec::new();
