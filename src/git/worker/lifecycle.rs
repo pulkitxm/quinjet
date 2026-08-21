@@ -5,6 +5,7 @@ pub(crate) struct GitWorker {
     mailbox: Arc<SharedMailbox>,
     github_mailbox: Arc<SharedMailbox>,
     conversation_mailbox: Arc<SharedMailbox>,
+    review_mailbox: Arc<SharedMailbox>,
     local_preview_mailbox: Arc<SharedMailbox>,
     pull_request_preview_mailbox: Arc<SharedMailbox>,
     warm_mailbox: Arc<SharedMailbox>,
@@ -21,6 +22,7 @@ impl GitWorker {
         let mailbox = new_mailbox();
         let github_mailbox = new_mailbox();
         let conversation_mailbox = new_mailbox();
+        let review_mailbox = new_mailbox();
         let local_preview_mailbox = new_mailbox();
         let pull_request_preview_mailbox = new_mailbox();
         let warm_mailbox = new_mailbox();
@@ -29,17 +31,20 @@ impl GitWorker {
         let worker_mailbox = Arc::clone(&mailbox);
         let worker_github_mailbox = Arc::clone(&github_mailbox);
         let worker_conversation_mailbox = Arc::clone(&conversation_mailbox);
+        let worker_review_mailbox = Arc::clone(&review_mailbox);
         let worker_local_preview_mailbox = Arc::clone(&local_preview_mailbox);
         let worker_pull_request_preview_mailbox = Arc::clone(&pull_request_preview_mailbox);
         let worker_warm_mailbox = Arc::clone(&warm_mailbox);
         let github_repository = repository.clone_for_worker();
         let conversation_repository = repository.clone_for_worker();
+        let review_repository = repository.clone_for_worker();
         let local_preview_repository = repository.clone_for_worker();
         let pull_request_preview_repository = repository.clone_for_worker();
         let warm_repository = repository.clone_for_worker();
         let (event_tx, event_rx) = unbounded();
         let github_events = event_tx.clone();
         let conversation_events = event_tx.clone();
+        let review_events = event_tx.clone();
         let local_preview_events = event_tx.clone();
         let pull_request_preview_events = event_tx.clone();
         let warm_events = event_tx.clone();
@@ -68,6 +73,14 @@ impl GitWorker {
                     );
                 })
                 .expect("failed to start conversation worker"),
+        );
+        drop(
+            thread::Builder::new()
+                .name("quinjet-review".to_owned())
+                .spawn(move || {
+                    run_worker(&review_repository, &worker_review_mailbox, &review_events);
+                })
+                .expect("failed to start review worker"),
         );
         drop(
             thread::Builder::new()
@@ -110,6 +123,7 @@ impl GitWorker {
             mailbox,
             github_mailbox,
             conversation_mailbox,
+            review_mailbox,
             local_preview_mailbox,
             pull_request_preview_mailbox,
             warm_mailbox,
@@ -128,6 +142,7 @@ impl GitWorker {
         let target = match worker_lane(&command) {
             WorkerLane::GitHubMetadata => &self.github_mailbox,
             WorkerLane::Conversation => &self.conversation_mailbox,
+            WorkerLane::Review => &self.review_mailbox,
             WorkerLane::LocalPreview => &self.local_preview_mailbox,
             WorkerLane::PullRequestPreview => &self.pull_request_preview_mailbox,
             WorkerLane::Warm => &self.warm_mailbox,
@@ -155,6 +170,7 @@ impl Drop for GitWorker {
         shutdown_mailbox(&self.mailbox);
         shutdown_mailbox(&self.github_mailbox);
         shutdown_mailbox(&self.conversation_mailbox);
+        shutdown_mailbox(&self.review_mailbox);
         shutdown_mailbox(&self.local_preview_mailbox);
         shutdown_mailbox(&self.pull_request_preview_mailbox);
         shutdown_mailbox(&self.warm_mailbox);

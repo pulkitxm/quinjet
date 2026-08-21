@@ -36,6 +36,12 @@ pub(crate) struct ContentStepHit {
     pub step: usize,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct ContentReviewHit {
+    pub area: Rect,
+    pub thread_id: String,
+}
+
 pub(crate) struct PullRequestContentRow {
     pub line: Line<'static>,
     pub step: Option<usize>,
@@ -120,6 +126,7 @@ pub(crate) struct UiGeometry {
     pub modal_action_hits: Vec<(Rect, ModalAction)>,
     pub content_file_hits: Vec<ContentFileHit>,
     pub content_step_hits: Vec<ContentStepHit>,
+    pub content_review_hits: Vec<ContentReviewHit>,
     pub link_hits: Vec<LinkHit>,
     pub help_hits: Vec<HelpHit>,
     pub project_hits: Vec<Rect>,

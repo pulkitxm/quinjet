@@ -74,7 +74,7 @@ pub(crate) fn diff(document: &DiffDocument) -> String {
                 out.line(&text);
             }
             DiffLineKind::FileFooter => {}
-            DiffLineKind::HunkHeader | DiffLineKind::Meta => {
+            DiffLineKind::HunkHeader | DiffLineKind::Meta | DiffLineKind::Review => {
                 out.line(&text);
             }
             DiffLineKind::Added => {

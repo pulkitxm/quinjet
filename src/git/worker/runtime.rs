@@ -241,6 +241,37 @@ pub(super) fn run_worker(
                         .and_then(Outcome::conversation),
                 ),
             },
+            WorkerCommand::LoadPullRequestReview {
+                generation,
+                pull_request,
+            } => WorkerEvent::PullRequestReview {
+                generation,
+                result: answer(
+                    session
+                        .execute(Command::PullRequestReview { pull_request })
+                        .and_then(Outcome::review),
+                ),
+            },
+            WorkerCommand::OperatePullRequestReview {
+                generation,
+                pull_request,
+                operation,
+            } => WorkerEvent::PullRequestReview {
+                generation,
+                result: answer(
+                    session
+                        .execute(Command::OperatePullRequestReview {
+                            pull_request: pull_request.clone(),
+                            operation,
+                        })
+                        .and_then(Outcome::operation)
+                        .and_then(|_| {
+                            session
+                                .execute(Command::PullRequestReview { pull_request })
+                                .and_then(Outcome::review)
+                        }),
+                ),
+            },
             WorkerCommand::LoadCheckRunLog {
                 generation,
                 pull_request,

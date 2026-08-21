@@ -2,12 +2,17 @@
 use super::*;
 
 #[expect(clippy::integer_division, reason = "layout maths works in whole cells")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "diff rendering returns file hits while registering review hits"
+)]
 pub(super) fn draw_side_by_side_diff(
     frame: &mut Frame<'_>,
     area: Rect,
     app: &App,
     rows: &[SideBySideRow],
     diff_scroll: usize,
+    review_hits: &mut Vec<ContentReviewHit>,
     theme: &Theme,
 ) -> (Rect, Vec<ContentFileHit>) {
     let content = area;
@@ -79,6 +84,12 @@ pub(super) fn draw_side_by_side_diff(
                 let Some(line) = lines.get(*index) else {
                     continue;
                 };
+                if let Some(thread_id) = app.pull_request_review_line_threads.get(index) {
+                    review_hits.push(ContentReviewHit {
+                        area: row_area,
+                        thread_id: thread_id.clone(),
+                    });
+                }
                 draw_full_width_diff_line(
                     frame,
                     row_area,
@@ -99,6 +110,7 @@ pub(super) fn draw_side_by_side_diff(
                     true,
                     app.horizontal_scroll,
                     old_emphasis.as_ref(),
+                    old_line.is_some_and(|line| review_line_selected(app, line, Some(true))),
                     theme,
                 );
                 frame.render_widget(
@@ -112,6 +124,7 @@ pub(super) fn draw_side_by_side_diff(
                     false,
                     app.horizontal_scroll,
                     new_emphasis.as_ref(),
+                    new_line.is_some_and(|line| review_line_selected(app, line, Some(false))),
                     theme,
                 );
             }
@@ -152,7 +165,7 @@ pub(super) fn side_by_side_rows(document: &DiffDocument, app: &App) -> Vec<SideB
             DiffLineKind::HunkHeader => {
                 index += 1;
             }
-            DiffLineKind::Meta => {
+            DiffLineKind::Meta | DiffLineKind::Review => {
                 rows.push(SideBySideRow::Full {
                     index,
                     boxed: in_file,
