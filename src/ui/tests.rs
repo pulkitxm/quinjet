@@ -90,5 +90,6 @@ mod controls;
 mod diff;
 mod layout;
 mod logs;
+mod modals;
 mod overview;
 mod rendering;
