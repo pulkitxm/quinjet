@@ -95,6 +95,10 @@ fn install_panic_hook() {
     }));
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the terminal loop routes both onboarding and repository sessions"
+)]
 fn open_terminal(options: &TerminalOptions) -> Result<()> {
     if !io::stdin().is_terminal() || !cli::stdout_is_terminal() {
         anyhow::bail!("Quinjet requires an interactive terminal");
