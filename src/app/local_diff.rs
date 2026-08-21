@@ -90,9 +90,6 @@ impl App {
         let Some(workspace_generation) = self.local_diff_workspace_generation else {
             return;
         };
-        if self.local_diff_preserving_document && workspace_generation != self.diff_generation {
-            return;
-        }
         let indexed = self
             .local_diff_index
             .as_ref()

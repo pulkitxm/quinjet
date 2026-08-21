@@ -12,7 +12,9 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
         return;
     }
 
-    let [tabs, main, footer] = Layout::vertical([
+    let repository_tabs_height = u16::from(app.repository_tabs.len() > 1).saturating_mul(2);
+    let [repository_tabs, tabs, main, footer] = Layout::vertical([
+        Constraint::Length(repository_tabs_height),
         Constraint::Length(3),
         Constraint::Min(8),
         Constraint::Length(2),
@@ -31,6 +33,17 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
         .areas(main)
     };
 
+    let (repository_tab_hits, repository_tab_open, repository_tab_previous, repository_tab_next) =
+        if repository_tabs_height == 0 {
+            (
+                Vec::new(),
+                Rect::default(),
+                Rect::default(),
+                Rect::default(),
+            )
+        } else {
+            draw_repository_tabs(frame, repository_tabs, app, theme)
+        };
     let (changes_tab, history_tab, pull_requests_tab, mut link_hits, projects_hit) =
         draw_tabs(frame, tabs, app, theme);
     let mut project_hits: Vec<Rect> = projects_hit.into_iter().collect();
@@ -50,6 +63,11 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     draw_footer(frame, footer, app, theme, &mut link_hits, &mut project_hits);
 
     app.geometry = UiGeometry {
+        repository_tab_hits,
+        repository_tab_open,
+        repository_tab_previous,
+        repository_tab_next,
+        repository_tab_menu_hits: Vec::new(),
         changes_tab,
         history_tab,
         pull_requests_tab,
@@ -91,6 +109,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     if let Some(toast) = app.toast.as_ref() {
         draw_toast(frame, toast.message.as_str(), toast.level, theme);
     }
+    draw_repository_tab_menu(frame, app, theme);
 }
 
 pub(super) fn snapshot_cells(buffer: &Buffer, area: Rect) -> Vec<Vec<char>> {

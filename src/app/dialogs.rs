@@ -15,12 +15,13 @@ impl App {
         })));
     }
 
-    pub(super) fn open_projects(&mut self, effects: &mut Vec<AppEffect>) {
+    pub(super) fn open_projects(&mut self, mode: ProjectOpenMode, effects: &mut Vec<AppEffect>) {
         self.modal = Some(Modal::Projects {
             groups: self.project_groups.clone(),
             selected: 0,
             query: TextBuffer::default(),
             loading: self.project_groups.is_empty(),
+            mode,
         });
         self.request_recent_projects(effects);
     }

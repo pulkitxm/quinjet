@@ -356,6 +356,7 @@ pub(crate) enum Modal {
         selected: usize,
         query: TextBuffer,
         loading: bool,
+        mode: ProjectOpenMode,
     },
     PullRequestRepositories {
         items: Vec<GitHubRepository>,
@@ -382,6 +383,13 @@ pub(crate) enum Modal {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProjectOpenMode {
+    Initial,
+    CurrentTab,
+    NewTab,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PaletteCommand {
     Refresh,
     StageAll,
@@ -398,6 +406,7 @@ pub(crate) enum PaletteCommand {
     StashPop,
     ManageStashes,
     OpenProject,
+    OpenProjectNewTab,
     Branches,
     CompareBranch,
     RenameCurrentBranch,
@@ -413,7 +422,7 @@ pub(crate) enum PaletteCommand {
 }
 
 impl PaletteCommand {
-    pub(crate) const ALL: [Self; 27] = [
+    pub(crate) const ALL: [Self; 28] = [
         Self::Refresh,
         Self::StageAll,
         Self::UnstageAll,
@@ -429,6 +438,7 @@ impl PaletteCommand {
         Self::StashPop,
         Self::ManageStashes,
         Self::OpenProject,
+        Self::OpenProjectNewTab,
         Self::Branches,
         Self::CompareBranch,
         Self::RenameCurrentBranch,
@@ -459,7 +469,8 @@ impl PaletteCommand {
             Self::StashIncludeUntracked => "Stash Changes Including Untracked…",
             Self::StashPop => "Pop Latest Stash",
             Self::ManageStashes => "View and Manage Stashes…",
-            Self::OpenProject => "Open Project…",
+            Self::OpenProject => "Switch Project in Current Tab…",
+            Self::OpenProjectNewTab => "Open Project in New Tab…",
             Self::Branches => "Switch Branch…",
             Self::CompareBranch => "Compare Current Branch With…",
             Self::RenameCurrentBranch => "Rename Current Branch…",

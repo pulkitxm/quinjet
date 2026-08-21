@@ -100,7 +100,8 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
             selected,
             query,
             loading,
-        }) => draw_projects(frame, groups, *selected, query, *loading, theme),
+            mode,
+        }) => draw_projects(frame, groups, *selected, query, *loading, *mode, theme),
         Some(Modal::PullRequestRepositories {
             items,
             selected,

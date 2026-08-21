@@ -5,12 +5,17 @@ use super::*;
     clippy::too_many_lines,
     reason = "the picker renders headings and worktree rows in one pass"
 )]
-pub(super) fn draw_projects(
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the picker receives one value for each modal field plus its palette"
+)]
+pub(crate) fn draw_projects(
     frame: &mut Frame<'_>,
     groups: &[ProjectGroup],
     selected: usize,
     query: &crate::app::TextBuffer,
     loading: bool,
+    mode: ProjectOpenMode,
     theme: &Theme,
 ) {
     let height = frame.area().height.saturating_sub(6).min(28);
@@ -20,7 +25,12 @@ pub(super) fn draw_projects(
         frame.area(),
     );
     frame.render_widget(Clear, area);
-    let block = modal_block(" Recent projects ", theme);
+    let title = match mode {
+        ProjectOpenMode::Initial => " Open a project ",
+        ProjectOpenMode::CurrentTab => " Switch project ",
+        ProjectOpenMode::NewTab => " Open in new tab ",
+    };
+    let block = modal_block(title, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let query_area = Rect::new(inner.x, inner.y, inner.width, 1);
@@ -144,21 +154,25 @@ pub(super) fn draw_projects(
             .take(list_area.height as usize)
             .collect();
         if visible_lines.is_empty() {
+            let empty = if groups.is_empty() && mode == ProjectOpenMode::Initial {
+                "No recent projects. Press Ctrl+O to enter a repository path."
+            } else {
+                "No projects match this filter"
+            };
             frame.render_widget(
-                Paragraph::new("No projects match this filter")
-                    .style(Style::default().fg(theme.muted)),
+                Paragraph::new(empty).style(Style::default().fg(theme.muted)),
                 list_area,
             );
         } else {
             frame.render_widget(Paragraph::new(visible_lines), list_area);
         }
     }
-    draw_modal_hint(
-        frame,
-        area,
-        "Enter open   Delete forget project   Esc close",
-        theme,
-    );
+    let hint = match mode {
+        ProjectOpenMode::Initial => "Enter open   Ctrl+O path   Esc quit",
+        ProjectOpenMode::CurrentTab => "Enter switch tab   Delete forget project   Esc close",
+        ProjectOpenMode::NewTab => "Enter open in new tab   Delete forget project   Esc close",
+    };
+    draw_modal_hint(frame, area, hint, theme);
 }
 
 pub(super) fn draw_pull_request_repositories(

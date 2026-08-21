@@ -282,7 +282,13 @@ fn a_fast_tick_only_speeds_up_the_reads_that_change_that_fast() {
                 AppEffect::Copy(_)
                 | AppEffect::SetMouseCapture(_)
                 | AppEffect::Open(_)
-                | AppEffect::OpenRepository(_)
+                | AppEffect::SwitchRepository(_)
+                | AppEffect::OpenRepositoryTab(_)
+                | AppEffect::ActivateRepositoryTab(_)
+                | AppEffect::ReorderRepositoryTab { .. }
+                | AppEffect::CloseRepositoryTab(_)
+                | AppEffect::CloseOtherRepositoryTabs(_)
+                | AppEffect::CloseAllRepositoryTabs
                 | AppEffect::Quit => false,
             })
             .count()

@@ -25,6 +25,9 @@ impl App {
                 .iter()
                 .any(|hit| hit.area.contains((event.column, event.row).into())))
         .then_some((event.column, event.row));
+        if let Some(effects) = self.handle_repository_tab_mouse(event) {
+            return effects;
+        }
         if let Some(Modal::Help {
             selected, hover, ..
         }) = &mut self.modal
@@ -110,7 +113,7 @@ impl App {
                     .iter()
                     .any(|area| area.contains(point))
                 {
-                    self.open_projects(&mut effects);
+                    self.open_projects(ProjectOpenMode::CurrentTab, &mut effects);
                 } else if let Some(target) = self
                     .geometry
                     .link_hits

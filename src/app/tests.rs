@@ -261,6 +261,8 @@ mod refresh;
 mod refresh_preview;
 mod refresh_preview_interaction;
 mod refresh_preview_state;
+mod repository_tabs;
 mod reviews;
 mod support;
+mod view_state;
 mod workflows;

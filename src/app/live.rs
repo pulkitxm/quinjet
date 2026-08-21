@@ -79,7 +79,7 @@ impl App {
     #[doc = " interval also stretches when the reader is somewhere else, so a loaded"]
     #[doc = " pull request stays fresh without spending requests on an unseen pane."]
     pub(super) fn pull_request_poll_interval(&self) -> Duration {
-        if self.view != View::PullRequests {
+        if !self.tab_active || self.view != View::PullRequests {
             return PULL_REQUEST_BACKGROUND_POLL;
         }
         if self

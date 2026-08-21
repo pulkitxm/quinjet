@@ -108,9 +108,8 @@ show up without waiting, and, when asked for, the webhook listener. The first
 frame asks for the working-tree status, the current branch's history, the list
 of local and remote-tracking branches, the worktrees attached to this
 repository, and a repository link derived only from configured Git remotes. No
-GitHub request is made at startup, when the Pull Requests tab is opened, or
-when a tab is switched. Only typing a number and pressing Enter contacts
-GitHub.
+GitHub request is made at startup or when the Pull Requests view is selected.
+Only typing a number and pressing Enter contacts GitHub.
 
 The terminal is put into raw mode with the alternate screen, bracketed paste
 and, where the terminal supports them, the keyboard enhancement flags that let
@@ -158,6 +157,28 @@ SSH. A cmux SSH relay is used for ordinary browser clicks when its socket is
 available. Clicking the worktree path opens Recent projects. The rest of a
 commit row keeps selecting that commit, so opening and selecting remain
 distinct targets.
+
+## Project tabs
+
+A session starts with one project and no project-tab strip. `w`, the header
+path, and the worktree count open the project picker in `Switch project` mode.
+Choosing a project or worktree replaces the repository in the current tab and
+keeps that tab's identity and position.
+
+`N` opens the same picker in `Open in new tab` mode. Adding a second project
+reveals the project-tab strip. Every project tab owns its own Git worker,
+filesystem watcher, repository data, selected view, filters, folds, and scroll
+positions. `Ctrl+Tab` and `Ctrl+Shift+Tab` cycle through them without resetting
+that state. A project selected for a new tab activates its existing tab when
+the exact worktree root is already open. Different worktree roots remain
+separate tabs even when they belong to the same Git repository.
+
+Drag a visible project tab to reorder it. When the strip overflows, its left
+and right controls cycle until the hidden tab becomes visible. Right-click a
+tab for `Open Project...` in a new tab, `Close`, `Close Others`, and `Close
+All`. `Ctrl+W` closes the active project tab. Closing the active tab chooses
+its right neighbor when one exists, otherwise its left neighbor. Closing the
+final tab exits the session.
 
 Changes are divided into merge, staged, and unstaged sections. Untracked files
 sit in Changes with the other worktree edits. Click a section header or press
@@ -236,13 +257,14 @@ change made by another process in a directory the watcher missed.
 
 An open pull request polls itself. Check state is read every 5 seconds while
 any run is in progress, every 20 seconds once everything has settled, and every
-2 minutes when the reader is on another tab. That cadence is a ceiling rather
-than a schedule: the metadata and the conversation hold their own 20 second
-floor and a growing log holds an 8 second floor, so a fast tick costs one extra
-request rather than four. A finished run's log is never re-read, because its
-archive can no longer change. Each stream is read separately, so one failing
-endpoint never stalls the others, and a read that coalesced into a request
-still in flight is left unstamped so it is due again next tick.
+2 minutes when the reader is in another view or project tab. That cadence is a
+ceiling rather than a schedule: the metadata and the conversation hold their
+own 20 second floor and a growing log holds an 8 second floor, so a fast tick
+costs one extra request rather than four. A finished run's log is never
+re-read, because its archive can no longer change. Each stream is read
+separately, so one failing endpoint never stalls the others, and a read that
+coalesced into a request still in flight is left unstamped so it is due again
+next tick.
 
 ## `--json` and the interface
 
@@ -331,7 +353,11 @@ The verbs in the right-hand column are documented in their groups:
 | `f` or `p` in Pull Requests | nothing. Both show a toast, because reading someone's pull request is not the place to push your branch |
 | `d` in Changes | `quinjet branch compare <ref>` |
 | `b` outside History, or `B` | `quinjet branch list`; Enter on a row is `quinjet branch switch <name>` |
-| `w`, clicking the header path, or clicking `N worktrees` in the footer | `quinjet worktree list` for this repository, plus the same listing for each recently opened project; Enter on a tree rebinds this session, the same as `quinjet tui <path>` |
+| `w`, clicking the header path, or clicking the worktree count in the footer | `quinjet worktree list` for this repository, plus the same listing for each recently opened project; Enter switches the current project tab, the same repository setup as `quinjet tui <path>` |
+| `N` | opens the recent-project picker in new-tab mode; no verb, because project tabs belong to the terminal session |
+| `Ctrl+Tab`, `Ctrl+Shift+Tab` | no verb. Cycles through project tabs while retaining each tab's state |
+| `Ctrl+W` | no verb. Closes the active project tab |
+| dragging or right-clicking a project tab | no verb. Reorders it or opens Close, Close Others, and Close All |
 | `Ctrl+N` in the branch picker | `quinjet branch create <name>` |
 | `F2` or `Ctrl+R` in the branch picker | `quinjet branch rename <old> <new>` |
 | `Delete` in the branch picker, then confirm | `quinjet branch delete <name> --yes` |
@@ -385,10 +411,10 @@ The interface can do these, and no verb can:
   folding one step of a check log. A verb prints the whole thing, unified.
 - Filtering a list in place (`/`), the command palette, and the shortcut help.
 - Releasing the mouse (`m`) so the terminal can select text.
-- Remembering recently opened projects and rebinding this session onto one of
-  their worktrees. The command line can list this repository's trees with
-  `quinjet worktree list` and open another path with `quinjet tui <path>`, but
-  it does not keep a recents file.
+- Remembering recently opened projects and keeping independent project tabs.
+  The command line can list this repository's trees with `quinjet worktree
+  list` and open another path with `quinjet tui <path>`, but it does not keep a
+  recents file or multiple interface states in one process.
 - Showing that an answer came from the cache, and showing which reads are in
   flight.
 

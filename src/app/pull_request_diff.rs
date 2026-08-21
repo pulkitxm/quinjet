@@ -58,7 +58,7 @@ impl App {
         self.pull_request_checks_read_at = None;
         self.pull_request_detail_read_at = None;
         self.pull_request_log_read_at = None;
-        self.reset_sidebar_scroll();
+        self.reset_view_sidebar_scroll(View::PullRequests);
     }
 
     pub(super) fn apply_pull_request_index(&mut self, index: PullRequestDiffIndex) {

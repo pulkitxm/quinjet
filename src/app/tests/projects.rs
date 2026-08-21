@@ -45,11 +45,12 @@ fn recent_projects_nest_worktrees_and_open_another_tree() {
         selected: 1,
         query: TextBuffer::default(),
         loading: false,
+        mode: ProjectOpenMode::CurrentTab,
     });
     let effects = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
     assert!(matches!(
         effects.as_slice(),
-        [AppEffect::OpenRepository(path)] if path == Path::new("/tmp/repo-topic")
+        [AppEffect::SwitchRepository(path)] if path == Path::new("/tmp/repo-topic")
     ));
     assert!(app.modal.is_none());
 }

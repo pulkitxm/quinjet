@@ -227,7 +227,7 @@ fn unexpected(outcome: &Outcome, wanted: &str) -> anyhow::Error {
 
 pub(crate) struct Session {
     repository: Repository,
-    local_diff: Option<(u64, PreparedLocalDiff)>,
+    local_diffs: LocalDiffWorkspaces<PreparedLocalDiff>,
     pull_request_diff: Option<(u64, PreparedPullRequest)>,
 }
 
@@ -235,7 +235,7 @@ impl Session {
     pub(crate) const fn new(repository: Repository) -> Self {
         Self {
             repository,
-            local_diff: None,
+            local_diffs: LocalDiffWorkspaces::new(),
             pull_request_diff: None,
         }
     }
@@ -277,9 +277,10 @@ impl Session {
                 crate::state::load_recent_projects(self.repository.root()),
             )),
             Command::PrepareLocalDiff { workspace, request } => {
+                let kind = LocalDiffWorkspaceKind::from_request(&request);
                 let prepared = self.repository.prepare_local_diff(&request)?;
                 let index = prepared.index();
-                self.local_diff = Some((workspace, prepared));
+                self.local_diffs.store(kind, workspace, prepared);
                 Ok(Outcome::LocalDiffIndex(Box::new(index)))
             }
             Command::LocalDiffFile { workspace, path } => {
@@ -405,10 +406,8 @@ impl Session {
     }
 
     fn local_workspace(&self, workspace: u64) -> Result<&PreparedLocalDiff> {
-        self.local_diff
-            .as_ref()
-            .filter(|(prepared, _)| *prepared == workspace)
-            .map(|(_, prepared)| prepared)
+        self.local_diffs
+            .get(workspace)
             .ok_or_else(|| anyhow::anyhow!("Local diff workspace is no longer available"))
     }
 
@@ -418,5 +417,83 @@ impl Session {
             .filter(|(prepared, _)| *prepared == workspace)
             .map(|(_, prepared)| prepared)
             .ok_or_else(|| anyhow::anyhow!("Pull-request diff workspace is no longer available"))
+    }
+}
+
+#[derive(Clone, Copy)]
+enum LocalDiffWorkspaceKind {
+    Changes,
+    History,
+}
+
+impl LocalDiffWorkspaceKind {
+    const fn from_request(request: &LocalDiffRequest) -> Self {
+        match request {
+            LocalDiffRequest::Commit { .. } => Self::History,
+            LocalDiffRequest::Changes { .. }
+            | LocalDiffRequest::Branch { .. }
+            | LocalDiffRequest::Stash { .. } => Self::Changes,
+        }
+    }
+}
+
+struct LocalDiffWorkspaces<T> {
+    changes: Option<(u64, T)>,
+    history: Option<(u64, T)>,
+}
+
+impl<T> LocalDiffWorkspaces<T> {
+    const fn new() -> Self {
+        Self {
+            changes: None,
+            history: None,
+        }
+    }
+
+    fn store(&mut self, kind: LocalDiffWorkspaceKind, workspace: u64, prepared: T) {
+        let slot = match kind {
+            LocalDiffWorkspaceKind::Changes => &mut self.changes,
+            LocalDiffWorkspaceKind::History => &mut self.history,
+        };
+        *slot = Some((workspace, prepared));
+    }
+
+    fn get(&self, workspace: u64) -> Option<&T> {
+        [&self.changes, &self.history]
+            .into_iter()
+            .flatten()
+            .find(|(candidate, _)| *candidate == workspace)
+            .map(|(_, prepared)| prepared)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LocalDiffWorkspaceKind, LocalDiffWorkspaces};
+
+    #[test]
+    fn paused_changes_workspace_survives_history_browsing() {
+        let mut workspaces = LocalDiffWorkspaces::new();
+        workspaces.store(LocalDiffWorkspaceKind::Changes, 11, 110);
+
+        for generation in 12..100 {
+            workspaces.store(LocalDiffWorkspaceKind::History, generation, generation * 10);
+        }
+
+        assert_eq!(workspaces.get(11), Some(&110));
+        assert_eq!(workspaces.get(98), None);
+        assert_eq!(workspaces.get(99), Some(&990));
+    }
+
+    #[test]
+    fn each_view_replaces_only_its_own_workspace() {
+        let mut workspaces = LocalDiffWorkspaces::new();
+        workspaces.store(LocalDiffWorkspaceKind::Changes, 21, 210);
+        workspaces.store(LocalDiffWorkspaceKind::History, 22, 220);
+        workspaces.store(LocalDiffWorkspaceKind::Changes, 23, 230);
+
+        assert_eq!(workspaces.get(21), None);
+        assert_eq!(workspaces.get(22), Some(&220));
+        assert_eq!(workspaces.get(23), Some(&230));
     }
 }

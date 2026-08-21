@@ -94,3 +94,4 @@ mod logs;
 mod modals;
 mod overview;
 mod rendering;
+mod tabs;
