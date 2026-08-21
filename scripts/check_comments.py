@@ -261,6 +261,20 @@ def hash_comments(source: str) -> list[Comment]:
     return found
 
 
+def semicolon_comments(source: str) -> list[Comment]:
+    """Find full-line semicolon comments in EditorConfig files."""
+    found: list[Comment] = []
+    offset = 0
+    for line, text in enumerate(source.splitlines(keepends=True), start=1):
+        column = len(text) - len(text.lstrip())
+        if text[column:].startswith(";"):
+            content = text.rstrip("\r\n")
+            stop = offset + len(content)
+            found.append(Comment(offset + column, stop, line, content[column:].strip()))
+        offset += len(text)
+    return found
+
+
 def powershell_blocks(source: str) -> list[Comment]:
     """Find PowerShell block comments."""
     found: list[Comment] = []
@@ -309,6 +323,8 @@ def comments_for(path: Path, source: str) -> list[Comment]:
         return html_comments(source)
     if suffix in HASH_SUFFIXES or path.name in HASH_NAMES:
         found = hash_comments(source)
+        if path.name == ".editorconfig":
+            found.extend(semicolon_comments(source))
         if suffix in {".ps1", ".psd1"}:
             blocks = powershell_blocks(source)
             found = [
@@ -417,6 +433,7 @@ def selftest() -> int:
         (Path("file.sh"), "#!/bin/sh\nvalue=${name#prefix}\n# gone\n", 1),
         (Path("file.yml"), "key: '# text'\nkey: value # gone\n", 1),
         (Path("file.toml"), 'key = "# text" # gone\n', 1),
+        (Path(".editorconfig"), "root = true\n; gone\n", 1),
         (Path("file.ps1"), "<# gone #>\n", 1),
         (Path("file.rb"), "=begin\ngone\n=end\n", 1),
         (Path("file.md"), "text\n<!-- gone -->\n", 1),

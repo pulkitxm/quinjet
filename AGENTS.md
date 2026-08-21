@@ -52,9 +52,10 @@ the worker, the caches, or anything that touches a generation.
 
 ## House rules
 
-- No comments in code. Doc comments (`///`, `//!`) stay, because clap and
-  rustdoc render them. Ordinary `//` comments fail the build; let names and
-  structure carry the meaning. `scripts/check_comments.py` enforces this.
+- No comments in tracked files. Only exact machine-read directives are accepted.
+  Use attributes for Rust and clap documentation metadata, and let names and
+  structure carry the meaning. `scripts/check_comments.py` checks every tracked
+  file and rejects unclassified text formats.
 - Never use the em-dash character, in code, docs, or commit messages.
 - Prefer established crates over hand-rolled implementations.
 - Do not preserve backward compatibility for its own sake; choose the simplest
