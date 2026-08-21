@@ -9,6 +9,13 @@ pub(super) struct ApiPage {
 }
 
 impl Repository {
+    fn github_command(&self) -> Command {
+        if let Some(path) = &self.github_cli {
+            return Command::new(path);
+        }
+        Command::new("gh")
+    }
+
     pub(crate) fn perform_pull_request_operation(
         &self,
         pull_request: &PullRequest,
@@ -167,7 +174,7 @@ impl Repository {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let mut command = Command::new("gh");
+        let mut command = self.github_command();
         let _ = command
             .current_dir(&self.root)
             .args(args)
@@ -193,7 +200,7 @@ impl Repository {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let mut command = Command::new("gh");
+        let mut command = self.github_command();
         let _ = command
             .current_dir(&self.root)
             .args(args)

@@ -306,6 +306,7 @@ fn a_warm_up_stops_as_soon_as_the_pull_request_it_serves_is_left() {
     };
     let repository = Repository {
         root: std::path::PathBuf::from("/nonexistent-on-purpose"),
+        github_cli: None,
     };
     let checks = [settled("one"), settled("two"), settled("three")];
 

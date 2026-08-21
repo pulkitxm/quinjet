@@ -190,3 +190,72 @@ impl PullRequestReviewOperation {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn review_enums_have_stable_api_values() {
+        assert_eq!(PullRequestReviewSide::Left.graphql(), "LEFT");
+        assert_eq!(PullRequestReviewSide::Right.graphql(), "RIGHT");
+        assert_eq!(PullRequestReviewSide::Unknown.graphql(), "RIGHT");
+        assert_eq!(PullRequestReviewThreadSubject::File.graphql(), "FILE");
+        assert_eq!(PullRequestReviewThreadSubject::Line.graphql(), "LINE");
+        assert_eq!(PullRequestReviewThreadSubject::Unknown.graphql(), "LINE");
+        let decisions = [
+            (PullRequestReviewDecision::Comment, "Comment", "COMMENT"),
+            (PullRequestReviewDecision::Approve, "Approve", "APPROVE"),
+            (
+                PullRequestReviewDecision::RequestChanges,
+                "Request changes",
+                "REQUEST_CHANGES",
+            ),
+        ];
+        for (decision, label, graphql) in decisions {
+            assert_eq!(decision.label(), label);
+            assert_eq!(decision.graphql(), graphql);
+        }
+    }
+
+    #[test]
+    fn snapshot_counts_open_threads_and_pending_comments() {
+        let comment = PullRequestReviewComment {
+            id: "COMMENT_1".to_owned(),
+            author: "reviewer".to_owned(),
+            body: "Fix this".to_owned(),
+            created_at: String::new(),
+            updated_at: String::new(),
+            url: String::new(),
+            state: "pending".to_owned(),
+            viewer_did_author: true,
+            viewer_can_update: true,
+            viewer_can_delete: true,
+        };
+        let thread = |is_resolved, comments| PullRequestReviewThread {
+            id: "THREAD_1".to_owned(),
+            path: PathBuf::from("src/main.rs"),
+            side: PullRequestReviewSide::Right,
+            line: Some(1),
+            original_line: None,
+            start_side: None,
+            start_line: None,
+            original_start_line: None,
+            subject: PullRequestReviewThreadSubject::Line,
+            is_resolved,
+            is_outdated: false,
+            resolved_by: None,
+            viewer_can_reply: true,
+            viewer_can_resolve: true,
+            viewer_can_unresolve: false,
+            comments,
+            comments_truncated: false,
+        };
+        let snapshot = PullRequestReviewSnapshot {
+            threads: vec![thread(false, vec![comment]), thread(true, Vec::new())],
+            ..PullRequestReviewSnapshot::default()
+        };
+        assert_eq!(snapshot.unresolved_count(), 1);
+        assert_eq!(snapshot.pending_comment_count(), 1);
+    }
+}

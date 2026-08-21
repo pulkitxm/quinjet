@@ -310,3 +310,70 @@ fn review_body(args: &PrReviewBodyArgs) -> Result<String> {
     }
     Ok(body)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn review_body_accepts_inline_and_file_text() {
+        let inline = PrReviewBodyArgs {
+            body: Some("Looks good".to_owned()),
+            body_file: None,
+        };
+        assert_eq!(review_body(&inline).unwrap(), "Looks good");
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("review.txt");
+        fs::write(&path, "Please adjust this\n").unwrap();
+        let file = PrReviewBodyArgs {
+            body: None,
+            body_file: Some(path),
+        };
+        assert_eq!(review_body(&file).unwrap(), "Please adjust this\n");
+    }
+
+    #[test]
+    fn review_body_rejects_missing_empty_and_unreadable_text() {
+        let missing = PrReviewBodyArgs {
+            body: None,
+            body_file: None,
+        };
+        drop(review_body(&missing).unwrap_err());
+        let empty = PrReviewBodyArgs {
+            body: Some("  \n".to_owned()),
+            body_file: None,
+        };
+        drop(review_body(&empty).unwrap_err());
+        let unreadable = PrReviewBodyArgs {
+            body: None,
+            body_file: Some(PathBuf::from("missing-review.txt")),
+        };
+        drop(review_body(&unreadable).unwrap_err());
+    }
+
+    #[test]
+    fn review_arguments_map_to_domain_values() {
+        assert_eq!(
+            PullRequestReviewSide::from(PrReviewSideArg::Left),
+            PullRequestReviewSide::Left
+        );
+        assert_eq!(
+            PullRequestReviewSide::from(PrReviewSideArg::Right),
+            PullRequestReviewSide::Right
+        );
+        let decision = |approve: bool, request_changes: bool| {
+            PrReviewDecisionArgs {
+                comment: !approve && !request_changes,
+                approve,
+                request_changes,
+            }
+            .decision()
+        };
+        assert_eq!(decision(false, false), PullRequestReviewDecision::Comment);
+        assert_eq!(decision(true, false), PullRequestReviewDecision::Approve);
+        assert_eq!(
+            decision(false, true),
+            PullRequestReviewDecision::RequestChanges
+        );
+    }
+}

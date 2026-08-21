@@ -419,3 +419,6 @@ mod tests {
         assert_eq!(input.get("subjectType"), Some(&json!("FILE")));
     }
 }
+
+#[cfg(test)]
+mod transport_tests;

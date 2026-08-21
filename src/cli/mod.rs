@@ -21,10 +21,9 @@ use clap_complete::Shell;
 use clap_mangen::Man;
 pub(crate) use command::{Command, Outcome, Session};
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
-use serde::Serialize;
-
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use pr_verbs::*;
+use serde::Serialize;
 
 use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
