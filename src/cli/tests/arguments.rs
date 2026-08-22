@@ -77,6 +77,13 @@ fn a_terminal_path_belongs_to_the_tui_verb() {
 }
 
 #[test]
+fn edith_client_is_available_to_terminal_launches() {
+    let cli = Cli::try_parse_from(["quinjet", "--client", "edith", "tui", "/tmp/project"]).unwrap();
+    assert_eq!(cli.client, Some(Client::Edith));
+    drop(Cli::try_parse_from(["quinjet", "--client", "unknown"]).unwrap_err());
+}
+
+#[test]
 fn terminal_themes_default_to_quinjet_with_system_appearance() {
     let cli = Cli::try_parse_from(["quinjet", "tui"]).unwrap();
     assert!(matches!(

@@ -4,6 +4,7 @@ mod convert;
 mod date_time;
 mod file_icons;
 mod git;
+mod integration;
 mod onboarding;
 mod state;
 mod tabs;
@@ -32,6 +33,7 @@ use crossterm::event::{
     PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
+use crossterm::style::Print;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
@@ -121,6 +123,7 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
             options.appearance,
             !options.no_mouse,
             webhooks.is_some(),
+            options.client,
         );
         workspace.sync_tabs(Instant::now());
         workspace
@@ -233,6 +236,7 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
                                 options.appearance,
                                 !options.no_mouse,
                                 webhooks.is_some(),
+                                options.client,
                             );
                             next.sync_tabs(Instant::now());
                             running &= dispatch_launch_effects(
@@ -298,6 +302,7 @@ fn dispatch_effects(
                 }
                 AppEffect::Copy(text) => terminal.copy_to_clipboard(&text),
                 AppEffect::SetMouseCapture(enabled) => terminal.set_mouse_capture(enabled),
+                AppEffect::Host(action) => terminal.send_host_action(action),
                 AppEffect::Open(app::OpenTarget::Browser(url)) => drop(cli::open_url(&url)),
                 AppEffect::SwitchRepository(path) => {
                     if let Some(effects) = workspace.switch_repository(id, &path, Instant::now()) {
@@ -351,6 +356,13 @@ impl Drop for TerminalRollback {
 }
 
 impl TerminalGuard {
+    fn send_host_action(&mut self, action: integration::HostAction) {
+        drop(execute!(
+            self.terminal.backend_mut(),
+            Print(action.sequence())
+        ));
+    }
+
     fn copy_to_clipboard(&mut self, text: &str) {
         drop(execute!(
             self.terminal.backend_mut(),

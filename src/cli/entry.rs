@@ -2,8 +2,10 @@
 use super::*;
 
 pub(crate) fn dispatch() -> Result<Launch> {
-    completion::auto_install();
     let cli = Cli::parse();
+    if cli.client.is_none() {
+        completion::auto_install();
+    }
     let mut out = Emitter::new(cli.json);
     let verb = match cli.command {
         None => {
@@ -14,6 +16,7 @@ pub(crate) fn dispatch() -> Result<Launch> {
                 theme: ThemeName::default(),
                 appearance: AppearanceChoice::default(),
                 pull_request: cli.pull_request,
+                client: cli.client,
             })));
         }
         Some(Verb::Tui(args)) => {
@@ -24,6 +27,7 @@ pub(crate) fn dispatch() -> Result<Launch> {
                 theme: args.theme,
                 appearance: args.appearance,
                 pull_request: args.pull_request.or(cli.pull_request),
+                client: cli.client,
             })));
         }
         Some(Verb::Completions(args)) => {

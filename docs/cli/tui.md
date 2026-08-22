@@ -7,8 +7,8 @@ Usage:
 
 ```bash
 quinjet
-quinjet [--pr <NUMBER>]
-quinjet tui [PATH] [--pr <NUMBER>] [--theme <THEME>] [--appearance <APPEARANCE>] [--no-mouse] [--webhook-listen <ADDRESS>]
+quinjet [--pr <NUMBER>] [--client <CLIENT>]
+quinjet tui [PATH] [--pr <NUMBER>] [--client <CLIENT>] [--theme <THEME>] [--appearance <APPEARANCE>] [--no-mouse] [--webhook-listen <ADDRESS>]
 ```
 
 Arguments:
@@ -26,6 +26,7 @@ Options:
 | `--no-mouse` | flag | off | Starts with the mouse released, so the terminal keeps its own selection and copy behavior. Every feature stays reachable from the keyboard. |
 | `--webhook-listen <ADDRESS>` | port, or `host:port` | not listening | Binds a loopback HTTP listener. A forwarded GitHub delivery refreshes the open pull request immediately instead of waiting for the next poll. |
 | `--pr <NUMBER>` | unsigned integer | unset | Opens the interface already focused on this pull request: the Pull Requests tab is selected and the lookup starts before the first frame. Also accepted on a bare `quinjet` launch. With any other verb it is an error. |
+| `--client <CLIENT>` | `edith` | unset | Runs inside a supported embedding client. `edith` delegates project and worktree navigation to Edith and skips automatic shell integration. |
 | `-C, --path <DIR>` | path | `.` | Global and unused here. The positional `PATH` is what the interface opens. |
 | `--json` | flag | off | Global. Parsed and ignored here, because the interface writes to a screen rather than to stdout. |
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |

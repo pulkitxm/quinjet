@@ -35,6 +35,7 @@ use crate::git::github::{
 };
 use crate::git::status::{Change, ChangeArea};
 use crate::git::{ConflictChoice, GitOperation, LocalDiffRequest, Repository};
+use crate::integration::Client;
 use crate::theme::{AppearanceChoice, ThemeName};
 
 pub(crate) const EXIT_FAILURE: u8 = 1;
@@ -92,6 +93,7 @@ pub(crate) struct TerminalOptions {
     pub theme: ThemeName,
     pub appearance: AppearanceChoice,
     pub pull_request: Option<u64>,
+    pub client: Option<Client>,
 }
 
 #[expect(
@@ -130,6 +132,10 @@ struct Cli {
     #[doc = " Open the terminal interface focused on this pull request"]
     #[arg(long = "pr", value_name = "NUMBER")]
     pull_request: Option<u64>,
+
+    #[doc = " Delegate supported interface actions to an embedding client"]
+    #[arg(long, value_enum, global = true)]
+    client: Option<Client>,
 }
 
 #[derive(Debug, Subcommand)]
