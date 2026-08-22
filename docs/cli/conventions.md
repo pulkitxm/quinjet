@@ -161,7 +161,7 @@ job whose steps and archive are both still empty, in the first seconds of a run:
 
 ## Flags and values
 
-`--path`, spelled `-C` for the muscle memory Git already built, chooses the
+`--path`, also spelled `--folder` and `-C`, chooses the
 repository for every repository or GitHub verb and defaults to the current
 directory. Quinjet discovers the worktree root from it, so running from a
 subdirectory is the same as running from the top. `completions`, `man`,
@@ -171,12 +171,20 @@ subdirectory is the same as running from the top. `completions`, `man`,
 ```bash
 quinjet -C ~/code/project status
 quinjet status -C ~/code/project
+quinjet status --folder ~/code/project
 ```
 
-Repository paths for the terminal interface belong to the explicit `tui` verb:
-`quinjet tui ~/code/project`. The bare `quinjet` form still opens the current
-directory. Any other first word must be a real verb, so a typo is a clap usage
-error instead of an attempt to open a similarly named directory.
+The terminal accepts either `quinjet tui ~/code/project` or
+`quinjet --folder ~/code/project`. Any first word still must be a real verb, so
+a typo is a clap usage error instead of an attempt to open a similarly named
+directory.
+
+`--remote <SSH_TARGET>` runs the complete invocation through `ssh` on another
+machine. The target follows normal SSH configuration, including aliases from
+`~/.ssh/config`. The remote machine needs Quinjet and Git on `PATH`. Interactive
+launches allocate a terminal, while command-line verbs preserve their streams,
+JSON, watch behavior, and exit status. Successful target and folder pairs are
+kept in local recent state and checked by `quinjet remote list`.
 
 Boolean flags are presence only. There are no `--no-` inversions. Long options
 take their value as the next word or after an equals sign, so `--interval 5`

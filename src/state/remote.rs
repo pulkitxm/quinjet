@@ -62,3 +62,55 @@ fn write_entries(entries: &[RecentRemote]) {
         drop(fs::rename(staging, path));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct StateRootGuard {
+        previous: Option<std::path::PathBuf>,
+    }
+
+    impl StateRootGuard {
+        fn new(root: &Path) -> Self {
+            let previous = super::super::STATE_ROOT_OVERRIDE
+                .with(|cell| cell.replace(Some(root.to_path_buf())));
+            Self { previous }
+        }
+    }
+
+    impl Drop for StateRootGuard {
+        fn drop(&mut self) {
+            let previous = self.previous.take();
+            drop(super::super::STATE_ROOT_OVERRIDE.with(|cell| cell.replace(previous)));
+        }
+    }
+
+    #[test]
+    fn remote_recents_deduplicate_reorder_and_forget() {
+        let state = tempfile::tempdir().unwrap();
+        let _guard = StateRootGuard::new(state.path());
+        record_recent_remote("first", Path::new("/one"));
+        record_recent_remote("second", Path::new("/two"));
+        record_recent_remote("first", Path::new("/one"));
+        assert_eq!(
+            load_recent_remotes(),
+            vec![
+                RecentRemote {
+                    target: "first".to_owned(),
+                    folder: "/one".to_owned(),
+                },
+                RecentRemote {
+                    target: "second".to_owned(),
+                    folder: "/two".to_owned(),
+                },
+            ]
+        );
+        forget_recent_remote("first", Some("/other"));
+        assert_eq!(load_recent_remotes().len(), 2);
+        forget_recent_remote("first", Some("/one"));
+        assert_eq!(load_recent_remotes().len(), 1);
+        forget_recent_remote("second", None);
+        assert!(load_recent_remotes().is_empty());
+    }
+}

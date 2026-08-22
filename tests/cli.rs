@@ -243,3 +243,6 @@ mod remotes;
 mod repository;
 #[path = "cli/shell.rs"]
 mod shell;
+#[cfg(unix)]
+#[path = "cli/ssh.rs"]
+mod ssh;
