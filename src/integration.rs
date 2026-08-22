@@ -7,19 +7,6 @@ pub(crate) enum Client {
     Edith,
 }
 
-pub(crate) fn requests_edith_client(args: impl IntoIterator<Item = String>) -> bool {
-    let mut args = args.into_iter();
-    while let Some(argument) = args.next() {
-        if argument == "--client=edith" {
-            return true;
-        }
-        if argument == "--client" && args.next().as_deref() == Some("edith") {
-            return true;
-        }
-    }
-    false
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HostAction {
     OpenProjectNewTab,
@@ -53,23 +40,5 @@ mod tests {
             HostAction::OpenWorktreeCurrentTab.sequence(),
             "\u{1b}]6973;quinjet;open-worktree\u{1b}\\"
         );
-    }
-
-    #[test]
-    fn edith_client_detection_accepts_both_clap_spellings() {
-        for arguments in [
-            vec!["quinjet".to_owned(), "--client=edith".to_owned()],
-            vec![
-                "quinjet".to_owned(),
-                "--client".to_owned(),
-                "edith".to_owned(),
-            ],
-        ] {
-            assert!(requests_edith_client(arguments));
-        }
-        assert!(!requests_edith_client([
-            "quinjet".to_owned(),
-            "--version".to_owned(),
-        ]));
     }
 }

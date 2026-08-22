@@ -2,9 +2,7 @@
 use super::*;
 
 pub(crate) fn dispatch() -> Result<Launch> {
-    if !crate::integration::requests_edith_client(std::env::args()) {
-        completion::auto_install();
-    }
+    completion::auto_install();
     let cli = Cli::parse();
     let mut out = Emitter::new(cli.json);
     let verb = match cli.command {
