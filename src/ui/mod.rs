@@ -425,6 +425,7 @@ mod help;
 mod layout;
 mod modal_branches;
 mod modal_conflict;
+mod modal_ssh;
 mod modals;
 pub(crate) mod pickers;
 mod project_picker;
@@ -458,6 +459,7 @@ use layout::*;
 use modal_branches::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use modal_conflict::*;
+use modal_ssh::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use modals::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
