@@ -7,7 +7,7 @@ use crate::git::github::{
 };
 use crate::git::history::Commit;
 use crate::git::status::{ChangeArea, RepoStatus};
-use crate::git::{Branch, HistoryBranch, Stash, Worktree};
+use crate::git::{Branch, HistoryBranch, ProjectGroup, Stash, Worktree};
 
 #[derive(Default)]
 struct Report(String);

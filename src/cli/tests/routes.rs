@@ -80,6 +80,7 @@ fn the_read_only_views_have_verbs_too() {
         ["stash", "list"].as_slice(),
         ["stash", "show"].as_slice(),
         ["worktree", "list"].as_slice(),
+        ["project", "list"].as_slice(),
         ["repos"].as_slice(),
         ["pr", "view"].as_slice(),
         ["pr", "files"].as_slice(),

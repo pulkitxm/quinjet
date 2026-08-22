@@ -15,13 +15,15 @@ pub(super) fn run(session: &mut Session, out: &Emitter, verb: Verb) -> Result<u8
             "the terminal interface is launched before any verb runs",
         )
         .into()),
-        Verb::Completions(_) | Verb::Man(_) | Verb::Capabilities | Verb::Update(_) => {
-            Err(Failure::new(
-                EXIT_FAILURE,
-                "metadata commands run before a repository is opened",
-            )
-            .into())
-        }
+        Verb::Project { .. }
+        | Verb::Completions(_)
+        | Verb::Man(_)
+        | Verb::Capabilities
+        | Verb::Update(_) => Err(Failure::new(
+            EXIT_FAILURE,
+            "metadata commands run before a repository is opened",
+        )
+        .into()),
         Verb::Status(args) => status(session, out, &args),
         Verb::Diff(args) => working_diff(session, out, &args),
         Verb::Stage(args) => {

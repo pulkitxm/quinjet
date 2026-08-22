@@ -22,6 +22,7 @@ quinjet completions bash         generate metadata without a repository
 quinjet completions --install    install completions and the q shortcut
 quinjet man --dir ./man1         generate all manual pages on demand
 quinjet capabilities --json      inspect the installed command surface
+quinjet project list --json      recent projects and all linked worktrees
 quinjet update --check           check the latest stable release
 ```
 
@@ -41,6 +42,7 @@ quinjet update --check           check the latest stable release
 | [`quinjet branch`](./branch/README.md) | Listing, switching, creating, renaming, deleting, and comparing without a checkout |
 | [`quinjet stash`](./stash/README.md) | The whole stash workflow, including previewing one as a patch |
 | [`quinjet worktree list`](./worktree/README.md) | Linked checkouts of the same repository |
+| [`quinjet project list`](./project/README.md) | Recently opened repositories grouped with their linked worktrees |
 
 ## Changing a repository
 
