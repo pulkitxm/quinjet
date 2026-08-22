@@ -2,6 +2,14 @@ CARGO ?= cargo
 NIGHTLY ?= nightly
 COVERAGE_MIN ?= 65
 
+define preserve-lockfiles
+	lock_dir=$$(mktemp -d); \
+		cp Cargo.lock "$$lock_dir/Cargo.lock"; \
+		cp fuzz/Cargo.lock "$$lock_dir/fuzz-Cargo.lock"; \
+		trap 'cp "$$lock_dir/Cargo.lock" Cargo.lock; cp "$$lock_dir/fuzz-Cargo.lock" fuzz/Cargo.lock; rm -rf "$$lock_dir"' EXIT; \
+		$(1)
+endef
+
 .PHONY: ci ci-fast deep fmt fmt-check lint lint-nightly test doc msrv build package \
 	install-check comments rust-sizes secrets homebrew winget typos spellcheck deny audit osv sbom unused sort hack wiki \
 	coverage shell actions yaml markdown toml editorconfig ruff miri careful sanitize mutants \
@@ -78,14 +86,13 @@ typos:
 	typos
 
 deny:
-	$(CARGO) deny --all-features check
+	$(call preserve-lockfiles,$(CARGO) deny --all-features check)
 
 audit:
 	$(CARGO) audit --deny warnings --ignore RUSTSEC-2024-0320 --ignore RUSTSEC-2025-0141
 
 unused:
-	$(CARGO) machete --with-metadata
-	$(CARGO) shear
+	$(call preserve-lockfiles,$(CARGO) machete --with-metadata && $(CARGO) shear)
 
 sort:
 	$(CARGO) sort --check --check-format
@@ -124,11 +131,7 @@ bloat:
 deep: miri careful sanitize mutants minimal-versions udeps bloat
 
 hack:
-	hack_lock_dir=$$(mktemp -d); \
-		cp Cargo.lock "$$hack_lock_dir/Cargo.lock"; \
-		cp fuzz/Cargo.lock "$$hack_lock_dir/fuzz-Cargo.lock"; \
-		trap 'cp "$$hack_lock_dir/Cargo.lock" Cargo.lock; cp "$$hack_lock_dir/fuzz-Cargo.lock" fuzz/Cargo.lock; rm -rf "$$hack_lock_dir"' EXIT; \
-		$(CARGO) hack --feature-powerset --no-dev-deps check --locked
+	$(call preserve-lockfiles,$(CARGO) hack --feature-powerset --no-dev-deps check --locked)
 
 coverage:
 	$(CARGO) llvm-cov --all-features --locked --fail-under-lines $(COVERAGE_MIN)
