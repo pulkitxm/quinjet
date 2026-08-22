@@ -28,7 +28,7 @@ impl App {
                 if matches!(key.code, KeyCode::Char('e' | 'E'))
                     && key.modifiers.contains(KeyModifiers::CONTROL)
                 {
-                    collapsed.extend(groups.iter().map(|group| group.common_dir.clone()));
+                    Self::toggle_all_project_groups(groups, collapsed);
                     *selected = 0;
                     self.modal = Some(modal);
                     return effects;

@@ -190,9 +190,10 @@ capped at 34 cells.
 
 Each project heading starts with a bordered `[⌄]` or `[›]` control. Clicking
 that control collapses or expands only that project's worktrees without opening
-anything. `Ctrl+E` collapses every project. Filtering temporarily reveals
-matching worktrees inside collapsed projects, so collapse never hides a search
-result.
+anything. `Ctrl+E` collapses every project when any project is expanded, then
+expands every project when all are collapsed. The footer names the next action.
+Filtering temporarily reveals matching worktrees inside collapsed projects, so
+collapse never hides a search result.
 
 When recent SSH repositories exist, `Open a project` and both the `w` and `N`
 project pickers show the active machine. The originating computer appears
@@ -389,7 +390,7 @@ The verbs in the right-hand column are documented in their groups:
 | `b` outside History, or `B` | `quinjet branch list`; Enter on a row is `quinjet branch switch <name>` |
 | `w`, clicking the header path, or clicking the worktree count in the footer | `quinjet worktree list` for this repository, plus the same listing for each recently opened project; Enter switches the current project tab, the same repository setup as `quinjet tui <path>` |
 | `N` | opens the recent-project picker in new-tab mode; no verb, because project tabs belong to the terminal session |
-| `Ctrl+E` in the project picker | collapses every project; presentation state, not a repository operation |
+| `Ctrl+E` in the project picker | collapses all when any project is expanded, or expands all when every project is collapsed; presentation state, not a repository operation |
 | `Ctrl+Tab`, `Ctrl+Shift+Tab` | no verb. Cycles through project tabs while retaining each tab's state |
 | `Ctrl+W` | no verb. Closes the active project tab |
 | dragging or right-clicking a project tab | no verb. Reorders it or opens Close, Close Others, and Close All |

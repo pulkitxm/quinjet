@@ -54,7 +54,7 @@ fn empty_screen_reuses_the_grouped_project_picker() {
 }
 
 #[test]
-fn project_picker_compacts_long_paths_and_collapses_all() {
+fn project_picker_compacts_long_paths_and_toggles_all_projects() {
     let mut group = project_group();
     let full_path = "/Users/pulkit/scripts/quinjet/features/a-very-long-worktree-name";
     group.worktrees[0].path = PathBuf::from(full_path);
@@ -87,6 +87,20 @@ fn project_picker_compacts_long_paths_and_collapses_all() {
     let rendered = terminal.backend().to_string();
     assert!(rendered.contains("[›]"));
     assert!(!rendered.contains("main"));
+    assert!(rendered.contains("Ctrl+E expand all"));
+
+    drop(onboarding.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL)));
+    assert_eq!(
+        terminal
+            .draw(|frame| onboarding.draw(frame, &theme))
+            .unwrap()
+            .area,
+        Rect::new(0, 0, 100, 30),
+    );
+    let rendered = terminal.backend().to_string();
+    assert!(rendered.contains("[⌄]"));
+    assert!(rendered.contains("main"));
+    assert!(rendered.contains("Ctrl+E collapse all"));
 }
 
 #[test]

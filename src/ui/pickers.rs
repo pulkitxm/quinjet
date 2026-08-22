@@ -171,16 +171,25 @@ pub(crate) fn draw_projects(
             );
         }
     }
+    let fold_action = if App::all_project_groups_collapsed(groups, collapsed) {
+        "expand all"
+    } else {
+        "collapse all"
+    };
     let hint = match mode {
-        ProjectOpenMode::Initial => "Enter open   Ctrl+E collapse all   Ctrl+O path   Esc quit",
+        ProjectOpenMode::Initial => {
+            format!("Enter open   Ctrl+E {fold_action}   Ctrl+O path   Esc quit")
+        }
         ProjectOpenMode::CurrentTab => {
-            "Enter switch tab   Ctrl+E collapse all   Delete forget project   Esc close"
+            format!("Enter switch tab   Ctrl+E {fold_action}   Delete forget project   Esc close")
         }
         ProjectOpenMode::NewTab => {
-            "Enter open in new tab   Ctrl+E collapse all   Delete forget project   Esc close"
+            format!(
+                "Enter open in new tab   Ctrl+E {fold_action}   Delete forget project   Esc close"
+            )
         }
     };
-    draw_modal_hint(frame, area, hint, theme);
+    draw_modal_hint(frame, area, &hint, theme);
     machine_button
 }
 

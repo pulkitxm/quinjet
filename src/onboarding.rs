@@ -138,8 +138,7 @@ impl Onboarding {
         match key.code {
             KeyCode::Esc => OnboardingAction::Quit,
             KeyCode::Char('e' | 'E') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.collapsed
-                    .extend(self.groups.iter().map(|group| group.common_dir.clone()));
+                App::toggle_all_project_groups(&self.groups, &mut self.collapsed);
                 self.selected = 0;
                 OnboardingAction::None
             }

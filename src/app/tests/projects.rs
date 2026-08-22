@@ -97,7 +97,7 @@ fn header_path_and_w_open_the_projects_picker() {
 }
 
 #[test]
-fn control_e_collapses_every_project_without_hiding_search_matches() {
+fn control_e_collapses_mixed_projects_then_expands_all() {
     let mut app = App::new("/tmp/repo", "repo");
     let groups = vec![
         ProjectGroup {
@@ -115,7 +115,7 @@ fn control_e_collapses_every_project_without_hiding_search_matches() {
         groups,
         selected: 0,
         query: TextBuffer::default(),
-        collapsed: HashSet::new(),
+        collapsed: HashSet::from([PathBuf::from("/tmp/repo/.git")]),
         loading: false,
         mode: ProjectOpenMode::CurrentTab,
     });
@@ -144,6 +144,16 @@ fn control_e_collapses_every_project_without_hiding_search_matches() {
         App::filtered_project_rows(groups, &query.value, collapsed),
         vec![(1, 0)]
     );
+    query.value.clear();
+
+    drop(app.handle_key(
+        KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL),
+        Instant::now(),
+    ));
+    let Some(Modal::Projects { collapsed, .. }) = app.modal.as_ref() else {
+        panic!("project picker closed");
+    };
+    assert!(collapsed.is_empty());
 }
 
 #[test]
