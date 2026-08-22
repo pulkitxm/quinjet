@@ -17,6 +17,8 @@ fn project_group() -> ProjectGroup {
         worktrees: vec![Worktree {
             path: PathBuf::from("/repos/quinjet"),
             head: "0123456789abcdef".to_owned(),
+            updated_at: Some("2026-08-22T18:00:00Z".to_owned()),
+            updated_unix: Some(1_776_964_800),
             branch: Some("main".to_owned()),
             current: false,
             bare: false,
@@ -29,7 +31,7 @@ fn project_group() -> ProjectGroup {
 
 #[test]
 fn empty_screen_reuses_the_grouped_project_picker() {
-    let onboarding = Onboarding::from_groups(Path::new("/tmp"), vec![project_group()]);
+    let mut onboarding = Onboarding::from_groups(Path::new("/tmp"), vec![project_group()]);
     let backend = TestBackend::new(100, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let theme = Theme::new(ThemeName::Quinjet, Appearance::Dark);
@@ -45,7 +47,45 @@ fn empty_screen_reuses_the_grouped_project_picker() {
     assert!(rendered.contains("quinjet"));
     assert!(rendered.contains("main"));
     assert!(rendered.contains("/repos/quinjet"));
+    assert!(rendered.contains("[⌄]"));
+    assert!(rendered.contains("Ctrl+E collapse all"));
     assert!(!rendered.contains("fatal:"));
+}
+
+#[test]
+fn project_picker_compacts_long_paths_and_collapses_all() {
+    let mut group = project_group();
+    let full_path = "/Users/pulkit/scripts/quinjet/features/a-very-long-worktree-name";
+    group.worktrees[0].path = PathBuf::from(full_path);
+    group.worktrees[0].updated_at = Some("2020-08-22T18:00:00Z".to_owned());
+    group.worktrees[0].updated_unix = Some(1_598_119_200);
+    let mut onboarding = Onboarding::from_groups(Path::new("/tmp"), vec![group]);
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+    let theme = Theme::new(ThemeName::Quinjet, Appearance::Dark);
+
+    assert_eq!(
+        terminal
+            .draw(|frame| onboarding.draw(frame, &theme))
+            .unwrap()
+            .area,
+        Rect::new(0, 0, 100, 30),
+    );
+    let rendered = terminal.backend().to_string();
+    assert!(rendered.contains('…'));
+    assert!(!rendered.contains(full_path));
+    assert!(rendered.contains("years ago"));
+
+    drop(onboarding.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL)));
+    assert_eq!(
+        terminal
+            .draw(|frame| onboarding.draw(frame, &theme))
+            .unwrap()
+            .area,
+        Rect::new(0, 0, 100, 30),
+    );
+    let rendered = terminal.backend().to_string();
+    assert!(rendered.contains("[›]"));
+    assert!(!rendered.contains("main"));
 }
 
 #[test]

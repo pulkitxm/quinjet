@@ -4,6 +4,8 @@ fn sample_worktree(path: &str, branch: &str, current: bool) -> Worktree {
     Worktree {
         path: PathBuf::from(path),
         head: "abcdef0123456789".to_owned(),
+        updated_at: Some("2026-08-22T18:00:00Z".to_owned()),
+        updated_unix: Some(1_776_964_800),
         branch: Some(branch.to_owned()),
         current,
         bare: false,
@@ -33,17 +35,24 @@ fn recent_projects_nest_worktrees_and_open_another_tree() {
         },
     ];
     assert_eq!(
-        App::filtered_project_rows(&groups, ""),
+        App::filtered_project_rows(&groups, "", &HashSet::new()),
         vec![(0, 0), (0, 1), (1, 0)]
     );
-    assert_eq!(App::filtered_project_rows(&groups, "helix"), vec![(1, 0)]);
-    assert_eq!(App::filtered_project_rows(&groups, "topic"), vec![(0, 1)]);
+    assert_eq!(
+        App::filtered_project_rows(&groups, "helix", &HashSet::new()),
+        vec![(1, 0)]
+    );
+    assert_eq!(
+        App::filtered_project_rows(&groups, "topic", &HashSet::new()),
+        vec![(0, 1)]
+    );
 
     app.project_groups.clone_from(&groups);
     app.modal = Some(Modal::Projects {
         groups,
         selected: 1,
         query: TextBuffer::default(),
+        collapsed: HashSet::new(),
         loading: false,
         mode: ProjectOpenMode::CurrentTab,
     });
@@ -85,4 +94,92 @@ fn header_path_and_w_open_the_projects_picker() {
             effect,
             AppEffect::Git(command) if matches!(command.as_ref(), WorkerCommand::LoadRecentProjects { .. })
         )));
+}
+
+#[test]
+fn control_e_collapses_every_project_without_hiding_search_matches() {
+    let mut app = App::new("/tmp/repo", "repo");
+    let groups = vec![
+        ProjectGroup {
+            name: "repo".to_owned(),
+            common_dir: PathBuf::from("/tmp/repo/.git"),
+            worktrees: vec![sample_worktree("/tmp/repo", "main", true)],
+        },
+        ProjectGroup {
+            name: "helix".to_owned(),
+            common_dir: PathBuf::from("/src/helix/.git"),
+            worktrees: vec![sample_worktree("/src/helix-topic", "topic", false)],
+        },
+    ];
+    app.modal = Some(Modal::Projects {
+        groups,
+        selected: 0,
+        query: TextBuffer::default(),
+        collapsed: HashSet::new(),
+        loading: false,
+        mode: ProjectOpenMode::CurrentTab,
+    });
+
+    drop(app.handle_key(
+        KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL),
+        Instant::now(),
+    ));
+
+    let Some(Modal::Projects {
+        groups,
+        query,
+        collapsed,
+        ..
+    }) = app.modal.as_mut()
+    else {
+        panic!("project picker closed");
+    };
+    assert_eq!(collapsed.len(), 2);
+    assert_eq!(
+        App::filtered_project_rows(groups, "", collapsed),
+        Vec::<(usize, usize)>::new()
+    );
+    query.insert_str("topic");
+    assert_eq!(
+        App::filtered_project_rows(groups, &query.value, collapsed),
+        vec![(1, 0)]
+    );
+}
+
+#[test]
+fn clicking_a_project_button_only_toggles_that_project() {
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::layout::Rect;
+
+    let mut app = App::new("/tmp/repo", "repo");
+    let common_dir = PathBuf::from("/tmp/repo/.git");
+    app.modal = Some(Modal::Projects {
+        groups: vec![ProjectGroup {
+            name: "repo".to_owned(),
+            common_dir: common_dir.clone(),
+            worktrees: vec![sample_worktree("/tmp/repo", "main", true)],
+        }],
+        selected: 0,
+        query: TextBuffer::default(),
+        collapsed: HashSet::new(),
+        loading: false,
+        mode: ProjectOpenMode::CurrentTab,
+    });
+    app.geometry.project_collapse_hits = vec![(Rect::new(10, 5, 3, 1), common_dir.clone())];
+
+    let effects = app.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 11,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        },
+        Instant::now(),
+    );
+
+    assert!(effects.is_empty());
+    let Some(Modal::Projects { collapsed, .. }) = &app.modal else {
+        panic!("project picker closed");
+    };
+    assert_eq!(collapsed, &HashSet::from([common_dir]));
 }

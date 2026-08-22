@@ -11,9 +11,11 @@ use super::*;
 )]
 pub(crate) fn draw_projects(
     frame: &mut Frame<'_>,
+    collapse_hits: &mut Vec<(Rect, std::path::PathBuf)>,
     groups: &[ProjectGroup],
     selected: usize,
     query: &crate::app::TextBuffer,
+    collapsed: &HashSet<std::path::PathBuf>,
     loading: bool,
     mode: ProjectOpenMode,
     theme: &Theme,
@@ -65,27 +67,28 @@ pub(crate) fn draw_projects(
             list_area,
         );
     } else {
-        let visible = App::filtered_project_rows(groups, &query.value);
-        let mut lines = Vec::new();
+        let matching = App::matching_project_rows(groups, &query.value);
+        let mut lines: Vec<(Line<'static>, Option<std::path::PathBuf>)> = Vec::new();
         let mut selectable = 0_usize;
         let mut selected_line = 0_usize;
         for (group_index, group) in groups.iter().enumerate() {
-            let trees: Vec<usize> = visible
+            let trees: Vec<usize> = matching
                 .iter()
-                .filter_map(|(visible_group, tree_index)| {
-                    (*visible_group == group_index).then_some(*tree_index)
+                .filter_map(|(matching_group, tree_index)| {
+                    (*matching_group == group_index).then_some(*tree_index)
                 })
                 .collect();
             if trees.is_empty() {
                 continue;
             }
-            lines.push(Line::from(Span::styled(
-                format!(" {}", group.name),
-                Style::default()
-                    .fg(theme.muted)
-                    .add_modifier(Modifier::BOLD)
-                    .bg(theme.panel),
-            )));
+            let expanded = !collapsed.contains(&group.common_dir) || !query.value.is_empty();
+            lines.push((
+                project_header_line(group, expanded, list_area.width as usize, theme),
+                Some(group.common_dir.clone()),
+            ));
+            if !expanded {
+                continue;
+            }
             for tree_index in trees {
                 let Some(tree) = group.worktrees.get(tree_index) else {
                     continue;
@@ -95,60 +98,14 @@ pub(crate) fn draw_projects(
                     selected_line = lines.len();
                 }
                 selectable = selectable.saturating_add(1);
-                let background = if active { theme.selected } else { theme.panel };
-                let mut flag = String::new();
-                if tree.current {
-                    flag.push_str("this session");
-                } else if tree.locked.is_some() {
-                    flag.push_str("locked");
-                } else if tree.prunable.is_some() {
-                    flag.push_str("prunable");
-                }
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        if tree.current { " ● " } else { "   " },
-                        Style::default()
-                            .fg(if tree.current {
-                                theme.success
-                            } else {
-                                theme.muted
-                            })
-                            .bg(background),
-                    ),
-                    Span::styled(
-                        format!("- {}", tree.branch_label()),
-                        Style::default()
-                            .fg(theme.text)
-                            .bg(background)
-                            .add_modifier(if active {
-                                Modifier::BOLD
-                            } else {
-                                Modifier::empty()
-                            }),
-                    ),
-                    Span::styled(
-                        format!(
-                            "  {}",
-                            truncate_middle(
-                                &tree.path.display().to_string(),
-                                list_area.width.saturating_sub(36) as usize
-                            )
-                        ),
-                        Style::default().fg(theme.muted).bg(background),
-                    ),
-                    Span::styled(
-                        if flag.is_empty() {
-                            String::new()
-                        } else {
-                            format!("  {flag}")
-                        },
-                        Style::default().fg(theme.muted).bg(background),
-                    ),
-                ]));
+                lines.push((
+                    project_worktree_line(tree, active, list_area.width as usize, theme),
+                    None,
+                ));
             }
         }
         let offset = selected_line.saturating_sub(list_area.height.saturating_sub(1) as usize);
-        let visible_lines: Vec<Line<'_>> = lines
+        let visible_lines: Vec<_> = lines
             .into_iter()
             .skip(offset)
             .take(list_area.height as usize)
@@ -164,13 +121,40 @@ pub(crate) fn draw_projects(
                 list_area,
             );
         } else {
-            frame.render_widget(Paragraph::new(visible_lines), list_area);
+            collapse_hits.extend(visible_lines.iter().enumerate().filter_map(
+                |(line_index, (_, common_dir))| {
+                    common_dir.as_ref().map(|common_dir| {
+                        (
+                            Rect::new(
+                                list_area.x.saturating_add(1),
+                                list_area.y.saturating_add(cells(line_index)),
+                                3,
+                                1,
+                            ),
+                            common_dir.clone(),
+                        )
+                    })
+                },
+            ));
+            frame.render_widget(
+                Paragraph::new(
+                    visible_lines
+                        .into_iter()
+                        .map(|(line, _)| line)
+                        .collect::<Vec<_>>(),
+                ),
+                list_area,
+            );
         }
     }
     let hint = match mode {
-        ProjectOpenMode::Initial => "Enter open   Ctrl+O path   Esc quit",
-        ProjectOpenMode::CurrentTab => "Enter switch tab   Delete forget project   Esc close",
-        ProjectOpenMode::NewTab => "Enter open in new tab   Delete forget project   Esc close",
+        ProjectOpenMode::Initial => "Enter open   Ctrl+E collapse all   Ctrl+O path   Esc quit",
+        ProjectOpenMode::CurrentTab => {
+            "Enter switch tab   Ctrl+E collapse all   Delete forget project   Esc close"
+        }
+        ProjectOpenMode::NewTab => {
+            "Enter open in new tab   Ctrl+E collapse all   Delete forget project   Esc close"
+        }
     };
     draw_modal_hint(frame, area, hint, theme);
 }

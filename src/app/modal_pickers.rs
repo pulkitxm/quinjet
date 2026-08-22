@@ -18,13 +18,22 @@ impl App {
                 groups,
                 selected,
                 query,
+                collapsed,
                 loading,
                 mode,
             } => {
                 if key.code == KeyCode::Esc {
                     return effects;
                 }
-                let visible = Self::filtered_project_rows(groups, &query.value);
+                if matches!(key.code, KeyCode::Char('e' | 'E'))
+                    && key.modifiers.contains(KeyModifiers::CONTROL)
+                {
+                    collapsed.extend(groups.iter().map(|group| group.common_dir.clone()));
+                    *selected = 0;
+                    self.modal = Some(modal);
+                    return effects;
+                }
+                let visible = Self::filtered_project_rows(groups, &query.value, collapsed);
                 let selected_tree = visible
                     .get(*selected)
                     .and_then(|(group_index, tree_index)| {

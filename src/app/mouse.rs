@@ -28,6 +28,26 @@ impl App {
         if let Some(effects) = self.handle_repository_tab_mouse(event) {
             return effects;
         }
+        if event.kind == MouseEventKind::Down(MouseButton::Left)
+            && let Some(common_dir) = self
+                .geometry
+                .project_collapse_hits
+                .iter()
+                .find(|(area, _)| area.contains((event.column, event.row).into()))
+                .map(|(_, common_dir)| common_dir.clone())
+            && let Some(Modal::Projects {
+                groups,
+                selected,
+                query,
+                collapsed,
+                ..
+            }) = self.modal.as_mut()
+        {
+            toggle_membership(collapsed, common_dir);
+            let visible = Self::filtered_project_rows(groups, &query.value, collapsed);
+            *selected = (*selected).min(visible.len().saturating_sub(1));
+            return effects;
+        }
         if let Some(Modal::Help {
             selected, hover, ..
         }) = &mut self.modal

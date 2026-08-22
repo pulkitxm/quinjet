@@ -132,7 +132,47 @@ impl Repository {
             OsString::from("--porcelain"),
             OsString::from("-z"),
         ])?;
-        Ok(parse_worktrees(&output, session_root))
+        let mut worktrees = parse_worktrees(&output, session_root);
+        self.attach_worktree_updates(&mut worktrees);
+        Ok(worktrees)
+    }
+
+    pub(super) fn attach_worktree_updates(&self, worktrees: &mut [Worktree]) {
+        let mut arguments = vec![
+            OsString::from("log"),
+            OsString::from("--no-walk=unsorted"),
+            OsString::from("--ignore-missing"),
+            OsString::from("--format=%H%x1f%cI%x1f%ct%x1e"),
+        ];
+        arguments.extend(
+            worktrees
+                .iter()
+                .filter(|worktree| !worktree.head.is_empty())
+                .map(|worktree| OsString::from(&worktree.head)),
+        );
+        if arguments.len() == 4 {
+            return;
+        }
+        let Ok(output) = self.checked(arguments) else {
+            return;
+        };
+        let mut updates = HashMap::new();
+        for record in output.split(|byte| *byte == 0x1e) {
+            let fields: Vec<_> = trim_ascii(record).split(|byte| *byte == 0x1f).collect();
+            let [head, updated_at, updated_unix, ..] = fields.as_slice() else {
+                continue;
+            };
+            let Ok(updated_unix) = text(updated_unix).parse::<i64>() else {
+                continue;
+            };
+            drop(updates.insert(text(head), (text(updated_at), updated_unix)));
+        }
+        for worktree in worktrees {
+            if let Some((updated_at, updated_unix)) = updates.get(&worktree.head) {
+                worktree.updated_at = Some(updated_at.clone());
+                worktree.updated_unix = Some(*updated_unix);
+            }
+        }
     }
 
     pub(crate) fn git_common_dir(&self) -> Result<PathBuf> {

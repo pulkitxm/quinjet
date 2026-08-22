@@ -35,7 +35,7 @@ fn a_comment_shows_its_code_intact_and_only_that_code_scrolls() {
         scrollable.iter().any(|row| row.contains("State")
             && row.contains(&format!(
                 "opened {}",
-                format_local_timestamp("2026-08-01T09:00:00Z")
+                format_relative_timestamp("2026-08-01T09:00:00Z")
             ))),
         "a single-line value that outgrows the pane scrolls rather than being clipped"
     );
@@ -210,7 +210,7 @@ fn pull_request_overview_reads_as_a_conversation_beside_its_checks() {
     assert!(rendered.contains("Format, lint, and test"));
     assert!(rendered.contains("#42"));
     assert!(rendered.contains("acme/widget:main"));
-    assert!(rendered.contains(&format_local_timestamp("2026-08-01T09:00:00Z")));
+    assert!(rendered.contains(&format_relative_timestamp("2026-08-01T09:00:00Z")));
     assert!(rendered.contains("Description"));
     assert!(
         rendered.contains("Launch safely"),
@@ -364,6 +364,7 @@ fn empty_pull_request_view_renders_recent_numbers_and_titles_as_rows() {
     app.recent_pull_requests = vec![RecentPullRequest {
         number: 39,
         title: "Restore selectable previews".to_owned(),
+        updated_at: "2000-01-01T00:00:00Z".to_owned(),
         repository: GitHubRepository {
             name_with_owner: "acme/widget".to_owned(),
             url: "https://github.com/acme/widget".to_owned(),
@@ -384,11 +385,10 @@ fn empty_pull_request_view_renders_recent_numbers_and_titles_as_rows() {
         .collect::<String>();
 
     assert!(rendered.contains("Recent Pull Requests"));
-    assert!(rendered.contains("#39 Restore selectable previews"));
-    assert!(
-        app.geometry
-            .sidebar_hits
-            .iter()
-            .any(|hit| { matches!(hit.target, SidebarHit::RecentPullRequest(0)) })
-    );
+    assert!(rendered.contains("Restore selectable previews"));
+    assert!(rendered.contains("#39"));
+    assert!(rendered.contains("years ago"));
+    assert!(app.geometry.sidebar_hits.iter().any(|hit| {
+        hit.area.height == 2 && matches!(hit.target, SidebarHit::RecentPullRequest(0))
+    }));
 }

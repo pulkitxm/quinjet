@@ -44,6 +44,8 @@ fn project_group() -> ProjectGroup {
         worktrees: vec![Worktree {
             path: PathBuf::from("/target"),
             head: "0123456789abcdef".to_owned(),
+            updated_at: Some("2026-08-22T18:00:00Z".to_owned()),
+            updated_unix: Some(1_776_964_800),
             branch: Some("main".to_owned()),
             current: false,
             bare: false,

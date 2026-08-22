@@ -10,16 +10,17 @@ runs `git worktree add` or `git worktree remove`. Switching to another tree is
 a session rebind in the terminal interface, the same as `quinjet tui <path>`,
 not a Git mutation.
 
-The listing is one Git call: `git worktree list --porcelain -z`. Records are
-NUL-separated, so a path can contain any character except NUL. Quinjet then
-asks `git rev-parse --git-common-dir` so several trees that share one object
-store are one project in the picker rather than several recents.
+The listing starts with `git worktree list --porcelain -z`. Records are
+NUL-separated, so a path can contain any character except NUL. One batched
+`git log --no-walk` resolves the listed HEAD commit times. Quinjet then asks
+`git rev-parse --git-common-dir` so several trees that share one object store
+are one project in the picker rather than several recents.
 
 ## At a glance
 
 | Command | What it does |
 | --- | --- |
-| `quinjet worktree list` | Prints every worktree, with its path, branch or detached state, and whether it is this session. |
+| `quinjet worktree list` | Prints every worktree, with its path, branch or detached state, latest commit age, and whether it is this session. |
 
 ## Commands
 

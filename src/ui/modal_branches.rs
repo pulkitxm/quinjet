@@ -95,7 +95,7 @@ pub(super) fn draw_branches(
                             let mut meta = format!(
                                 "  {}  {}",
                                 branch.short_id,
-                                format_local_timestamp(&branch.relative_date)
+                                format_relative_timestamp(&branch.relative_date)
                             );
                             if let Some(path) = app.worktree_path_for_branch(&branch.name) {
                                 meta.push_str("  ");
@@ -209,7 +209,7 @@ pub(super) fn draw_history_branches(
                             "  {}  {}  {}",
                             if branch.remote { "remote" } else { "local" },
                             branch.short_id,
-                            format_local_timestamp(&branch.relative_date)
+                            format_relative_timestamp(&branch.relative_date)
                         ),
                         Style::default().fg(theme.muted).bg(background),
                     ),
@@ -312,7 +312,7 @@ pub(super) fn draw_compare_branches(
                             "  {}  {}  {}",
                             if branch.remote { "remote" } else { "local" },
                             branch.short_id,
-                            format_local_timestamp(&branch.relative_date)
+                            format_relative_timestamp(&branch.relative_date)
                         ),
                         Style::default().fg(theme.muted).bg(background),
                     ),
@@ -425,7 +425,7 @@ pub(super) fn draw_stashes(
                         format!(
                             "{branch}  {}  {}",
                             stash.short_id,
-                            format_local_timestamp(&stash.relative_date)
+                            format_relative_timestamp(&stash.relative_date)
                         ),
                         Style::default().fg(theme.muted).bg(background),
                     ),

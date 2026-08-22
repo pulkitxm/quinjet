@@ -55,7 +55,7 @@ const PULL_REQUEST_VIEW_TSV_JQ: &str = r#".data.repository.pullRequest | select(
 const REPOSITORY_TSV_TEMPLATE: &str = "{{.nameWithOwner}}{{\"\\t\"}}{{.url}}{{\"\\n\"}}";
 const PULL_REQUEST_TSV_FIELDS: usize = 38;
 #[cfg(not(test))]
-const RECENT_PULL_REQUESTS_CACHE_KEY: &str = "recent-pull-requests-v1";
+const RECENT_PULL_REQUESTS_CACHE_KEY: &str = "recent-pull-requests-v2";
 const MAX_RECENT_PULL_REQUESTS: usize = 20;
 const MAX_RECENT_CACHE_SCAN: usize = 256;
 const MAX_RECENT_CACHE_ENTRY_BYTES: u64 = 384 * 1024;

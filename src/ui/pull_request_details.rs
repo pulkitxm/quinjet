@@ -54,7 +54,7 @@ pub(super) fn draw_pull_request_details_scrolled(
         author,
         format!(
             "  ·  updated {}",
-            format_local_timestamp(&details.updated_at)
+            format_relative_timestamp(&details.updated_at)
         ),
         app.account_open_target(&details.author),
         area,

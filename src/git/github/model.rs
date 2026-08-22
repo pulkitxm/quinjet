@@ -89,6 +89,7 @@ pub(crate) struct PullRequestActionState {
 pub(crate) struct RecentPullRequest {
     pub number: u64,
     pub title: String,
+    pub updated_at: String,
     pub repository: GitHubRepository,
 }
 
@@ -97,6 +98,7 @@ impl From<&PullRequest> for RecentPullRequest {
         Self {
             number: pull_request.number,
             title: pull_request.title.clone(),
+            updated_at: pull_request.updated_at.clone(),
             repository: pull_request.base_repository.clone(),
         }
     }

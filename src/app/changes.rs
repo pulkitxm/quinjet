@@ -451,25 +451,6 @@ impl App {
             .collect()
     }
 
-    pub(crate) fn filtered_project_rows(
-        groups: &[ProjectGroup],
-        query: &str,
-    ) -> Vec<(usize, usize)> {
-        let query = query.to_lowercase();
-        let mut rows = Vec::new();
-        for (group_index, group) in groups.iter().enumerate() {
-            let group_matches = query.is_empty() || group.name.to_lowercase().contains(&query);
-            for (tree_index, tree) in group.worktrees.iter().enumerate() {
-                let tree_matches = tree.path.to_string_lossy().to_lowercase().contains(&query)
-                    || tree.branch_label().to_lowercase().contains(&query);
-                if group_matches || tree_matches {
-                    rows.push((group_index, tree_index));
-                }
-            }
-        }
-        rows
-    }
-
     pub(crate) fn worktree_path_for_branch(&self, name: &str) -> Option<&Path> {
         self.worktrees.iter().find_map(|tree| {
             (tree.branch.as_deref() == Some(name) && !tree.current).then_some(tree.path.as_path())

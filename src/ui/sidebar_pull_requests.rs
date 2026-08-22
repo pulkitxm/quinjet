@@ -346,7 +346,7 @@ pub(super) fn draw_recent_pull_requests(
         Paragraph::new(" Recently opened").style(Style::default().fg(theme.muted).bg(theme.panel)),
         heading,
     );
-    let capacity = usize::from(area.height.saturating_sub(1));
+    let capacity = usize::from(area.height.saturating_sub(1)).div_euclid(2);
     if capacity == 0 {
         return Vec::new();
     }
@@ -362,41 +362,65 @@ pub(super) fn draw_recent_pull_requests(
             let selected = index == app.recent_pull_request_cursor;
             let row = Rect::new(
                 area.x,
-                area.y + 1 + cells(index.saturating_sub(start)),
+                area.y + 1 + cells(index.saturating_sub(start).saturating_mul(2)),
                 area.width,
-                1,
+                2,
             );
-            let number = format!("#{} ", pull_request.number);
-            let reserved = number.width() + 3;
+            let number = format!("#{}", pull_request.number);
             let title = truncate_middle(
                 &pull_request.title,
-                usize::from(area.width).saturating_sub(reserved),
+                usize::from(area.width).saturating_sub(4),
             );
+            let row_style = Style::default().bg(if selected {
+                theme.selected
+            } else {
+                theme.panel
+            });
             frame.render_widget(
                 Paragraph::new(Line::from(vec![
                     Span::styled(
                         if selected { " › " } else { "   " },
                         Style::default().fg(theme.accent),
                     ),
+                    Span::styled(title, Style::default().fg(theme.text)),
+                ]))
+                .style(row_style),
+                Rect::new(row.x, row.y, row.width, 1),
+            );
+            let metadata_x = row.x.saturating_add(3);
+            let metadata_width = usize::from(row.width.saturating_sub(3));
+            let age = truncate_end(
+                &format_relative_timestamp(&pull_request.updated_at),
+                metadata_width.saturating_sub(number.width() + 1),
+            );
+            let gap = metadata_width
+                .saturating_sub(number.width())
+                .saturating_sub(age.width());
+            let number_area =
+                clipped_link_area(metadata_x, row.y.saturating_add(1), number.width(), row);
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
                     link_span(
-                        number.clone(),
+                        number,
                         Some(OpenTarget::Browser(format!(
                             "{}/pull/{}",
                             pull_request.repository.url.trim_end_matches('/'),
                             pull_request.number
                         ))),
-                        clipped_link_area(row.x.saturating_add(3), row.y, number.width(), row),
+                        number_area,
                         theme,
                         link_hits,
                     ),
-                    Span::styled(title, Style::default().fg(theme.text)),
+                    Span::raw(" ".repeat(gap)),
+                    Span::styled(age, Style::default().fg(theme.muted)),
                 ]))
-                .style(Style::default().bg(if selected {
-                    theme.selected
-                } else {
-                    theme.panel
-                })),
-                row,
+                .style(row_style),
+                Rect::new(
+                    metadata_x,
+                    row.y.saturating_add(1),
+                    cells(metadata_width),
+                    1,
+                ),
             );
             SidebarHitArea {
                 area: row,

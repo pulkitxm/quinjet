@@ -165,6 +165,8 @@ pub(super) fn worktree_from_fields(fields: &[&[u8]], session_root: &Path) -> Opt
         current: same_path(&path, session_root),
         path,
         head,
+        updated_at: None,
+        updated_unix: None,
         branch,
         bare,
         detached,

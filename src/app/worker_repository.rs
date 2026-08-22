@@ -316,11 +316,16 @@ impl App {
                             groups: modal_groups,
                             selected,
                             query,
+                            collapsed,
                             loading,
                             ..
                         }) = self.modal.as_mut()
                         {
-                            let visible = Self::filtered_project_rows(&groups, &query.value);
+                            collapsed.retain(|common_dir| {
+                                groups.iter().any(|group| &group.common_dir == common_dir)
+                            });
+                            let visible =
+                                Self::filtered_project_rows(&groups, &query.value, collapsed);
                             *selected = (*selected).min(visible.len().saturating_sub(1));
                             *modal_groups = groups;
                             *loading = false;

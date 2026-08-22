@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU16;
 use std::ops::Range;
 use std::path::Path;
@@ -20,7 +20,7 @@ use crate::app::{
     View,
 };
 use crate::convert::cells;
-use crate::date_time::format_local_timestamp;
+use crate::date_time::{format_relative_timestamp, relative_time_generation};
 use crate::file_icons;
 #[cfg(test)]
 use crate::git::diff::PullRequestDetails;
@@ -423,8 +423,10 @@ mod feedback;
 mod help;
 mod layout;
 mod modal_branches;
+mod modal_conflict;
 mod modals;
 pub(crate) mod pickers;
+mod project_picker;
 mod prose;
 mod pull_request_checks;
 mod pull_request_conversation;
@@ -454,9 +456,13 @@ use layout::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use modal_branches::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
+use modal_conflict::*;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use modals::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use pickers::*;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
+use project_picker::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use prose::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]

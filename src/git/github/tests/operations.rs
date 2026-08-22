@@ -454,6 +454,7 @@ fn cached_pull_request_metadata_becomes_a_recent_entry() {
     assert_eq!(recent.len(), 1);
     assert_eq!(recent[0].number, 39);
     assert_eq!(recent[0].title, "Restore selectable previews");
+    assert_eq!(recent[0].updated_at, "2026-08-18T05:35:58Z");
     assert_eq!(recent[0].repository.name_with_owner, "acme/widget");
     assert_eq!(recent[0].repository.url, "https://github.com/acme/widget");
 }

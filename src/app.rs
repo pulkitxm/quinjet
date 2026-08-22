@@ -141,6 +141,7 @@ mod modal_review;
 mod mouse;
 mod operations;
 mod palette;
+mod projects;
 mod pull_request_actions;
 mod pull_request_checks;
 mod pull_request_diff;
@@ -257,7 +258,7 @@ pub(crate) struct App {
     #[doc = " the pane to the selected step and make its own output unreadable."]
     pub pull_request_step_reveal: bool,
     pub pull_request_content_rows: Vec<PullRequestContentRow>,
-    pub pull_request_content_rows_key: Option<(bool, usize, u64)>,
+    pub pull_request_content_rows_key: Option<(bool, usize, u64, i64)>,
     pub pull_request_content_width: usize,
     pub pull_request_content_links: Vec<PullRequestContentLink>,
     pub pull_request_content_generation: u64,

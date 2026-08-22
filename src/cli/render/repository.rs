@@ -196,6 +196,10 @@ pub(crate) fn worktrees(worktrees: &[Worktree]) -> String {
         if worktree.prunable.is_some() {
             flags.push_str("  prunable");
         }
+        if let Some(updated_at) = worktree.updated_at.as_deref() {
+            flags.push_str("  ");
+            flags.push_str(&format_relative_timestamp(updated_at));
+        }
         out.line(&format!(
             "{} {}  {:<16}  {head}{flags}",
             if worktree.current { "*" } else { " " },
