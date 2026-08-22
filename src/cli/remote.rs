@@ -3,6 +3,7 @@ use std::ffi::{OsStr, OsString};
 use std::io::{self, IsTerminal};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::thread;
 
 use anyhow::{Context, Result};
 
@@ -63,10 +64,25 @@ pub(super) fn manage(out: &Emitter, command: RemoteVerb) -> Result<u8> {
 
 fn list(out: &Emitter) -> Result<u8> {
     let entries = crate::state::load_recent_remotes();
+    let accessible = thread::scope(|scope| {
+        #[expect(
+            clippy::needless_collect,
+            reason = "every reachability probe must start before any join can block"
+        )]
+        let checks = entries
+            .iter()
+            .map(|entry| scope.spawn(|| probe(&entry.target)))
+            .collect::<Vec<_>>();
+        checks
+            .into_iter()
+            .map(|check| check.join().is_ok_and(|accessible| accessible))
+            .collect::<Vec<_>>()
+    });
     let remotes = entries
         .into_iter()
-        .map(|entry| RemoteStatus {
-            accessible: probe(&entry.target),
+        .zip(accessible)
+        .map(|(entry, accessible)| RemoteStatus {
+            accessible,
             target: entry.target,
             folder: entry.folder,
         })

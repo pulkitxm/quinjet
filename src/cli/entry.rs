@@ -7,7 +7,7 @@ pub(crate) fn dispatch() -> Result<Launch> {
     if let Some(target) = cli.remote.as_deref() {
         let (terminal, folder) = match cli.command.as_ref() {
             None => (true, cli.repository.as_path()),
-            Some(Verb::Tui(args)) => (true, args.path.as_path()),
+            Some(Verb::Tui(args)) => (true, terminal_path(&args.path, &cli.repository)),
             Some(_) => (false, cli.repository.as_path()),
         };
         return remote::run(target, terminal, folder).map(Launch::Finished);
@@ -26,7 +26,7 @@ pub(crate) fn dispatch() -> Result<Launch> {
         }
         Some(Verb::Tui(args)) => {
             return Ok(Launch::Terminal(Box::new(TerminalOptions {
-                path: args.path,
+                path: terminal_path(&args.path, &cli.repository).to_path_buf(),
                 no_mouse: args.no_mouse,
                 webhook_listen: args.webhook_listen,
                 theme: args.theme,
@@ -67,6 +67,14 @@ pub(crate) fn dispatch() -> Result<Launch> {
     })();
     out.finish_progress();
     result.map(Launch::Finished)
+}
+
+fn terminal_path<'a>(positional: &'a Path, repository: &'a Path) -> &'a Path {
+    if positional == Path::new(".") {
+        repository
+    } else {
+        positional
+    }
 }
 
 pub(super) fn completions(out: &Emitter, args: &CompletionsArgs) -> Result<u8> {

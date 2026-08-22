@@ -8,6 +8,7 @@ Usage:
 ```bash
 quinjet
 quinjet [--pr <NUMBER>]
+quinjet --remote <SSH_TARGET> --folder <DIR>
 quinjet tui [PATH] [--pr <NUMBER>] [--theme <THEME>] [--appearance <APPEARANCE>] [--no-mouse] [--webhook-listen <ADDRESS>]
 ```
 
@@ -26,7 +27,8 @@ Options:
 | `--no-mouse` | flag | off | Starts with the mouse released, so the terminal keeps its own selection and copy behavior. Every feature stays reachable from the keyboard. |
 | `--webhook-listen <ADDRESS>` | port, or `host:port` | not listening | Binds a loopback HTTP listener. A forwarded GitHub delivery refreshes the open pull request immediately instead of waiting for the next poll. |
 | `--pr <NUMBER>` | unsigned integer | unset | Opens the interface already focused on this pull request: the Pull Requests tab is selected and the lookup starts before the first frame. Also accepted on a bare `quinjet` launch. With any other verb it is an error. |
-| `-C, --path <DIR>` | path | `.` | Global and unused here. The positional `PATH` is what the interface opens. |
+| `-C, --path, --folder <DIR>` | path | `.` | Selects a repository when the positional `PATH` is omitted. |
+| `--remote <SSH_TARGET>` | SSH target | local machine | Runs the interface on the SSH machine and allocates a remote terminal. |
 | `--json` | flag | off | Global. Parsed and ignored here, because the interface writes to a screen rather than to stdout. |
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |
 | `-V, --version` | flag | off | Prints the installed version and exits 0. |
@@ -37,10 +39,11 @@ Options:
 `Launch::Terminal` for both, before any session is built, so no verb machinery
 runs and nothing is ever printed on stdout.
 
-The no-argument form always opens the current directory. A path belongs to the
-explicit verb, as in `quinjet tui ~/code/project`. This keeps the root command
-unambiguous: `quinjet statsu` is an unknown verb with exit 2 rather than a request
-to open a directory named `statsu`.
+The no-argument form opens the current directory. A path can use the explicit
+verb, as in `quinjet tui ~/code/project`, or the global folder option, as in
+`quinjet --folder ~/code/project`. This keeps the root command unambiguous:
+`quinjet statsu` is an unknown verb with exit 2 rather than a request to open a
+directory named `statsu`.
 
 ## Themes and appearance
 
