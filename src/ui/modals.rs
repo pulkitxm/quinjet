@@ -13,8 +13,7 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
     match app.modal.as_ref() {
         None | Some(Modal::Help { .. }) => {}
         Some(Modal::Commit { input, amend }) => {
-            let input = input.clone();
-            let amend = *amend;
+            let (input, amend) = (input.clone(), *amend);
             draw_commit(
                 frame,
                 &mut app.geometry.modal_action_hits,
@@ -60,8 +59,7 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
             theme,
         ),
         Some(Modal::Confirm { title, message, .. }) => {
-            let title = title.clone();
-            let message = message.clone();
+            let (title, message) = (title.clone(), message.clone());
             draw_confirm(
                 frame,
                 &mut app.geometry.modal_action_hits,
@@ -101,6 +99,7 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
                 modal,
                 &mut app.geometry.project_collapse_hits,
                 app.ssh_context.as_ref(),
+                &mut app.geometry.modal_action_hits,
                 theme,
             );
         }

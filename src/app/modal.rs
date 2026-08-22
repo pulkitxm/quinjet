@@ -285,6 +285,7 @@ pub(crate) enum ModalAction {
     CommitToggleAmend,
     ConfirmYes,
     ConfirmNo,
+    OpenSshMachines,
     PullRequestAction(usize),
     PullRequestReviewThreadAction(usize),
 }

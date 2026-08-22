@@ -70,6 +70,25 @@ impl App {
                     }
                 }
             }
+            ModalAction::OpenSshMachines => {
+                let Some(parent @ Modal::Projects { .. }) = self.modal.clone() else {
+                    return;
+                };
+                let Some(context) = self.ssh_context.as_ref() else {
+                    return;
+                };
+                let selected = context
+                    .machines
+                    .iter()
+                    .position(|machine| machine.target == context.current)
+                    .unwrap_or_default();
+                self.modal = Some(Modal::SshMachines {
+                    items: context.machines.clone(),
+                    selected,
+                    current: context.current.clone(),
+                    parent: Box::new(parent),
+                });
+            }
             ModalAction::PullRequestAction(index) => {
                 let Some(Modal::PullRequestActions { items, .. }) = self.modal.take() else {
                     return;

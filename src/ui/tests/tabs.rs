@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
@@ -247,8 +247,13 @@ fn remote_project_picker_shows_the_host_and_ranked_machine_popup() {
         .unwrap();
     let rendered = terminal.backend().to_string();
     assert!(rendered.contains("Switch project"));
-    assert!(rendered.contains("Machine  current-host"));
-    assert!(rendered.contains("Tab switch machine"));
+    assert!(rendered.contains("Machine: current-host"));
+    assert!(
+        app.geometry
+            .modal_action_hits
+            .iter()
+            .any(|(_, action)| *action == ModalAction::OpenSshMachines)
+    );
 
     drop(app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), now));
     drop(app.handle_key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT), now));
@@ -257,10 +262,27 @@ fn remote_project_picker_shows_the_host_and_ranked_machine_popup() {
         .unwrap();
     let rendered = terminal.backend().to_string();
     assert!(rendered.contains("Open in new tab"));
-    assert!(rendered.contains("Machine  current-host"));
-    assert!(rendered.contains("Tab switch machine"));
+    assert!(rendered.contains("Machine: current-host"));
 
-    drop(app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), now));
+    let button = app
+        .geometry
+        .modal_action_hits
+        .iter()
+        .find(|(_, action)| *action == ModalAction::OpenSshMachines)
+        .map(|(area, _)| *area)
+        .expect("machine button");
+    assert!(
+        app.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: button.x,
+                row: button.y,
+                modifiers: KeyModifiers::NONE,
+            },
+            now,
+        )
+        .is_empty()
+    );
     terminal
         .draw(|frame| draw(frame, &mut app, &Theme::default()))
         .unwrap();

@@ -41,6 +41,7 @@ pub(crate) struct Onboarding {
     error: Option<String>,
     ssh_context: Option<SshContext>,
     machine_selected: usize,
+    machine_button: Option<Rect>,
 }
 
 impl Onboarding {
@@ -69,6 +70,7 @@ impl Onboarding {
             error: None,
             ssh_context,
             machine_selected: 0,
+            machine_button: None,
         }
     }
 
@@ -96,23 +98,26 @@ impl Onboarding {
         }
     }
 
-    pub(crate) fn show_error(&mut self, message: impl Into<String>) {
-        self.error = Some(message.into());
-    }
-
-    pub(crate) fn handle_mouse(&mut self, event: MouseEvent) {
+    pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent) -> OnboardingAction {
         if self.panel != OnboardingPanel::Projects
-            || event.kind != MouseEventKind::Down(MouseButton::Left)
+            || mouse.kind != MouseEventKind::Down(MouseButton::Left)
         {
-            return;
+            return OnboardingAction::None;
+        }
+        if self
+            .machine_button
+            .is_some_and(|area| area.contains((mouse.column, mouse.row).into()))
+        {
+            self.open_machine_picker();
+            return OnboardingAction::None;
         }
         let Some(common_dir) = self
             .collapse_hits
             .iter()
-            .find(|(area, _)| area.contains((event.column, event.row).into()))
+            .find(|(area, _)| area.contains((mouse.column, mouse.row).into()))
             .map(|(_, common_dir)| common_dir.clone())
         else {
-            return;
+            return OnboardingAction::None;
         };
         if self.collapsed.contains(&common_dir) {
             self.collapsed.retain(|candidate| candidate != &common_dir);
@@ -121,6 +126,11 @@ impl Onboarding {
         }
         let visible = App::filtered_project_rows(&self.groups, &self.query.value, &self.collapsed);
         self.selected = self.selected.min(visible.len().saturating_sub(1));
+        OnboardingAction::None
+    }
+
+    pub(crate) fn show_error(&mut self, message: impl Into<String>) {
+        self.error = Some(message.into());
     }
 
     fn handle_projects_key(&mut self, key: KeyEvent) -> OnboardingAction {
@@ -134,14 +144,7 @@ impl Onboarding {
                 OnboardingAction::None
             }
             KeyCode::Tab if self.ssh_context.is_some() => {
-                if let Some(context) = self.ssh_context.as_ref() {
-                    self.machine_selected = context
-                        .machines
-                        .iter()
-                        .position(|machine| machine.target == context.current)
-                        .unwrap_or_default();
-                }
-                self.panel = OnboardingPanel::SshMachines;
+                self.open_machine_picker();
                 OnboardingAction::None
             }
             KeyCode::Char('o' | 'O') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -209,6 +212,17 @@ impl Onboarding {
                 OnboardingAction::None
             }
             _ => OnboardingAction::None,
+        }
+    }
+
+    fn open_machine_picker(&mut self) {
+        if let Some(context) = self.ssh_context.as_ref() {
+            self.machine_selected = context
+                .machines
+                .iter()
+                .position(|machine| machine.target == context.current)
+                .unwrap_or_default();
+            self.panel = OnboardingPanel::SshMachines;
         }
     }
 
@@ -292,10 +306,11 @@ impl Onboarding {
             Block::default().style(Style::default().bg(theme.background)),
             frame.area(),
         );
+        self.machine_button = None;
         match self.panel {
             OnboardingPanel::Projects => {
                 self.collapse_hits.clear();
-                crate::ui::pickers::draw_projects(
+                self.machine_button = crate::ui::pickers::draw_projects(
                     frame,
                     &mut self.collapse_hits,
                     &self.groups,

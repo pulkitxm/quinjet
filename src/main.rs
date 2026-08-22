@@ -277,10 +277,7 @@ fn open_terminal(
                         onboarding.handle_paste(&text);
                         OnboardingAction::None
                     }
-                    Event::Mouse(mouse) => {
-                        onboarding.handle_mouse(mouse);
-                        OnboardingAction::None
-                    }
+                    Event::Mouse(mouse) => onboarding.handle_mouse(mouse),
                     _ => OnboardingAction::None,
                 };
                 match action {

@@ -20,7 +20,7 @@ pub(crate) fn draw_projects(
     mode: ProjectOpenMode,
     ssh: Option<&SshContext>,
     theme: &Theme,
-) {
+) -> Option<Rect> {
     let height = frame.area().height.saturating_sub(6).min(28);
     let area = centered_rect(
         frame.area().width.saturating_sub(10).min(88),
@@ -36,7 +36,15 @@ pub(crate) fn draw_projects(
     let block = modal_block(title, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let query_area = Rect::new(inner.x, inner.y, inner.width, 1);
+    let machine_button = ssh.map(|context| {
+        let desired_width = cells(context.current.width().saturating_add(14));
+        let width = desired_width.min(inner.width.saturating_sub(12)).max(1);
+        Rect::new(inner.right().saturating_sub(width), inner.y, width, 1)
+    });
+    let query_width = machine_button.map_or(inner.width, |button| {
+        button.x.saturating_sub(inner.x).saturating_sub(1)
+    });
+    let query_area = Rect::new(inner.x, inner.y, query_width, 1);
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(" / ", Style::default().fg(theme.accent)),
@@ -56,30 +64,26 @@ pub(crate) fn draw_projects(
         query,
         false,
     );
-    let machine_rows = u16::from(ssh.is_some());
-    if let Some(context) = ssh {
+    if let (Some(context), Some(button)) = (ssh, machine_button) {
+        let label_width = button.width.saturating_sub(12) as usize;
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(" Machine  ", Style::default().fg(theme.muted)),
+                Span::styled(" Machine: ", Style::default()),
                 Span::styled(
-                    context.current.as_str(),
-                    Style::default()
-                        .fg(theme.accent)
-                        .add_modifier(Modifier::BOLD),
+                    truncate_middle(context.current.as_str(), label_width),
+                    Style::default().add_modifier(Modifier::BOLD),
                 ),
-                Span::styled("   Tab switch machine", Style::default().fg(theme.muted)),
+                Span::styled(" ▾ ", Style::default()),
             ]))
-            .style(Style::default().bg(theme.panel)),
-            Rect::new(inner.x, inner.y + 2, inner.width, 1),
+            .style(Style::default().fg(theme.background).bg(theme.accent)),
+            button,
         );
     }
     let list_area = Rect::new(
         inner.x,
-        inner.y + 2 + machine_rows.saturating_mul(2),
+        inner.y + 2,
         inner.width,
-        inner
-            .height
-            .saturating_sub(5 + machine_rows.saturating_mul(2)),
+        inner.height.saturating_sub(5),
     );
     if loading {
         frame.render_widget(
@@ -169,12 +173,6 @@ pub(crate) fn draw_projects(
     }
     let hint = match mode {
         ProjectOpenMode::Initial => "Enter open   Ctrl+E collapse all   Ctrl+O path   Esc quit",
-        ProjectOpenMode::CurrentTab if ssh.is_some() => {
-            "Enter switch tab   Ctrl+E collapse all   Tab machines   Delete forget project   Esc close"
-        }
-        ProjectOpenMode::NewTab if ssh.is_some() => {
-            "Enter open in new tab   Ctrl+E collapse all   Tab machines   Delete forget project   Esc close"
-        }
         ProjectOpenMode::CurrentTab => {
             "Enter switch tab   Ctrl+E collapse all   Delete forget project   Esc close"
         }
@@ -183,6 +181,7 @@ pub(crate) fn draw_projects(
         }
     };
     draw_modal_hint(frame, area, hint, theme);
+    machine_button
 }
 
 pub(super) fn draw_pull_request_repositories(

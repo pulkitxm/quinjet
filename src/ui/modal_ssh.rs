@@ -6,6 +6,7 @@ pub(super) fn draw_ssh_project_modal(
     modal: &Modal,
     collapse_hits: &mut Vec<(Rect, std::path::PathBuf)>,
     context: Option<&SshContext>,
+    hits: &mut Vec<(Rect, ModalAction)>,
     theme: &Theme,
 ) {
     match modal {
@@ -16,18 +17,22 @@ pub(super) fn draw_ssh_project_modal(
             collapsed,
             loading,
             mode,
-        } => draw_projects(
-            frame,
-            collapse_hits,
-            groups,
-            *selected,
-            query,
-            collapsed,
-            *loading,
-            *mode,
-            context,
-            theme,
-        ),
+        } => {
+            if let Some(area) = draw_projects(
+                frame,
+                collapse_hits,
+                groups,
+                *selected,
+                query,
+                collapsed,
+                *loading,
+                *mode,
+                context,
+                theme,
+            ) {
+                hits.push((area, ModalAction::OpenSshMachines));
+            }
+        }
         Modal::SshMachines {
             items,
             selected,

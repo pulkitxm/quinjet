@@ -1,4 +1,4 @@
-use crossterm::event::KeyModifiers;
+use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
@@ -151,11 +151,16 @@ fn local_project_picker_opens_the_ranked_machine_switcher() {
         Rect::new(0, 0, 100, 30),
     );
     let rendered = terminal.backend().to_string();
-    assert!(rendered.contains("Machine  local"));
-    assert!(rendered.contains("Tab switch machine"));
+    assert!(rendered.contains("Machine: local"));
+    let button = onboarding.machine_button.expect("machine button");
 
     assert_eq!(
-        onboarding.handle_key(key(KeyCode::Tab)),
+        onboarding.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: button.x,
+            row: button.y,
+            modifiers: KeyModifiers::NONE,
+        }),
         OnboardingAction::None
     );
     assert_eq!(
