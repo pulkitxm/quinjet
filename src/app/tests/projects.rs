@@ -86,3 +86,75 @@ fn header_path_and_w_open_the_projects_picker() {
             AppEffect::Git(command) if matches!(command.as_ref(), WorkerCommand::LoadRecentProjects { .. })
         )));
 }
+
+#[test]
+fn project_picker_is_the_machine_switching_entry_point() {
+    let mut app = App::new("/tmp/repo", "repo");
+    app.ssh_context = Some(SshContext {
+        current: "current-host".to_owned(),
+        machines: vec![
+            SshMachine {
+                target: "busy-host".to_owned(),
+                folder: PathBuf::from("/work/busy"),
+                accessible: true,
+                uses: 12,
+            },
+            SshMachine {
+                target: "current-host".to_owned(),
+                folder: PathBuf::from("/work/current"),
+                accessible: true,
+                uses: 3,
+            },
+        ],
+    });
+    app.modal = Some(Modal::Projects {
+        groups: Vec::new(),
+        selected: 0,
+        query: TextBuffer::default(),
+        loading: false,
+        mode: ProjectOpenMode::NewTab,
+    });
+    let now = Instant::now();
+    assert!(
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), now)
+            .is_empty()
+    );
+    assert!(matches!(
+        app.modal,
+        Some(Modal::SshMachines { selected: 1, .. })
+    ));
+    drop(app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), now));
+    let effects = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+    assert!(matches!(
+        effects.as_slice(),
+        [AppEffect::SwitchSshMachine(0)]
+    ));
+}
+
+#[test]
+fn unavailable_machine_cannot_be_selected() {
+    let mut app = App::new("/tmp/repo", "repo");
+    app.modal = Some(Modal::SshMachines {
+        items: vec![SshMachine {
+            target: "offline".to_owned(),
+            folder: PathBuf::from("/work/offline"),
+            accessible: false,
+            uses: 4,
+        }],
+        selected: 0,
+        current: "current".to_owned(),
+        parent: Box::new(Modal::Projects {
+            groups: Vec::new(),
+            selected: 0,
+            query: TextBuffer::default(),
+            loading: false,
+            mode: ProjectOpenMode::NewTab,
+        }),
+    });
+    let effects = app.handle_key(
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        Instant::now(),
+    );
+    assert!(effects.is_empty());
+    assert!(matches!(app.modal, Some(Modal::SshMachines { .. })));
+}

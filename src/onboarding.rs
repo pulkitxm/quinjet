@@ -206,6 +206,7 @@ impl Onboarding {
                 &self.query,
                 false,
                 ProjectOpenMode::Initial,
+                None,
                 theme,
             ),
             OnboardingPanel::Path => self.draw_path(frame, theme),

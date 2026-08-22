@@ -33,6 +33,7 @@ use crate::git::github::{
 use crate::git::github::{PullRequestCheck, PullRequestFile, RecentPullRequest};
 use crate::git::status::{Change, ChangeArea, ChangeStatus};
 use crate::git::{Branch, HistoryBranch, ProjectGroup, Stash};
+use crate::ssh::{SshContext, SshMachine};
 use crate::theme::{AppearanceChoice, Theme, ThemeName};
 
 const DETAIL_LABEL_WIDTH: usize = 12;
@@ -423,6 +424,7 @@ mod feedback;
 mod help;
 mod layout;
 mod modal_branches;
+mod modal_ssh;
 mod modals;
 pub(crate) mod pickers;
 mod prose;
@@ -453,6 +455,8 @@ pub(crate) use layout::draw;
 use layout::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use modal_branches::*;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
+use modal_ssh::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use modals::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]

@@ -95,13 +95,9 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
             query,
             loading,
         }) => draw_stashes(frame, items, *selected, query, *loading, theme),
-        Some(Modal::Projects {
-            groups,
-            selected,
-            query,
-            loading,
-            mode,
-        }) => draw_projects(frame, groups, *selected, query, *loading, *mode, theme),
+        Some(modal @ (Modal::Projects { .. } | Modal::SshMachines { .. })) => {
+            draw_ssh_project_modal(frame, modal, app.ssh_context.as_ref(), theme);
+        }
         Some(Modal::PullRequestRepositories {
             items,
             selected,

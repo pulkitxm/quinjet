@@ -7,6 +7,20 @@ opens the terminal interface; with a verb it answers one question on stdout and
 exits. Both faces are the same executable and the same command layer, so
 nothing you learn here is specific to one of them.
 
+The same interface can run where the repository lives on an SSH machine. Both
+machines need Quinjet installed, then the local invocation selects the SSH
+target and remote folder:
+
+```bash
+quinjet --remote tuf-wired --folder ~/code/project
+quinjet --remote tuf-wired --folder ~/code/project status --watch
+```
+
+The remote process owns Git and filesystem watching, so edits made on that
+machine appear through the normal live refresh. See
+[remote repositories](./remote/README.md) for recent-machine reachability and
+the complete transport contract.
+
 The terminal interface starts with the `quinjet` color palette and checks the
 system light or dark preference once. No configuration file is needed. Use
 `quinjet tui --theme solarized` to select another palette, or add

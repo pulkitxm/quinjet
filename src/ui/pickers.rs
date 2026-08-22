@@ -16,6 +16,7 @@ pub(crate) fn draw_projects(
     query: &crate::app::TextBuffer,
     loading: bool,
     mode: ProjectOpenMode,
+    ssh: Option<&SshContext>,
     theme: &Theme,
 ) {
     let height = frame.area().height.saturating_sub(6).min(28);
@@ -53,11 +54,30 @@ pub(crate) fn draw_projects(
         query,
         false,
     );
+    let machine_rows = u16::from(ssh.is_some());
+    if let Some(context) = ssh {
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(" SSH  ", Style::default().fg(theme.muted)),
+                Span::styled(
+                    context.current.as_str(),
+                    Style::default()
+                        .fg(theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("   Tab switch machine", Style::default().fg(theme.muted)),
+            ]))
+            .style(Style::default().bg(theme.panel)),
+            Rect::new(inner.x, inner.y + 2, inner.width, 1),
+        );
+    }
     let list_area = Rect::new(
         inner.x,
-        inner.y + 2,
+        inner.y + 2 + machine_rows.saturating_mul(2),
         inner.width,
-        inner.height.saturating_sub(5),
+        inner
+            .height
+            .saturating_sub(5 + machine_rows.saturating_mul(2)),
     );
     if loading {
         frame.render_widget(
@@ -169,6 +189,12 @@ pub(crate) fn draw_projects(
     }
     let hint = match mode {
         ProjectOpenMode::Initial => "Enter open   Ctrl+O path   Esc quit",
+        ProjectOpenMode::CurrentTab if ssh.is_some() => {
+            "Enter switch tab   Tab machines   Delete forget project   Esc close"
+        }
+        ProjectOpenMode::NewTab if ssh.is_some() => {
+            "Enter open in new tab   Tab machines   Delete forget project   Esc close"
+        }
         ProjectOpenMode::CurrentTab => "Enter switch tab   Delete forget project   Esc close",
         ProjectOpenMode::NewTab => "Enter open in new tab   Delete forget project   Esc close",
     };
