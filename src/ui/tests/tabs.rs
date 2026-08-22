@@ -238,22 +238,29 @@ fn remote_project_picker_shows_the_host_and_ranked_machine_popup() {
             },
         ],
     });
-    drop(app.handle_key(
-        KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT),
-        Instant::now(),
-    ));
+    let now = Instant::now();
     let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+
+    drop(app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE), now));
     terminal
         .draw(|frame| draw(frame, &mut app, &Theme::default()))
         .unwrap();
     let rendered = terminal.backend().to_string();
+    assert!(rendered.contains("Switch project"));
     assert!(rendered.contains("SSH  current-host"));
     assert!(rendered.contains("Tab switch machine"));
 
-    drop(app.handle_key(
-        KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
-        Instant::now(),
-    ));
+    drop(app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), now));
+    drop(app.handle_key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT), now));
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+    let rendered = terminal.backend().to_string();
+    assert!(rendered.contains("Open in new tab"));
+    assert!(rendered.contains("SSH  current-host"));
+    assert!(rendered.contains("Tab switch machine"));
+
+    drop(app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), now));
     terminal
         .draw(|frame| draw(frame, &mut app, &Theme::default()))
         .unwrap();

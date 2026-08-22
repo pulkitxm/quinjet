@@ -194,6 +194,11 @@ anything. `Ctrl+E` collapses every project. Filtering temporarily reveals
 matching worktrees inside collapsed projects, so collapse never hides a search
 result.
 
+Over SSH, both the `w` and `N` project pickers show the active machine. Press
+`Tab` from either picker to open the machine switcher. Machines are ordered by
+usage, show their current reachability, and return to the same picker when the
+switcher is closed.
+
 Drag a visible project tab to reorder it. When the strip overflows, its left
 and right controls cycle until the hidden tab becomes visible. Right-click a
 tab for `Open Project...` in a new tab, `Close`, `Close Others`, and `Close
