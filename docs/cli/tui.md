@@ -195,11 +195,13 @@ matching worktrees inside collapsed projects, so collapse never hides a search
 result.
 
 When recent SSH repositories exist, `Open a project` and both the `w` and `N`
-project pickers show the active machine. A local session is named `local`.
-Press `Tab` from any of these pickers to open the machine switcher. Machines are
-ordered by usage and show their current reachability. Choosing one opens its
-most recent folder through SSH. Closing the switcher returns to the same
-project picker.
+project pickers show the active machine. The originating computer appears
+first under its hostname and is marked as the host. The machine button opens a
+second-layer switcher, with SSH machines ordered by usage and labeled with
+their current reachability. Choosing the host returns to its local project
+picker without a reverse SSH connection. Choosing an SSH machine opens that
+machine's project picker. Closing the switcher returns to the same project
+picker.
 
 Drag a visible project tab to reorder it. When the strip overflows, its left
 and right controls cycle until the hidden tab becomes visible. Right-click a

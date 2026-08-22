@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 pub(crate) const MAX_SSH_MACHINES: usize = 16;
 pub(crate) const SWITCH_EXIT_BASE: u8 = 80;
+pub(crate) const OPEN_PROJECTS_ENV: &str = "QUINJET_OPEN_PROJECTS";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -12,6 +13,7 @@ pub(crate) struct SshMachine {
     pub folder: PathBuf,
     pub accessible: bool,
     pub uses: u64,
+    pub local: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

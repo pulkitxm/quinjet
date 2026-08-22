@@ -191,16 +191,18 @@ fn project_picker_is_the_machine_switching_entry_point() {
         current: "current-host".to_owned(),
         machines: vec![
             SshMachine {
-                target: "busy-host".to_owned(),
-                folder: PathBuf::from("/work/busy"),
+                target: "Pulkits-MacBook-Pro.local".to_owned(),
+                folder: PathBuf::from("/Users/pulkit"),
                 accessible: true,
-                uses: 12,
+                uses: 0,
+                local: true,
             },
             SshMachine {
                 target: "current-host".to_owned(),
                 folder: PathBuf::from("/work/current"),
                 accessible: true,
                 uses: 3,
+                local: false,
             },
         ],
     });
@@ -238,6 +240,7 @@ fn unavailable_machine_cannot_be_selected() {
             folder: PathBuf::from("/work/offline"),
             accessible: false,
             uses: 4,
+            local: false,
         }],
         selected: 0,
         current: "current".to_owned(),

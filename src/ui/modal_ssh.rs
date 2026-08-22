@@ -80,10 +80,17 @@ pub(crate) fn draw_ssh_machines(
             } else {
                 ""
             };
-            let (glyph, color, status) = if machine.accessible {
+            let (glyph, color, status) = if machine.local {
+                ("●", theme.success, "host")
+            } else if machine.accessible {
                 ("●", theme.success, "reachable")
             } else {
                 ("●", theme.error, "unavailable")
+            };
+            let details = if machine.local {
+                format!("  {status:<11}         {current_marker}")
+            } else {
+                format!("  {status:<11}  used {}{current_marker}", machine.uses)
             };
             Line::from(vec![
                 Span::styled(
@@ -101,10 +108,7 @@ pub(crate) fn draw_ssh_machines(
                             Modifier::empty()
                         }),
                 ),
-                Span::styled(
-                    format!("  {status:<11}  used {}{current_marker}", machine.uses),
-                    Style::default().fg(theme.muted).bg(background),
-                ),
+                Span::styled(details, Style::default().fg(theme.muted).bg(background)),
             ])
         })
         .collect::<Vec<_>>();

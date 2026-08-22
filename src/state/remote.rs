@@ -56,6 +56,7 @@ pub(crate) fn load_recent_ssh_machines_with_current(
             folder: folder.to_path_buf(),
             accessible: true,
             uses: 0,
+            local: false,
         });
         machines.sort_by_key(|machine| std::cmp::Reverse(machine.uses));
     }
@@ -85,6 +86,7 @@ fn grouped_ssh_machines() -> Vec<SshMachine> {
                 folder: Path::new(&entry.folder).to_path_buf(),
                 accessible: false,
                 uses: entry.uses,
+                local: false,
             });
         }
     }

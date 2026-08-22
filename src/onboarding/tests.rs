@@ -122,19 +122,28 @@ fn pasted_control_characters_are_removed_from_paths() {
 #[test]
 fn local_project_picker_opens_the_ranked_machine_switcher() {
     let context = SshContext {
-        current: "local".to_owned(),
+        current: "Pulkits-MacBook-Pro.local".to_owned(),
         machines: vec![
+            SshMachine {
+                target: "Pulkits-MacBook-Pro.local".to_owned(),
+                folder: PathBuf::from("/work"),
+                accessible: true,
+                uses: 0,
+                local: true,
+            },
             SshMachine {
                 target: "busy-host".to_owned(),
                 folder: PathBuf::from("/work/busy"),
                 accessible: true,
                 uses: 8,
+                local: false,
             },
             SshMachine {
                 target: "offline-host".to_owned(),
                 folder: PathBuf::from("/work/offline"),
                 accessible: false,
                 uses: 2,
+                local: false,
             },
         ],
     };
@@ -151,7 +160,7 @@ fn local_project_picker_opens_the_ranked_machine_switcher() {
         Rect::new(0, 0, 100, 30),
     );
     let rendered = terminal.backend().to_string();
-    assert!(rendered.contains("Machine: local"));
+    assert!(rendered.contains("Machine: Pulkits-MacBook-Pro.local"));
     let button = onboarding.machine_button.expect("machine button");
 
     assert_eq!(
@@ -172,10 +181,13 @@ fn local_project_picker_opens_the_ranked_machine_switcher() {
     );
     let rendered = terminal.backend().to_string();
     assert!(rendered.contains("Switch machine"));
+    assert!(rendered.contains("Pulkits-MacBook-Pro.local"));
+    assert!(rendered.contains("host"));
     assert!(rendered.contains("busy-host"));
     assert!(rendered.contains("used 8"));
+    drop(onboarding.handle_key(key(KeyCode::Down)));
     assert_eq!(
         onboarding.handle_key(key(KeyCode::Enter)),
-        OnboardingAction::SwitchSshMachine(0)
+        OnboardingAction::SwitchSshMachine(1)
     );
 }

@@ -46,7 +46,7 @@ fn main() -> ExitCode {
 fn terminal_exit_code(options: &TerminalOptions) -> ExitCode {
     let inherited_context = SshContext::from_environment();
     let local_session = inherited_context.is_none();
-    let context = inherited_context.or_else(cli::local_ssh_context);
+    let context = inherited_context.or_else(|| cli::local_ssh_context(&options.path));
     match open_terminal(options, context.as_ref()) {
         Ok(TerminalOutcome::Finished) => ExitCode::SUCCESS,
         Ok(TerminalOutcome::SwitchSshMachine(index)) if local_session => {
@@ -91,7 +91,10 @@ fn open_terminal(
         .as_deref()
         .map(WebhookListener::bind)
         .transpose()?;
-    let repository = Repository::discover(&options.path).ok();
+    let repository = std::env::var_os(ssh::OPEN_PROJECTS_ENV)
+        .is_none()
+        .then(|| Repository::discover(&options.path).ok())
+        .flatten();
     if let Some(repository) = repository.as_ref() {
         state::record_recent_project(repository.root());
     }

@@ -11,6 +11,9 @@ use super::{EXIT_FAILURE, EXIT_UNAVAILABLE, Emitter, RemoteVerb};
 use crate::ssh::SshContext;
 
 const REMOTE_BINARY_ENV: &str = "QUINJET_REMOTE_BINARY";
+mod terminal;
+
+pub(crate) use terminal::run_selected_terminal;
 
 pub(super) fn run(
     target: &str,
@@ -25,75 +28,13 @@ pub(super) fn run(
         let arguments = forwarded_arguments(original_arguments)?;
         return run_once(target, folder, &binary, &arguments, None);
     }
-    run_terminal_loop(
+    terminal::run_terminal_loop(
         target,
         folder,
         &binary,
         &original_arguments,
         (implicit_terminal, false, None),
     )
-}
-
-pub(crate) fn run_selected_terminal(
-    target: &str,
-    folder: &Path,
-    context: SshContext,
-) -> Result<u8> {
-    validate_target(target)?;
-    let binary = env::var(REMOTE_BINARY_ENV).unwrap_or_else(|_| "quinjet".to_owned());
-    let original_arguments = wild::args_os().skip(1).collect::<Vec<_>>();
-    run_terminal_loop(
-        target,
-        folder,
-        &binary,
-        &original_arguments,
-        (false, true, Some(context)),
-    )
-}
-
-fn run_terminal_loop(
-    target: &str,
-    folder: &Path,
-    binary: &str,
-    original_arguments: &[OsString],
-    handoff: (bool, bool, Option<SshContext>),
-) -> Result<u8> {
-    let (implicit_terminal, mut switched, context) = handoff;
-    let (mut current_target, mut current_folder) = (target.to_owned(), folder.to_path_buf());
-    let mut context = context.unwrap_or_else(|| ssh_context(&current_target, &current_folder));
-    loop {
-        let arguments = if implicit_terminal || switched {
-            switched_terminal_arguments(original_arguments.to_owned(), &current_folder)?
-        } else {
-            forwarded_arguments(original_arguments.to_owned())?
-        };
-        let status = ssh_status(
-            &current_target,
-            binary,
-            &arguments,
-            Some(&context),
-            true,
-            switched,
-        )?;
-        let code = status.code().unwrap_or_else(|| i32::from(EXIT_FAILURE));
-        if let Some(index) = crate::ssh::switch_index(code)
-            && let Some(machine) = context.machines.get(index)
-        {
-            crate::state::record_recent_remote(&current_target, &current_folder);
-            current_target.clone_from(&machine.target);
-            current_folder.clone_from(&machine.folder);
-            context.current.clone_from(&current_target);
-            switched = true;
-            continue;
-        }
-        if status.success() {
-            crate::state::record_recent_remote(&current_target, &current_folder);
-        }
-        if switched {
-            crate::terminal::restore_inherited_terminal();
-        }
-        return Ok(exit_code(status));
-    }
 }
 
 fn run_once(
@@ -143,13 +84,51 @@ fn exit_code(status: std::process::ExitStatus) -> u8 {
 }
 
 fn ssh_context(target: &str, folder: &Path) -> SshContext {
-    let machines = crate::state::load_recent_ssh_machines_with_current(target, folder);
+    let machines = with_host_machine(
+        crate::state::load_recent_ssh_machines_with_current(target, folder),
+        &env::current_dir().unwrap_or_default(),
+    );
     context_with_reachability(target, machines, Some(target))
 }
 
-pub(crate) fn local_ssh_context() -> Option<SshContext> {
+pub(crate) fn local_ssh_context(folder: &Path) -> Option<SshContext> {
     let machines = crate::state::load_recent_ssh_machines();
-    (!machines.is_empty()).then(|| context_with_reachability("local", machines, None))
+    (!machines.is_empty()).then(|| {
+        let machines = with_host_machine(machines, folder);
+        let current = machines
+            .first()
+            .map_or_else(|| "local".to_owned(), |machine| machine.target.clone());
+        context_with_reachability(&current, machines, None)
+    })
+}
+
+fn with_host_machine(
+    mut machines: Vec<crate::ssh::SshMachine>,
+    folder: &Path,
+) -> Vec<crate::ssh::SshMachine> {
+    machines.truncate(crate::ssh::MAX_SSH_MACHINES.saturating_sub(1));
+    machines.insert(
+        0,
+        crate::ssh::SshMachine {
+            target: host_name(),
+            folder: folder.to_path_buf(),
+            accessible: true,
+            uses: 0,
+            local: true,
+        },
+    );
+    machines
+}
+
+fn host_name() -> String {
+    Command::new("hostname")
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "local".to_owned())
 }
 
 fn context_with_reachability(
@@ -159,7 +138,7 @@ fn context_with_reachability(
 ) -> SshContext {
     let targets = machines
         .iter()
-        .map(|machine| machine.target.clone())
+        .map(|machine| (machine.target.clone(), machine.local))
         .collect::<Vec<_>>();
     let accessible = thread::scope(|scope| {
         #[expect(
@@ -168,9 +147,9 @@ fn context_with_reachability(
         )]
         let checks = targets
             .iter()
-            .map(|candidate| {
+            .map(|(candidate, local)| {
                 let current = assumed_reachable.is_some_and(|target| candidate == target);
-                scope.spawn(move || current || probe(candidate))
+                scope.spawn(move || *local || current || probe(candidate))
             })
             .collect::<Vec<_>>();
         checks
@@ -404,7 +383,11 @@ fn remote_command(
         command = format!("QUINJET_SSH_CONTEXT={} {command}", quote(&serialized)?);
     }
     if inherited_terminal {
-        command = format!("{}=1 {command}", crate::terminal::INHERITED_TERMINAL_ENV);
+        command = format!(
+            "{}=1 {}=1 {command}",
+            crate::terminal::INHERITED_TERMINAL_ENV,
+            crate::ssh::OPEN_PROJECTS_ENV
+        );
     }
     Ok(command)
 }
@@ -453,7 +436,29 @@ mod tests {
     #[test]
     fn switched_terminal_inherits_the_existing_alternate_screen() {
         let command = remote_command("quinjet", &[], None, true).unwrap();
-        assert_eq!(command, "QUINJET_INHERITED_TERMINAL=1 quinjet");
+        assert_eq!(
+            command,
+            "QUINJET_INHERITED_TERMINAL=1 QUINJET_OPEN_PROJECTS=1 quinjet"
+        );
+    }
+
+    #[test]
+    fn host_machine_is_named_and_pinned_before_remotes() {
+        let machines = with_host_machine(
+            vec![crate::ssh::SshMachine {
+                target: "remote".to_owned(),
+                folder: "/remote".into(),
+                accessible: true,
+                uses: 9,
+                local: false,
+            }],
+            Path::new("/host"),
+        );
+        assert_eq!(machines.len(), 2);
+        assert!(machines[0].local);
+        assert!(!machines[0].target.is_empty());
+        assert_eq!(machines[0].folder, Path::new("/host"));
+        assert_eq!(machines[1].target, "remote");
     }
 
     #[test]

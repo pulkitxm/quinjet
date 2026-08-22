@@ -35,6 +35,7 @@ fn machine_picker_context_follows_replaced_and_appended_projects() {
             folder: "/work/remote".into(),
             accessible: true,
             uses: 5,
+            local: false,
         }],
     };
     let mut workspace = RepositoryWorkspace::new(

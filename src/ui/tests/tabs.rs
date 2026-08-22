@@ -219,22 +219,32 @@ fn remote_project_picker_shows_the_host_and_ranked_machine_popup() {
         current: "current-host".to_owned(),
         machines: vec![
             SshMachine {
+                target: "Pulkits-MacBook-Pro.local".to_owned(),
+                folder: "/host".into(),
+                accessible: true,
+                uses: 0,
+                local: true,
+            },
+            SshMachine {
                 target: "busy-host".to_owned(),
                 folder: "/busy".into(),
                 accessible: true,
                 uses: 14,
+                local: false,
             },
             SshMachine {
                 target: "current-host".to_owned(),
                 folder: "/current".into(),
                 accessible: true,
                 uses: 3,
+                local: false,
             },
             SshMachine {
                 target: "offline-host".to_owned(),
                 folder: "/offline".into(),
                 accessible: false,
                 uses: 1,
+                local: false,
             },
         ],
     });
@@ -288,6 +298,8 @@ fn remote_project_picker_shows_the_host_and_ranked_machine_popup() {
         .unwrap();
     let rendered = terminal.backend().to_string();
     assert!(rendered.contains("Switch machine"));
+    assert!(rendered.contains("Pulkits-MacBook-Pro.local"));
+    assert!(rendered.contains("host"));
     assert!(rendered.contains("busy-host"));
     assert!(rendered.contains("used 14"));
     assert!(rendered.contains("current-host"));
