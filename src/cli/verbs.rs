@@ -62,6 +62,12 @@ pub(super) enum WorktreeVerb {
     List,
 }
 
+#[derive(Debug, Clone, Copy, Subcommand)]
+pub(super) enum ProjectVerb {
+    #[doc = " List recently opened projects and their worktrees"]
+    List,
+}
+
 #[derive(Debug, Subcommand)]
 pub(super) enum StashVerb {
     #[doc = " List stashes"]

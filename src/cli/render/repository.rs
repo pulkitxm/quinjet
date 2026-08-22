@@ -205,3 +205,23 @@ pub(crate) fn worktrees(worktrees: &[Worktree]) -> String {
     }
     out.finish()
 }
+
+pub(crate) fn projects(projects: &[ProjectGroup]) -> String {
+    let mut out = Report::default();
+    for project in projects {
+        out.line(&format!(
+            "{}  {}",
+            project.name,
+            project.common_dir.display()
+        ));
+        for worktree in &project.worktrees {
+            out.line(&format!(
+                "  {}  {:<16}  {}",
+                worktree.path.display(),
+                worktree.branch_label(),
+                worktree.short_head()
+            ));
+        }
+    }
+    out.finish()
+}

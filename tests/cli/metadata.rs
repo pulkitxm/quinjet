@@ -32,6 +32,7 @@ fn help_lists_every_group_verb() -> Result<()> {
         "branch",
         "stash",
         "worktree",
+        "project",
         "cherry-pick",
         "revert",
         "resolve",
@@ -44,6 +45,33 @@ fn help_lists_every_group_verb() -> Result<()> {
     ] {
         ensure!(run.stdout.contains(verb), "--help does not mention {verb}");
     }
+    Ok(())
+}
+
+#[test]
+fn project_list_reads_recent_projects_without_a_repository() -> Result<()> {
+    let repository = Scratch::repository()?;
+    let state = repository.environment.join("state/quinjet");
+    fs::create_dir_all(&state)?;
+    let entries = serde_json::json!([{
+        "path": repository.path,
+        "commonDir": repository.path.join(".git")
+    }]);
+    fs::write(
+        state.join("recent-projects.json"),
+        serde_json::to_vec(&entries)?,
+    )?;
+
+    let run = repository
+        .quinjet(&["project", "list", "--json"])?
+        .success()?;
+    let projects = run.json()?;
+
+    ensure!(projects.as_array().is_some_and(|items| items.len() == 1));
+    let listed = projects[0]["worktrees"][0]["path"]
+        .as_str()
+        .context("project worktree path was not a string")?;
+    ensure!(fs::canonicalize(listed)? == fs::canonicalize(&repository.path)?);
     Ok(())
 }
 

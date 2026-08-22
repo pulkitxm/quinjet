@@ -1,5 +1,6 @@
 use super::*;
 use crate::convert::cells;
+use crate::integration::{Client, HostAction};
 use crate::tabs::{RepositoryTabs, TabId};
 
 fn repository_tabs() -> (RepositoryTabs<()>, TabId, TabId, TabId) {
@@ -97,6 +98,27 @@ fn project_shortcuts_choose_current_or_new_tab_mode() {
         effects.as_slice(),
         [AppEffect::OpenRepositoryTab(path)] if path == Path::new("/target")
     ));
+}
+
+#[test]
+fn edith_client_delegates_project_shortcuts_without_opening_quinjet_modals() {
+    let now = Instant::now();
+    let mut app = App::new("/one", "one");
+    app.set_host_client(Some(Client::Edith));
+
+    let effects = app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE), now);
+    assert!(matches!(
+        effects.as_slice(),
+        [AppEffect::Host(HostAction::OpenWorktreeCurrentTab)]
+    ));
+    assert!(app.modal.is_none());
+
+    let effects = app.handle_key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT), now);
+    assert!(matches!(
+        effects.as_slice(),
+        [AppEffect::Host(HostAction::OpenProjectNewTab)]
+    ));
+    assert!(app.modal.is_none());
 }
 
 #[test]

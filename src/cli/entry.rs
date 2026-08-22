@@ -14,6 +14,7 @@ pub(crate) fn dispatch() -> Result<Launch> {
                 theme: ThemeName::default(),
                 appearance: AppearanceChoice::default(),
                 pull_request: cli.pull_request,
+                client: cli.client,
             })));
         }
         Some(Verb::Tui(args)) => {
@@ -24,6 +25,7 @@ pub(crate) fn dispatch() -> Result<Launch> {
                 theme: args.theme,
                 appearance: args.appearance,
                 pull_request: args.pull_request.or(cli.pull_request),
+                client: cli.client,
             })));
         }
         Some(Verb::Completions(args)) => {
@@ -31,6 +33,9 @@ pub(crate) fn dispatch() -> Result<Launch> {
         }
         Some(Verb::Man(args)) => return manual(&out, &args).map(Launch::Finished),
         Some(Verb::Capabilities) => return capabilities(&out).map(Launch::Finished),
+        Some(Verb::Project { command }) => {
+            return projects(&out, command).map(Launch::Finished);
+        }
         Some(Verb::Update(args)) => {
             out.start_progress("Checking for updates")?;
             let result = update::run(&out, args.check);
@@ -56,6 +61,16 @@ pub(crate) fn dispatch() -> Result<Launch> {
     })();
     out.finish_progress();
     result.map(Launch::Finished)
+}
+
+fn projects(out: &Emitter, command: ProjectVerb) -> Result<u8> {
+    match command {
+        ProjectVerb::List => {
+            let projects = crate::state::load_stored_projects();
+            out.emit(&projects, || render::projects(&projects))?;
+            Ok(0)
+        }
+    }
 }
 
 pub(super) fn completions(out: &Emitter, args: &CompletionsArgs) -> Result<u8> {

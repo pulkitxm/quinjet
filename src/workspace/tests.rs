@@ -19,6 +19,7 @@ fn workspace(repository: &Repository) -> RepositoryWorkspace {
         AppearanceChoice::Dark,
         false,
         false,
+        None,
     )
 }
 

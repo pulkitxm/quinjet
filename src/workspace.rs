@@ -4,6 +4,7 @@ use std::time::Instant;
 use crate::app::{App, AppEffect, ToastLevel};
 use crate::git::Repository;
 use crate::git::worker::{GitWorker, WorkerCommand};
+use crate::integration::Client;
 use crate::tabs::{RepositoryTabs, TabId};
 use crate::theme::{AppearanceChoice, ThemeName};
 use crate::watch::RepoWatcher;
@@ -26,6 +27,7 @@ impl RepositoryRuntime {
         appearance: AppearanceChoice,
         mouse: bool,
         webhooks_listening: bool,
+        host_client: Option<Client>,
     ) -> Self {
         let common_dir = repository.git_common_dir().ok();
         let worker = GitWorker::start(repository.clone());
@@ -34,6 +36,7 @@ impl RepositoryRuntime {
         app.set_theme_selection(theme, appearance);
         app.configure_mouse_capture(mouse);
         app.webhooks_listening = webhooks_listening;
+        app.set_host_client(host_client);
         Self {
             app,
             worker,
@@ -53,11 +56,18 @@ impl RepositoryWorkspace {
         appearance: AppearanceChoice,
         mouse: bool,
         webhooks_listening: bool,
+        host_client: Option<Client>,
     ) -> Self {
         let title = repository.name();
         let root = repository.root().to_path_buf();
-        let runtime =
-            RepositoryRuntime::new(repository, theme, appearance, mouse, webhooks_listening);
+        let runtime = RepositoryRuntime::new(
+            repository,
+            theme,
+            appearance,
+            mouse,
+            webhooks_listening,
+            host_client,
+        );
         Self {
             tabs: RepositoryTabs::new(title, root, runtime),
         }
@@ -204,10 +214,17 @@ impl RepositoryWorkspace {
         let appearance = source_runtime.app.appearance_choice;
         let mouse = source_runtime.app.mouse_capture_preference;
         let webhooks_listening = source_runtime.app.webhooks_listening;
+        let host_client = source_runtime.app.host_client;
         let title = repository.name();
         let root = repository.root().to_path_buf();
-        let runtime =
-            RepositoryRuntime::new(repository, theme, appearance, mouse, webhooks_listening);
+        let runtime = RepositoryRuntime::new(
+            repository,
+            theme,
+            appearance,
+            mouse,
+            webhooks_listening,
+            host_client,
+        );
         drop(self.tabs.replace(source, title, root, runtime));
         self.sync_tabs(now);
         let effects = self.app_mut(source)?.initial_effects();
@@ -228,10 +245,17 @@ impl RepositoryWorkspace {
         let appearance = source.app.appearance_choice;
         let mouse = source.app.mouse_capture_preference;
         let webhooks_listening = source.app.webhooks_listening;
+        let host_client = source.app.host_client;
         let title = repository.name();
         let root = repository.root().to_path_buf();
-        let runtime =
-            RepositoryRuntime::new(repository, theme, appearance, mouse, webhooks_listening);
+        let runtime = RepositoryRuntime::new(
+            repository,
+            theme,
+            appearance,
+            mouse,
+            webhooks_listening,
+            host_client,
+        );
         let id = self.tabs.append(title, root, runtime);
         self.sync_tabs(now);
         let effects = self.app_mut(id)?.initial_effects();
