@@ -67,6 +67,14 @@ pub(crate) fn load_recent_ssh_machines(current: &str, folder: &Path) -> Vec<SshM
         });
     }
     machines.sort_by_key(|machine| std::cmp::Reverse(machine.uses));
+    if let Some(current_index) = machines
+        .iter()
+        .position(|machine| machine.target == current)
+        .filter(|index| *index >= MAX_SSH_MACHINES)
+    {
+        let current_machine = machines.remove(current_index);
+        machines.insert(MAX_SSH_MACHINES.saturating_sub(1), current_machine);
+    }
     machines.truncate(MAX_SSH_MACHINES);
     machines
 }
@@ -174,5 +182,25 @@ mod tests {
         assert_eq!(machines[1].uses, 1);
         assert_eq!(machines[2].target, "new");
         assert_eq!(machines[2].uses, 0);
+    }
+
+    #[test]
+    fn current_machine_remains_visible_at_the_limit() {
+        let state = tempfile::tempdir().unwrap();
+        let _guard = StateRootGuard::new(state.path());
+        for index in 0..MAX_SSH_MACHINES {
+            record_recent_remote(&format!("host-{index}"), Path::new("/repo"));
+        }
+        let machines = load_recent_ssh_machines("new-current", Path::new("/current"));
+        assert_eq!(machines.len(), MAX_SSH_MACHINES);
+        assert!(
+            machines
+                .iter()
+                .any(|machine| machine.target == "new-current")
+        );
+        assert_eq!(
+            machines.last().map(|machine| machine.target.as_str()),
+            Some("new-current")
+        );
     }
 }
