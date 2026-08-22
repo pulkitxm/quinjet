@@ -115,3 +115,62 @@ fn local_status(
         .status()
         .context("failed to return to the local Quinjet session")
 }
+
+pub(super) fn remote_command(
+    binary: &str,
+    arguments: &[OsString],
+    context: Option<&SshContext>,
+    inherited_terminal: bool,
+    project_mode: Option<SshProjectOpenMode>,
+) -> Result<String> {
+    let mut command = super::quote(binary)?;
+    for argument in arguments {
+        command.push(' ');
+        command.push_str(&super::quote(&argument.to_string_lossy())?);
+    }
+    if let Some(context) = context {
+        let serialized = serde_json::to_string(context)?;
+        command = format!(
+            "QUINJET_SSH_CONTEXT={} {command}",
+            super::quote(&serialized)?
+        );
+    }
+    if inherited_terminal {
+        let mode = project_mode.unwrap_or(SshProjectOpenMode::CurrentTab);
+        command = format!(
+            "{}=1 {}={} {command}",
+            crate::terminal::INHERITED_TERMINAL_ENV,
+            crate::ssh::OPEN_PROJECTS_ENV,
+            mode.environment_value()
+        );
+    }
+    Ok(command)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remote_command_quotes_every_argument() {
+        let command = remote_command(
+            "quinjet test",
+            &[OsString::from("--path"), OsString::from("a'b c")],
+            None,
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(command, "'quinjet test' --path \"a'b c\"");
+    }
+
+    #[test]
+    fn switched_terminal_inherits_the_existing_alternate_screen() {
+        let command =
+            remote_command("quinjet", &[], None, true, Some(SshProjectOpenMode::NewTab)).unwrap();
+        assert_eq!(
+            command,
+            "QUINJET_INHERITED_TERMINAL=1 QUINJET_OPEN_PROJECTS=new-tab quinjet"
+        );
+    }
+}

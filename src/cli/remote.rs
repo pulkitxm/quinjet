@@ -66,7 +66,7 @@ fn ssh_status(
     context: Option<&SshContext>,
     terminal: TerminalRelay,
 ) -> Result<std::process::ExitStatus> {
-    let command = remote_command(
+    let command = terminal::remote_command(
         binary,
         arguments,
         context,
@@ -380,34 +380,6 @@ fn switched_terminal_arguments(
     Ok(terminal)
 }
 
-fn remote_command(
-    binary: &str,
-    arguments: &[OsString],
-    context: Option<&SshContext>,
-    inherited_terminal: bool,
-    project_mode: Option<SshProjectOpenMode>,
-) -> Result<String> {
-    let mut command = quote(binary)?;
-    for argument in arguments {
-        command.push(' ');
-        command.push_str(&quote(&argument.to_string_lossy())?);
-    }
-    if let Some(context) = context {
-        let serialized = serde_json::to_string(context)?;
-        command = format!("QUINJET_SSH_CONTEXT={} {command}", quote(&serialized)?);
-    }
-    if inherited_terminal {
-        let mode = project_mode.unwrap_or(SshProjectOpenMode::CurrentTab);
-        command = format!(
-            "{}=1 {}={} {command}",
-            crate::terminal::INHERITED_TERMINAL_ENV,
-            crate::ssh::OPEN_PROJECTS_ENV,
-            mode.environment_value()
-        );
-    }
-    Ok(command)
-}
-
 fn quote(value: &str) -> Result<String> {
     shlex::try_quote(value)
         .map(std::borrow::Cow::into_owned)
@@ -434,29 +406,6 @@ mod tests {
             ["--path", "/repos/a project", "status", "--json"]
                 .map(OsString::from)
                 .to_vec()
-        );
-    }
-
-    #[test]
-    fn remote_command_quotes_every_argument() {
-        let command = remote_command(
-            "quinjet test",
-            &[OsString::from("--path"), OsString::from("a'b c")],
-            None,
-            false,
-            None,
-        )
-        .unwrap();
-        assert_eq!(command, "'quinjet test' --path \"a'b c\"");
-    }
-
-    #[test]
-    fn switched_terminal_inherits_the_existing_alternate_screen() {
-        let command =
-            remote_command("quinjet", &[], None, true, Some(SshProjectOpenMode::NewTab)).unwrap();
-        assert_eq!(
-            command,
-            "QUINJET_INHERITED_TERMINAL=1 QUINJET_OPEN_PROJECTS=new-tab quinjet"
         );
     }
 
