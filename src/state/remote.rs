@@ -111,6 +111,6 @@ mod tests {
         forget_recent_remote("first", Some("/one"));
         assert_eq!(load_recent_remotes().len(), 1);
         forget_recent_remote("second", None);
-        assert!(load_recent_remotes().is_empty());
+        assert_eq!(load_recent_remotes(), Vec::new());
     }
 }
