@@ -244,6 +244,7 @@ impl Onboarding {
                     &self.collapsed,
                     false,
                     ProjectOpenMode::Initial,
+                    None,
                     theme,
                 );
             }

@@ -33,6 +33,22 @@ impl App {
                     self.modal = Some(modal);
                     return effects;
                 }
+                if key.code == KeyCode::Tab
+                    && let Some(context) = self.ssh_context.as_ref()
+                {
+                    let selected = context
+                        .machines
+                        .iter()
+                        .position(|machine| machine.target == context.current)
+                        .unwrap_or_default();
+                    self.modal = Some(Modal::SshMachines {
+                        items: context.machines.clone(),
+                        selected,
+                        current: context.current.clone(),
+                        parent: Box::new(modal.clone()),
+                    });
+                    return effects;
+                }
                 let visible = Self::filtered_project_rows(groups, &query.value, collapsed);
                 let selected_tree = visible
                     .get(*selected)
@@ -77,6 +93,36 @@ impl App {
                         edit_text(query, key, false);
                         *selected = 0;
                     }
+                }
+                self.modal = Some(modal);
+            }
+            Modal::SshMachines {
+                items,
+                selected,
+                current,
+                parent,
+            } => {
+                match key.code {
+                    KeyCode::Esc => {
+                        self.modal = Some(*parent.clone());
+                        return effects;
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        *selected = previous_list_index(*selected, items.len());
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        *selected = next_list_index(*selected, items.len());
+                    }
+                    KeyCode::Enter => {
+                        if let Some(machine) = items.get(*selected)
+                            && machine.accessible
+                            && machine.target != *current
+                        {
+                            effects.push(AppEffect::SwitchSshMachine(*selected));
+                            return effects;
+                        }
+                    }
+                    _ => {}
                 }
                 self.modal = Some(modal);
             }

@@ -5,6 +5,7 @@ mod date_time;
 mod file_icons;
 mod git;
 mod onboarding;
+mod ssh;
 mod state;
 mod state_sorting;
 mod tabs;
@@ -49,7 +50,9 @@ use crate::workspace::{RepositoryWorkspace, RoutedEffects};
 fn main() -> ExitCode {
     match cli::dispatch() {
         Ok(Launch::Terminal(options)) => match open_terminal(&options) {
-            Ok(()) => ExitCode::SUCCESS,
+            Ok(TerminalOutcome::Finished) => ExitCode::SUCCESS,
+            Ok(TerminalOutcome::SwitchSshMachine(index)) => ssh::switch_exit_code(index)
+                .map_or_else(|| ExitCode::from(cli::EXIT_FAILURE), ExitCode::from),
             Err(error) => ExitCode::from(cli::report(&error)),
         },
         Ok(Launch::Finished(code)) => ExitCode::from(code),
@@ -96,11 +99,16 @@ fn install_panic_hook() {
     }));
 }
 
+enum TerminalOutcome {
+    Finished,
+    SwitchSshMachine(usize),
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "the terminal loop routes both onboarding and repository sessions"
 )]
-fn open_terminal(options: &TerminalOptions) -> Result<()> {
+fn open_terminal(options: &TerminalOptions) -> Result<TerminalOutcome> {
     if !io::stdin().is_terminal() || !cli::stdout_is_terminal() {
         anyhow::bail!("Quinjet requires an interactive terminal");
     }
@@ -134,9 +142,15 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
     let periodic_refresh = tick(Duration::from_secs(10));
     let mut dirty = true;
     let mut running = true;
+    let mut switch_ssh_machine = None;
 
     if let Some(current) = workspace.as_mut() {
-        running &= dispatch_launch_effects(current, &mut terminal, options.pull_request);
+        running &= dispatch_launch_effects(
+            current,
+            &mut terminal,
+            options.pull_request,
+            &mut switch_ssh_machine,
+        );
     }
     while running {
         if dirty {
@@ -161,30 +175,43 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
         if let Some(current) = workspace.as_mut() {
             let worker_effects = current.drain_worker_events(Instant::now());
             if !worker_effects.is_empty() {
-                running &= dispatch_effects(current, &mut terminal, worker_effects);
+                running &= dispatch_effects(
+                    current,
+                    &mut terminal,
+                    worker_effects,
+                    &mut switch_ssh_machine,
+                );
                 dirty = true;
             }
 
             let watcher_effects = current.poll_watchers();
             if !watcher_effects.is_empty() {
-                running &= dispatch_effects(current, &mut terminal, watcher_effects);
+                running &= dispatch_effects(
+                    current,
+                    &mut terminal,
+                    watcher_effects,
+                    &mut switch_ssh_machine,
+                );
                 dirty = true;
             }
 
             if webhook_delivered(webhooks.as_ref()) {
                 let effects = current.webhook_delivered(Instant::now());
-                running &= dispatch_effects(current, &mut terminal, effects);
+                running &=
+                    dispatch_effects(current, &mut terminal, effects, &mut switch_ssh_machine);
                 dirty = true;
             }
 
             if render_tick.try_recv().is_ok() {
                 let (effects, changed) = current.tick(Instant::now());
-                running &= dispatch_effects(current, &mut terminal, effects);
+                running &=
+                    dispatch_effects(current, &mut terminal, effects, &mut switch_ssh_machine);
                 dirty |= changed;
             }
             if periodic_refresh.try_recv().is_ok() {
                 let effects = current.periodic_refresh();
-                running &= dispatch_effects(current, &mut terminal, effects);
+                running &=
+                    dispatch_effects(current, &mut terminal, effects, &mut switch_ssh_machine);
                 dirty = true;
             }
         }
@@ -213,8 +240,12 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
                     _ => Vec::new(),
                 };
                 current.propagate_preferences(id);
-                running &=
-                    dispatch_effects(current, &mut terminal, [RoutedEffects { id, effects }]);
+                running &= dispatch_effects(
+                    current,
+                    &mut terminal,
+                    [RoutedEffects { id, effects }],
+                    &mut switch_ssh_machine,
+                );
             } else {
                 let action = match event {
                     Event::Key(key) if key.kind != KeyEventKind::Release => {
@@ -248,6 +279,7 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
                                 &mut next,
                                 &mut terminal,
                                 options.pull_request,
+                                &mut switch_ssh_machine,
                             );
                             workspace = Some(next);
                         }
@@ -259,22 +291,23 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
         }
     }
 
-    Ok(())
+    Ok(switch_ssh_machine.map_or(TerminalOutcome::Finished, TerminalOutcome::SwitchSshMachine))
 }
 
 fn dispatch_launch_effects(
     workspace: &mut RepositoryWorkspace,
     terminal: &mut TerminalGuard,
     pull_request: Option<u64>,
+    switch_ssh_machine: &mut Option<usize>,
 ) -> bool {
     let mut running = true;
     if let Some(effects) = workspace.initial_effects() {
-        running &= dispatch_effects(workspace, terminal, [effects]);
+        running &= dispatch_effects(workspace, terminal, [effects], switch_ssh_machine);
     }
     if let Some(number) = pull_request
         && let Some(effects) = workspace.open_pull_request_on_launch(number)
     {
-        running &= dispatch_effects(workspace, terminal, [effects]);
+        running &= dispatch_effects(workspace, terminal, [effects], switch_ssh_machine);
     }
     running
 }
@@ -296,6 +329,7 @@ fn dispatch_effects(
     workspace: &mut RepositoryWorkspace,
     terminal: &mut TerminalGuard,
     routed: impl IntoIterator<Item = RoutedEffects>,
+    switch_ssh_machine: &mut Option<usize>,
 ) -> bool {
     let mut running = true;
     let mut pending = routed.into_iter().collect::<VecDeque<_>>();
@@ -318,6 +352,10 @@ fn dispatch_effects(
                     {
                         pending.push_back(effects);
                     }
+                }
+                AppEffect::SwitchSshMachine(index) => {
+                    *switch_ssh_machine = Some(index);
+                    running = false;
                 }
                 AppEffect::ActivateRepositoryTab(target) => {
                     workspace.activate(target, Instant::now());

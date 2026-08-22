@@ -211,3 +211,59 @@ fn new_tab_picker_names_its_destination() {
         .collect::<String>();
     assert!(rendered.contains("Open in new tab"));
 }
+
+#[test]
+fn remote_project_picker_shows_the_host_and_ranked_machine_popup() {
+    let mut app = App::new("/repo", "project");
+    app.ssh_context = Some(SshContext {
+        current: "current-host".to_owned(),
+        machines: vec![
+            SshMachine {
+                target: "busy-host".to_owned(),
+                folder: "/busy".into(),
+                accessible: true,
+                uses: 14,
+            },
+            SshMachine {
+                target: "current-host".to_owned(),
+                folder: "/current".into(),
+                accessible: true,
+                uses: 3,
+            },
+            SshMachine {
+                target: "offline-host".to_owned(),
+                folder: "/offline".into(),
+                accessible: false,
+                uses: 1,
+            },
+        ],
+    });
+    drop(app.handle_key(
+        KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT),
+        Instant::now(),
+    ));
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+    let rendered = terminal.backend().to_string();
+    assert!(rendered.contains("SSH  current-host"));
+    assert!(rendered.contains("Tab switch machine"));
+
+    drop(app.handle_key(
+        KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+        Instant::now(),
+    ));
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+    let rendered = terminal.backend().to_string();
+    assert!(rendered.contains("Switch SSH machine"));
+    assert!(rendered.contains("busy-host"));
+    assert!(rendered.contains("used 14"));
+    assert!(rendered.contains("current-host"));
+    assert!(rendered.contains("current"));
+    assert!(rendered.contains("offline-host"));
+    assert!(rendered.contains("unavailable"));
+    assert!(rendered.find("busy-host") < rendered.find("current-host"));
+}

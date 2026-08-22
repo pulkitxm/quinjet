@@ -18,6 +18,7 @@ pub(crate) fn draw_projects(
     collapsed: &HashSet<std::path::PathBuf>,
     loading: bool,
     mode: ProjectOpenMode,
+    ssh: Option<&SshContext>,
     theme: &Theme,
 ) {
     let height = frame.area().height.saturating_sub(6).min(28);
@@ -55,11 +56,30 @@ pub(crate) fn draw_projects(
         query,
         false,
     );
+    let machine_rows = u16::from(ssh.is_some());
+    if let Some(context) = ssh {
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(" SSH  ", Style::default().fg(theme.muted)),
+                Span::styled(
+                    context.current.as_str(),
+                    Style::default()
+                        .fg(theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("   Tab switch machine", Style::default().fg(theme.muted)),
+            ]))
+            .style(Style::default().bg(theme.panel)),
+            Rect::new(inner.x, inner.y + 2, inner.width, 1),
+        );
+    }
     let list_area = Rect::new(
         inner.x,
-        inner.y + 2,
+        inner.y + 2 + machine_rows.saturating_mul(2),
         inner.width,
-        inner.height.saturating_sub(5),
+        inner
+            .height
+            .saturating_sub(5 + machine_rows.saturating_mul(2)),
     );
     if loading {
         frame.render_widget(
@@ -149,6 +169,12 @@ pub(crate) fn draw_projects(
     }
     let hint = match mode {
         ProjectOpenMode::Initial => "Enter open   Ctrl+E collapse all   Ctrl+O path   Esc quit",
+        ProjectOpenMode::CurrentTab if ssh.is_some() => {
+            "Enter switch tab   Ctrl+E collapse all   Tab machines   Delete forget project   Esc close"
+        }
+        ProjectOpenMode::NewTab if ssh.is_some() => {
+            "Enter open in new tab   Ctrl+E collapse all   Tab machines   Delete forget project   Esc close"
+        }
         ProjectOpenMode::CurrentTab => {
             "Enter switch tab   Ctrl+E collapse all   Delete forget project   Esc close"
         }
@@ -157,6 +183,75 @@ pub(crate) fn draw_projects(
         }
     };
     draw_modal_hint(frame, area, hint, theme);
+}
+
+pub(crate) fn draw_ssh_machines(
+    frame: &mut Frame<'_>,
+    items: &[SshMachine],
+    selected: usize,
+    current: &str,
+    theme: &Theme,
+) {
+    let height = cells(items.len()).saturating_add(4).max(7);
+    let area = centered_rect(
+        frame.area().width.saturating_sub(18).min(72),
+        height.min(frame.area().height.saturating_sub(10)),
+        frame.area(),
+    );
+    frame.render_widget(Clear, area);
+    let block = modal_block(" Switch SSH machine ", theme);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let list_area = Rect::new(
+        inner.x,
+        inner.y,
+        inner.width,
+        inner.height.saturating_sub(2),
+    );
+    let offset = selected.saturating_sub(list_area.height.saturating_sub(1) as usize);
+    let lines = items
+        .iter()
+        .skip(offset)
+        .take(list_area.height as usize)
+        .enumerate()
+        .map(|(visible_index, machine)| {
+            let active = offset.saturating_add(visible_index) == selected;
+            let background = if active { theme.selected } else { theme.panel };
+            let current_marker = if machine.target == current {
+                "  current"
+            } else {
+                ""
+            };
+            let (glyph, color, status) = if machine.accessible {
+                ("●", theme.success, "reachable")
+            } else {
+                ("●", theme.error, "unavailable")
+            };
+            Line::from(vec![
+                Span::styled(
+                    format!(" {glyph} "),
+                    Style::default().fg(color).bg(background),
+                ),
+                Span::styled(
+                    format!("{:<20}", machine.target),
+                    Style::default()
+                        .fg(theme.text)
+                        .bg(background)
+                        .add_modifier(if active {
+                            Modifier::BOLD
+                        } else {
+                            Modifier::empty()
+                        }),
+                ),
+                Span::styled(
+                    format!("  {status:<11}  used {}{current_marker}", machine.uses),
+                    Style::default().fg(theme.muted).bg(background),
+                ),
+            ])
+        })
+        .collect::<Vec<_>>();
+    frame.render_widget(Paragraph::new(lines), list_area);
+    draw_modal_hint(frame, area, "Enter switch   Esc projects", theme);
 }
 
 pub(super) fn draw_pull_request_repositories(

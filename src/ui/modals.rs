@@ -115,8 +115,15 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
             collapsed,
             *loading,
             *mode,
+            app.ssh_context.as_ref(),
             theme,
         ),
+        Some(Modal::SshMachines {
+            items,
+            selected,
+            current,
+            ..
+        }) => draw_ssh_machines(frame, items, *selected, current, theme),
         Some(Modal::PullRequestRepositories {
             items,
             selected,

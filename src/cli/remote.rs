@@ -19,12 +19,61 @@ pub(super) fn run(
 ) -> Result<u8> {
     validate_target(target)?;
     let binary = env::var(REMOTE_BINARY_ENV).unwrap_or_else(|_| "quinjet".to_owned());
-    let arguments = if implicit_terminal {
-        implicit_terminal_arguments(wild::args_os().skip(1), folder)?
-    } else {
-        forwarded_arguments(wild::args_os().skip(1))?
-    };
-    let command = remote_command(&binary, &arguments)?;
+    let original_arguments = wild::args_os().skip(1).collect::<Vec<_>>();
+    if !terminal {
+        let arguments = forwarded_arguments(original_arguments)?;
+        return run_once(target, folder, &binary, &arguments, None);
+    }
+    let mut current_target = target.to_owned();
+    let mut current_folder = folder.to_path_buf();
+    let mut switched = false;
+    loop {
+        let arguments = if implicit_terminal || switched {
+            switched_terminal_arguments(original_arguments.clone(), &current_folder)?
+        } else {
+            forwarded_arguments(original_arguments.clone())?
+        };
+        let context = ssh_context(&current_target, &current_folder);
+        let status = ssh_status(&current_target, &binary, &arguments, Some(&context), true)?;
+        let code = status.code().unwrap_or_else(|| i32::from(EXIT_FAILURE));
+        if let Some(index) = crate::ssh::switch_index(code)
+            && let Some(machine) = context.machines.get(index)
+        {
+            crate::state::record_recent_remote(&current_target, &current_folder);
+            current_target.clone_from(&machine.target);
+            current_folder.clone_from(&machine.folder);
+            switched = true;
+            continue;
+        }
+        if status.success() {
+            crate::state::record_recent_remote(&current_target, &current_folder);
+        }
+        return Ok(exit_code(status));
+    }
+}
+
+fn run_once(
+    target: &str,
+    folder: &Path,
+    binary: &str,
+    arguments: &[OsString],
+    context: Option<&crate::ssh::SshContext>,
+) -> Result<u8> {
+    let status = ssh_status(target, binary, arguments, context, false)?;
+    if status.success() {
+        crate::state::record_recent_remote(target, folder);
+    }
+    Ok(exit_code(status))
+}
+
+fn ssh_status(
+    target: &str,
+    binary: &str,
+    arguments: &[OsString],
+    context: Option<&crate::ssh::SshContext>,
+    terminal: bool,
+) -> Result<std::process::ExitStatus> {
+    let command = remote_command(binary, arguments, context)?;
     let mut ssh = Command::new("ssh");
     let ssh = if terminal && io::stdin().is_terminal() && io::stdout().is_terminal() {
         ssh.arg("-tt")
@@ -37,14 +86,47 @@ pub(super) fn run(
         .arg(command)
         .status()
         .with_context(|| format!("failed to start ssh for {target}"))?;
-    if status.success() {
-        crate::state::record_recent_remote(target, folder);
-    }
-    Ok(match status.code() {
+    Ok(status)
+}
+
+fn exit_code(status: std::process::ExitStatus) -> u8 {
+    match status.code() {
         Some(255) => EXIT_UNAVAILABLE,
         Some(code) => u8::try_from(code).unwrap_or(EXIT_FAILURE),
         None => EXIT_FAILURE,
-    })
+    }
+}
+
+fn ssh_context(target: &str, folder: &Path) -> crate::ssh::SshContext {
+    let mut machines = crate::state::load_recent_ssh_machines(target, folder);
+    let targets = machines
+        .iter()
+        .map(|machine| machine.target.clone())
+        .collect::<Vec<_>>();
+    let accessible = thread::scope(|scope| {
+        #[expect(
+            clippy::needless_collect,
+            reason = "every reachability probe must start before any join can block"
+        )]
+        let checks = targets
+            .iter()
+            .map(|candidate| {
+                let current = candidate == target;
+                scope.spawn(move || current || probe(candidate))
+            })
+            .collect::<Vec<_>>();
+        checks
+            .into_iter()
+            .map(|check| check.join().is_ok_and(|reachable| reachable))
+            .collect::<Vec<_>>()
+    });
+    for (machine, reachable) in machines.iter_mut().zip(accessible) {
+        machine.accessible = reachable;
+    }
+    crate::ssh::SshContext {
+        current: target.to_owned(),
+        machines,
+    }
 }
 
 pub(super) fn manage(out: &Emitter, command: RemoteVerb) -> Result<u8> {
@@ -220,13 +302,48 @@ fn implicit_terminal_arguments(
     Ok(terminal)
 }
 
-fn remote_command(binary: &str, arguments: &[OsString]) -> Result<String> {
+fn switched_terminal_arguments(
+    arguments: impl IntoIterator<Item = OsString>,
+    folder: &Path,
+) -> Result<Vec<OsString>> {
+    let forwarded = forwarded_arguments(arguments)?;
+    let Some(tui) = forwarded
+        .iter()
+        .position(|argument| argument == OsStr::new("tui"))
+    else {
+        return implicit_terminal_arguments(forwarded, folder);
+    };
+    let mut terminal = vec![OsString::from("tui"), folder.as_os_str().to_os_string()];
+    let mut trailing = forwarded.into_iter().skip(tui.saturating_add(1));
+    if let Some(argument) = trailing.next()
+        && argument
+            .to_str()
+            .is_some_and(|value| value.starts_with('-'))
+    {
+        terminal.push(argument);
+    }
+    terminal.extend(trailing);
+    Ok(terminal)
+}
+
+fn remote_command(
+    binary: &str,
+    arguments: &[OsString],
+    context: Option<&crate::ssh::SshContext>,
+) -> Result<String> {
     let mut command = quote(binary)?;
     for argument in arguments {
         command.push(' ');
         command.push_str(&quote(&argument.to_string_lossy())?);
     }
-    Ok(command)
+    let Some(context) = context else {
+        return Ok(command);
+    };
+    let serialized = serde_json::to_string(context)?;
+    Ok(format!(
+        "QUINJET_SSH_CONTEXT={} {command}",
+        quote(&serialized)?
+    ))
 }
 
 fn quote(value: &str) -> Result<String> {
@@ -263,6 +380,7 @@ mod tests {
         let command = remote_command(
             "quinjet test",
             &[OsString::from("--path"), OsString::from("a'b c")],
+            None,
         )
         .unwrap();
         assert_eq!(command, "'quinjet test' --path \"a'b c\"");
@@ -276,6 +394,26 @@ mod tests {
         assert_eq!(
             implicit_terminal_arguments(arguments, Path::new("/repos/a project")).unwrap(),
             ["tui", "/repos/a project"].map(OsString::from).to_vec()
+        );
+    }
+
+    #[test]
+    fn switched_terminal_replaces_the_repository_and_preserves_options() {
+        let arguments = [
+            "--remote",
+            "host",
+            "tui",
+            "/old/repository",
+            "--theme",
+            "quinjet",
+        ]
+        .into_iter()
+        .map(OsString::from);
+        assert_eq!(
+            switched_terminal_arguments(arguments, Path::new("/new/repository")).unwrap(),
+            ["tui", "/new/repository", "--theme", "quinjet"]
+                .map(OsString::from)
+                .to_vec()
         );
     }
 
