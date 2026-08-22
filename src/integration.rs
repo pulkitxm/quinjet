@@ -1,10 +1,25 @@
 use clap::ValueEnum;
+use std::ffi::{OsStr, OsString};
 
 pub(crate) const HOST_OSC_CODE: u16 = 6973;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub(crate) enum Client {
     Edith,
+}
+
+pub(crate) fn requests_edith_client(args: impl IntoIterator<Item = OsString>) -> bool {
+    let mut args = args.into_iter();
+    while let Some(argument) = args.next() {
+        if argument == OsStr::new("--client=edith") {
+            return true;
+        }
+        if argument == OsStr::new("--client") && args.next().as_deref() == Some(OsStr::new("edith"))
+        {
+            return true;
+        }
+    }
+    false
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,5 +55,23 @@ mod tests {
             HostAction::OpenWorktreeCurrentTab.sequence(),
             "\u{1b}]6973;quinjet;open-worktree\u{1b}\\"
         );
+    }
+
+    #[test]
+    fn edith_client_detection_accepts_both_clap_spellings() {
+        for arguments in [
+            vec![OsString::from("quinjet"), OsString::from("--client=edith")],
+            vec![
+                OsString::from("quinjet"),
+                OsString::from("--client"),
+                OsString::from("edith"),
+            ],
+        ] {
+            assert!(requests_edith_client(arguments));
+        }
+        assert!(!requests_edith_client([
+            OsString::from("quinjet"),
+            OsString::from("--version"),
+        ]));
     }
 }

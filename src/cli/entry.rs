@@ -2,10 +2,10 @@
 use super::*;
 
 pub(crate) fn dispatch() -> Result<Launch> {
-    let cli = Cli::parse();
-    if cli.client.is_none() {
+    if !crate::integration::requests_edith_client(std::env::args_os()) {
         completion::auto_install();
     }
+    let cli = Cli::parse();
     let mut out = Emitter::new(cli.json);
     let verb = match cli.command {
         None => {
