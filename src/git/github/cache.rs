@@ -223,6 +223,7 @@ pub(super) fn cached_pull_request_at(path: &Path) -> Option<RecentPullRequest> {
     Some(RecentPullRequest {
         number,
         title: bounded_text(fields.get(2)?, MAX_PULL_REQUEST_TITLE_BYTES),
+        updated_at: fields.get(7)?.to_owned(),
         repository,
     })
 }

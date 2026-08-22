@@ -20,7 +20,7 @@ use crate::app::{
     View,
 };
 use crate::convert::cells;
-use crate::date_time::format_local_timestamp;
+use crate::date_time::{format_relative_timestamp, relative_time_generation};
 use crate::file_icons;
 #[cfg(test)]
 use crate::git::diff::PullRequestDetails;

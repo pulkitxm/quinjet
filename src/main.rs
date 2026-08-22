@@ -129,6 +129,7 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
     let onboarding_theme = theme::Theme::new(options.theme, options.appearance.resolve());
     let mut terminal = TerminalGuard::enter(!options.no_mouse)?;
     let render_tick = tick(Duration::from_millis(16));
+    let relative_time_tick = tick(Duration::from_secs(1));
     let periodic_refresh = tick(Duration::from_secs(10));
     let mut dirty = true;
     let mut running = true;
@@ -179,6 +180,9 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
                 let (effects, changed) = current.tick(Instant::now());
                 running &= dispatch_effects(current, &mut terminal, effects);
                 dirty |= changed;
+            }
+            if relative_time_tick.try_recv().is_ok() {
+                dirty = true;
             }
             if periodic_refresh.try_recv().is_ok() {
                 let effects = current.periodic_refresh();

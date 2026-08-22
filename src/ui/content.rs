@@ -311,7 +311,7 @@ pub(super) fn draw_commit_details_scrolled(
                 "{} <{}>  ·  {}",
                 details.author,
                 details.author_email,
-                format_local_timestamp(&details.authored_at)
+                format_relative_timestamp(&details.authored_at)
             ),
             theme,
         ),
@@ -321,7 +321,7 @@ pub(super) fn draw_commit_details_scrolled(
                 "{} <{}>  ·  {}",
                 details.committer,
                 details.committer_email,
-                format_local_timestamp(&details.committed_at)
+                format_relative_timestamp(&details.committed_at)
             ),
             theme,
         ),
