@@ -117,6 +117,7 @@ impl TerminalGuard {
 
     pub(crate) fn enter(mouse: bool) -> Result<Self> {
         if std::env::var_os(INHERITED_TERMINAL_ENV).is_some() {
+            enable_raw_mode().context("failed to inherit terminal raw mode")?;
             TERMINAL_ENTERED.store(true, Ordering::SeqCst);
             KEYBOARD_ENHANCED.store(true, Ordering::SeqCst);
             let backend = CrosstermBackend::new(io::stdout());
