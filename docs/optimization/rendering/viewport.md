@@ -1998,10 +1998,3 @@ Use this matrix during performance reviews. Each row combines a cost lens, repos
 | 34 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record steady frame cost |
 | 35 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record bytes accepted from child output |
 | 36 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record Git and gh process count |
-| 37 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record maximum retained document bytes |
-| 38 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record cache disposition and complete key |
-| 39 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record stale reply rejection |
-| 40 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record visible state after failure |
-| 41 | Check latency for Viewport rendering and terminal frame economics in rapid keyboard navigation | Record time to first useful rows |
-| 42 | Check latency for Viewport rendering and terminal frame economics in rapid keyboard navigation | Record steady frame cost |
-| 43 | Check latency for Viewport rendering and terminal frame economics in rapid keyboard navigation | Record bytes accepted from child output |
