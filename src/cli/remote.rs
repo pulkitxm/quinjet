@@ -8,6 +8,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 
 use super::{EXIT_FAILURE, EXIT_UNAVAILABLE, Emitter, RemoteVerb};
+use crate::ssh::SshContext;
 
 const REMOTE_BINARY_ENV: &str = "QUINJET_REMOTE_BINARY";
 
@@ -29,16 +30,14 @@ pub(super) fn run(
         folder,
         &binary,
         &original_arguments,
-        implicit_terminal,
-        false,
-        None,
+        (implicit_terminal, false, None),
     )
 }
 
 pub(crate) fn run_selected_terminal(
     target: &str,
     folder: &Path,
-    context: crate::ssh::SshContext,
+    context: SshContext,
 ) -> Result<u8> {
     validate_target(target)?;
     let binary = env::var(REMOTE_BINARY_ENV).unwrap_or_else(|_| "quinjet".to_owned());
@@ -48,27 +47,19 @@ pub(crate) fn run_selected_terminal(
         folder,
         &binary,
         &original_arguments,
-        false,
-        true,
-        Some(context),
+        (false, true, Some(context)),
     )
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "terminal handoff keeps transport arguments and live machine context together"
-)]
 fn run_terminal_loop(
     target: &str,
     folder: &Path,
     binary: &str,
     original_arguments: &[OsString],
-    implicit_terminal: bool,
-    mut switched: bool,
-    context: Option<crate::ssh::SshContext>,
+    handoff: (bool, bool, Option<SshContext>),
 ) -> Result<u8> {
-    let mut current_target = target.to_owned();
-    let mut current_folder = folder.to_path_buf();
+    let (implicit_terminal, mut switched, context) = handoff;
+    let (mut current_target, mut current_folder) = (target.to_owned(), folder.to_path_buf());
     let mut context = context.unwrap_or_else(|| ssh_context(&current_target, &current_folder));
     loop {
         let arguments = if implicit_terminal || switched {
@@ -110,7 +101,7 @@ fn run_once(
     folder: &Path,
     binary: &str,
     arguments: &[OsString],
-    context: Option<&crate::ssh::SshContext>,
+    context: Option<&SshContext>,
 ) -> Result<u8> {
     let status = ssh_status(target, binary, arguments, context, false, false)?;
     if status.success() {
@@ -123,7 +114,7 @@ fn ssh_status(
     target: &str,
     binary: &str,
     arguments: &[OsString],
-    context: Option<&crate::ssh::SshContext>,
+    context: Option<&SshContext>,
     terminal: bool,
     inherited_terminal: bool,
 ) -> Result<std::process::ExitStatus> {
@@ -151,12 +142,12 @@ fn exit_code(status: std::process::ExitStatus) -> u8 {
     }
 }
 
-fn ssh_context(target: &str, folder: &Path) -> crate::ssh::SshContext {
+fn ssh_context(target: &str, folder: &Path) -> SshContext {
     let machines = crate::state::load_recent_ssh_machines_with_current(target, folder);
     context_with_reachability(target, machines, Some(target))
 }
 
-pub(crate) fn local_ssh_context() -> Option<crate::ssh::SshContext> {
+pub(crate) fn local_ssh_context() -> Option<SshContext> {
     let machines = crate::state::load_recent_ssh_machines();
     (!machines.is_empty()).then(|| context_with_reachability("local", machines, None))
 }
@@ -165,7 +156,7 @@ fn context_with_reachability(
     current: &str,
     mut machines: Vec<crate::ssh::SshMachine>,
     assumed_reachable: Option<&str>,
-) -> crate::ssh::SshContext {
+) -> SshContext {
     let targets = machines
         .iter()
         .map(|machine| machine.target.clone())
@@ -190,7 +181,7 @@ fn context_with_reachability(
     for (machine, reachable) in machines.iter_mut().zip(accessible) {
         machine.accessible = reachable;
     }
-    crate::ssh::SshContext {
+    SshContext {
         current: current.to_owned(),
         machines,
     }
@@ -400,7 +391,7 @@ fn switched_terminal_arguments(
 fn remote_command(
     binary: &str,
     arguments: &[OsString],
-    context: Option<&crate::ssh::SshContext>,
+    context: Option<&SshContext>,
     inherited_terminal: bool,
 ) -> Result<String> {
     let mut command = quote(binary)?;
