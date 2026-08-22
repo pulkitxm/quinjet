@@ -456,7 +456,7 @@ mod tests {
         );
         assert_eq!(machines.len(), 2);
         assert!(machines[0].local);
-        assert!(!machines[0].target.is_empty());
+        assert_ne!(machines[0].target, "");
         assert_eq!(machines[0].folder, Path::new("/host"));
         assert_eq!(machines[1].target, "remote");
     }

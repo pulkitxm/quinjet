@@ -84,7 +84,10 @@ pub(super) fn run_terminal_loop(
 
 fn local_status(arguments: &[OsString], context: &SshContext) -> Result<std::process::ExitStatus> {
     let executable = env::var_os(LOCAL_BINARY_ENV).map_or_else(
-        || env::current_exe().context("failed to locate the local Quinjet binary"),
+        || {
+            env::current_exe() // nosemgrep: rust.lang.security.current-exe.current-exe
+                .context("failed to locate the local Quinjet binary")
+        },
         |path| Ok(path.into()),
     )?;
     let serialized = serde_json::to_string(context)?;
