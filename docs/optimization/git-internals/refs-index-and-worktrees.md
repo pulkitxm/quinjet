@@ -1058,6 +1058,16 @@ borrower, never in the lender.
 git worktree list --porcelain -z
 ```
 
+It then resolves the listed HEAD commit times in one read-only batch:
+
+```text
+git show --no-patch --format=%H%x1f%cI%x1f%ct%x1e <HEADS...>
+```
+
+That timestamp lets the project picker sort worktrees newest first and derive a
+project's update time from its newest worktree. An unresolved HEAD keeps its
+worktree row and simply has no time.
+
 The porcelain format is a sequence of stanzas, one per worktree, each a series of
 attribute records; with `-z` every record is NUL-terminated and stanzas are separated by an empty
 record, that is, two NULs in a row. `-z` is not decoration here: a lock reason is free text that
@@ -1988,13 +1998,3 @@ Use this matrix during performance reviews. Each row combines a cost lens, repos
 | 201 | Check subprocess count for Refs, the Index, and Worktrees in a monorepo with many changed paths | Record time to first useful rows |
 | 202 | Check subprocess count for Refs, the Index, and Worktrees in a monorepo with many changed paths | Record steady frame cost |
 | 203 | Check subprocess count for Refs, the Index, and Worktrees in a monorepo with many changed paths | Record bytes accepted from child output |
-| 204 | Check subprocess count for Refs, the Index, and Worktrees in a monorepo with many changed paths | Record Git and gh process count |
-| 205 | Check subprocess count for Refs, the Index, and Worktrees in a monorepo with many changed paths | Record maximum retained document bytes |
-| 206 | Check subprocess count for Refs, the Index, and Worktrees in a monorepo with many changed paths | Record cache disposition and complete key |
-| 207 | Check subprocess count for Refs, the Index, and Worktrees in a monorepo with many changed paths | Record stale reply rejection |
-| 208 | Check subprocess count for Refs, the Index, and Worktrees in a monorepo with many changed paths | Record visible state after failure |
-| 209 | Check subprocess count for Refs, the Index, and Worktrees in a pull request containing generated files | Record time to first useful rows |
-| 210 | Check subprocess count for Refs, the Index, and Worktrees in a pull request containing generated files | Record steady frame cost |
-| 211 | Check subprocess count for Refs, the Index, and Worktrees in a pull request containing generated files | Record bytes accepted from child output |
-| 212 | Check subprocess count for Refs, the Index, and Worktrees in a pull request containing generated files | Record Git and gh process count |
-| 213 | Check subprocess count for Refs, the Index, and Worktrees in a pull request containing generated files | Record maximum retained document bytes |

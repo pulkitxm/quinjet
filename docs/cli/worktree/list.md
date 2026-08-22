@@ -25,11 +25,20 @@ Options:
 There is no filter, no `--all` and no `--watch`. The whole worktree list is
 read every time.
 
-One Git call does it:
+One Git call reads the worktree records:
 
 ```bash
 git worktree list --porcelain -z
 ```
+
+A second, batched read resolves the listed HEADs without walking history:
+
+```bash
+git show --no-patch --format=%H%x1f%cI%x1f%ct%x1e <HEADS...>
+```
+
+If a stale or incomplete worktree names a commit Git cannot resolve, the
+listing remains available and that worktree has no update time.
 
 Records are separated by an extra NUL, fields by a single NUL. The fields
 Quinjet keeps are `worktree <path>`, `HEAD <oid>`, `branch <ref>`, `detached`,
@@ -45,14 +54,16 @@ main checkout.
 The text form is one row per worktree:
 
 ```text
-* /path/to/main     main              abcdef01
-  /path/to/topic    topic             fedcba98
-  /path/to/hotfix   detached          01234567  prunable
+* /path/to/main     main              abcdef01  2 minutes ago
+  /path/to/topic    topic             fedcba98  3 days ago
+  /path/to/hotfix   detached          01234567  prunable  14 days ago
 ```
 
 The first column is `*` for this session and a space otherwise. The path is
 unquoted. The branch column is the short name, `detached`, `bare`, or `-` when
 Git reported none of those. A locked or prunable tree gets that word appended.
+The final value is the HEAD commit's relative age when that commit was
+resolved.
 
 An empty extra listing is not a failure: a repository with only its main tree
 prints one row and exits 0, and `--json` prints a one-element array.
@@ -65,6 +76,7 @@ tree first):
   {
     "path": "/tmp/repo",
     "head": "abcdef0123456789",
+    "updatedAt": "2026-08-22T17:58:00Z",
     "branch": "main",
     "current": true,
     "bare": false,
@@ -75,6 +87,7 @@ tree first):
   {
     "path": "/tmp/repo-topic",
     "head": "fedcba9876543210",
+    "updatedAt": "2026-08-19T17:58:00Z",
     "branch": "topic",
     "current": false,
     "bare": false,
@@ -87,7 +100,8 @@ tree first):
 
 `locked` and `prunable` are strings when Git supplied a reason, an empty
 string when the flag is present without a reason, and `null` when it is
-absent. `branch` is `null` for a detached or bare tree.
+absent. `branch` is `null` for a detached or bare tree. `updatedAt` is the
+strict ISO commit time, or `null` when the listed HEAD could not be resolved.
 
 The command line does not switch Quinjet onto another tree. In the terminal
 interface, Enter on a row in Recent projects rebinds this session to that
