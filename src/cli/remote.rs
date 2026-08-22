@@ -1,12 +1,10 @@
-use std::env;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, IsTerminal};
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::thread;
+use std::{env, thread};
 
 use anyhow::{Context, Result};
-
 use serde::Serialize;
 
 use super::{EXIT_FAILURE, EXIT_UNAVAILABLE, Emitter, RemoteVerb};
@@ -16,7 +14,7 @@ const REMOTE_BINARY_ENV: &str = "QUINJET_REMOTE_BINARY";
 pub(super) fn run(target: &str, terminal: bool, folder: &Path) -> Result<u8> {
     validate_target(target)?;
     let binary = env::var(REMOTE_BINARY_ENV).unwrap_or_else(|_| "quinjet".to_owned());
-    let arguments = forwarded_arguments(env::args_os().skip(1))?;
+    let arguments = forwarded_arguments(wild::args_os().skip(1))?;
     let command = remote_command(&binary, &arguments)?;
     let mut ssh = Command::new("ssh");
     let ssh = if terminal && io::stdin().is_terminal() && io::stdout().is_terminal() {
