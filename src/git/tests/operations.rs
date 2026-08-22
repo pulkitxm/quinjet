@@ -323,3 +323,25 @@ fn lists_a_linked_worktree_without_changing_head() {
     drop(fs::remove_dir_all(&linked));
     run_test_git(&test_repository.path, ["worktree", "prune"]);
 }
+
+#[test]
+fn missing_worktree_heads_do_not_hide_valid_update_times() {
+    let test_repository = TestRepository::new();
+    let repository = test_repository.repository();
+    let mut worktrees = repository.worktrees().unwrap();
+    let mut missing = worktrees[0].clone();
+    missing.path = PathBuf::from("/missing-worktree");
+    missing.head = "ffffffffffffffffffffffffffffffffffffffff".to_owned();
+    missing.updated_at = None;
+    missing.updated_unix = None;
+    worktrees[0].updated_at = None;
+    worktrees[0].updated_unix = None;
+    worktrees.push(missing);
+
+    repository.attach_worktree_updates(&mut worktrees);
+
+    assert!(worktrees[0].updated_at.is_some());
+    assert!(worktrees[0].updated_unix.is_some());
+    assert!(worktrees[1].updated_at.is_none());
+    assert!(worktrees[1].updated_unix.is_none());
+}

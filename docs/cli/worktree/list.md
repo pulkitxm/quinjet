@@ -34,7 +34,7 @@ git worktree list --porcelain -z
 A second, batched read resolves the listed HEADs without walking history:
 
 ```bash
-git show --no-patch --format=%H%x1f%cI%x1f%ct%x1e <HEADS...>
+git log --no-walk=unsorted --ignore-missing --format=%H%x1f%cI%x1f%ct%x1e <HEADS...>
 ```
 
 If a stale or incomplete worktree names a commit Git cannot resolve, the

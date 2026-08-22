@@ -137,10 +137,11 @@ impl Repository {
         Ok(worktrees)
     }
 
-    fn attach_worktree_updates(&self, worktrees: &mut [Worktree]) {
+    pub(super) fn attach_worktree_updates(&self, worktrees: &mut [Worktree]) {
         let mut arguments = vec![
-            OsString::from("show"),
-            OsString::from("--no-patch"),
+            OsString::from("log"),
+            OsString::from("--no-walk=unsorted"),
+            OsString::from("--ignore-missing"),
             OsString::from("--format=%H%x1f%cI%x1f%ct%x1e"),
         ];
         arguments.extend(
@@ -149,7 +150,7 @@ impl Repository {
                 .filter(|worktree| !worktree.head.is_empty())
                 .map(|worktree| OsString::from(&worktree.head)),
         );
-        if arguments.len() == 3 {
+        if arguments.len() == 4 {
             return;
         }
         let Ok(output) = self.checked(arguments) else {

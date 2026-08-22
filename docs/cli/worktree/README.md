@@ -12,7 +12,7 @@ not a Git mutation.
 
 The listing starts with `git worktree list --porcelain -z`. Records are
 NUL-separated, so a path can contain any character except NUL. One batched
-`git show --no-patch` resolves the listed HEAD commit times. Quinjet then asks
+`git log --no-walk` resolves the listed HEAD commit times. Quinjet then asks
 `git rev-parse --git-common-dir` so several trees that share one object store
 are one project in the picker rather than several recents.
 

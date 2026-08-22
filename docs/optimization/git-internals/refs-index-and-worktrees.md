@@ -1061,7 +1061,7 @@ git worktree list --porcelain -z
 It then resolves the listed HEAD commit times in one read-only batch:
 
 ```text
-git show --no-patch --format=%H%x1f%cI%x1f%ct%x1e <HEADS...>
+git log --no-walk=unsorted --ignore-missing --format=%H%x1f%cI%x1f%ct%x1e <HEADS...>
 ```
 
 That timestamp lets the project picker sort worktrees newest first and derive a
