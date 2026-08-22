@@ -69,6 +69,27 @@ fn remote_command_forwards_the_folder_and_records_a_reachable_recent() -> Result
 }
 
 #[test]
+fn implicit_remote_terminal_opens_the_folder_through_the_tui_verb() -> Result<()> {
+    let scratch = Scratch::directory()?;
+    let (bin, capture) = fake_ssh(&scratch)?;
+    drop(
+        ssh_command(
+            &scratch,
+            &bin,
+            &capture,
+            &["--remote", "test-host", "--folder", "/srv/a project"],
+        )?
+        .success()?,
+    );
+    let arguments = fs::read_to_string(&capture)?;
+    ensure!(
+        arguments.contains("'quinjet test' tui '/srv/a project'"),
+        "unexpected remote command: {arguments}"
+    );
+    Ok(())
+}
+
+#[test]
 fn unreachable_ssh_maps_to_the_unavailable_exit_code() -> Result<()> {
     let scratch = Scratch::directory()?;
     let (bin, capture) = fake_ssh(&scratch)?;
