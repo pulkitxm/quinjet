@@ -496,8 +496,5 @@ use style::*;
 use unified_diff::*;
 
 #[cfg(test)]
-#[expect(
-    unused_results,
-    reason = "test helpers return values the assertions do not use"
-)]
+#[expect(unused_results, reason = "test helpers discard unused return values")]
 mod tests;
