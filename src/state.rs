@@ -7,6 +7,7 @@ use crate::git::{ProjectGroup, Repository, Worktree};
 use crate::state_sorting::{sort_project_groups, sort_worktrees};
 
 mod remote;
+pub(crate) mod session;
 
 pub(crate) use remote::{
     forget_recent_remote, load_recent_remotes, load_recent_ssh_machines,
