@@ -58,7 +58,14 @@ fn run_terminal_loop(
             forwarded_arguments(original_arguments.to_owned())?
         };
         let context = ssh_context(&current_target, &current_folder);
-        let status = ssh_status(&current_target, binary, &arguments, Some(&context), true)?;
+        let status = ssh_status(
+            &current_target,
+            binary,
+            &arguments,
+            Some(&context),
+            true,
+            switched,
+        )?;
         let code = status.code().unwrap_or_else(|| i32::from(EXIT_FAILURE));
         if let Some(index) = crate::ssh::switch_index(code)
             && let Some(machine) = context.machines.get(index)
@@ -72,6 +79,9 @@ fn run_terminal_loop(
         if status.success() {
             crate::state::record_recent_remote(&current_target, &current_folder);
         }
+        if switched {
+            crate::terminal::restore_inherited_terminal();
+        }
         return Ok(exit_code(status));
     }
 }
@@ -83,7 +93,7 @@ fn run_once(
     arguments: &[OsString],
     context: Option<&crate::ssh::SshContext>,
 ) -> Result<u8> {
-    let status = ssh_status(target, binary, arguments, context, false)?;
+    let status = ssh_status(target, binary, arguments, context, false, false)?;
     if status.success() {
         crate::state::record_recent_remote(target, folder);
     }
@@ -96,8 +106,9 @@ fn ssh_status(
     arguments: &[OsString],
     context: Option<&crate::ssh::SshContext>,
     terminal: bool,
+    inherited_terminal: bool,
 ) -> Result<std::process::ExitStatus> {
-    let command = remote_command(binary, arguments, context)?;
+    let command = remote_command(binary, arguments, context, inherited_terminal)?;
     let mut ssh = Command::new("ssh");
     let ssh = if terminal && io::stdin().is_terminal() && io::stdout().is_terminal() {
         ssh.arg("-tt")
@@ -371,20 +382,21 @@ fn remote_command(
     binary: &str,
     arguments: &[OsString],
     context: Option<&crate::ssh::SshContext>,
+    inherited_terminal: bool,
 ) -> Result<String> {
     let mut command = quote(binary)?;
     for argument in arguments {
         command.push(' ');
         command.push_str(&quote(&argument.to_string_lossy())?);
     }
-    let Some(context) = context else {
-        return Ok(command);
-    };
-    let serialized = serde_json::to_string(context)?;
-    Ok(format!(
-        "QUINJET_SSH_CONTEXT={} {command}",
-        quote(&serialized)?
-    ))
+    if let Some(context) = context {
+        let serialized = serde_json::to_string(context)?;
+        command = format!("QUINJET_SSH_CONTEXT={} {command}", quote(&serialized)?);
+    }
+    if inherited_terminal {
+        command = format!("{}=1 {command}", crate::terminal::INHERITED_TERMINAL_ENV);
+    }
+    Ok(command)
 }
 
 fn quote(value: &str) -> Result<String> {
@@ -422,9 +434,16 @@ mod tests {
             "quinjet test",
             &[OsString::from("--path"), OsString::from("a'b c")],
             None,
+            false,
         )
         .unwrap();
         assert_eq!(command, "'quinjet test' --path \"a'b c\"");
+    }
+
+    #[test]
+    fn switched_terminal_inherits_the_existing_alternate_screen() {
+        let command = remote_command("quinjet", &[], None, true).unwrap();
+        assert_eq!(command, "QUINJET_INHERITED_TERMINAL=1 quinjet");
     }
 
     #[test]

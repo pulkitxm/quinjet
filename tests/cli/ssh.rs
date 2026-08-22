@@ -157,5 +157,6 @@ fn terminal_machine_selection_reconnects_to_the_ranked_target() -> Result<()> {
     ensure!(arguments.contains("\"target\":\"second-host\""));
     ensure!(arguments.contains("'quinjet test' tui /second"));
     ensure!(arguments.matches("QUINJET_SSH_CONTEXT=").count() == 2);
+    ensure!(arguments.matches("QUINJET_INHERITED_TERMINAL=1").count() == 1);
     Ok(())
 }
