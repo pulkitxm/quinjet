@@ -174,6 +174,7 @@ fn list(out: &Emitter) -> Result<u8> {
             accessible,
             target: entry.target,
             folder: entry.folder,
+            uses: entry.uses,
         })
         .collect::<Vec<_>>();
     out.emit(&RemoteList { remotes: &remotes }, || {
@@ -190,6 +191,8 @@ fn list(out: &Emitter) -> Result<u8> {
             text.push_str(&remote.target);
             text.push(':');
             text.push_str(&remote.folder);
+            text.push_str("   used ");
+            text.push_str(&remote.uses.to_string());
             text.push('\n');
         }
         text
@@ -221,6 +224,7 @@ struct RemoteStatus {
     target: String,
     folder: String,
     accessible: bool,
+    uses: u64,
 }
 
 #[derive(Serialize)]

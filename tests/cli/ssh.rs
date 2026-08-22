@@ -9,7 +9,7 @@ fn fake_ssh(scratch: &Scratch) -> Result<(PathBuf, PathBuf)> {
     fs::create_dir_all(&bin)?;
     fs::write(
         &executable,
-        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$SSH_CAPTURE\"\nif [ -n \"$SSH_EXIT_CODE\" ]; then\n  exit \"$SSH_EXIT_CODE\"\nfi\nexit 0\n",
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$SSH_CAPTURE\"\nif [ -n \"$SSH_EXIT_CODE\" ]; then\n  exit \"$SSH_EXIT_CODE\"\nfi\nif [ -n \"$SSH_SWITCH_TARGET\" ] && [ \"$2\" = \"$SSH_SWITCH_TARGET\" ]; then\n  case \"$3\" in\n    *QUINJET_SSH_CONTEXT*) exit \"$SSH_SWITCH_CODE\" ;;\n  esac\nfi\nexit 0\n",
     )?;
     let mut permissions = fs::metadata(&executable)?.permissions();
     permissions.set_mode(0o755);
@@ -65,6 +65,7 @@ fn remote_command_forwards_the_folder_and_records_a_reachable_recent() -> Result
     ensure!(document["remotes"][0]["target"] == "test-host");
     ensure!(document["remotes"][0]["folder"] == "/srv/a project");
     ensure!(document["remotes"][0]["accessible"] == true);
+    ensure!(document["remotes"][0]["uses"] == 1);
     Ok(())
 }
 
@@ -107,5 +108,54 @@ fn unreachable_ssh_maps_to_the_unavailable_exit_code() -> Result<()> {
     isolate_quinjet(&mut command, &scratch.environment);
     let run = Run::from(command.output()?)?;
     ensure!(run.code == 4, "SSH unavailability exited {}", run.code);
+    Ok(())
+}
+
+#[test]
+fn terminal_machine_selection_reconnects_to_the_ranked_target() -> Result<()> {
+    let scratch = Scratch::directory()?;
+    let (bin, capture) = fake_ssh(&scratch)?;
+    drop(
+        ssh_command(
+            &scratch,
+            &bin,
+            &capture,
+            &["--remote", "second-host", "--folder", "/second", "status"],
+        )?
+        .success()?,
+    );
+    drop(
+        ssh_command(
+            &scratch,
+            &bin,
+            &capture,
+            &["--remote", "second-host", "--folder", "/second", "status"],
+        )?
+        .success()?,
+    );
+    fs::write(&capture, "")?;
+    let mut paths = vec![bin];
+    if let Some(existing) = std::env::var_os("PATH") {
+        paths.extend(std::env::split_paths(&existing));
+    }
+    let mut command = ProcessCommand::new(env!("CARGO_BIN_EXE_quinjet"));
+    command
+        .args(["--remote", "first-host", "--folder", "/first"])
+        .env("PATH", std::env::join_paths(paths)?)
+        .env("SSH_CAPTURE", &capture)
+        .env("SSH_SWITCH_TARGET", "first-host")
+        .env("SSH_SWITCH_CODE", "80")
+        .env("QUINJET_REMOTE_BINARY", "quinjet test");
+    isolate_git(&mut command);
+    isolate_quinjet(&mut command, &scratch.environment);
+    drop(Run::from(command.output()?)?.success()?);
+
+    let arguments = fs::read_to_string(capture)?;
+    ensure!(arguments.contains("\nfirst-host\n"));
+    ensure!(arguments.contains("\nsecond-host\n"));
+    ensure!(arguments.contains("\"current\":\"first-host\""));
+    ensure!(arguments.contains("\"target\":\"second-host\""));
+    ensure!(arguments.contains("'quinjet test' tui /second"));
+    ensure!(arguments.matches("QUINJET_SSH_CONTEXT=").count() == 2);
     Ok(())
 }

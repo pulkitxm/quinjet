@@ -33,6 +33,12 @@ Options:
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |
 | `-V, --version` | flag | off | Prints the installed version and exits 0. |
 
+When the interface runs through `--remote`, the project picker displays the
+active SSH target. `Tab` opens a second-level machine picker containing recent
+targets ordered by use count. Reachable targets can take over the terminal
+session, while unavailable targets are shown but disabled. SSH machine
+switching is available only from this project picker.
+
 ## The two spellings
 
 `quinjet` and `quinjet tui .` reach the same code. `dispatch` returns
