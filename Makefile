@@ -124,7 +124,11 @@ bloat:
 deep: miri careful sanitize mutants minimal-versions udeps bloat
 
 hack:
-	$(CARGO) hack --feature-powerset --no-dev-deps check --locked
+	hack_lock_dir=$$(mktemp -d); \
+		cp Cargo.lock "$$hack_lock_dir/Cargo.lock"; \
+		cp fuzz/Cargo.lock "$$hack_lock_dir/fuzz-Cargo.lock"; \
+		trap 'cp "$$hack_lock_dir/Cargo.lock" Cargo.lock; cp "$$hack_lock_dir/fuzz-Cargo.lock" fuzz/Cargo.lock; rm -rf "$$hack_lock_dir"' EXIT; \
+		$(CARGO) hack --feature-powerset --no-dev-deps check --locked
 
 coverage:
 	$(CARGO) llvm-cov --all-features --locked --fail-under-lines $(COVERAGE_MIN)
