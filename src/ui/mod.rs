@@ -459,7 +459,7 @@ use layout::*;
 use modal_branches::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use modal_conflict::*;
-use modal_ssh::*;
+use modal_ssh::draw_ssh_project_modal;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use modals::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]

@@ -60,7 +60,7 @@ fn project_picker_compacts_long_paths_and_collapses_all() {
     group.worktrees[0].path = PathBuf::from(full_path);
     group.worktrees[0].updated_at = Some("2020-08-22T18:00:00Z".to_owned());
     group.worktrees[0].updated_unix = Some(1_598_119_200);
-    let mut onboarding = Onboarding::from_groups(Path::new("/tmp"), vec![group]);
+    let mut onboarding = Onboarding::from_groups(Path::new("/tmp"), vec![group], None);
     let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
     let theme = Theme::new(ThemeName::Quinjet, Appearance::Dark);
 
