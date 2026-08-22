@@ -61,7 +61,8 @@ fn isolate_quinjet(command: &mut ProcessCommand, root: &Path) {
         .env("XDG_CONFIG_HOME", root.join("config"))
         .env("XDG_DATA_HOME", root.join("data"))
         .env("XDG_STATE_HOME", root.join("state"))
-        .env("QUINJET_CACHE_DIR", root.join("quinjet-cache"));
+        .env("QUINJET_CACHE_DIR", root.join("quinjet-cache"))
+        .env("QUINJET_STATE_DIR", root.join("state/quinjet"));
 }
 
 #[cfg(not(windows))]
