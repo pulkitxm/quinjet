@@ -26,7 +26,7 @@ use anyhow::{Context, Result};
 use crossbeam_channel::tick;
 use crossterm::event::{self, Event, KeyEventKind};
 
-use crate::app::AppEffect;
+use crate::app::{AppEffect, Modal};
 use crate::cli::{Launch, TerminalOptions};
 use crate::git::Repository;
 use crate::onboarding::{Onboarding, OnboardingAction};
@@ -326,11 +326,13 @@ fn dispatch_effects(
                 AppEffect::SetMouseCapture(enabled) => terminal.set_mouse_capture(enabled),
                 AppEffect::Open(app::OpenTarget::Browser(url)) => drop(cli::open_url(&url)),
                 AppEffect::SwitchRepository(path) => {
+                    render_project_opening(workspace, terminal, id);
                     if let Some(effects) = workspace.switch_repository(id, &path, Instant::now()) {
                         pending.push_back(effects);
                     }
                 }
                 AppEffect::OpenRepositoryTab(path) => {
+                    render_project_opening(workspace, terminal, id);
                     if let Some(effects) = workspace.open_repository_tab(id, &path, Instant::now())
                     {
                         pending.push_back(effects);
@@ -361,4 +363,28 @@ fn dispatch_effects(
         }
     }
     running
+}
+
+fn render_project_opening(
+    workspace: &mut RepositoryWorkspace,
+    terminal: &mut TerminalGuard,
+    id: tabs::TabId,
+) {
+    if workspace.active_id() != Some(id) {
+        return;
+    }
+    let Some(app) = workspace.app_mut(id) else {
+        return;
+    };
+    if !matches!(
+        app.modal,
+        Some(Modal::Projects {
+            opening: Some(_),
+            ..
+        })
+    ) {
+        return;
+    }
+    let theme = app.theme;
+    drop(terminal.terminal.draw(|frame| ui::draw(frame, app, &theme)));
 }

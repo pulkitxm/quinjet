@@ -358,6 +358,7 @@ pub(crate) enum Modal {
         query: TextBuffer,
         collapsed: HashSet<PathBuf>,
         loading: bool,
+        opening: Option<PathBuf>,
         mode: ProjectOpenMode,
     },
     SshMachines {

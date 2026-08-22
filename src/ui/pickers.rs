@@ -17,6 +17,7 @@ pub(crate) fn draw_projects(
     query: &crate::app::TextBuffer,
     collapsed: &HashSet<std::path::PathBuf>,
     loading: bool,
+    opening: Option<&Path>,
     mode: ProjectOpenMode,
     ssh: Option<&SshContext>,
     theme: &Theme,
@@ -85,7 +86,9 @@ pub(crate) fn draw_projects(
         inner.width,
         inner.height.saturating_sub(5),
     );
-    if loading {
+    if let Some(path) = opening {
+        modal_ssh::draw_project_opening(frame, path, list_area, theme);
+    } else if loading {
         frame.render_widget(
             Paragraph::new("Loading projects…").style(Style::default().fg(theme.muted)),
             list_area,
@@ -176,17 +179,23 @@ pub(crate) fn draw_projects(
     } else {
         "expand all"
     };
-    let hint = match mode {
-        ProjectOpenMode::Initial => {
-            format!("Enter open   Ctrl+E {fold_action}   Ctrl+O path   Esc quit")
-        }
-        ProjectOpenMode::CurrentTab => {
-            format!("Enter switch tab   Ctrl+E {fold_action}   Delete forget project   Esc close")
-        }
-        ProjectOpenMode::NewTab => {
-            format!(
-                "Enter open in new tab   Ctrl+E {fold_action}   Delete forget project   Esc close"
-            )
+    let hint = if opening.is_some() {
+        "Opening project…".to_owned()
+    } else {
+        match mode {
+            ProjectOpenMode::Initial => {
+                format!("Enter open   Ctrl+E {fold_action}   Ctrl+O path   Esc quit")
+            }
+            ProjectOpenMode::CurrentTab => {
+                format!(
+                    "Enter switch tab   Ctrl+E {fold_action}   Delete forget project   Esc close"
+                )
+            }
+            ProjectOpenMode::NewTab => {
+                format!(
+                    "Enter open in new tab   Ctrl+E {fold_action}   Delete forget project   Esc close"
+                )
+            }
         }
     };
     draw_modal_hint(frame, area, &hint, theme);

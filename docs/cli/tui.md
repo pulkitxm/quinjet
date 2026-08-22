@@ -192,6 +192,9 @@ Each project heading starts with a bordered `[⌄]` or `[›]` control. Clicking
 that control collapses or expands only that project's worktrees without opening
 anything. `Ctrl+E` expands every project when any project is collapsed, then
 collapses every project when all are expanded. The footer names the next action.
+Opening a selected worktree keeps the picker visible with the destination path
+until repository discovery finishes. A failed open returns to the picker and
+shows the error without losing the current filter or selection.
 Filtering temporarily reveals matching worktrees inside collapsed projects, so
 collapse never hides a search result.
 

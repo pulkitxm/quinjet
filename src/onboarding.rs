@@ -317,6 +317,7 @@ impl Onboarding {
                     &self.query,
                     &self.collapsed,
                     false,
+                    None,
                     ProjectOpenMode::Initial,
                     self.ssh_context.as_ref(),
                     theme,

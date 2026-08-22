@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::Instant;
 
-use crate::app::{App, AppEffect, ToastLevel};
+use crate::app::{App, AppEffect, Modal, ToastLevel};
 use crate::git::Repository;
 use crate::git::worker::{GitWorker, WorkerCommand};
 use crate::ssh::SshContext;
@@ -171,6 +171,9 @@ impl RepositoryWorkspace {
             Ok(repository) => repository,
             Err(error) => {
                 if let Some(app) = self.app_mut(source) {
+                    if let Some(Modal::Projects { opening, .. }) = app.modal.as_mut() {
+                        *opening = None;
+                    }
                     app.show_toast(error.to_string(), ToastLevel::Error, now);
                 }
                 return None;
@@ -190,11 +193,17 @@ impl RepositoryWorkspace {
             Ok(repository) => repository,
             Err(error) => {
                 if let Some(app) = self.app_mut(source) {
+                    if let Some(Modal::Projects { opening, .. }) = app.modal.as_mut() {
+                        *opening = None;
+                    }
                     app.show_toast(error.to_string(), ToastLevel::Error, now);
                 }
                 return None;
             }
         };
+        if let Some(app) = self.app_mut(source) {
+            app.modal = None;
+        }
         if let Some(id) = self.tabs.id_for_root(repository.root()) {
             self.activate(id, now);
             return None;

@@ -54,6 +54,7 @@ fn recent_projects_nest_worktrees_and_open_another_tree() {
         query: TextBuffer::default(),
         collapsed: HashSet::new(),
         loading: false,
+        opening: None,
         mode: ProjectOpenMode::CurrentTab,
     });
     let effects = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
@@ -61,7 +62,13 @@ fn recent_projects_nest_worktrees_and_open_another_tree() {
         effects.as_slice(),
         [AppEffect::SwitchRepository(path)] if path == Path::new("/tmp/repo-topic")
     ));
-    assert!(app.modal.is_none());
+    assert!(matches!(
+        app.modal.as_ref(),
+        Some(Modal::Projects {
+            opening: Some(path),
+            ..
+        }) if path == Path::new("/tmp/repo-topic")
+    ));
 }
 
 #[test]
@@ -117,6 +124,7 @@ fn control_e_expands_mixed_projects_then_collapses_all() {
         query: TextBuffer::default(),
         collapsed: HashSet::from([PathBuf::from("/tmp/repo/.git")]),
         loading: false,
+        opening: None,
         mode: ProjectOpenMode::CurrentTab,
     });
 
@@ -170,6 +178,7 @@ fn clicking_a_project_button_only_toggles_that_project() {
         query: TextBuffer::default(),
         collapsed: HashSet::new(),
         loading: false,
+        opening: None,
         mode: ProjectOpenMode::CurrentTab,
     });
     app.geometry.project_collapse_hits = vec![(Rect::new(10, 5, 3, 1), common_dir.clone())];
@@ -219,6 +228,7 @@ fn project_picker_is_the_machine_switching_entry_point() {
         query: TextBuffer::default(),
         collapsed: HashSet::new(),
         loading: false,
+        opening: None,
         mode: ProjectOpenMode::NewTab,
     });
     let now = Instant::now();
@@ -257,6 +267,7 @@ fn unavailable_machine_cannot_be_selected() {
             query: TextBuffer::default(),
             collapsed: HashSet::new(),
             loading: false,
+            opening: None,
             mode: ProjectOpenMode::NewTab,
         }),
     });

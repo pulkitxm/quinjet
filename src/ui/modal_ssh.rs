@@ -1,6 +1,23 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
+pub(super) fn draw_project_opening(frame: &mut Frame<'_>, path: &Path, area: Rect, theme: &Theme) {
+    let width = area.width.saturating_sub(4) as usize;
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled("◐ ", Style::default().fg(theme.accent)),
+                Span::styled("Opening project…", Style::default().fg(theme.text)),
+            ]),
+            Line::from(Span::styled(
+                truncate_middle(path.to_string_lossy().as_ref(), width),
+                Style::default().fg(theme.muted),
+            )),
+        ]),
+        area,
+    );
+}
+
 pub(super) fn draw_ssh_project_modal(
     frame: &mut Frame<'_>,
     modal: &Modal,
@@ -16,6 +33,7 @@ pub(super) fn draw_ssh_project_modal(
             query,
             collapsed,
             loading,
+            opening,
             mode,
         } => {
             if let Some(area) = draw_projects(
@@ -26,6 +44,7 @@ pub(super) fn draw_ssh_project_modal(
                 query,
                 collapsed,
                 *loading,
+                opening.as_deref(),
                 *mode,
                 context,
                 theme,

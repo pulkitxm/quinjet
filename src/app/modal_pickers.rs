@@ -20,6 +20,7 @@ impl App {
                 query,
                 collapsed,
                 loading,
+                opening,
                 mode,
             } => {
                 if key.code == KeyCode::Esc {
@@ -68,14 +69,16 @@ impl App {
                     KeyCode::Down | KeyCode::Char('j') => {
                         *selected = next_list_index(*selected, visible.len());
                     }
-                    KeyCode::Enter if !*loading => {
+                    KeyCode::Enter if !*loading && opening.is_none() => {
                         if let Some(tree) = selected_tree.filter(|tree| !tree.current) {
+                            *opening = Some(tree.path.clone());
                             effects.push(match mode {
                                 ProjectOpenMode::Initial | ProjectOpenMode::CurrentTab => {
                                     AppEffect::SwitchRepository(tree.path)
                                 }
                                 ProjectOpenMode::NewTab => AppEffect::OpenRepositoryTab(tree.path),
                             });
+                            self.modal = Some(modal);
                         }
                         return effects;
                     }

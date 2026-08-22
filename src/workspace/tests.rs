@@ -1,9 +1,10 @@
 use std::collections::HashSet;
+use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use super::*;
-use crate::app::View;
+use crate::app::{Modal, ProjectOpenMode, TextBuffer, View};
 use crate::git::tests::TestRepository;
 use crate::ssh::SshMachine;
 
@@ -149,6 +150,32 @@ fn replacement_keeps_tab_identity_and_new_tabs_follow_the_close_lifecycle() {
     assert_eq!(workspace.tabs.len(), 1);
     assert!(!workspace.close(second, now));
     assert!(workspace.tabs.is_empty());
+}
+
+#[test]
+fn failed_project_open_returns_to_the_picker() {
+    let (_directory, repository) = test_repository("first");
+    let mut workspace = workspace(&repository);
+    let source = workspace.active_id().expect("active tab");
+    workspace.app_mut(source).expect("source app").modal = Some(Modal::Projects {
+        groups: Vec::new(),
+        selected: 0,
+        query: TextBuffer::default(),
+        collapsed: HashSet::new(),
+        loading: false,
+        opening: Some("/missing/project".into()),
+        mode: ProjectOpenMode::CurrentTab,
+    });
+
+    assert!(
+        workspace
+            .switch_repository(source, Path::new("/missing/project"), Instant::now())
+            .is_none()
+    );
+    assert!(matches!(
+        workspace.app_mut(source).and_then(|app| app.modal.as_ref()),
+        Some(Modal::Projects { opening: None, .. })
+    ));
 }
 
 #[test]

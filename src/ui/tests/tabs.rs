@@ -308,3 +308,27 @@ fn remote_project_picker_shows_the_host_and_ranked_machine_popup() {
     assert!(rendered.contains("unavailable"));
     assert!(rendered.find("busy-host") < rendered.find("current-host"));
 }
+
+#[test]
+fn project_picker_shows_the_destination_while_opening() {
+    let mut app = App::new("/repo", "project");
+    app.modal = Some(Modal::Projects {
+        groups: Vec::new(),
+        selected: 0,
+        query: crate::app::TextBuffer::default(),
+        collapsed: HashSet::new(),
+        loading: false,
+        opening: Some("/Users/pulkit/scripts/quinjet-feature".into()),
+        mode: ProjectOpenMode::CurrentTab,
+    });
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+
+    let rendered = terminal.backend().to_string();
+    assert!(rendered.contains("Opening project…"));
+    assert!(rendered.contains("/Users/pulkit/scripts/quinjet-feature"));
+    assert!(!rendered.contains("Enter switch tab"));
+}

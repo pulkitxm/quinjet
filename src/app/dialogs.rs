@@ -22,6 +22,7 @@ impl App {
             query: TextBuffer::default(),
             collapsed: HashSet::new(),
             loading: self.project_groups.is_empty(),
+            opening: None,
             mode,
         });
         self.request_recent_projects(effects);
