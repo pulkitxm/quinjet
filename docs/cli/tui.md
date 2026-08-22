@@ -242,7 +242,7 @@ pull request is refreshing or served from cache.
 
 ## How it stays live
 
-Three clocks run, and they are independent.
+Four clocks run, and they are independent.
 
 The filesystem watcher reports every change under the worktree root, ignoring
 pure access events, everything under `.git/objects`, `index.lock`, and
@@ -250,6 +250,10 @@ pure access events, everything under `.git/objects`, `index.lock`, and
 refresh reads the complete Git state rather than applying an event. If the
 watcher cannot be created, the interface starts anyway and simply relies on the
 next clock.
+
+A 1 second display tick repaints relative timestamps without reading Git or
+GitHub. Directly rendered lists advance on that tick, while cached pull-request
+conversations and check details rebuild at most once every 10 seconds.
 
 A 10 second tick refreshes the status regardless. It is the safety net for a
 watcher that failed to start, a network filesystem that reports nothing, and a
