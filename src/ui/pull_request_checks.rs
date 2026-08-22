@@ -71,7 +71,7 @@ pub(super) fn check_run_rows(app: &App, width: usize, theme: &Theme) -> Vec<Cont
             "Ran",
             format!(
                 "{}{}",
-                format_local_timestamp(&check.started_at),
+                format_relative_timestamp(&check.started_at),
                 match check.duration_label() {
                     duration if duration.is_empty() => String::new(),
                     duration => format!("  ·  {duration}"),

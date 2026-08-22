@@ -182,4 +182,5 @@ pub(crate) struct UiGeometry {
     pub link_hits: Vec<LinkHit>,
     pub help_hits: Vec<HelpHit>,
     pub project_hits: Vec<Rect>,
+    pub project_collapse_hits: Vec<(Rect, PathBuf)>,
 }

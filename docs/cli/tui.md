@@ -173,6 +173,18 @@ that state. A project selected for a new tab activates its existing tab when
 the exact worktree root is already open. Different worktree roots remain
 separate tabs even when they belong to the same Git repository.
 
+The picker orders worktrees by their HEAD commit time, newest first. A project's
+time is the newest time among its worktrees, and projects use that time for the
+same newest-first ordering. Both levels show live relative ages. Long worktree
+paths keep their beginning and ending text around a middle ellipsis and are
+capped at 34 cells.
+
+Each project heading starts with a bordered `[⌄]` or `[›]` control. Clicking
+that control collapses or expands only that project's worktrees without opening
+anything. `Ctrl+E` collapses every project. Filtering temporarily reveals
+matching worktrees inside collapsed projects, so collapse never hides a search
+result.
+
 Drag a visible project tab to reorder it. When the strip overflows, its left
 and right controls cycle until the hidden tab becomes visible. Right-click a
 tab for `Open Project...` in a new tab, `Close`, `Close Others`, and `Close
@@ -242,7 +254,7 @@ pull request is refreshing or served from cache.
 
 ## How it stays live
 
-Three clocks run, and they are independent.
+Four clocks run, and they are independent.
 
 The filesystem watcher reports every change under the worktree root, ignoring
 pure access events, everything under `.git/objects`, `index.lock`, and
@@ -250,6 +262,10 @@ pure access events, everything under `.git/objects`, `index.lock`, and
 refresh reads the complete Git state rather than applying an event. If the
 watcher cannot be created, the interface starts anyway and simply relies on the
 next clock.
+
+A 1 second display tick repaints relative timestamps without reading Git or
+GitHub. Directly rendered lists advance on that tick, while cached pull-request
+conversations and check details rebuild at most once every 10 seconds.
 
 A 10 second tick refreshes the status regardless. It is the safety net for a
 watcher that failed to start, a network filesystem that reports nothing, and a
@@ -355,6 +371,7 @@ The verbs in the right-hand column are documented in their groups:
 | `b` outside History, or `B` | `quinjet branch list`; Enter on a row is `quinjet branch switch <name>` |
 | `w`, clicking the header path, or clicking the worktree count in the footer | `quinjet worktree list` for this repository, plus the same listing for each recently opened project; Enter switches the current project tab, the same repository setup as `quinjet tui <path>` |
 | `N` | opens the recent-project picker in new-tab mode; no verb, because project tabs belong to the terminal session |
+| `Ctrl+E` in the project picker | collapses every project; presentation state, not a repository operation |
 | `Ctrl+Tab`, `Ctrl+Shift+Tab` | no verb. Cycles through project tabs while retaining each tab's state |
 | `Ctrl+W` | no verb. Closes the active project tab |
 | dragging or right-clicking a project tab | no verb. Reorders it or opens Close, Close Others, and Close All |

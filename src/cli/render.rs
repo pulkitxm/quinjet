@@ -1,4 +1,4 @@
-use crate::date_time::format_local_timestamp;
+use crate::date_time::{format_local_timestamp, format_relative_timestamp};
 use crate::git::diff::{DiffDocument, DiffLineKind};
 use crate::git::github::{
     CheckRunLog, CheckStep, ConversationKind, GitHubRepository, PullRequest, PullRequestCheck,

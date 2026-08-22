@@ -20,6 +20,7 @@ impl App {
             groups: self.project_groups.clone(),
             selected: 0,
             query: TextBuffer::default(),
+            collapsed: HashSet::new(),
             loading: self.project_groups.is_empty(),
             mode,
         });

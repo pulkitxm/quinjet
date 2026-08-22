@@ -87,7 +87,12 @@ pub(super) fn draw_pull_request_overview(
     }
 
     let width = inner.width as usize;
-    let rows_key = (showing_check, width, app.pull_request_content_generation);
+    let rows_key = (
+        showing_check,
+        width,
+        app.pull_request_content_generation,
+        relative_time_generation(),
+    );
     if app.pull_request_content_rows_key != Some(rows_key) {
         app.pull_request_content_rows = if showing_check {
             check_run_rows(app, width, theme)

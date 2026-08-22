@@ -355,6 +355,7 @@ pub(crate) enum Modal {
         groups: Vec<ProjectGroup>,
         selected: usize,
         query: TextBuffer,
+        collapsed: HashSet<PathBuf>,
         loading: bool,
         mode: ProjectOpenMode,
     },

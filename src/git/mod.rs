@@ -66,6 +66,9 @@ pub(crate) struct Stash {
 pub(crate) struct Worktree {
     pub path: PathBuf,
     pub head: String,
+    pub updated_at: Option<String>,
+    #[serde(skip)]
+    pub updated_unix: Option<i64>,
     pub branch: Option<String>,
     pub current: bool,
     pub bare: bool,
@@ -101,6 +104,27 @@ pub(crate) struct ProjectGroup {
     pub name: String,
     pub common_dir: PathBuf,
     pub worktrees: Vec<Worktree>,
+}
+
+impl ProjectGroup {
+    pub(crate) fn updated_at(&self) -> Option<&str> {
+        self.worktrees
+            .iter()
+            .filter_map(|worktree| {
+                worktree
+                    .updated_unix
+                    .map(|updated| (updated, worktree.updated_at.as_deref()))
+            })
+            .max_by_key(|(updated, _)| *updated)
+            .and_then(|(_, updated_at)| updated_at)
+    }
+
+    pub(crate) fn updated_unix(&self) -> Option<i64> {
+        self.worktrees
+            .iter()
+            .filter_map(|worktree| worktree.updated_unix)
+            .max()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

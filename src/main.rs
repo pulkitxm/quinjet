@@ -6,6 +6,7 @@ mod file_icons;
 mod git;
 mod onboarding;
 mod state;
+mod state_sorting;
 mod tabs;
 mod theme;
 mod ui;
@@ -129,6 +130,7 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
     let onboarding_theme = theme::Theme::new(options.theme, options.appearance.resolve());
     let mut terminal = TerminalGuard::enter(!options.no_mouse)?;
     let render_tick = tick(Duration::from_millis(16));
+    let relative_time_tick = tick(Duration::from_secs(1));
     let periodic_refresh = tick(Duration::from_secs(10));
     let mut dirty = true;
     let mut running = true;
@@ -186,6 +188,9 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
                 dirty = true;
             }
         }
+        if relative_time_tick.try_recv().is_ok() {
+            dirty = true;
+        }
 
         if event::poll(Duration::from_millis(8)).context("failed to poll terminal events")? {
             let event = event::read().context("failed to read terminal event")?;
@@ -217,6 +222,10 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
                     }
                     Event::Paste(text) => {
                         onboarding.handle_paste(&text);
+                        OnboardingAction::None
+                    }
+                    Event::Mouse(mouse) => {
+                        onboarding.handle_mouse(mouse);
                         OnboardingAction::None
                     }
                     _ => OnboardingAction::None,

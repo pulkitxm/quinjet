@@ -38,7 +38,7 @@ pub(super) fn draw_history_sidebar(
     }
 
     let visible = app.visible_commit_indices();
-    let height = inner.height as usize;
+    let height = usize::from(inner.height).div_euclid(2);
     app.sidebar_viewport(app.history_cursor, height, visible.len());
     let mut hits = Vec::new();
     let end = (app.sidebar_offset + height).min(visible.len());
@@ -53,7 +53,7 @@ pub(super) fn draw_history_sidebar(
             continue;
         };
         let selected = cursor == app.history_cursor;
-        let y = inner.y + cells(row_offset);
+        let y = inner.y + cells(row_offset.saturating_mul(2));
         let row_style = Style::default().bg(if selected {
             theme.selected
         } else {
@@ -65,12 +65,12 @@ pub(super) fn draw_history_sidebar(
             .first()
             .map(|decoration| format!("  {}", clean_decoration(decoration)))
             .unwrap_or_default();
-        let reserved = commit.short_id.width() + 8;
+        let reserved = 3 + graph.width() + badge.width();
         let subject = truncate_middle(
             &commit.subject,
-            (inner.width as usize).saturating_sub(reserved + badge.width()),
+            usize::from(inner.width).saturating_sub(reserved + 1),
         );
-        let line = Line::from(vec![
+        let subject_line = Line::from(vec![
             Span::styled(
                 if selected { " › " } else { "   " },
                 Style::default().fg(theme.accent),
@@ -86,37 +86,43 @@ pub(super) fn draw_history_sidebar(
             ),
             Span::styled(badge, Style::default().fg(theme.modified)),
         ]);
+        let row_area = Rect::new(inner.x, y, inner.width.saturating_sub(1), 2);
         frame.render_widget(
-            Paragraph::new(line).style(row_style),
-            Rect::new(inner.x, y, inner.width.saturating_sub(10), 1),
+            Paragraph::new(subject_line).style(row_style),
+            Rect::new(row_area.x, row_area.y, row_area.width, 1),
         );
+        let metadata_x = inner.x.saturating_add(3);
+        let metadata_width = usize::from(inner.width.saturating_sub(4));
+        let age = truncate_end(
+            &format_relative_timestamp(&commit.committed_at),
+            metadata_width.saturating_sub(commit.short_id.width() + 1),
+        );
+        let gap = metadata_width
+            .saturating_sub(commit.short_id.width())
+            .saturating_sub(age.width());
         let sha_area = Rect::new(
-            inner
-                .right()
-                .saturating_sub(1)
-                .saturating_sub(cells(commit.short_id.width())),
-            y,
+            metadata_x,
+            y.saturating_add(1),
             cells(commit.short_id.width()),
             1,
         );
         frame.render_widget(
-            Paragraph::new(Line::from(link_span(
-                commit.short_id.clone(),
-                app.commit_open_target(&commit.id),
-                sha_area,
-                theme,
-                link_hits,
-            )))
-            .alignment(Alignment::Right)
-            .style(Style::default().bg(if selected {
-                theme.selected
-            } else {
-                theme.panel
-            })),
-            Rect::new(inner.right().saturating_sub(10), y, 9, 1),
+            Paragraph::new(Line::from(vec![
+                link_span(
+                    commit.short_id.clone(),
+                    app.commit_open_target(&commit.id),
+                    sha_area,
+                    theme,
+                    link_hits,
+                ),
+                Span::raw(" ".repeat(gap)),
+                Span::styled(age, Style::default().fg(theme.muted)),
+            ]))
+            .style(row_style),
+            Rect::new(metadata_x, y.saturating_add(1), cells(metadata_width), 1),
         );
         hits.push(SidebarHitArea {
-            area: Rect::new(inner.x, y, inner.width, 1),
+            area: row_area,
             target: SidebarHit::Commit(*index),
         });
     }

@@ -736,8 +736,8 @@ The pull request Overview pane, which shows the conversation thread or a check r
 uses a `DiffDocument`. Its content is composed directly from `App` state: PR metadata, the
 flattened conversation entries, the check list, and the parsed check log. ARCHITECTURE.md invariant
 10b names the design: "The pull-request pane composes rows from app state rather than from a diff
-document and reuses the resulting layout until its data or pane width changes, so large
-conversations and logs are not rebuilt on every frame."
+document and reuses the resulting layout until its data, pane width, or ten-second relative-time
+generation changes, so large conversations and logs are not rebuilt on every frame."
 
 The composed artifact is a `Vec<PullRequestContentRow>` (src/app.rs:925), where each row carries a
 pre-styled ratatui `Line<'static>`, an optional `step: Option<usize>` anchoring it to a check step,
@@ -747,13 +747,18 @@ step so a click or the step cursor can find it after scrolling." Alongside the r
 caches the maximum wide-row width (for the horizontal overflow indicator) and a list of
 `PullRequestContentLink` records positioned by row index and display column.
 
-### The three-part key
+### The four-part key
 
 The cache check sits at the top of `draw_pull_request_overview`, from src/ui/mod.rs:
 
 ```rust
 let width = inner.width as usize;
-let rows_key = (showing_check, width, app.pull_request_content_generation);
+let rows_key = (
+    showing_check,
+    width,
+    app.pull_request_content_generation,
+    relative_time_generation(),
+);
 if app.pull_request_content_rows_key != Some(rows_key) {
     app.pull_request_content_rows = if showing_check {
         check_run_rows(app, width, theme)
@@ -784,6 +789,8 @@ Each key component covers one axis of change:
 - `pull_request_content_generation` is the single data counter, bumped by
   `invalidate_pull_request_content_rows` (src/app.rs, `wrapping_add(1)` plus clearing the key)
   whenever PR metadata, the conversation, the checks, or the check log actually change.
+- `relative_time_generation()` advances every ten seconds. It keeps relative timestamps live
+  without rebuilding the rows on every frame or issuing any repository or GitHub request.
 
 On a miss the pane rebuilds all three artifacts together: the rows, the maximum wide width, and
 the link positions, so they can never disagree with each other.
@@ -1991,10 +1998,3 @@ Use this matrix during performance reviews. Each row combines a cost lens, repos
 | 34 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record steady frame cost |
 | 35 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record bytes accepted from child output |
 | 36 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record Git and gh process count |
-| 37 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record maximum retained document bytes |
-| 38 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record cache disposition and complete key |
-| 39 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record stale reply rejection |
-| 40 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record visible state after failure |
-| 41 | Check latency for Viewport rendering and terminal frame economics in rapid keyboard navigation | Record time to first useful rows |
-| 42 | Check latency for Viewport rendering and terminal frame economics in rapid keyboard navigation | Record steady frame cost |
-| 43 | Check latency for Viewport rendering and terminal frame economics in rapid keyboard navigation | Record bytes accepted from child output |

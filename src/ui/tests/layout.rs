@@ -115,6 +115,54 @@ fn header_registers_repository_branch_and_workspace_links() {
 }
 
 #[test]
+fn history_rows_give_the_subject_hash_and_live_age_their_own_space() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    let mut app = App::new("/tmp/repo", "repo");
+    app.view = View::History;
+    app.history = vec![crate::git::history::Commit {
+        id: "abc123456789".to_owned(),
+        short_id: "abc1234".to_owned(),
+        parent_ids: Vec::new(),
+        author: String::new(),
+        author_email: String::new(),
+        authored_at: String::new(),
+        committer: String::new(),
+        committer_email: String::new(),
+        committed_at: "2000-01-01T00:00:00Z".to_owned(),
+        relative_date: String::new(),
+        subject: "feat: use the full sidebar line".to_owned(),
+        decorations: Vec::new(),
+    }];
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+
+    let hit = app
+        .geometry
+        .sidebar_hits
+        .iter()
+        .find(|hit| matches!(hit.target, SidebarHit::Commit(0)))
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    let row_text = |y| {
+        (hit.area.x..hit.area.right())
+            .map(|x| buffer[(x, y)].symbol())
+            .collect::<String>()
+    };
+    let subject = row_text(hit.area.y);
+    let metadata = row_text(hit.area.y.saturating_add(1));
+
+    assert_eq!(hit.area.height, 2);
+    assert!(subject.contains("feat: use the full sidebar line"));
+    assert!(metadata.contains("abc1234"));
+    assert!(metadata.contains("years ago"));
+}
+
+#[test]
 fn footer_underlines_only_the_worktree_count() {
     use std::path::PathBuf;
 
@@ -126,6 +174,8 @@ fn footer_underlines_only_the_worktree_count() {
     let tree = |path: &str, current: bool| crate::git::Worktree {
         path: PathBuf::from(path),
         head: "abcdef0123456789".to_owned(),
+        updated_at: Some("2026-08-22T18:00:00Z".to_owned()),
+        updated_unix: Some(1_776_964_800),
         branch: Some("main".to_owned()),
         current,
         bare: false,

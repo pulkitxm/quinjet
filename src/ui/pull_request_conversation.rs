@@ -68,8 +68,8 @@ pub(super) fn conversation_rows(app: &App, width: usize, theme: &Theme) -> Vec<C
         Span::styled(
             format!(
                 "  ·  opened {}  ·  updated {}",
-                format_local_timestamp(&pull_request.created_at),
-                format_local_timestamp(&pull_request.updated_at)
+                format_relative_timestamp(&pull_request.created_at),
+                format_relative_timestamp(&pull_request.updated_at)
             ),
             Style::default().fg(theme.text),
         ),
@@ -231,7 +231,7 @@ pub(super) fn push_conversation_entry(
     theme: &Theme,
 ) {
     let (icon, color, action) = conversation_marker(entry, theme);
-    let stamp = format_local_timestamp(&entry.timestamp);
+    let stamp = format_relative_timestamp(&entry.timestamp);
     let stamp = if stamp.is_empty() {
         String::new()
     } else {
