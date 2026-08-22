@@ -1,5 +1,4 @@
 use clap::ValueEnum;
-use std::ffi::{OsStr, OsString};
 
 pub(crate) const HOST_OSC_CODE: u16 = 6973;
 
@@ -8,14 +7,13 @@ pub(crate) enum Client {
     Edith,
 }
 
-pub(crate) fn requests_edith_client(args: impl IntoIterator<Item = OsString>) -> bool {
+pub(crate) fn requests_edith_client(args: impl IntoIterator<Item = String>) -> bool {
     let mut args = args.into_iter();
     while let Some(argument) = args.next() {
-        if argument == OsStr::new("--client=edith") {
+        if argument == "--client=edith" {
             return true;
         }
-        if argument == OsStr::new("--client") && args.next().as_deref() == Some(OsStr::new("edith"))
-        {
+        if argument == "--client" && args.next().as_deref() == Some("edith") {
             return true;
         }
     }
@@ -60,18 +58,18 @@ mod tests {
     #[test]
     fn edith_client_detection_accepts_both_clap_spellings() {
         for arguments in [
-            vec![OsString::from("quinjet"), OsString::from("--client=edith")],
+            vec!["quinjet".to_owned(), "--client=edith".to_owned()],
             vec![
-                OsString::from("quinjet"),
-                OsString::from("--client"),
-                OsString::from("edith"),
+                "quinjet".to_owned(),
+                "--client".to_owned(),
+                "edith".to_owned(),
             ],
         ] {
             assert!(requests_edith_client(arguments));
         }
         assert!(!requests_edith_client([
-            OsString::from("quinjet"),
-            OsString::from("--version"),
+            "quinjet".to_owned(),
+            "--version".to_owned(),
         ]));
     }
 }
