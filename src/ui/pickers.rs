@@ -60,7 +60,7 @@ pub(crate) fn draw_projects(
     if let Some(context) = ssh {
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(" SSH  ", Style::default().fg(theme.muted)),
+                Span::styled(" Machine  ", Style::default().fg(theme.muted)),
                 Span::styled(
                     context.current.as_str(),
                     Style::default()

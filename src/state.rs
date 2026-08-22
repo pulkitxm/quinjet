@@ -9,7 +9,8 @@ use crate::state_sorting::{sort_project_groups, sort_worktrees};
 mod remote;
 
 pub(crate) use remote::{
-    forget_recent_remote, load_recent_remotes, load_recent_ssh_machines, record_recent_remote,
+    forget_recent_remote, load_recent_remotes, load_recent_ssh_machines,
+    load_recent_ssh_machines_with_current, record_recent_remote,
 };
 
 const MAX_RECENT_PROJECTS: usize = 20;

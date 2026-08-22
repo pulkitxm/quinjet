@@ -41,7 +41,37 @@ pub(crate) fn record_recent_remote(target: &str, folder: &Path) {
     write_entries(&entries);
 }
 
-pub(crate) fn load_recent_ssh_machines(current: &str, folder: &Path) -> Vec<SshMachine> {
+pub(crate) fn load_recent_ssh_machines() -> Vec<SshMachine> {
+    grouped_ssh_machines()
+}
+
+pub(crate) fn load_recent_ssh_machines_with_current(
+    current: &str,
+    folder: &Path,
+) -> Vec<SshMachine> {
+    let mut machines = grouped_ssh_machines();
+    if !machines.iter().any(|machine| machine.target == current) {
+        machines.push(SshMachine {
+            target: current.to_owned(),
+            folder: folder.to_path_buf(),
+            accessible: true,
+            uses: 0,
+        });
+        machines.sort_by_key(|machine| std::cmp::Reverse(machine.uses));
+    }
+    if let Some(current_index) = machines
+        .iter()
+        .position(|machine| machine.target == current)
+        .filter(|index| *index >= MAX_SSH_MACHINES)
+    {
+        let current_machine = machines.remove(current_index);
+        machines.insert(MAX_SSH_MACHINES.saturating_sub(1), current_machine);
+    }
+    machines.truncate(MAX_SSH_MACHINES);
+    machines
+}
+
+fn grouped_ssh_machines() -> Vec<SshMachine> {
     let mut machines = Vec::<SshMachine>::new();
     for entry in load_recent_remotes() {
         if let Some(machine) = machines
@@ -58,23 +88,7 @@ pub(crate) fn load_recent_ssh_machines(current: &str, folder: &Path) -> Vec<SshM
             });
         }
     }
-    if !machines.iter().any(|machine| machine.target == current) {
-        machines.push(SshMachine {
-            target: current.to_owned(),
-            folder: folder.to_path_buf(),
-            accessible: true,
-            uses: 0,
-        });
-    }
     machines.sort_by_key(|machine| std::cmp::Reverse(machine.uses));
-    if let Some(current_index) = machines
-        .iter()
-        .position(|machine| machine.target == current)
-        .filter(|index| *index >= MAX_SSH_MACHINES)
-    {
-        let current_machine = machines.remove(current_index);
-        machines.insert(MAX_SSH_MACHINES.saturating_sub(1), current_machine);
-    }
     machines.truncate(MAX_SSH_MACHINES);
     machines
 }
@@ -174,7 +188,7 @@ mod tests {
         record_recent_remote("frequent", Path::new("/first"));
         record_recent_remote("frequent", Path::new("/second"));
         record_recent_remote("frequent", Path::new("/first"));
-        let machines = load_recent_ssh_machines("new", Path::new("/repo"));
+        let machines = load_recent_ssh_machines_with_current("new", Path::new("/repo"));
         assert_eq!(machines[0].target, "frequent");
         assert_eq!(machines[0].uses, 3);
         assert_eq!(machines[0].folder, Path::new("/first"));
@@ -191,7 +205,7 @@ mod tests {
         for index in 0..MAX_SSH_MACHINES {
             record_recent_remote(&format!("host-{index}"), Path::new("/repo"));
         }
-        let machines = load_recent_ssh_machines("new-current", Path::new("/current"));
+        let machines = load_recent_ssh_machines_with_current("new-current", Path::new("/current"));
         assert_eq!(machines.len(), MAX_SSH_MACHINES);
         assert!(
             machines
@@ -201,6 +215,20 @@ mod tests {
         assert_eq!(
             machines.last().map(|machine| machine.target.as_str()),
             Some("new-current")
+        );
+    }
+
+    #[test]
+    fn local_machine_list_contains_only_recorded_ssh_targets() {
+        let state = tempfile::tempdir().unwrap();
+        let _guard = StateRootGuard::new(state.path());
+        record_recent_remote("remote-host", Path::new("/repo"));
+        assert_eq!(
+            load_recent_ssh_machines()
+                .iter()
+                .map(|machine| machine.target.as_str())
+                .collect::<Vec<_>>(),
+            vec!["remote-host"]
         );
     }
 }

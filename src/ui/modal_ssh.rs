@@ -38,7 +38,7 @@ pub(super) fn draw_ssh_project_modal(
     }
 }
 
-pub(super) fn draw_ssh_machines(
+pub(crate) fn draw_ssh_machines(
     frame: &mut Frame<'_>,
     items: &[SshMachine],
     selected: usize,
@@ -52,7 +52,7 @@ pub(super) fn draw_ssh_machines(
         frame.area(),
     );
     frame.render_widget(Clear, area);
-    let block = modal_block(" Switch SSH machine ", theme);
+    let block = modal_block(" Switch machine ", theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let list_area = Rect::new(

@@ -44,18 +44,36 @@ use crate::app::AppEffect;
 use crate::cli::{Launch, TerminalOptions};
 use crate::git::Repository;
 use crate::onboarding::{Onboarding, OnboardingAction};
+use crate::ssh::SshContext;
 use crate::webhook::WebhookListener;
 use crate::workspace::{RepositoryWorkspace, RoutedEffects};
 
 fn main() -> ExitCode {
     match cli::dispatch() {
-        Ok(Launch::Terminal(options)) => match open_terminal(&options) {
-            Ok(TerminalOutcome::Finished) => ExitCode::SUCCESS,
-            Ok(TerminalOutcome::SwitchSshMachine(index)) => ssh::switch_exit_code(index)
-                .map_or_else(|| ExitCode::from(cli::EXIT_FAILURE), ExitCode::from),
-            Err(error) => ExitCode::from(cli::report(&error)),
-        },
+        Ok(Launch::Terminal(options)) => terminal_exit_code(&options),
         Ok(Launch::Finished(code)) => ExitCode::from(code),
+        Err(error) => ExitCode::from(cli::report(&error)),
+    }
+}
+
+fn terminal_exit_code(options: &TerminalOptions) -> ExitCode {
+    let inherited_context = SshContext::from_environment();
+    let local_session = inherited_context.is_none();
+    let context = inherited_context.or_else(cli::local_ssh_context);
+    match open_terminal(options, context.as_ref()) {
+        Ok(TerminalOutcome::Finished) => ExitCode::SUCCESS,
+        Ok(TerminalOutcome::SwitchSshMachine(index)) if local_session => {
+            let Some(machine) = context.and_then(|context| context.machines.get(index).cloned())
+            else {
+                return ExitCode::from(cli::EXIT_FAILURE);
+            };
+            match cli::run_selected_terminal(&machine.target, &machine.folder) {
+                Ok(code) => ExitCode::from(code),
+                Err(error) => ExitCode::from(cli::report(&error)),
+            }
+        }
+        Ok(TerminalOutcome::SwitchSshMachine(index)) => ssh::switch_exit_code(index)
+            .map_or_else(|| ExitCode::from(cli::EXIT_FAILURE), ExitCode::from),
         Err(error) => ExitCode::from(cli::report(&error)),
     }
 }
@@ -108,7 +126,10 @@ enum TerminalOutcome {
     clippy::too_many_lines,
     reason = "the terminal loop routes both onboarding and repository sessions"
 )]
-fn open_terminal(options: &TerminalOptions) -> Result<TerminalOutcome> {
+fn open_terminal(
+    options: &TerminalOptions,
+    ssh_context: Option<&SshContext>,
+) -> Result<TerminalOutcome> {
     if !io::stdin().is_terminal() || !cli::stdout_is_terminal() {
         anyhow::bail!("Quinjet requires an interactive terminal");
     }
@@ -130,11 +151,12 @@ fn open_terminal(options: &TerminalOptions) -> Result<TerminalOutcome> {
             options.appearance,
             !options.no_mouse,
             webhooks.is_some(),
+            ssh_context.cloned(),
         );
         workspace.sync_tabs(Instant::now());
         workspace
     });
-    let mut onboarding = Onboarding::new(&options.path);
+    let mut onboarding = Onboarding::new(&options.path, ssh_context.cloned());
     let onboarding_theme = theme::Theme::new(options.theme, options.appearance.resolve());
     let mut terminal = TerminalGuard::enter(!options.no_mouse)?;
     let render_tick = tick(Duration::from_millis(16));
@@ -264,6 +286,10 @@ fn open_terminal(options: &TerminalOptions) -> Result<TerminalOutcome> {
                 match action {
                     OnboardingAction::None => {}
                     OnboardingAction::Quit => running = false,
+                    OnboardingAction::SwitchSshMachine(index) => {
+                        switch_ssh_machine = Some(index);
+                        running = false;
+                    }
                     OnboardingAction::Open(path) => match Repository::discover(&path) {
                         Ok(repository) => {
                             state::record_recent_project(repository.root());
@@ -273,6 +299,7 @@ fn open_terminal(options: &TerminalOptions) -> Result<TerminalOutcome> {
                                 options.appearance,
                                 !options.no_mouse,
                                 webhooks.is_some(),
+                                ssh_context.cloned(),
                             );
                             next.sync_tabs(Instant::now());
                             running &= dispatch_launch_effects(

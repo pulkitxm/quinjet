@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use super::*;
 use crate::app::View;
 use crate::git::tests::TestRepository;
+use crate::ssh::SshMachine;
 
 fn test_repository(branch: &str) -> (TestRepository, Repository) {
     let fixture = TestRepository::with_branch(branch);
@@ -19,7 +20,50 @@ fn workspace(repository: &Repository) -> RepositoryWorkspace {
         AppearanceChoice::Dark,
         false,
         false,
+        None,
     )
+}
+
+#[test]
+fn machine_picker_context_follows_replaced_and_appended_projects() {
+    let (_first_directory, first_repository) = test_repository("first");
+    let (_second_directory, second_repository) = test_repository("second");
+    let context = SshContext {
+        current: "local".to_owned(),
+        machines: vec![SshMachine {
+            target: "remote-host".to_owned(),
+            folder: "/work/remote".into(),
+            accessible: true,
+            uses: 5,
+        }],
+    };
+    let mut workspace = RepositoryWorkspace::new(
+        &first_repository,
+        ThemeName::Quinjet,
+        AppearanceChoice::Dark,
+        false,
+        false,
+        Some(context.clone()),
+    );
+    let now = Instant::now();
+    let first = workspace.active_id().expect("first tab is active");
+    let second = workspace
+        .append_repository(first, &second_repository, now)
+        .expect("append second repository")
+        .id;
+
+    assert_eq!(
+        workspace
+            .app_mut(first)
+            .and_then(|app| app.ssh_context.clone()),
+        Some(context.clone())
+    );
+    assert_eq!(
+        workspace
+            .app_mut(second)
+            .and_then(|app| app.ssh_context.clone()),
+        Some(context)
+    );
 }
 
 #[test]

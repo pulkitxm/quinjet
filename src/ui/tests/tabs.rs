@@ -247,7 +247,7 @@ fn remote_project_picker_shows_the_host_and_ranked_machine_popup() {
         .unwrap();
     let rendered = terminal.backend().to_string();
     assert!(rendered.contains("Switch project"));
-    assert!(rendered.contains("SSH  current-host"));
+    assert!(rendered.contains("Machine  current-host"));
     assert!(rendered.contains("Tab switch machine"));
 
     drop(app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), now));
@@ -257,7 +257,7 @@ fn remote_project_picker_shows_the_host_and_ranked_machine_popup() {
         .unwrap();
     let rendered = terminal.backend().to_string();
     assert!(rendered.contains("Open in new tab"));
-    assert!(rendered.contains("SSH  current-host"));
+    assert!(rendered.contains("Machine  current-host"));
     assert!(rendered.contains("Tab switch machine"));
 
     drop(app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), now));
@@ -265,7 +265,7 @@ fn remote_project_picker_shows_the_host_and_ranked_machine_popup() {
         .draw(|frame| draw(frame, &mut app, &Theme::default()))
         .unwrap();
     let rendered = terminal.backend().to_string();
-    assert!(rendered.contains("Switch SSH machine"));
+    assert!(rendered.contains("Switch machine"));
     assert!(rendered.contains("busy-host"));
     assert!(rendered.contains("used 14"));
     assert!(rendered.contains("current-host"));

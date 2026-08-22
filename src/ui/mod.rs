@@ -425,7 +425,7 @@ mod help;
 mod layout;
 mod modal_branches;
 mod modal_conflict;
-mod modal_ssh;
+pub(crate) mod modal_ssh;
 mod modals;
 pub(crate) mod pickers;
 mod project_picker;

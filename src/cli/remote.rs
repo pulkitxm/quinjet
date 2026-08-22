@@ -24,17 +24,41 @@ pub(super) fn run(
         let arguments = forwarded_arguments(original_arguments)?;
         return run_once(target, folder, &binary, &arguments, None);
     }
+    run_terminal_loop(
+        target,
+        folder,
+        &binary,
+        &original_arguments,
+        implicit_terminal,
+        false,
+    )
+}
+
+pub(crate) fn run_selected_terminal(target: &str, folder: &Path) -> Result<u8> {
+    validate_target(target)?;
+    let binary = env::var(REMOTE_BINARY_ENV).unwrap_or_else(|_| "quinjet".to_owned());
+    let original_arguments = wild::args_os().skip(1).collect::<Vec<_>>();
+    run_terminal_loop(target, folder, &binary, &original_arguments, false, true)
+}
+
+fn run_terminal_loop(
+    target: &str,
+    folder: &Path,
+    binary: &str,
+    original_arguments: &[OsString],
+    implicit_terminal: bool,
+    mut switched: bool,
+) -> Result<u8> {
     let mut current_target = target.to_owned();
     let mut current_folder = folder.to_path_buf();
-    let mut switched = false;
     loop {
         let arguments = if implicit_terminal || switched {
-            switched_terminal_arguments(original_arguments.clone(), &current_folder)?
+            switched_terminal_arguments(original_arguments.to_owned(), &current_folder)?
         } else {
-            forwarded_arguments(original_arguments.clone())?
+            forwarded_arguments(original_arguments.to_owned())?
         };
         let context = ssh_context(&current_target, &current_folder);
-        let status = ssh_status(&current_target, &binary, &arguments, Some(&context), true)?;
+        let status = ssh_status(&current_target, binary, &arguments, Some(&context), true)?;
         let code = status.code().unwrap_or_else(|| i32::from(EXIT_FAILURE));
         if let Some(index) = crate::ssh::switch_index(code)
             && let Some(machine) = context.machines.get(index)
@@ -98,7 +122,20 @@ fn exit_code(status: std::process::ExitStatus) -> u8 {
 }
 
 fn ssh_context(target: &str, folder: &Path) -> crate::ssh::SshContext {
-    let mut machines = crate::state::load_recent_ssh_machines(target, folder);
+    let machines = crate::state::load_recent_ssh_machines_with_current(target, folder);
+    context_with_reachability(target, machines, Some(target))
+}
+
+pub(crate) fn local_ssh_context() -> Option<crate::ssh::SshContext> {
+    let machines = crate::state::load_recent_ssh_machines();
+    (!machines.is_empty()).then(|| context_with_reachability("local", machines, None))
+}
+
+fn context_with_reachability(
+    current: &str,
+    mut machines: Vec<crate::ssh::SshMachine>,
+    assumed_reachable: Option<&str>,
+) -> crate::ssh::SshContext {
     let targets = machines
         .iter()
         .map(|machine| machine.target.clone())
@@ -111,7 +148,7 @@ fn ssh_context(target: &str, folder: &Path) -> crate::ssh::SshContext {
         let checks = targets
             .iter()
             .map(|candidate| {
-                let current = candidate == target;
+                let current = assumed_reachable.is_some_and(|target| candidate == target);
                 scope.spawn(move || current || probe(candidate))
             })
             .collect::<Vec<_>>();
@@ -124,7 +161,7 @@ fn ssh_context(target: &str, folder: &Path) -> crate::ssh::SshContext {
         machine.accessible = reachable;
     }
     crate::ssh::SshContext {
-        current: target.to_owned(),
+        current: current.to_owned(),
         machines,
     }
 }
