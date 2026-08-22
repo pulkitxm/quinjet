@@ -85,6 +85,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
         link_hits,
         help_hits: Vec::new(),
         project_hits,
+        project_collapse_hits: Vec::new(),
     };
 
     let frame_area = frame.area();

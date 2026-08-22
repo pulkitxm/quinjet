@@ -141,6 +141,7 @@ mod modal_review;
 mod mouse;
 mod operations;
 mod palette;
+mod projects;
 mod pull_request_actions;
 mod pull_request_checks;
 mod pull_request_diff;

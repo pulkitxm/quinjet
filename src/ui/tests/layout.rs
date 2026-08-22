@@ -174,6 +174,8 @@ fn footer_underlines_only_the_worktree_count() {
     let tree = |path: &str, current: bool| crate::git::Worktree {
         path: PathBuf::from(path),
         head: "abcdef0123456789".to_owned(),
+        updated_at: Some("2026-08-22T18:00:00Z".to_owned()),
+        updated_unix: Some(1_776_964_800),
         branch: Some("main".to_owned()),
         current,
         bare: false,

@@ -1,7 +1,8 @@
+use std::collections::HashSet;
 use std::env;
 use std::path::{Path, PathBuf};
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::Style;
@@ -30,6 +31,8 @@ pub(crate) struct Onboarding {
     groups: Vec<ProjectGroup>,
     selected: usize,
     query: TextBuffer,
+    collapsed: HashSet<PathBuf>,
+    collapse_hits: Vec<(Rect, PathBuf)>,
     panel: OnboardingPanel,
     path_input: String,
     error: Option<String>,
@@ -46,6 +49,8 @@ impl Onboarding {
             groups,
             selected: 0,
             query: TextBuffer::default(),
+            collapsed: HashSet::new(),
+            collapse_hits: Vec::new(),
             panel: OnboardingPanel::Projects,
             path_input: String::new(),
             error: None,
@@ -78,10 +83,39 @@ impl Onboarding {
         self.error = Some(message.into());
     }
 
+    pub(crate) fn handle_mouse(&mut self, event: MouseEvent) {
+        if self.panel != OnboardingPanel::Projects
+            || event.kind != MouseEventKind::Down(MouseButton::Left)
+        {
+            return;
+        }
+        let Some(common_dir) = self
+            .collapse_hits
+            .iter()
+            .find(|(area, _)| area.contains((event.column, event.row).into()))
+            .map(|(_, common_dir)| common_dir.clone())
+        else {
+            return;
+        };
+        if self.collapsed.contains(&common_dir) {
+            self.collapsed.retain(|candidate| candidate != &common_dir);
+        } else {
+            self.collapsed.extend([common_dir]);
+        }
+        let visible = App::filtered_project_rows(&self.groups, &self.query.value, &self.collapsed);
+        self.selected = self.selected.min(visible.len().saturating_sub(1));
+    }
+
     fn handle_projects_key(&mut self, key: KeyEvent) -> OnboardingAction {
-        let visible = App::filtered_project_rows(&self.groups, &self.query.value);
+        let visible = App::filtered_project_rows(&self.groups, &self.query.value, &self.collapsed);
         match key.code {
             KeyCode::Esc => OnboardingAction::Quit,
+            KeyCode::Char('e' | 'E') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.collapsed
+                    .extend(self.groups.iter().map(|group| group.common_dir.clone()));
+                self.selected = 0;
+                OnboardingAction::None
+            }
             KeyCode::Char('o' | 'O') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.panel = OnboardingPanel::Path;
                 OnboardingAction::None
@@ -193,21 +227,26 @@ impl Onboarding {
         })
     }
 
-    pub(crate) fn draw(&self, frame: &mut Frame<'_>, theme: &Theme) {
+    pub(crate) fn draw(&mut self, frame: &mut Frame<'_>, theme: &Theme) {
         frame.render_widget(
             Block::default().style(Style::default().bg(theme.background)),
             frame.area(),
         );
         match self.panel {
-            OnboardingPanel::Projects => crate::ui::pickers::draw_projects(
-                frame,
-                &self.groups,
-                self.selected,
-                &self.query,
-                false,
-                ProjectOpenMode::Initial,
-                theme,
-            ),
+            OnboardingPanel::Projects => {
+                self.collapse_hits.clear();
+                crate::ui::pickers::draw_projects(
+                    frame,
+                    &mut self.collapse_hits,
+                    &self.groups,
+                    self.selected,
+                    &self.query,
+                    &self.collapsed,
+                    false,
+                    ProjectOpenMode::Initial,
+                    theme,
+                );
+            }
             OnboardingPanel::Path => self.draw_path(frame, theme),
         }
         self.draw_error(frame, theme);

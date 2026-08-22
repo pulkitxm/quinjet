@@ -306,6 +306,8 @@ fn lists_a_linked_worktree_without_changing_head() {
     );
     let trees = repository.worktrees().unwrap();
     assert_eq!(trees.len(), 2);
+    assert!(trees.iter().all(|tree| tree.updated_at.is_some()));
+    assert!(trees.iter().all(|tree| tree.updated_unix.is_some()));
     assert!(
         trees
             .iter()

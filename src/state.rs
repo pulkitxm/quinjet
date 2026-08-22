@@ -4,6 +4,7 @@ use std::{env, fs};
 use serde::{Deserialize, Serialize};
 
 use crate::git::{ProjectGroup, Repository, Worktree};
+use crate::state_sorting::{sort_project_groups, sort_worktrees};
 
 const MAX_RECENT_PROJECTS: usize = 20;
 const RECENT_PROJECTS_FILE: &str = "recent-projects.json";
@@ -57,9 +58,10 @@ pub(crate) fn load_recent_projects(session_root: &Path) -> Vec<ProjectGroup> {
         let Some(repository) = open_repository(&entry) else {
             continue;
         };
-        let Ok(worktrees) = repository.worktrees_relative_to(session_root) else {
+        let Ok(mut worktrees) = repository.worktrees_relative_to(session_root) else {
             continue;
         };
+        sort_worktrees(&mut worktrees);
         seen.push(entry.common_dir.clone());
         groups.push(ProjectGroup {
             name: project_name(&worktrees, &repository),
@@ -67,6 +69,7 @@ pub(crate) fn load_recent_projects(session_root: &Path) -> Vec<ProjectGroup> {
             worktrees,
         });
     }
+    sort_project_groups(&mut groups);
     groups
 }
 

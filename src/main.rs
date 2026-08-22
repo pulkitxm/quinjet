@@ -6,6 +6,7 @@ mod file_icons;
 mod git;
 mod onboarding;
 mod state;
+mod state_sorting;
 mod tabs;
 mod theme;
 mod ui;
@@ -181,14 +182,14 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
                 running &= dispatch_effects(current, &mut terminal, effects);
                 dirty |= changed;
             }
-            if relative_time_tick.try_recv().is_ok() {
-                dirty = true;
-            }
             if periodic_refresh.try_recv().is_ok() {
                 let effects = current.periodic_refresh();
                 running &= dispatch_effects(current, &mut terminal, effects);
                 dirty = true;
             }
+        }
+        if relative_time_tick.try_recv().is_ok() {
+            dirty = true;
         }
 
         if event::poll(Duration::from_millis(8)).context("failed to poll terminal events")? {
@@ -221,6 +222,10 @@ fn open_terminal(options: &TerminalOptions) -> Result<()> {
                     }
                     Event::Paste(text) => {
                         onboarding.handle_paste(&text);
+                        OnboardingAction::None
+                    }
+                    Event::Mouse(mouse) => {
+                        onboarding.handle_mouse(mouse);
                         OnboardingAction::None
                     }
                     _ => OnboardingAction::None,
