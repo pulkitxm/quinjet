@@ -9,6 +9,10 @@ pub(super) fn draw_modal(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     draw_modal_content(frame, app, theme);
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the exhaustive modal renderer keeps each popup route visible"
+)]
 pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     match app.modal.as_ref() {
         None | Some(Modal::Help { .. }) => {}
@@ -101,7 +105,22 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
             query,
             loading,
             mode,
-        }) => draw_projects(frame, groups, *selected, query, *loading, *mode, theme),
+        }) => draw_projects(
+            frame,
+            groups,
+            *selected,
+            query,
+            *loading,
+            *mode,
+            app.ssh_context.as_ref(),
+            theme,
+        ),
+        Some(Modal::SshMachines {
+            items,
+            selected,
+            current,
+            ..
+        }) => draw_ssh_machines(frame, items, *selected, current, theme),
         Some(Modal::PullRequestRepositories {
             items,
             selected,

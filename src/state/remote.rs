@@ -4,6 +4,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use super::{MAX_RECENT_PROJECTS, state_root};
+use crate::ssh::{MAX_SSH_MACHINES, SshMachine};
 
 const RECENT_REMOTES_FILE: &str = "recent-remotes.json";
 
@@ -12,21 +13,62 @@ const RECENT_REMOTES_FILE: &str = "recent-remotes.json";
 pub(crate) struct RecentRemote {
     pub target: String,
     pub folder: String,
+    #[serde(default = "initial_uses")]
+    pub uses: u64,
+}
+
+const fn initial_uses() -> u64 {
+    1
 }
 
 pub(crate) fn record_recent_remote(target: &str, folder: &Path) {
     let folder = folder.to_string_lossy().into_owned();
     let mut entries = load_recent_remotes();
+    let uses = entries
+        .iter()
+        .find(|entry| entry.target == target && entry.folder == folder)
+        .map_or(1, |entry| entry.uses.saturating_add(1));
     entries.retain(|entry| entry.target != target || entry.folder != folder);
     entries.insert(
         0,
         RecentRemote {
             target: target.to_owned(),
             folder,
+            uses,
         },
     );
     entries.truncate(MAX_RECENT_PROJECTS);
     write_entries(&entries);
+}
+
+pub(crate) fn load_recent_ssh_machines(current: &str, folder: &Path) -> Vec<SshMachine> {
+    let mut machines = Vec::<SshMachine>::new();
+    for entry in load_recent_remotes() {
+        if let Some(machine) = machines
+            .iter_mut()
+            .find(|machine| machine.target == entry.target)
+        {
+            machine.uses = machine.uses.saturating_add(entry.uses);
+        } else {
+            machines.push(SshMachine {
+                target: entry.target,
+                folder: Path::new(&entry.folder).to_path_buf(),
+                accessible: false,
+                uses: entry.uses,
+            });
+        }
+    }
+    if !machines.iter().any(|machine| machine.target == current) {
+        machines.push(SshMachine {
+            target: current.to_owned(),
+            folder: folder.to_path_buf(),
+            accessible: true,
+            uses: 0,
+        });
+    }
+    machines.sort_by_key(|machine| std::cmp::Reverse(machine.uses));
+    machines.truncate(MAX_SSH_MACHINES);
+    machines
 }
 
 pub(crate) fn forget_recent_remote(target: &str, folder: Option<&str>) {
@@ -99,10 +141,12 @@ mod tests {
                 RecentRemote {
                     target: "first".to_owned(),
                     folder: "/one".to_owned(),
+                    uses: 2,
                 },
                 RecentRemote {
                     target: "second".to_owned(),
                     folder: "/two".to_owned(),
+                    uses: 1,
                 },
             ]
         );
@@ -112,5 +156,23 @@ mod tests {
         assert_eq!(load_recent_remotes().len(), 1);
         forget_recent_remote("second", None);
         assert_eq!(load_recent_remotes(), Vec::new());
+    }
+
+    #[test]
+    fn machines_are_grouped_and_sorted_by_total_usage() {
+        let state = tempfile::tempdir().unwrap();
+        let _guard = StateRootGuard::new(state.path());
+        record_recent_remote("occasional", Path::new("/one"));
+        record_recent_remote("frequent", Path::new("/first"));
+        record_recent_remote("frequent", Path::new("/second"));
+        record_recent_remote("frequent", Path::new("/first"));
+        let machines = load_recent_ssh_machines("new", Path::new("/repo"));
+        assert_eq!(machines[0].target, "frequent");
+        assert_eq!(machines[0].uses, 3);
+        assert_eq!(machines[0].folder, Path::new("/first"));
+        assert_eq!(machines[1].target, "occasional");
+        assert_eq!(machines[1].uses, 1);
+        assert_eq!(machines[2].target, "new");
+        assert_eq!(machines[2].uses, 0);
     }
 }

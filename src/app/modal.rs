@@ -358,6 +358,12 @@ pub(crate) enum Modal {
         loading: bool,
         mode: ProjectOpenMode,
     },
+    SshMachines {
+        items: Vec<SshMachine>,
+        selected: usize,
+        current: String,
+        parent: Box<Self>,
+    },
     PullRequestRepositories {
         items: Vec<GitHubRepository>,
         selected: usize,
