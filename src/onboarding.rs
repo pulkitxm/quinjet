@@ -42,21 +42,37 @@ pub(crate) struct Onboarding {
     ssh_context: Option<SshContext>,
     machine_selected: usize,
     machine_button: Option<Rect>,
+    mode: ProjectOpenMode,
 }
 
 impl Onboarding {
-    pub(crate) fn new(launch_path: &Path, ssh_context: Option<SshContext>) -> Self {
-        Self::from_groups(
+    pub(crate) fn new(
+        launch_path: &Path,
+        ssh_context: Option<SshContext>,
+        mode: ProjectOpenMode,
+    ) -> Self {
+        Self::from_groups_with_mode(
             launch_path,
             crate::state::load_recent_projects(launch_path),
             ssh_context,
+            mode,
         )
     }
 
+    #[cfg(test)]
     fn from_groups(
         launch_path: &Path,
         groups: Vec<ProjectGroup>,
         ssh_context: Option<SshContext>,
+    ) -> Self {
+        Self::from_groups_with_mode(launch_path, groups, ssh_context, ProjectOpenMode::Initial)
+    }
+
+    fn from_groups_with_mode(
+        launch_path: &Path,
+        groups: Vec<ProjectGroup>,
+        ssh_context: Option<SshContext>,
+        mode: ProjectOpenMode,
     ) -> Self {
         Self {
             launch_path: launch_path.to_path_buf(),
@@ -71,6 +87,7 @@ impl Onboarding {
             ssh_context,
             machine_selected: 0,
             machine_button: None,
+            mode,
         }
     }
 
@@ -318,7 +335,7 @@ impl Onboarding {
                     &self.collapsed,
                     false,
                     None,
-                    ProjectOpenMode::Initial,
+                    self.mode,
                     self.ssh_context.as_ref(),
                     theme,
                 );

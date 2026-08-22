@@ -49,20 +49,25 @@ fn terminal_exit_code(options: &TerminalOptions) -> ExitCode {
     let context = inherited_context.or_else(|| cli::local_ssh_context(&options.path));
     match open_terminal(options, context.as_ref()) {
         Ok(TerminalOutcome::Finished) => ExitCode::SUCCESS,
-        Ok(TerminalOutcome::SwitchSshMachine(index)) if local_session => {
+        Ok(TerminalOutcome::SwitchSshMachine(request)) if local_session => {
             let Some(mut context) = context else {
                 return ExitCode::from(cli::EXIT_FAILURE);
             };
-            let Some(machine) = context.machines.get(index).cloned() else {
+            let Some(machine) = context.machines.get(request.index).cloned() else {
                 return ExitCode::from(cli::EXIT_FAILURE);
             };
             context.current.clone_from(&machine.target);
-            match cli::run_selected_terminal(&machine.target, &machine.folder, context) {
+            match cli::run_selected_terminal(
+                &machine.target,
+                &machine.folder,
+                context,
+                request.mode,
+            ) {
                 Ok(code) => ExitCode::from(code),
                 Err(error) => ExitCode::from(cli::report(&error)),
             }
         }
-        Ok(TerminalOutcome::SwitchSshMachine(index)) => ssh::switch_exit_code(index)
+        Ok(TerminalOutcome::SwitchSshMachine(request)) => ssh::switch_exit_code(request)
             .map_or_else(|| ExitCode::from(cli::EXIT_FAILURE), ExitCode::from),
         Err(error) => ExitCode::from(cli::report(&error)),
     }
@@ -70,7 +75,7 @@ fn terminal_exit_code(options: &TerminalOptions) -> ExitCode {
 
 enum TerminalOutcome {
     Finished,
-    SwitchSshMachine(usize),
+    SwitchSshMachine(ssh::SshSwitch),
 }
 
 #[expect(
@@ -91,8 +96,8 @@ fn open_terminal(
         .as_deref()
         .map(WebhookListener::bind)
         .transpose()?;
-    let repository = std::env::var_os(ssh::OPEN_PROJECTS_ENV)
-        .is_none()
+    let handoff_mode = ssh::SshProjectOpenMode::from_environment();
+    let repository = (handoff_mode != Some(ssh::SshProjectOpenMode::CurrentTab))
         .then(|| Repository::discover(&options.path).ok())
         .flatten();
     if let Some(repository) = repository.as_ref() {
@@ -110,7 +115,12 @@ fn open_terminal(
         workspace.sync_tabs(Instant::now());
         workspace
     });
-    let mut onboarding = Onboarding::new(&options.path, ssh_context.cloned());
+    let onboarding_mode = if handoff_mode == Some(ssh::SshProjectOpenMode::NewTab) {
+        app::ProjectOpenMode::NewTab
+    } else {
+        app::ProjectOpenMode::Initial
+    };
+    let mut onboarding = Onboarding::new(&options.path, ssh_context.cloned(), onboarding_mode);
     let onboarding_theme = theme::Theme::new(options.theme, options.appearance.resolve());
     let mut terminal = TerminalGuard::enter(!options.no_mouse)?;
     let render_tick = tick(Duration::from_millis(16));
@@ -127,6 +137,11 @@ fn open_terminal(
             options.pull_request,
             &mut switch_ssh_machine,
         );
+        if handoff_mode == Some(ssh::SshProjectOpenMode::NewTab)
+            && let Some(effects) = current.open_projects_in_new_tab_on_launch()
+        {
+            running &= dispatch_effects(current, &mut terminal, [effects], &mut switch_ssh_machine);
+        }
     }
     while running {
         if dirty {
@@ -238,7 +253,10 @@ fn open_terminal(
                     OnboardingAction::None => {}
                     OnboardingAction::Quit => running = false,
                     OnboardingAction::SwitchSshMachine(index) => {
-                        switch_ssh_machine = Some(index);
+                        switch_ssh_machine = Some(ssh::SshSwitch {
+                            index,
+                            mode: ssh::SshProjectOpenMode::CurrentTab,
+                        });
                         running = false;
                     }
                     OnboardingAction::Open(path) => match Repository::discover(&path) {
@@ -281,7 +299,7 @@ fn dispatch_launch_effects(
     workspace: &mut RepositoryWorkspace,
     terminal: &mut TerminalGuard,
     pull_request: Option<u64>,
-    switch_ssh_machine: &mut Option<usize>,
+    switch_ssh_machine: &mut Option<ssh::SshSwitch>,
 ) -> bool {
     let mut running = true;
     if let Some(effects) = workspace.initial_effects() {
@@ -312,7 +330,7 @@ fn dispatch_effects(
     workspace: &mut RepositoryWorkspace,
     terminal: &mut TerminalGuard,
     routed: impl IntoIterator<Item = RoutedEffects>,
-    switch_ssh_machine: &mut Option<usize>,
+    switch_ssh_machine: &mut Option<ssh::SshSwitch>,
 ) -> bool {
     let mut running = true;
     let mut pending = routed.into_iter().collect::<VecDeque<_>>();
@@ -338,8 +356,8 @@ fn dispatch_effects(
                         pending.push_back(effects);
                     }
                 }
-                AppEffect::SwitchSshMachine(index) => {
-                    *switch_ssh_machine = Some(index);
+                AppEffect::SwitchSshMachine(request) => {
+                    *switch_ssh_machine = Some(request);
                     running = false;
                 }
                 AppEffect::ActivateRepositoryTab(target) => {

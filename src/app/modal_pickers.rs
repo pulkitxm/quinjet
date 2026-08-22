@@ -121,7 +121,17 @@ impl App {
                             && machine.accessible
                             && machine.target != *current
                         {
-                            effects.push(AppEffect::SwitchSshMachine(*selected));
+                            let mode = match parent.as_ref() {
+                                Modal::Projects {
+                                    mode: ProjectOpenMode::NewTab,
+                                    ..
+                                } => crate::ssh::SshProjectOpenMode::NewTab,
+                                _ => crate::ssh::SshProjectOpenMode::CurrentTab,
+                            };
+                            effects.push(AppEffect::SwitchSshMachine(crate::ssh::SshSwitch {
+                                index: *selected,
+                                mode,
+                            }));
                             return effects;
                         }
                     }

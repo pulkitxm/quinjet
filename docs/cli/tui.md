@@ -205,7 +205,8 @@ second-layer switcher, with SSH machines ordered by usage and labeled with
 their current reachability. Choosing the host returns to its local project
 picker without a reverse SSH connection. Choosing an SSH machine opens that
 machine's project picker. Closing the switcher returns to the same project
-picker.
+picker. A machine switch from the `N` picker keeps `Open in new tab` mode, so
+the selected project is added as another tab on the destination machine.
 
 Drag a visible project tab to reorder it. When the strip overflows, its left
 and right controls cycle until the hidden tab becomes visible. Right-click a

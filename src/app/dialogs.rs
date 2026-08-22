@@ -2,6 +2,12 @@
 use super::*;
 
 impl App {
+    pub(crate) fn open_projects_in_new_tab_on_launch(&mut self) -> Vec<AppEffect> {
+        let mut effects = Vec::new();
+        self.open_projects(ProjectOpenMode::NewTab, &mut effects);
+        effects
+    }
+
     pub(super) fn open_stashes(&mut self, effects: &mut Vec<AppEffect>) {
         self.stash_generation = self.stash_generation.wrapping_add(1);
         self.modal = Some(Modal::Stashes {

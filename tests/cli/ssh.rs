@@ -202,7 +202,39 @@ fn terminal_machine_selection_returns_to_the_named_host_picker() -> Result<()> {
     ensure!(local.contains("arguments:tui "));
     ensure!(local.contains("\"local\":true"));
     ensure!(local.contains("inherited:1"));
-    ensure!(local.contains("projects:1"));
+    ensure!(local.contains("projects:current-tab"));
+    let ssh = fs::read_to_string(ssh_capture)?;
+    ensure!(ssh.matches("\nfirst-host\n").count() == 1);
+    Ok(())
+}
+
+#[test]
+fn terminal_machine_selection_preserves_new_tab_mode_on_the_host() -> Result<()> {
+    let scratch = Scratch::directory()?;
+    let (bin, ssh_capture) = fake_ssh(&scratch)?;
+    let (local_binary, local_capture) = fake_local(&scratch)?;
+    let mut paths = vec![bin];
+    if let Some(existing) = std::env::var_os("PATH") {
+        paths.extend(std::env::split_paths(&existing));
+    }
+    let mut command = ProcessCommand::new(env!("CARGO_BIN_EXE_quinjet"));
+    command
+        .args(["--remote", "first-host", "--folder", "/first"])
+        .env("PATH", std::env::join_paths(paths)?)
+        .env("SSH_CAPTURE", &ssh_capture)
+        .env("SSH_SWITCH_TARGET", "first-host")
+        .env("SSH_SWITCH_CODE", "96")
+        .env("QUINJET_LOCAL_BINARY", local_binary)
+        .env("LOCAL_CAPTURE", &local_capture)
+        .env("QUINJET_REMOTE_BINARY", "quinjet test");
+    isolate_git(&mut command);
+    isolate_quinjet(&mut command, &scratch.environment);
+    drop(Run::from(command.output()?)?.success()?);
+
+    let local = fs::read_to_string(local_capture)?;
+    ensure!(local.contains("arguments:tui "));
+    ensure!(local.contains("inherited:1"));
+    ensure!(local.contains("projects:new-tab"));
     let ssh = fs::read_to_string(ssh_capture)?;
     ensure!(ssh.matches("\nfirst-host\n").count() == 1);
     Ok(())

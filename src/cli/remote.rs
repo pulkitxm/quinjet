@@ -8,12 +8,19 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 
 use super::{EXIT_FAILURE, EXIT_UNAVAILABLE, Emitter, RemoteVerb};
-use crate::ssh::SshContext;
+use crate::ssh::{SshContext, SshProjectOpenMode};
 
 const REMOTE_BINARY_ENV: &str = "QUINJET_REMOTE_BINARY";
 mod terminal;
 
 pub(crate) use terminal::run_selected_terminal;
+
+#[derive(Clone, Copy, Default)]
+struct TerminalRelay {
+    allocate: bool,
+    inherited: bool,
+    project_mode: Option<SshProjectOpenMode>,
+}
 
 pub(super) fn run(
     target: &str,
@@ -34,6 +41,7 @@ pub(super) fn run(
         &binary,
         &original_arguments,
         (implicit_terminal, false, None),
+        None,
     )
 }
 
@@ -44,7 +52,7 @@ fn run_once(
     arguments: &[OsString],
     context: Option<&SshContext>,
 ) -> Result<u8> {
-    let status = ssh_status(target, binary, arguments, context, false, false)?;
+    let status = ssh_status(target, binary, arguments, context, TerminalRelay::default())?;
     if status.success() {
         crate::state::record_recent_remote(target, folder);
     }
@@ -56,12 +64,17 @@ fn ssh_status(
     binary: &str,
     arguments: &[OsString],
     context: Option<&SshContext>,
-    terminal: bool,
-    inherited_terminal: bool,
+    terminal: TerminalRelay,
 ) -> Result<std::process::ExitStatus> {
-    let command = remote_command(binary, arguments, context, inherited_terminal)?;
+    let command = remote_command(
+        binary,
+        arguments,
+        context,
+        terminal.inherited,
+        terminal.project_mode,
+    )?;
     let mut ssh = Command::new("ssh");
-    let ssh = if terminal && io::stdin().is_terminal() && io::stdout().is_terminal() {
+    let ssh = if terminal.allocate && io::stdin().is_terminal() && io::stdout().is_terminal() {
         ssh.arg("-tt")
     } else {
         &mut ssh
@@ -372,6 +385,7 @@ fn remote_command(
     arguments: &[OsString],
     context: Option<&SshContext>,
     inherited_terminal: bool,
+    project_mode: Option<SshProjectOpenMode>,
 ) -> Result<String> {
     let mut command = quote(binary)?;
     for argument in arguments {
@@ -383,10 +397,12 @@ fn remote_command(
         command = format!("QUINJET_SSH_CONTEXT={} {command}", quote(&serialized)?);
     }
     if inherited_terminal {
+        let mode = project_mode.unwrap_or(SshProjectOpenMode::CurrentTab);
         command = format!(
-            "{}=1 {}=1 {command}",
+            "{}=1 {}={} {command}",
             crate::terminal::INHERITED_TERMINAL_ENV,
-            crate::ssh::OPEN_PROJECTS_ENV
+            crate::ssh::OPEN_PROJECTS_ENV,
+            mode.environment_value()
         );
     }
     Ok(command)
@@ -428,6 +444,7 @@ mod tests {
             &[OsString::from("--path"), OsString::from("a'b c")],
             None,
             false,
+            None,
         )
         .unwrap();
         assert_eq!(command, "'quinjet test' --path \"a'b c\"");
@@ -435,10 +452,11 @@ mod tests {
 
     #[test]
     fn switched_terminal_inherits_the_existing_alternate_screen() {
-        let command = remote_command("quinjet", &[], None, true).unwrap();
+        let command =
+            remote_command("quinjet", &[], None, true, Some(SshProjectOpenMode::NewTab)).unwrap();
         assert_eq!(
             command,
-            "QUINJET_INHERITED_TERMINAL=1 QUINJET_OPEN_PROJECTS=1 quinjet"
+            "QUINJET_INHERITED_TERMINAL=1 QUINJET_OPEN_PROJECTS=new-tab quinjet"
         );
     }
 

@@ -174,7 +174,7 @@ pub(crate) enum AppEffect {
     Open(OpenTarget),
     SwitchRepository(PathBuf),
     OpenRepositoryTab(PathBuf),
-    SwitchSshMachine(usize),
+    SwitchSshMachine(crate::ssh::SshSwitch),
     ActivateRepositoryTab(TabId),
     ReorderRepositoryTab { source: TabId, target: TabId },
     CloseRepositoryTab(TabId),

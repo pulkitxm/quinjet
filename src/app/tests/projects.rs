@@ -104,6 +104,25 @@ fn header_path_and_w_open_the_projects_picker() {
 }
 
 #[test]
+fn machine_handoff_reopens_projects_in_new_tab_mode() {
+    let mut app = App::new("/tmp/repo", "repo");
+    let effects = app.open_projects_in_new_tab_on_launch();
+
+    assert!(matches!(
+        app.modal,
+        Some(Modal::Projects {
+            mode: ProjectOpenMode::NewTab,
+            ..
+        })
+    ));
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        AppEffect::Git(command)
+            if matches!(command.as_ref(), WorkerCommand::LoadRecentProjects { .. })
+    )));
+}
+
+#[test]
 fn control_e_expands_mixed_projects_then_collapses_all() {
     let mut app = App::new("/tmp/repo", "repo");
     let groups = vec![
@@ -244,7 +263,10 @@ fn project_picker_is_the_machine_switching_entry_point() {
     let effects = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
     assert!(matches!(
         effects.as_slice(),
-        [AppEffect::SwitchSshMachine(0)]
+        [AppEffect::SwitchSshMachine(crate::ssh::SshSwitch {
+            index: 0,
+            mode: crate::ssh::SshProjectOpenMode::NewTab,
+        })]
     ));
 }
 

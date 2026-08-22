@@ -91,6 +91,12 @@ impl RepositoryWorkspace {
         Some(RoutedEffects { id, effects })
     }
 
+    pub(crate) fn open_projects_in_new_tab_on_launch(&mut self) -> Option<RoutedEffects> {
+        let id = self.active_id()?;
+        let effects = self.app_mut(id)?.open_projects_in_new_tab_on_launch();
+        Some(RoutedEffects { id, effects })
+    }
+
     pub(crate) fn open_pull_request_on_launch(&mut self, number: u64) -> Option<RoutedEffects> {
         let id = self.active_id()?;
         let effects = self.app_mut(id)?.open_pull_request_on_launch(number);
