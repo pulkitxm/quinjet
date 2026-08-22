@@ -80,6 +80,10 @@ fn grouped_ssh_machines() -> Vec<SshMachine> {
             .find(|machine| machine.target == entry.target)
         {
             machine.uses = machine.uses.saturating_add(entry.uses);
+            let folder = Path::new(&entry.folder);
+            if machine.folder.is_relative() && folder.is_absolute() {
+                machine.folder = folder.to_path_buf();
+            }
         } else {
             machines.push(SshMachine {
                 target: entry.target,
@@ -198,6 +202,19 @@ mod tests {
         assert_eq!(machines[1].uses, 1);
         assert_eq!(machines[2].target, "new");
         assert_eq!(machines[2].uses, 0);
+    }
+
+    #[test]
+    fn machine_folder_prefers_an_absolute_recent_project() {
+        let state = tempfile::tempdir().unwrap();
+        let _guard = StateRootGuard::new(state.path());
+        record_recent_remote("remote", Path::new("/work/project"));
+        record_recent_remote("remote", Path::new("."));
+
+        let machines = load_recent_ssh_machines();
+
+        assert_eq!(machines[0].folder, Path::new("/work/project"));
+        assert_eq!(machines[0].uses, 2);
     }
 
     #[test]
