@@ -50,11 +50,14 @@ fn terminal_exit_code(options: &TerminalOptions) -> ExitCode {
     match open_terminal(options, context.as_ref()) {
         Ok(TerminalOutcome::Finished) => ExitCode::SUCCESS,
         Ok(TerminalOutcome::SwitchSshMachine(index)) if local_session => {
-            let Some(machine) = context.and_then(|context| context.machines.get(index).cloned())
-            else {
+            let Some(mut context) = context else {
                 return ExitCode::from(cli::EXIT_FAILURE);
             };
-            match cli::run_selected_terminal(&machine.target, &machine.folder) {
+            let Some(machine) = context.machines.get(index).cloned() else {
+                return ExitCode::from(cli::EXIT_FAILURE);
+            };
+            context.current.clone_from(&machine.target);
+            match cli::run_selected_terminal(&machine.target, &machine.folder, context) {
                 Ok(code) => ExitCode::from(code),
                 Err(error) => ExitCode::from(cli::report(&error)),
             }

@@ -31,16 +31,33 @@ pub(super) fn run(
         &original_arguments,
         implicit_terminal,
         false,
+        None,
     )
 }
 
-pub(crate) fn run_selected_terminal(target: &str, folder: &Path) -> Result<u8> {
+pub(crate) fn run_selected_terminal(
+    target: &str,
+    folder: &Path,
+    context: crate::ssh::SshContext,
+) -> Result<u8> {
     validate_target(target)?;
     let binary = env::var(REMOTE_BINARY_ENV).unwrap_or_else(|_| "quinjet".to_owned());
     let original_arguments = wild::args_os().skip(1).collect::<Vec<_>>();
-    run_terminal_loop(target, folder, &binary, &original_arguments, false, true)
+    run_terminal_loop(
+        target,
+        folder,
+        &binary,
+        &original_arguments,
+        false,
+        true,
+        Some(context),
+    )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "terminal handoff keeps transport arguments and live machine context together"
+)]
 fn run_terminal_loop(
     target: &str,
     folder: &Path,
@@ -48,16 +65,17 @@ fn run_terminal_loop(
     original_arguments: &[OsString],
     implicit_terminal: bool,
     mut switched: bool,
+    context: Option<crate::ssh::SshContext>,
 ) -> Result<u8> {
     let mut current_target = target.to_owned();
     let mut current_folder = folder.to_path_buf();
+    let mut context = context.unwrap_or_else(|| ssh_context(&current_target, &current_folder));
     loop {
         let arguments = if implicit_terminal || switched {
             switched_terminal_arguments(original_arguments.to_owned(), &current_folder)?
         } else {
             forwarded_arguments(original_arguments.to_owned())?
         };
-        let context = ssh_context(&current_target, &current_folder);
         let status = ssh_status(
             &current_target,
             binary,
@@ -73,6 +91,7 @@ fn run_terminal_loop(
             crate::state::record_recent_remote(&current_target, &current_folder);
             current_target.clone_from(&machine.target);
             current_folder.clone_from(&machine.folder);
+            context.current.clone_from(&current_target);
             switched = true;
             continue;
         }
