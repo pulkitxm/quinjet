@@ -1,10 +1,11 @@
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use super::*;
 use crate::app::{Modal, ProjectOpenMode, TextBuffer, View};
+use crate::git::support::same_path;
 use crate::git::tests::TestRepository;
 use crate::ssh::SshMachine;
 
@@ -23,6 +24,50 @@ fn workspace(repository: &Repository) -> RepositoryWorkspace {
         false,
         None,
     )
+}
+
+#[test]
+fn machine_session_restores_open_tabs_in_order_and_reactivates_the_saved_project() {
+    let (_first_directory, first_repository) = test_repository("first");
+    let (_second_directory, second_repository) = test_repository("second");
+    let session = ProjectSession {
+        roots: vec![
+            first_repository.root().to_path_buf(),
+            PathBuf::from("/missing/project"),
+            second_repository.root().to_path_buf(),
+        ],
+        active: Some(first_repository.root().to_path_buf()),
+    };
+
+    let mut restored = RepositoryWorkspace::restore(
+        &session,
+        ThemeName::Quinjet,
+        AppearanceChoice::Dark,
+        false,
+        false,
+        None,
+    )
+    .expect("restored workspace");
+
+    let tabs = restored.tabs.infos();
+    assert_eq!(tabs.len(), 2);
+    assert!(
+        tabs.first()
+            .is_some_and(|tab| { tab.active && same_path(&tab.root, first_repository.root()) })
+    );
+    assert!(
+        tabs.get(1)
+            .is_some_and(|tab| { !tab.active && same_path(&tab.root, second_repository.root()) })
+    );
+    let restored_session = restored.project_session();
+    assert_eq!(restored_session.roots.len(), 2);
+    assert!(
+        restored_session
+            .active
+            .as_deref()
+            .is_some_and(|active| same_path(active, first_repository.root()))
+    );
+    assert_eq!(restored.initial_effects().len(), 2);
 }
 
 #[test]

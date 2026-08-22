@@ -1,10 +1,11 @@
 use std::path::Path;
 use std::time::Instant;
 
-use crate::app::{App, AppEffect, Modal, ToastLevel};
+use crate::app::{App, AppEffect, Modal, ProjectOpenMode, ToastLevel};
 use crate::git::Repository;
 use crate::git::worker::{GitWorker, WorkerCommand};
 use crate::ssh::SshContext;
+use crate::state::session::ProjectSession;
 use crate::tabs::{RepositoryTabs, TabId};
 use crate::theme::{AppearanceChoice, ThemeName};
 use crate::watch::RepoWatcher;
@@ -73,6 +74,63 @@ impl RepositoryWorkspace {
         }
     }
 
+    pub(crate) fn restore(
+        session: &ProjectSession,
+        theme: ThemeName,
+        appearance: AppearanceChoice,
+        mouse: bool,
+        webhooks_listening: bool,
+        ssh_context: Option<&SshContext>,
+    ) -> Option<Self> {
+        let mut repositories = session.roots.iter().filter_map(|root| {
+            Repository::discover(root)
+                .ok()
+                .map(|repository| (root, repository))
+        });
+        let (first_root, first) = repositories.next()?;
+        let mut workspace = Self::new(
+            &first,
+            theme,
+            appearance,
+            mouse,
+            webhooks_listening,
+            ssh_context.cloned(),
+        );
+        let mut restored_active = (session.active.as_ref() == Some(first_root))
+            .then(|| workspace.active_id())
+            .flatten();
+        for (saved_root, repository) in repositories {
+            let title = repository.name();
+            let root = repository.root().to_path_buf();
+            let runtime = RepositoryRuntime::new(
+                &repository,
+                theme,
+                appearance,
+                mouse,
+                webhooks_listening,
+                ssh_context.cloned(),
+            );
+            let id = workspace.tabs.append(title, root.clone(), runtime);
+            if session.active.as_ref() == Some(saved_root) {
+                restored_active = Some(id);
+            }
+        }
+        if let Some(id) = restored_active {
+            workspace.activate(id, Instant::now());
+        } else {
+            workspace.sync_tabs(Instant::now());
+        }
+        Some(workspace)
+    }
+
+    pub(crate) fn project_session(&self) -> ProjectSession {
+        let infos = self.tabs.infos();
+        ProjectSession {
+            roots: infos.iter().map(|tab| tab.root.clone()).collect(),
+            active: infos.into_iter().find(|tab| tab.active).map(|tab| tab.root),
+        }
+    }
+
     pub(crate) const fn active_id(&self) -> Option<TabId> {
         self.tabs.active_id()
     }
@@ -85,15 +143,22 @@ impl RepositoryWorkspace {
         self.tabs.get_mut(id).map(|runtime| &mut runtime.app)
     }
 
-    pub(crate) fn initial_effects(&mut self) -> Option<RoutedEffects> {
-        let id = self.active_id()?;
-        let effects = self.app_mut(id)?.initial_effects();
-        Some(RoutedEffects { id, effects })
+    pub(crate) fn initial_effects(&mut self) -> Vec<RoutedEffects> {
+        self.tabs
+            .iter_mut()
+            .map(|(id, runtime)| RoutedEffects {
+                id,
+                effects: runtime.app.initial_effects(),
+            })
+            .collect()
     }
 
-    pub(crate) fn open_projects_in_new_tab_on_launch(&mut self) -> Option<RoutedEffects> {
+    pub(crate) fn open_projects_on_launch(
+        &mut self,
+        mode: ProjectOpenMode,
+    ) -> Option<RoutedEffects> {
         let id = self.active_id()?;
-        let effects = self.app_mut(id)?.open_projects_in_new_tab_on_launch();
+        let effects = self.app_mut(id)?.open_projects_on_launch(mode);
         Some(RoutedEffects { id, effects })
     }
 

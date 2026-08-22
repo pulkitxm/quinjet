@@ -103,17 +103,31 @@ fn open_terminal(
     if let Some(repository) = repository.as_ref() {
         state::record_recent_project(repository.root());
     }
-    let mut workspace = repository.as_ref().map(|repository| {
-        let mut workspace = RepositoryWorkspace::new(
-            repository,
-            options.theme,
-            options.appearance,
-            !options.no_mouse,
-            webhooks.is_some(),
-            ssh_context.cloned(),
-        );
-        workspace.sync_tabs(Instant::now());
-        workspace
+    let restored_workspace = handoff_mode
+        .and_then(|_| state::session::load_project_session())
+        .and_then(|session| {
+            RepositoryWorkspace::restore(
+                &session,
+                options.theme,
+                options.appearance,
+                !options.no_mouse,
+                webhooks.is_some(),
+                ssh_context,
+            )
+        });
+    let mut workspace = restored_workspace.or_else(|| {
+        repository.as_ref().map(|repository| {
+            let mut workspace = RepositoryWorkspace::new(
+                repository,
+                options.theme,
+                options.appearance,
+                !options.no_mouse,
+                webhooks.is_some(),
+                ssh_context.cloned(),
+            );
+            workspace.sync_tabs(Instant::now());
+            workspace
+        })
     });
     let onboarding_mode = if handoff_mode == Some(ssh::SshProjectOpenMode::NewTab) {
         app::ProjectOpenMode::NewTab
@@ -137,8 +151,13 @@ fn open_terminal(
             options.pull_request,
             &mut switch_ssh_machine,
         );
-        if handoff_mode == Some(ssh::SshProjectOpenMode::NewTab)
-            && let Some(effects) = current.open_projects_in_new_tab_on_launch()
+        let project_mode = match handoff_mode {
+            Some(ssh::SshProjectOpenMode::CurrentTab) => Some(app::ProjectOpenMode::CurrentTab),
+            Some(ssh::SshProjectOpenMode::NewTab) => Some(app::ProjectOpenMode::NewTab),
+            None => None,
+        };
+        if let Some(mode) = project_mode
+            && let Some(effects) = current.open_projects_on_launch(mode)
         {
             running &= dispatch_effects(current, &mut terminal, [effects], &mut switch_ssh_machine);
         }
@@ -287,6 +306,11 @@ fn open_terminal(
         }
     }
 
+    if switch_ssh_machine.is_some()
+        && let Some(current) = workspace.as_ref()
+    {
+        state::session::record_project_session(current.project_session());
+    }
     let outcome =
         switch_ssh_machine.map_or(TerminalOutcome::Finished, TerminalOutcome::SwitchSshMachine);
     if matches!(outcome, TerminalOutcome::SwitchSshMachine(_)) {
@@ -302,9 +326,8 @@ fn dispatch_launch_effects(
     switch_ssh_machine: &mut Option<ssh::SshSwitch>,
 ) -> bool {
     let mut running = true;
-    if let Some(effects) = workspace.initial_effects() {
-        running &= dispatch_effects(workspace, terminal, [effects], switch_ssh_machine);
-    }
+    let effects = workspace.initial_effects();
+    running &= dispatch_effects(workspace, terminal, effects, switch_ssh_machine);
     if let Some(number) = pull_request
         && let Some(effects) = workspace.open_pull_request_on_launch(number)
     {

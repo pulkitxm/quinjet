@@ -2,9 +2,9 @@
 use super::*;
 
 impl App {
-    pub(crate) fn open_projects_in_new_tab_on_launch(&mut self) -> Vec<AppEffect> {
+    pub(crate) fn open_projects_on_launch(&mut self, mode: ProjectOpenMode) -> Vec<AppEffect> {
         let mut effects = Vec::new();
-        self.open_projects(ProjectOpenMode::NewTab, &mut effects);
+        self.open_projects(mode, &mut effects);
         effects
     }
 

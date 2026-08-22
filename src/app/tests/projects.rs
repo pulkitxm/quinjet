@@ -106,7 +106,7 @@ fn header_path_and_w_open_the_projects_picker() {
 #[test]
 fn machine_handoff_reopens_projects_in_new_tab_mode() {
     let mut app = App::new("/tmp/repo", "repo");
-    let effects = app.open_projects_in_new_tab_on_launch();
+    let effects = app.open_projects_on_launch(ProjectOpenMode::NewTab);
 
     assert!(matches!(
         app.modal,
