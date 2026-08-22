@@ -5,12 +5,12 @@ pub(crate) fn dispatch() -> Result<Launch> {
     completion::auto_install();
     let cli = Cli::parse();
     if let Some(target) = cli.remote.as_deref() {
-        let (terminal, folder) = match cli.command.as_ref() {
-            None => (true, cli.repository.as_path()),
-            Some(Verb::Tui(args)) => (true, terminal_path(&args.path, &cli.repository)),
-            Some(_) => (false, cli.repository.as_path()),
+        let (terminal, implicit_terminal, folder) = match cli.command.as_ref() {
+            None => (true, true, cli.repository.as_path()),
+            Some(Verb::Tui(args)) => (true, false, terminal_path(&args.path, &cli.repository)),
+            Some(_) => (false, false, cli.repository.as_path()),
         };
-        return remote::run(target, terminal, folder).map(Launch::Finished);
+        return remote::run(target, terminal, implicit_terminal, folder).map(Launch::Finished);
     }
     let mut out = Emitter::new(cli.json);
     let verb = match cli.command {

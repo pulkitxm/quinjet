@@ -11,10 +11,19 @@ use super::{EXIT_FAILURE, EXIT_UNAVAILABLE, Emitter, RemoteVerb};
 
 const REMOTE_BINARY_ENV: &str = "QUINJET_REMOTE_BINARY";
 
-pub(super) fn run(target: &str, terminal: bool, folder: &Path) -> Result<u8> {
+pub(super) fn run(
+    target: &str,
+    terminal: bool,
+    implicit_terminal: bool,
+    folder: &Path,
+) -> Result<u8> {
     validate_target(target)?;
     let binary = env::var(REMOTE_BINARY_ENV).unwrap_or_else(|_| "quinjet".to_owned());
-    let arguments = forwarded_arguments(wild::args_os().skip(1))?;
+    let arguments = if implicit_terminal {
+        implicit_terminal_arguments(wild::args_os().skip(1), folder)?
+    } else {
+        forwarded_arguments(wild::args_os().skip(1))?
+    };
     let command = remote_command(&binary, &arguments)?;
     let mut ssh = Command::new("ssh");
     let ssh = if terminal && io::stdin().is_terminal() && io::stdout().is_terminal() {
@@ -186,6 +195,31 @@ fn forwarded_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<
     Ok(forwarded)
 }
 
+fn implicit_terminal_arguments(
+    arguments: impl IntoIterator<Item = OsString>,
+    folder: &Path,
+) -> Result<Vec<OsString>> {
+    let forwarded = forwarded_arguments(arguments)?;
+    let mut terminal = vec![OsString::from("tui"), folder.as_os_str().to_os_string()];
+    let mut forwarded = forwarded.into_iter();
+    while let Some(argument) = forwarded.next() {
+        if argument == OsStr::new("--path") || argument == OsStr::new("-C") {
+            drop(
+                forwarded
+                    .next()
+                    .context("repository path requires a directory")?,
+            );
+        } else if argument
+            .to_str()
+            .is_some_and(|value| value.starts_with("--path=") || value.starts_with("-C"))
+        {
+        } else {
+            terminal.push(argument);
+        }
+    }
+    Ok(terminal)
+}
+
 fn remote_command(binary: &str, arguments: &[OsString]) -> Result<String> {
     let mut command = quote(binary)?;
     for argument in arguments {
@@ -232,6 +266,17 @@ mod tests {
         )
         .unwrap();
         assert_eq!(command, "'quinjet test' --path \"a'b c\"");
+    }
+
+    #[test]
+    fn implicit_terminal_uses_the_tui_path_for_released_remote_binaries() {
+        let arguments = ["--remote", "host", "--folder", "/repos/a project"]
+            .into_iter()
+            .map(OsString::from);
+        assert_eq!(
+            implicit_terminal_arguments(arguments, Path::new("/repos/a project")).unwrap(),
+            ["tui", "/repos/a project"].map(OsString::from).to_vec()
+        );
     }
 
     #[test]
