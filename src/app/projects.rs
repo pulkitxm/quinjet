@@ -2,24 +2,24 @@
 use super::*;
 
 impl App {
-    pub(crate) fn all_project_groups_collapsed(
+    pub(crate) fn all_project_groups_expanded(
         groups: &[ProjectGroup],
         collapsed: &HashSet<PathBuf>,
     ) -> bool {
         !groups.is_empty()
             && groups
                 .iter()
-                .all(|group| collapsed.contains(&group.common_dir))
+                .all(|group| !collapsed.contains(&group.common_dir))
     }
 
     pub(crate) fn toggle_all_project_groups(
         groups: &[ProjectGroup],
         collapsed: &mut HashSet<PathBuf>,
     ) {
-        if Self::all_project_groups_collapsed(groups, collapsed) {
-            collapsed.clear();
-        } else {
+        if Self::all_project_groups_expanded(groups, collapsed) {
             collapsed.extend(groups.iter().map(|group| group.common_dir.clone()));
+        } else {
+            collapsed.clear();
         }
     }
 

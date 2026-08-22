@@ -97,7 +97,7 @@ fn header_path_and_w_open_the_projects_picker() {
 }
 
 #[test]
-fn control_e_collapses_mixed_projects_then_expands_all() {
+fn control_e_expands_mixed_projects_then_collapses_all() {
     let mut app = App::new("/tmp/repo", "repo");
     let groups = vec![
         ProjectGroup {
@@ -134,11 +134,8 @@ fn control_e_collapses_mixed_projects_then_expands_all() {
     else {
         panic!("project picker closed");
     };
-    assert_eq!(collapsed.len(), 2);
-    assert_eq!(
-        App::filtered_project_rows(groups, "", collapsed),
-        Vec::<(usize, usize)>::new()
-    );
+    assert!(collapsed.is_empty());
+    assert_eq!(App::filtered_project_rows(groups, "", collapsed).len(), 2);
     query.insert_str("topic");
     assert_eq!(
         App::filtered_project_rows(groups, &query.value, collapsed),
@@ -153,7 +150,7 @@ fn control_e_collapses_mixed_projects_then_expands_all() {
     let Some(Modal::Projects { collapsed, .. }) = app.modal.as_ref() else {
         panic!("project picker closed");
     };
-    assert!(collapsed.is_empty());
+    assert_eq!(collapsed.len(), 2);
 }
 
 #[test]

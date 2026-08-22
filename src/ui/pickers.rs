@@ -171,10 +171,10 @@ pub(crate) fn draw_projects(
             );
         }
     }
-    let fold_action = if App::all_project_groups_collapsed(groups, collapsed) {
-        "expand all"
-    } else {
+    let fold_action = if App::all_project_groups_expanded(groups, collapsed) {
         "collapse all"
+    } else {
+        "expand all"
     };
     let hint = match mode {
         ProjectOpenMode::Initial => {
