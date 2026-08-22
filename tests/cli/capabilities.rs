@@ -108,7 +108,7 @@ fn capability_paths_are_complete_unique_and_parent_first() -> Result<()> {
         .as_array()
         .context("capabilities commands were not an array")?;
     ensure!(
-        commands.len() == 80,
+        commands.len() == 83,
         "unexpected command count: {}",
         commands.len()
     );
@@ -138,6 +138,7 @@ fn capability_paths_are_complete_unique_and_parent_first() -> Result<()> {
                 "revert",
                 "resolve",
                 "repos",
+                "remote",
                 "pr",
                 "completions",
                 "man",

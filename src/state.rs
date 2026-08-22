@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 use crate::git::{ProjectGroup, Repository, Worktree};
 use crate::state_sorting::{sort_project_groups, sort_worktrees};
 
+mod remote;
+
+pub(crate) use remote::{forget_recent_remote, load_recent_remotes, record_recent_remote};
+
 const MAX_RECENT_PROJECTS: usize = 20;
 const RECENT_PROJECTS_FILE: &str = "recent-projects.json";
 

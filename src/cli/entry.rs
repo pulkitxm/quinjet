@@ -4,11 +4,19 @@ use super::*;
 pub(crate) fn dispatch() -> Result<Launch> {
     completion::auto_install();
     let cli = Cli::parse();
+    if let Some(target) = cli.remote.as_deref() {
+        let (terminal, folder) = match cli.command.as_ref() {
+            None => (true, cli.repository.as_path()),
+            Some(Verb::Tui(args)) => (true, args.path.as_path()),
+            Some(_) => (false, cli.repository.as_path()),
+        };
+        return remote::run(target, terminal, folder).map(Launch::Finished);
+    }
     let mut out = Emitter::new(cli.json);
     let verb = match cli.command {
         None => {
             return Ok(Launch::Terminal(Box::new(TerminalOptions {
-                path: PathBuf::from("."),
+                path: cli.repository,
                 no_mouse: false,
                 webhook_listen: None,
                 theme: ThemeName::default(),
@@ -31,6 +39,9 @@ pub(crate) fn dispatch() -> Result<Launch> {
         }
         Some(Verb::Man(args)) => return manual(&out, &args).map(Launch::Finished),
         Some(Verb::Capabilities) => return capabilities(&out).map(Launch::Finished),
+        Some(Verb::Remote { command }) => {
+            return remote::manage(&out, command).map(Launch::Finished);
+        }
         Some(Verb::Update(args)) => {
             out.start_progress("Checking for updates")?;
             let result = update::run(&out, args.check);
