@@ -135,7 +135,10 @@ fn control_e_collapses_every_project_without_hiding_search_matches() {
         panic!("project picker closed");
     };
     assert_eq!(collapsed.len(), 2);
-    assert!(App::filtered_project_rows(groups, "", collapsed).is_empty());
+    assert_eq!(
+        App::filtered_project_rows(groups, "", collapsed),
+        Vec::<(usize, usize)>::new()
+    );
     query.insert_str("topic");
     assert_eq!(
         App::filtered_project_rows(groups, &query.value, collapsed),
