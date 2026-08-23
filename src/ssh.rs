@@ -314,6 +314,8 @@ pub(crate) struct SshContext {
     pub current: String,
     pub machines: Vec<SshMachine>,
     pub tabs: SshTabs,
+    #[serde(default)]
+    pub probing: bool,
 }
 
 impl SshContext {

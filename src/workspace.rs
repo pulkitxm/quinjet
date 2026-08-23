@@ -88,6 +88,10 @@ impl RepositoryWorkspace {
         )
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the shared constructor adds one pending-tab mode to the public constructor inputs"
+    )]
     fn new_with_mode(
         repository: &Repository,
         theme: ThemeName,
@@ -239,6 +243,22 @@ impl RepositoryWorkspace {
 
     pub(crate) fn ssh_context(&self) -> Option<SshContext> {
         self.ssh_context.clone()
+    }
+
+    pub(crate) fn apply_ssh_probe(&mut self, accessibility: &[(String, bool)], now: Instant) {
+        let Some(context) = self.ssh_context.as_mut() else {
+            return;
+        };
+        for machine in &mut context.machines {
+            if let Some((_, accessible)) = accessibility
+                .iter()
+                .find(|(target, _)| target == &machine.target)
+            {
+                machine.accessible = *accessible;
+            }
+        }
+        context.probing = false;
+        self.sync_tabs(now);
     }
 
     pub(crate) const fn active_id(&self) -> Option<TabId> {

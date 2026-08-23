@@ -296,6 +296,7 @@ fn project_picker_keeps_host_and_ssh_navigation_in_one_layout() {
             },
         ],
         tabs: crate::ssh::SshTabs::default(),
+        probing: false,
     });
     let now = Instant::now();
     let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
@@ -310,7 +311,8 @@ fn project_picker_keeps_host_and_ssh_navigation_in_one_layout() {
     assert!(rendered.contains("Pulkits-MacBook-Pro.local"));
     assert!(rendered.contains("busy-host"));
     assert!(rendered.contains("current-host"));
-    assert!(rendered.contains("Tab next machine"));
+    assert!(rendered.contains("Tab machine"));
+    assert!(rendered.contains("Esc close"));
     assert!(!rendered.contains("choose machine"));
     assert!(
         app.geometry
@@ -353,6 +355,42 @@ fn project_picker_keeps_host_and_ssh_navigation_in_one_layout() {
         })]
     ));
     assert!(matches!(app.modal, Some(Modal::Projects { .. })));
+}
+
+#[test]
+fn project_picker_shows_pending_machine_checks_without_hiding_the_footer() {
+    let mut app = App::new("/repo", "project");
+    app.ssh_context = Some(SshContext {
+        current: "host".to_owned(),
+        machines: vec![
+            SshMachine {
+                target: "host".to_owned(),
+                folder: "/repo".into(),
+                accessible: true,
+                uses: 0,
+                local: true,
+            },
+            SshMachine {
+                target: "remote".to_owned(),
+                folder: "/remote".into(),
+                accessible: false,
+                uses: 1,
+                local: false,
+            },
+        ],
+        tabs: crate::ssh::SshTabs::default(),
+        probing: true,
+    });
+    drop(app.open_projects_on_launch(ProjectOpenMode::NewTab));
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+
+    let rendered = terminal.backend().to_string();
+    assert!(rendered.contains("◌ remote"));
+    assert!(rendered.contains("Esc close"));
 }
 
 #[test]

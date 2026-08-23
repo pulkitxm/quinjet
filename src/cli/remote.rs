@@ -136,7 +136,7 @@ fn ssh_context(target: &str, folder: &Path) -> SshContext {
         crate::state::load_recent_ssh_machines_with_current(target, folder),
         &env::current_dir().unwrap_or_default(),
     );
-    context_with_reachability(target, machines, Some(target))
+    context_before_reachability(target, machines, Some(target))
 }
 
 pub(crate) fn local_ssh_context(folder: &Path) -> Option<SshContext> {
@@ -146,7 +146,7 @@ pub(crate) fn local_ssh_context(folder: &Path) -> Option<SshContext> {
         let current = machines
             .first()
             .map_or_else(|| "local".to_owned(), |machine| machine.target.clone());
-        context_with_reachability(&current, machines, None)
+        context_before_reachability(&current, machines, None)
     })
 }
 
@@ -179,40 +179,62 @@ fn host_name() -> String {
         .unwrap_or_else(|| "local".to_owned())
 }
 
-fn context_with_reachability(
+fn context_before_reachability(
     current: &str,
     mut machines: Vec<crate::ssh::SshMachine>,
     assumed_reachable: Option<&str>,
 ) -> SshContext {
-    let targets = machines
-        .iter()
-        .map(|machine| (machine.target.clone(), machine.local))
-        .collect::<Vec<_>>();
-    let accessible = thread::scope(|scope| {
-        #[expect(
-            clippy::needless_collect,
-            reason = "every reachability probe must start before any join can block"
-        )]
-        let checks = targets
-            .iter()
-            .map(|(candidate, local)| {
-                let current = assumed_reachable.is_some_and(|target| candidate == target);
-                scope.spawn(move || *local || current || probe(candidate))
-            })
-            .collect::<Vec<_>>();
-        checks
-            .into_iter()
-            .map(|check| check.join().is_ok_and(|reachable| reachable))
-            .collect::<Vec<_>>()
-    });
-    for (machine, reachable) in machines.iter_mut().zip(accessible) {
-        machine.accessible = reachable;
+    for machine in &mut machines {
+        machine.accessible =
+            machine.local || assumed_reachable.is_some_and(|target| machine.target == target);
     }
+    let probing = machines.iter().any(|machine| !machine.accessible);
     SshContext {
         current: current.to_owned(),
         machines,
         tabs: crate::ssh::SshTabs::default(),
+        probing,
     }
+}
+
+pub(crate) fn begin_ssh_probe(
+    context: &SshContext,
+) -> Option<crossbeam_channel::Receiver<Vec<(String, bool)>>> {
+    context.probing.then(|| {
+        let targets = context
+            .machines
+            .iter()
+            .map(|machine| (machine.target.clone(), machine.local))
+            .collect::<Vec<_>>();
+        let current = context.current.clone();
+        let (sender, receiver) = crossbeam_channel::bounded(1);
+        let _thread = thread::spawn(move || {
+            let accessible = thread::scope(|scope| {
+                #[expect(
+                    clippy::needless_collect,
+                    reason = "every reachability probe must start before any join can block"
+                )]
+                let checks = targets
+                    .iter()
+                    .map(|(candidate, local)| {
+                        let selected = candidate == &current;
+                        scope.spawn(move || *local || selected || probe(candidate))
+                    })
+                    .collect::<Vec<_>>();
+                checks
+                    .into_iter()
+                    .map(|check| check.join().is_ok_and(|reachable| reachable))
+                    .collect::<Vec<_>>()
+            });
+            let result = targets
+                .into_iter()
+                .zip(accessible)
+                .map(|((target, _), reachable)| (target, reachable))
+                .collect();
+            drop(sender.send(result));
+        });
+        receiver
+    })
 }
 
 pub(super) fn manage(out: &Emitter, command: RemoteVerb) -> Result<u8> {
@@ -347,6 +369,16 @@ fn quote(value: &str) -> Result<String> {
 mod tests {
     use super::*;
 
+    fn machine(target: &str, local: bool) -> crate::ssh::SshMachine {
+        crate::ssh::SshMachine {
+            target: target.to_owned(),
+            folder: Path::new("/work").join(target),
+            accessible: true,
+            uses: 0,
+            local,
+        }
+    }
+
     #[test]
     fn host_machine_is_named_and_pinned_before_remotes() {
         let machines = with_host_machine(
@@ -370,5 +402,42 @@ mod tests {
     fn unsafe_ssh_targets_are_refused() {
         assert!(validate_target("-oProxyCommand=bad").is_err());
         assert!(validate_target("two hosts").is_err());
+    }
+
+    #[test]
+    fn initial_context_marks_unknown_machines_as_probing() {
+        let context = context_before_reachability(
+            "remote-current",
+            vec![
+                machine("host", true),
+                machine("remote-current", false),
+                machine("unknown", false),
+            ],
+            Some("remote-current"),
+        );
+
+        assert!(context.probing);
+        assert!(context.machines[0].accessible);
+        assert!(context.machines[1].accessible);
+        assert!(!context.machines[2].accessible);
+    }
+
+    #[test]
+    fn reachability_probe_runs_after_context_creation() {
+        let context = SshContext {
+            current: "current".to_owned(),
+            machines: vec![machine("current", false), machine("host", true)],
+            tabs: crate::ssh::SshTabs::default(),
+            probing: true,
+        };
+        let probe = begin_ssh_probe(&context).expect("probe starts");
+        let result = probe
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("probe finishes");
+
+        assert_eq!(
+            result,
+            vec![("current".to_owned(), true), ("host".to_owned(), true)]
+        );
     }
 }

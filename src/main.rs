@@ -105,6 +105,7 @@ fn open_terminal(
     }
 
     terminal::install_panic_hook();
+    let mut machine_probe = ssh_context.and_then(cli::begin_ssh_probe);
     let webhooks = options
         .webhook_listen
         .as_deref()
@@ -162,7 +163,9 @@ fn open_terminal(
     } else {
         app::ProjectOpenMode::Initial
     };
-    let mut onboarding = Onboarding::new(&options.path, ssh_context.cloned(), onboarding_mode);
+    let mut onboarding = workspace
+        .is_none()
+        .then(|| Onboarding::new(&options.path, ssh_context.cloned(), onboarding_mode));
     let onboarding_theme = theme::Theme::new(options.theme, options.appearance.resolve());
     let mut terminal = TerminalGuard::enter(!options.no_mouse)?;
     let render_tick = tick(Duration::from_millis(16));
@@ -202,12 +205,32 @@ fn open_terminal(
                     .draw(|frame| ui::draw(frame, app, &theme))
                     .context("failed to render Quinjet")?;
             } else {
+                let Some(onboarding) = onboarding.as_mut() else {
+                    break;
+                };
                 let _ = terminal
                     .terminal
                     .draw(|frame| onboarding.draw(frame, &onboarding_theme))
                     .context("failed to render Quinjet onboarding")?;
             }
             dirty = false;
+        }
+
+        if let Some(accessibility) = machine_probe
+            .as_ref()
+            .and_then(|probe| probe.try_recv().ok())
+        {
+            if let Some(current) = workspace.as_mut() {
+                current.apply_ssh_probe(&accessibility, Instant::now());
+            }
+            if let Some(onboarding) = onboarding.as_mut() {
+                onboarding.apply_ssh_probe(&accessibility);
+            }
+            machine_probe = None;
+            dirty = true;
+        }
+        if workspace.is_none() && onboarding.as_mut().is_some_and(Onboarding::poll_projects) {
+            dirty = true;
         }
 
         if let Some(current) = workspace.as_mut() {
@@ -285,6 +308,9 @@ fn open_terminal(
                     &mut switch_ssh_machine,
                 );
             } else {
+                let Some(onboarding) = onboarding.as_mut() else {
+                    break;
+                };
                 let action = match event {
                     Event::Key(key) if key.kind != KeyEventKind::Release => {
                         onboarding.handle_key(key)
@@ -357,7 +383,7 @@ fn open_terminal(
             context: workspace
                 .as_ref()
                 .and_then(RepositoryWorkspace::ssh_context)
-                .or_else(|| onboarding.ssh_context())
+                .or_else(|| onboarding.as_ref().and_then(Onboarding::ssh_context))
                 .or_else(|| ssh_context.cloned()),
         }
     });

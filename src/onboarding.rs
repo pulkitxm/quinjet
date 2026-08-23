@@ -46,6 +46,8 @@ pub(crate) struct Onboarding {
     ssh_context: Option<SshContext>,
     machine_hits: Vec<(Rect, usize)>,
     mode: ProjectOpenMode,
+    project_loader: Option<crossbeam_channel::Receiver<Vec<ProjectGroup>>>,
+    loading: bool,
 }
 
 impl Onboarding {
@@ -54,12 +56,15 @@ impl Onboarding {
         ssh_context: Option<SshContext>,
         mode: ProjectOpenMode,
     ) -> Self {
-        let mut onboarding = Self::from_groups_with_mode(
-            launch_path,
-            crate::state::load_recent_projects(launch_path),
-            ssh_context,
-            mode,
-        );
+        let (sender, receiver) = crossbeam_channel::bounded(1);
+        let project_root = launch_path.to_path_buf();
+        let _thread = std::thread::spawn(move || {
+            drop(sender.send(crate::state::load_recent_projects(&project_root)));
+        });
+        let mut onboarding =
+            Self::from_groups_with_mode(launch_path, Vec::new(), ssh_context, mode);
+        onboarding.project_loader = Some(receiver);
+        onboarding.loading = true;
         onboarding.collapsed = crate::state::load_collapsed_project_groups();
         onboarding.selected =
             App::first_project_worktree_index(&onboarding.groups, "", &onboarding.collapsed);
@@ -101,6 +106,8 @@ impl Onboarding {
             ssh_context,
             machine_hits: Vec::new(),
             mode,
+            project_loader: None,
+            loading: false,
         }
     }
 
@@ -135,6 +142,37 @@ impl Onboarding {
 
     pub(crate) fn ssh_context(&self) -> Option<SshContext> {
         self.ssh_context.clone()
+    }
+
+    pub(crate) fn apply_ssh_probe(&mut self, accessibility: &[(String, bool)]) {
+        let Some(context) = self.ssh_context.as_mut() else {
+            return;
+        };
+        for machine in &mut context.machines {
+            if let Some((_, accessible)) = accessibility
+                .iter()
+                .find(|(target, _)| target == &machine.target)
+            {
+                machine.accessible = *accessible;
+            }
+        }
+        context.probing = false;
+    }
+
+    pub(crate) fn poll_projects(&mut self) -> bool {
+        let Some(groups) = self
+            .project_loader
+            .as_ref()
+            .and_then(|loader| loader.try_recv().ok())
+        else {
+            return false;
+        };
+        self.groups = groups;
+        self.project_loader = None;
+        self.loading = false;
+        self.selected =
+            App::first_project_worktree_index(&self.groups, &self.query.value, &self.collapsed);
+        true
     }
 
     fn handle_projects_key(&mut self, key: KeyEvent) -> OnboardingAction {
@@ -366,7 +404,7 @@ impl Onboarding {
                     self.selected,
                     &self.query,
                     &self.collapsed,
-                    false,
+                    self.loading,
                     None,
                     self.mode,
                     self.ssh_context.as_ref(),

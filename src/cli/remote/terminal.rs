@@ -278,6 +278,7 @@ mod tests {
             current: "macbook".to_owned(),
             machines: Vec::new(),
             tabs,
+            probing: false,
         };
         let mut input = vec![b'x'; 8191];
         input.extend_from_slice(crate::ssh::HANDOFF_CONTEXT_PREFIX);
