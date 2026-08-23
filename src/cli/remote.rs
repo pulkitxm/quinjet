@@ -420,6 +420,19 @@ mod tests {
     }
 
     #[test]
+    fn edith_client_is_forwarded_through_the_remote_transport() {
+        let arguments = ["--client", "edith", "--remote", "host", "tui", "/repo"]
+            .into_iter()
+            .map(OsString::from);
+        assert_eq!(
+            forwarded_arguments(arguments).unwrap(),
+            ["--client", "edith", "tui", "/repo"]
+                .map(OsString::from)
+                .to_vec()
+        );
+    }
+
+    #[test]
     fn host_machine_is_named_and_pinned_before_remotes() {
         let machines = with_host_machine(
             vec![crate::ssh::SshMachine {
