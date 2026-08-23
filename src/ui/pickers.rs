@@ -17,9 +17,12 @@ pub(crate) fn draw_projects(
     query: &crate::app::TextBuffer,
     collapsed: &HashSet<std::path::PathBuf>,
     loading: bool,
+    opening: Option<&Path>,
     mode: ProjectOpenMode,
+    ssh: Option<&SshContext>,
+    machine_focus: Option<usize>,
     theme: &Theme,
-) {
+) -> Vec<(Rect, usize)> {
     let height = frame.area().height.saturating_sub(6).min(28);
     let area = centered_rect(
         frame.area().width.saturating_sub(10).min(88),
@@ -44,24 +47,38 @@ pub(crate) fn draw_projects(
         .style(Style::default().bg(theme.panel_alt)),
         query_area,
     );
-    set_text_cursor(
-        frame,
-        Rect::new(
-            query_area.x + 3,
-            query_area.y,
-            query_area.width.saturating_sub(3),
-            1,
-        ),
-        query,
-        false,
-    );
+    if machine_focus.is_none() {
+        set_text_cursor(
+            frame,
+            Rect::new(
+                query_area.x + 3,
+                query_area.y,
+                query_area.width.saturating_sub(3),
+                1,
+            ),
+            query,
+            false,
+        );
+    }
+    let machine_hits = ssh.map_or_else(Vec::new, |context| {
+        modal_ssh::draw_project_machines(
+            frame,
+            Rect::new(inner.x, inner.y.saturating_add(2), inner.width, 1),
+            context,
+            machine_focus,
+            theme,
+        )
+    });
+    let machine_rows = if ssh.is_some() { 2 } else { 0 };
     let list_area = Rect::new(
         inner.x,
-        inner.y + 2,
+        inner.y.saturating_add(2 + machine_rows),
         inner.width,
-        inner.height.saturating_sub(5),
+        inner.height.saturating_sub(5 + machine_rows),
     );
-    if loading {
+    if let Some(path) = opening {
+        modal_ssh::draw_project_opening(frame, path, list_area, theme);
+    } else if loading {
         frame.render_widget(
             Paragraph::new("Loading projects…").style(Style::default().fg(theme.muted)),
             list_area,
@@ -147,16 +164,40 @@ pub(crate) fn draw_projects(
             );
         }
     }
-    let hint = match mode {
-        ProjectOpenMode::Initial => "Enter open   Ctrl+E collapse all   Ctrl+O path   Esc quit",
-        ProjectOpenMode::CurrentTab => {
-            "Enter switch tab   Ctrl+E collapse all   Delete forget project   Esc close"
-        }
-        ProjectOpenMode::NewTab => {
-            "Enter open in new tab   Ctrl+E collapse all   Delete forget project   Esc close"
+    let fold_action = if App::all_project_groups_expanded(groups, collapsed) {
+        "collapse all"
+    } else {
+        "expand all"
+    };
+    let hint = if opening.is_some() {
+        "Opening project…".to_owned()
+    } else if machine_focus.is_some() {
+        let escape = if mode == ProjectOpenMode::Initial {
+            "quit"
+        } else {
+            "close"
+        };
+        format!("←/→ choose machine   Enter switch   Tab projects   Esc {escape}")
+    } else {
+        let machines = ssh.map_or("", |_| "   Tab machines");
+        match mode {
+            ProjectOpenMode::Initial => {
+                format!("Enter open{machines}   Ctrl+E {fold_action}   Ctrl+O path   Esc quit")
+            }
+            ProjectOpenMode::CurrentTab => {
+                format!(
+                    "Enter switch tab{machines}   Ctrl+E {fold_action}   Delete forget   Esc close"
+                )
+            }
+            ProjectOpenMode::NewTab => {
+                format!(
+                    "Enter new tab{machines}   Ctrl+E {fold_action}   Delete forget   Esc close"
+                )
+            }
         }
     };
-    draw_modal_hint(frame, area, hint, theme);
+    draw_modal_hint(frame, area, &hint, theme);
+    machine_hits
 }
 
 pub(super) fn draw_pull_request_repositories(

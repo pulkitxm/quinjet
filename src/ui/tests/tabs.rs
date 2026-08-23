@@ -1,11 +1,12 @@
 use std::time::Instant;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
 use super::*;
-use crate::app::{RepositoryTabDrag, RepositoryTabMenu};
+use crate::app::{AppEffect, RepositoryTabDrag, RepositoryTabMenu};
+use crate::ssh::SshMachine;
 use crate::tabs::{RepositoryTabs, TabId};
 
 fn app_with_tabs(count: usize, active: usize) -> (App, Vec<TabId>) {
@@ -210,4 +211,114 @@ fn new_tab_picker_names_its_destination() {
         .map(ratatui::buffer::Cell::symbol)
         .collect::<String>();
     assert!(rendered.contains("Open in new tab"));
+}
+
+#[test]
+fn project_picker_keeps_host_and_ssh_navigation_in_one_layout() {
+    let mut app = App::new("/repo", "project");
+    app.ssh_context = Some(SshContext {
+        current: "current-host".to_owned(),
+        machines: vec![
+            SshMachine {
+                target: "Pulkits-MacBook-Pro.local".to_owned(),
+                folder: "/host".into(),
+                accessible: true,
+                uses: 0,
+                local: true,
+            },
+            SshMachine {
+                target: "busy-host".to_owned(),
+                folder: "/busy".into(),
+                accessible: true,
+                uses: 14,
+                local: false,
+            },
+            SshMachine {
+                target: "current-host".to_owned(),
+                folder: "/current".into(),
+                accessible: true,
+                uses: 3,
+                local: false,
+            },
+        ],
+    });
+    let now = Instant::now();
+    let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+
+    drop(app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE), now));
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+    let rendered = terminal.backend().to_string();
+    assert!(rendered.contains("Switch project"));
+    assert!(rendered.contains("Machine"));
+    assert!(rendered.contains("Pulkits-MacBook-Pro.local"));
+    assert!(rendered.contains("busy-host"));
+    assert!(rendered.contains("current-host"));
+    assert!(
+        app.geometry
+            .modal_action_hits
+            .iter()
+            .any(|(_, action)| *action == ModalAction::SwitchSshMachine(1))
+    );
+
+    drop(app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), now));
+    drop(app.handle_key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT), now));
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+    let rendered = terminal.backend().to_string();
+    assert!(rendered.contains("Open in new tab"));
+    assert!(rendered.contains("Pulkits-MacBook-Pro.local"));
+    assert!(rendered.contains("current-host"));
+
+    let button = app
+        .geometry
+        .modal_action_hits
+        .iter()
+        .find(|(_, action)| *action == ModalAction::SwitchSshMachine(1))
+        .map(|(area, _)| *area)
+        .expect("SSH machine chip");
+    let effects = app.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: button.x,
+            row: button.y,
+            modifiers: KeyModifiers::NONE,
+        },
+        now,
+    );
+    assert!(matches!(
+        effects.as_slice(),
+        [AppEffect::SwitchSshMachine(crate::ssh::SshSwitch {
+            index: 1,
+            mode: crate::ssh::SshProjectOpenMode::NewTab,
+        })]
+    ));
+    assert!(matches!(app.modal, Some(Modal::Projects { .. })));
+    assert_eq!(app.project_machine_focus, Some(1));
+}
+
+#[test]
+fn project_picker_shows_the_destination_while_opening() {
+    let mut app = App::new("/repo", "project");
+    app.modal = Some(Modal::Projects {
+        groups: Vec::new(),
+        selected: 0,
+        query: crate::app::TextBuffer::default(),
+        collapsed: HashSet::new(),
+        loading: false,
+        opening: Some("/Users/pulkit/scripts/quinjet-feature".into()),
+        mode: ProjectOpenMode::CurrentTab,
+    });
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+
+    let rendered = terminal.backend().to_string();
+    assert!(rendered.contains("Opening project…"));
+    assert!(rendered.contains("/Users/pulkit/scripts/quinjet-feature"));
+    assert!(!rendered.contains("Enter switch tab"));
 }

@@ -11,12 +11,14 @@ use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 
 use crate::app::{App, ProjectOpenMode, TextBuffer};
 use crate::git::ProjectGroup;
+use crate::ssh::SshContext;
 use crate::theme::Theme;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum OnboardingAction {
     None,
     Open(PathBuf),
+    SwitchSshMachine(usize),
     Quit,
 }
 
@@ -36,14 +38,41 @@ pub(crate) struct Onboarding {
     panel: OnboardingPanel,
     path_input: String,
     error: Option<String>,
+    ssh_context: Option<SshContext>,
+    machine_selected: Option<usize>,
+    machine_hits: Vec<(Rect, usize)>,
+    mode: ProjectOpenMode,
 }
 
 impl Onboarding {
-    pub(crate) fn new(launch_path: &Path) -> Self {
-        Self::from_groups(launch_path, crate::state::load_recent_projects(launch_path))
+    pub(crate) fn new(
+        launch_path: &Path,
+        ssh_context: Option<SshContext>,
+        mode: ProjectOpenMode,
+    ) -> Self {
+        Self::from_groups_with_mode(
+            launch_path,
+            crate::state::load_recent_projects(launch_path),
+            ssh_context,
+            mode,
+        )
     }
 
-    fn from_groups(launch_path: &Path, groups: Vec<ProjectGroup>) -> Self {
+    #[cfg(test)]
+    fn from_groups(
+        launch_path: &Path,
+        groups: Vec<ProjectGroup>,
+        ssh_context: Option<SshContext>,
+    ) -> Self {
+        Self::from_groups_with_mode(launch_path, groups, ssh_context, ProjectOpenMode::Initial)
+    }
+
+    fn from_groups_with_mode(
+        launch_path: &Path,
+        groups: Vec<ProjectGroup>,
+        ssh_context: Option<SshContext>,
+        mode: ProjectOpenMode,
+    ) -> Self {
         Self {
             launch_path: launch_path.to_path_buf(),
             groups,
@@ -54,6 +83,10 @@ impl Onboarding {
             panel: OnboardingPanel::Projects,
             path_input: String::new(),
             error: None,
+            ssh_context,
+            machine_selected: None,
+            machine_hits: Vec::new(),
+            mode,
         }
     }
 
@@ -72,6 +105,7 @@ impl Onboarding {
             .collect::<String>();
         match self.panel {
             OnboardingPanel::Projects => {
+                self.machine_selected = None;
                 self.query.insert_str(&sanitized);
                 self.selected = 0;
             }
@@ -79,23 +113,42 @@ impl Onboarding {
         }
     }
 
-    pub(crate) fn show_error(&mut self, message: impl Into<String>) {
-        self.error = Some(message.into());
-    }
-
-    pub(crate) fn handle_mouse(&mut self, event: MouseEvent) {
+    pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent) -> OnboardingAction {
         if self.panel != OnboardingPanel::Projects
-            || event.kind != MouseEventKind::Down(MouseButton::Left)
+            || mouse.kind != MouseEventKind::Down(MouseButton::Left)
         {
-            return;
+            return OnboardingAction::None;
+        }
+        if let Some(index) = self
+            .machine_hits
+            .iter()
+            .find(|(area, _)| area.contains((mouse.column, mouse.row).into()))
+            .map(|(_, index)| *index)
+        {
+            self.machine_selected = Some(index);
+            return self
+                .ssh_context
+                .as_ref()
+                .map_or(OnboardingAction::None, |context| {
+                    context
+                        .machines
+                        .get(index)
+                        .map_or(OnboardingAction::None, |machine| {
+                            if machine.accessible && machine.target != context.current {
+                                OnboardingAction::SwitchSshMachine(index)
+                            } else {
+                                OnboardingAction::None
+                            }
+                        })
+                });
         }
         let Some(common_dir) = self
             .collapse_hits
             .iter()
-            .find(|(area, _)| area.contains((event.column, event.row).into()))
+            .find(|(area, _)| area.contains((mouse.column, mouse.row).into()))
             .map(|(_, common_dir)| common_dir.clone())
         else {
-            return;
+            return OnboardingAction::None;
         };
         if self.collapsed.contains(&common_dir) {
             self.collapsed.retain(|candidate| candidate != &common_dir);
@@ -104,22 +157,46 @@ impl Onboarding {
         }
         let visible = App::filtered_project_rows(&self.groups, &self.query.value, &self.collapsed);
         self.selected = self.selected.min(visible.len().saturating_sub(1));
+        OnboardingAction::None
+    }
+
+    pub(crate) fn show_error(&mut self, message: impl Into<String>) {
+        self.error = Some(message.into());
     }
 
     fn handle_projects_key(&mut self, key: KeyEvent) -> OnboardingAction {
-        let visible = App::filtered_project_rows(&self.groups, &self.query.value, &self.collapsed);
         match key.code {
-            KeyCode::Esc => OnboardingAction::Quit,
+            KeyCode::Esc => return OnboardingAction::Quit,
             KeyCode::Char('e' | 'E') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.collapsed
-                    .extend(self.groups.iter().map(|group| group.common_dir.clone()));
+                App::toggle_all_project_groups(&self.groups, &mut self.collapsed);
                 self.selected = 0;
-                OnboardingAction::None
+                return OnboardingAction::None;
+            }
+            KeyCode::Tab if self.ssh_context.is_some() => {
+                self.machine_selected = self.machine_selected.map_or_else(
+                    || {
+                        self.ssh_context.as_ref().and_then(|context| {
+                            context
+                                .machines
+                                .iter()
+                                .position(|machine| machine.target == context.current)
+                        })
+                    },
+                    |_| None,
+                );
+                return OnboardingAction::None;
             }
             KeyCode::Char('o' | 'O') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.panel = OnboardingPanel::Path;
-                OnboardingAction::None
+                return OnboardingAction::None;
             }
+            _ => {}
+        }
+        if let Some(action) = self.handle_focused_machine_key(key) {
+            return action;
+        }
+        let visible = App::filtered_project_rows(&self.groups, &self.query.value, &self.collapsed);
+        match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.selected = self.selected.saturating_sub(1);
                 OnboardingAction::None
@@ -184,6 +261,42 @@ impl Onboarding {
         }
     }
 
+    fn handle_focused_machine_key(&mut self, key: KeyEvent) -> Option<OnboardingAction> {
+        let selected = self.machine_selected?;
+        let Some(context) = self.ssh_context.as_ref() else {
+            self.machine_selected = None;
+            return None;
+        };
+        match key.code {
+            KeyCode::Left | KeyCode::Up | KeyCode::Char('h' | 'k') => {
+                self.machine_selected =
+                    crate::ssh::previous_accessible_machine_index(&context.machines, selected)
+                        .or(Some(selected));
+                Some(OnboardingAction::None)
+            }
+            KeyCode::Right | KeyCode::Down | KeyCode::Char('j' | 'l') => {
+                self.machine_selected =
+                    crate::ssh::next_accessible_machine_index(&context.machines, selected)
+                        .or(Some(selected));
+                Some(OnboardingAction::None)
+            }
+            KeyCode::Enter => Some(context.machines.get(selected).map_or(
+                OnboardingAction::None,
+                |machine| {
+                    if machine.accessible && machine.target != context.current {
+                        OnboardingAction::SwitchSshMachine(selected)
+                    } else {
+                        OnboardingAction::None
+                    }
+                },
+            )),
+            _ => {
+                self.machine_selected = None;
+                None
+            }
+        }
+    }
+
     fn handle_path_key(&mut self, key: KeyEvent) -> OnboardingAction {
         match key.code {
             KeyCode::Esc => {
@@ -232,10 +345,11 @@ impl Onboarding {
             Block::default().style(Style::default().bg(theme.background)),
             frame.area(),
         );
+        self.machine_hits.clear();
         match self.panel {
             OnboardingPanel::Projects => {
                 self.collapse_hits.clear();
-                crate::ui::pickers::draw_projects(
+                self.machine_hits = crate::ui::pickers::draw_projects(
                     frame,
                     &mut self.collapse_hits,
                     &self.groups,
@@ -243,7 +357,10 @@ impl Onboarding {
                     &self.query,
                     &self.collapsed,
                     false,
-                    ProjectOpenMode::Initial,
+                    None,
+                    self.mode,
+                    self.ssh_context.as_ref(),
+                    self.machine_selected,
                     theme,
                 );
             }

@@ -33,6 +33,8 @@ argv
       filesystem watcher, webhook listener
 
 metadata verb ──► generated references / verified updater ──► text or JSON
+
+--remote ──► SSH terminal or command relay ──► remote Quinjet process
 ```
 
 - `src/cli/command.rs`: the one command vocabulary. `Command` names every operation, `Outcome` names every answer, and `Session` owns the repository plus the two reusable diff workspaces.
@@ -64,6 +66,7 @@ the wiki section is the deep operational record.
 
 1. The UI thread mutates only in-memory state and renders visible rows.
 1a. There is one command vocabulary for user-visible repository and GitHub operations. The terminal and subcommands execute `cli::Command` through `cli::Session`; presentation state such as focus, scrolling, folding, filtering, and mouse capture stays in the app. The worker adds only a generation tag and a lane; it constructs no argument list. One macro declaration generates the exhaustive route match and one fixture per `GitOperation` variant. Subcommand dispatch happens before the interactive-terminal check and before any terminal mode is entered, so metadata verbs such as `completions`, `man`, and `update` run without repository discovery and a piped invocation never claims the terminal.
+1b. `--remote` relays the complete invocation to a Quinjet process on the SSH machine before local repository discovery or terminal setup. Interactive launches allocate a remote terminal. Command-line verbs preserve stdin, stdout, stderr, JSON, watch streams, and exit status. Git, GitHub, filesystem watching, periodic refresh, and repository mutations therefore stay native to the machine that owns the worktree.
 1b. File icons are static glyphs resolved by allocation-free, compile-time sorted hash catalogs in the render layer. Rendering never reads SVGs, font files, configuration, or the filesystem, and unknown paths use one generic glyph.
 2. Every preview, status, history, branch, and pull-request request carries a generation; stale replies are ignored.
 3. Fixed coalescing mailboxes isolate status/history, GitHub metadata (lookup, checks, check logs), paginated conversations, local change/commit/branch/stash previews, worktree and recent-project listings, and potentially network-bound PR previews. Background diff prefetch occupies its own mailbox slot behind the preview slot, so a queued batch can never displace the preview a reader is waiting for. Key repeat remains constant-space, a large conversation cannot block interactive check logs, slow GitHub work cannot block tab switches, and ordered user mutations are serialized by app state. No GitHub command is queued at startup or merely by opening the PR tab.

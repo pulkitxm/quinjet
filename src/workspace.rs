@@ -1,9 +1,11 @@
 use std::path::Path;
 use std::time::Instant;
 
-use crate::app::{App, AppEffect, ToastLevel};
+use crate::app::{App, AppEffect, Modal, ProjectOpenMode, ToastLevel};
 use crate::git::Repository;
 use crate::git::worker::{GitWorker, WorkerCommand};
+use crate::ssh::SshContext;
+use crate::state::session::ProjectSession;
 use crate::tabs::{RepositoryTabs, TabId};
 use crate::theme::{AppearanceChoice, ThemeName};
 use crate::watch::RepoWatcher;
@@ -26,6 +28,7 @@ impl RepositoryRuntime {
         appearance: AppearanceChoice,
         mouse: bool,
         webhooks_listening: bool,
+        ssh_context: Option<SshContext>,
     ) -> Self {
         let common_dir = repository.git_common_dir().ok();
         let worker = GitWorker::start(repository.clone());
@@ -34,6 +37,7 @@ impl RepositoryRuntime {
         app.set_theme_selection(theme, appearance);
         app.configure_mouse_capture(mouse);
         app.webhooks_listening = webhooks_listening;
+        app.ssh_context = ssh_context;
         Self {
             app,
             worker,
@@ -53,13 +57,77 @@ impl RepositoryWorkspace {
         appearance: AppearanceChoice,
         mouse: bool,
         webhooks_listening: bool,
+        ssh_context: Option<SshContext>,
     ) -> Self {
         let title = repository.name();
         let root = repository.root().to_path_buf();
-        let runtime =
-            RepositoryRuntime::new(repository, theme, appearance, mouse, webhooks_listening);
+        let runtime = RepositoryRuntime::new(
+            repository,
+            theme,
+            appearance,
+            mouse,
+            webhooks_listening,
+            ssh_context,
+        );
         Self {
             tabs: RepositoryTabs::new(title, root, runtime),
+        }
+    }
+
+    pub(crate) fn restore(
+        session: &ProjectSession,
+        theme: ThemeName,
+        appearance: AppearanceChoice,
+        mouse: bool,
+        webhooks_listening: bool,
+        ssh_context: Option<&SshContext>,
+    ) -> Option<Self> {
+        let mut repositories = session.roots.iter().filter_map(|root| {
+            Repository::discover(root)
+                .ok()
+                .map(|repository| (root, repository))
+        });
+        let (first_root, first) = repositories.next()?;
+        let mut workspace = Self::new(
+            &first,
+            theme,
+            appearance,
+            mouse,
+            webhooks_listening,
+            ssh_context.cloned(),
+        );
+        let mut restored_active = (session.active.as_ref() == Some(first_root))
+            .then(|| workspace.active_id())
+            .flatten();
+        for (saved_root, repository) in repositories {
+            let title = repository.name();
+            let root = repository.root().to_path_buf();
+            let runtime = RepositoryRuntime::new(
+                &repository,
+                theme,
+                appearance,
+                mouse,
+                webhooks_listening,
+                ssh_context.cloned(),
+            );
+            let id = workspace.tabs.append(title, root.clone(), runtime);
+            if session.active.as_ref() == Some(saved_root) {
+                restored_active = Some(id);
+            }
+        }
+        if let Some(id) = restored_active {
+            workspace.activate(id, Instant::now());
+        } else {
+            workspace.sync_tabs(Instant::now());
+        }
+        Some(workspace)
+    }
+
+    pub(crate) fn project_session(&self) -> ProjectSession {
+        let infos = self.tabs.infos();
+        ProjectSession {
+            roots: infos.iter().map(|tab| tab.root.clone()).collect(),
+            active: infos.into_iter().find(|tab| tab.active).map(|tab| tab.root),
         }
     }
 
@@ -75,9 +143,22 @@ impl RepositoryWorkspace {
         self.tabs.get_mut(id).map(|runtime| &mut runtime.app)
     }
 
-    pub(crate) fn initial_effects(&mut self) -> Option<RoutedEffects> {
+    pub(crate) fn initial_effects(&mut self) -> Vec<RoutedEffects> {
+        self.tabs
+            .iter_mut()
+            .map(|(id, runtime)| RoutedEffects {
+                id,
+                effects: runtime.app.initial_effects(),
+            })
+            .collect()
+    }
+
+    pub(crate) fn open_projects_on_launch(
+        &mut self,
+        mode: ProjectOpenMode,
+    ) -> Option<RoutedEffects> {
         let id = self.active_id()?;
-        let effects = self.app_mut(id)?.initial_effects();
+        let effects = self.app_mut(id)?.open_projects_on_launch(mode);
         Some(RoutedEffects { id, effects })
     }
 
@@ -161,6 +242,9 @@ impl RepositoryWorkspace {
             Ok(repository) => repository,
             Err(error) => {
                 if let Some(app) = self.app_mut(source) {
+                    if let Some(Modal::Projects { opening, .. }) = app.modal.as_mut() {
+                        *opening = None;
+                    }
                     app.show_toast(error.to_string(), ToastLevel::Error, now);
                 }
                 return None;
@@ -180,11 +264,17 @@ impl RepositoryWorkspace {
             Ok(repository) => repository,
             Err(error) => {
                 if let Some(app) = self.app_mut(source) {
+                    if let Some(Modal::Projects { opening, .. }) = app.modal.as_mut() {
+                        *opening = None;
+                    }
                     app.show_toast(error.to_string(), ToastLevel::Error, now);
                 }
                 return None;
             }
         };
+        if let Some(app) = self.app_mut(source) {
+            app.modal = None;
+        }
         if let Some(id) = self.tabs.id_for_root(repository.root()) {
             self.activate(id, now);
             return None;
@@ -204,10 +294,17 @@ impl RepositoryWorkspace {
         let appearance = source_runtime.app.appearance_choice;
         let mouse = source_runtime.app.mouse_capture_preference;
         let webhooks_listening = source_runtime.app.webhooks_listening;
+        let ssh_context = source_runtime.app.ssh_context.clone();
         let title = repository.name();
         let root = repository.root().to_path_buf();
-        let runtime =
-            RepositoryRuntime::new(repository, theme, appearance, mouse, webhooks_listening);
+        let runtime = RepositoryRuntime::new(
+            repository,
+            theme,
+            appearance,
+            mouse,
+            webhooks_listening,
+            ssh_context,
+        );
         drop(self.tabs.replace(source, title, root, runtime));
         self.sync_tabs(now);
         let effects = self.app_mut(source)?.initial_effects();
@@ -228,10 +325,17 @@ impl RepositoryWorkspace {
         let appearance = source.app.appearance_choice;
         let mouse = source.app.mouse_capture_preference;
         let webhooks_listening = source.app.webhooks_listening;
+        let ssh_context = source.app.ssh_context.clone();
         let title = repository.name();
         let root = repository.root().to_path_buf();
-        let runtime =
-            RepositoryRuntime::new(repository, theme, appearance, mouse, webhooks_listening);
+        let runtime = RepositoryRuntime::new(
+            repository,
+            theme,
+            appearance,
+            mouse,
+            webhooks_listening,
+            ssh_context,
+        );
         let id = self.tabs.append(title, root, runtime);
         self.sync_tabs(now);
         let effects = self.app_mut(id)?.initial_effects();

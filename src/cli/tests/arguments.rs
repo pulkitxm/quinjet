@@ -77,6 +77,17 @@ fn a_terminal_path_belongs_to_the_tui_verb() {
 }
 
 #[test]
+fn the_global_folder_alias_selects_an_implicit_or_explicit_terminal() {
+    let implicit = Cli::try_parse_from(["quinjet", "--folder", "/tmp/implicit"]).unwrap();
+    assert!(implicit.command.is_none());
+    assert_eq!(implicit.repository, Path::new("/tmp/implicit"));
+
+    let explicit = Cli::try_parse_from(["quinjet", "tui", "--folder", "/tmp/explicit"]).unwrap();
+    assert!(matches!(explicit.command, Some(Verb::Tui(_))));
+    assert_eq!(explicit.repository, Path::new("/tmp/explicit"));
+}
+
+#[test]
 fn terminal_themes_default_to_quinjet_with_system_appearance() {
     let cli = Cli::try_parse_from(["quinjet", "tui"]).unwrap();
     assert!(matches!(

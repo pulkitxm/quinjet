@@ -1,10 +1,13 @@
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use super::*;
-use crate::app::View;
+use crate::app::{Modal, ProjectOpenMode, TextBuffer, View};
+use crate::git::support::same_path;
 use crate::git::tests::TestRepository;
+use crate::ssh::SshMachine;
 
 fn test_repository(branch: &str) -> (TestRepository, Repository) {
     let fixture = TestRepository::with_branch(branch);
@@ -19,7 +22,95 @@ fn workspace(repository: &Repository) -> RepositoryWorkspace {
         AppearanceChoice::Dark,
         false,
         false,
+        None,
     )
+}
+
+#[test]
+fn machine_session_restores_open_tabs_in_order_and_reactivates_the_saved_project() {
+    let (_first_directory, first_repository) = test_repository("first");
+    let (_second_directory, second_repository) = test_repository("second");
+    let session = ProjectSession {
+        roots: vec![
+            first_repository.root().to_path_buf(),
+            PathBuf::from("/missing/project"),
+            second_repository.root().to_path_buf(),
+        ],
+        active: Some(first_repository.root().to_path_buf()),
+    };
+
+    let mut restored = RepositoryWorkspace::restore(
+        &session,
+        ThemeName::Quinjet,
+        AppearanceChoice::Dark,
+        false,
+        false,
+        None,
+    )
+    .expect("restored workspace");
+
+    let tabs = restored.tabs.infos();
+    assert_eq!(tabs.len(), 2);
+    assert!(
+        tabs.first()
+            .is_some_and(|tab| { tab.active && same_path(&tab.root, first_repository.root()) })
+    );
+    assert!(
+        tabs.get(1)
+            .is_some_and(|tab| { !tab.active && same_path(&tab.root, second_repository.root()) })
+    );
+    let restored_session = restored.project_session();
+    assert_eq!(restored_session.roots.len(), 2);
+    assert!(
+        restored_session
+            .active
+            .as_deref()
+            .is_some_and(|active| same_path(active, first_repository.root()))
+    );
+    assert_eq!(restored.initial_effects().len(), 2);
+}
+
+#[test]
+fn machine_picker_context_follows_replaced_and_appended_projects() {
+    let (_first_directory, first_repository) = test_repository("first");
+    let (_second_directory, second_repository) = test_repository("second");
+    let context = SshContext {
+        current: "local".to_owned(),
+        machines: vec![SshMachine {
+            target: "remote-host".to_owned(),
+            folder: "/work/remote".into(),
+            accessible: true,
+            uses: 5,
+            local: false,
+        }],
+    };
+    let mut workspace = RepositoryWorkspace::new(
+        &first_repository,
+        ThemeName::Quinjet,
+        AppearanceChoice::Dark,
+        false,
+        false,
+        Some(context.clone()),
+    );
+    let now = Instant::now();
+    let first = workspace.active_id().expect("first tab is active");
+    let second = workspace
+        .append_repository(first, &second_repository, now)
+        .expect("append second repository")
+        .id;
+
+    assert_eq!(
+        workspace
+            .app_mut(first)
+            .and_then(|app| app.ssh_context.clone()),
+        Some(context.clone())
+    );
+    assert_eq!(
+        workspace
+            .app_mut(second)
+            .and_then(|app| app.ssh_context.clone()),
+        Some(context)
+    );
 }
 
 #[test]
@@ -104,6 +195,32 @@ fn replacement_keeps_tab_identity_and_new_tabs_follow_the_close_lifecycle() {
     assert_eq!(workspace.tabs.len(), 1);
     assert!(!workspace.close(second, now));
     assert!(workspace.tabs.is_empty());
+}
+
+#[test]
+fn failed_project_open_returns_to_the_picker() {
+    let (_directory, repository) = test_repository("first");
+    let mut workspace = workspace(&repository);
+    let source = workspace.active_id().expect("active tab");
+    workspace.app_mut(source).expect("source app").modal = Some(Modal::Projects {
+        groups: Vec::new(),
+        selected: 0,
+        query: TextBuffer::default(),
+        collapsed: HashSet::new(),
+        loading: false,
+        opening: Some("/missing/project".into()),
+        mode: ProjectOpenMode::CurrentTab,
+    });
+
+    assert!(
+        workspace
+            .switch_repository(source, Path::new("/missing/project"), Instant::now())
+            .is_none()
+    );
+    assert!(matches!(
+        workspace.app_mut(source).and_then(|app| app.modal.as_ref()),
+        Some(Modal::Projects { opening: None, .. })
+    ));
 }
 
 #[test]

@@ -285,6 +285,7 @@ pub(crate) enum ModalAction {
     CommitToggleAmend,
     ConfirmYes,
     ConfirmNo,
+    SwitchSshMachine(usize),
     PullRequestAction(usize),
     PullRequestReviewThreadAction(usize),
 }
@@ -357,6 +358,7 @@ pub(crate) enum Modal {
         query: TextBuffer,
         collapsed: HashSet<PathBuf>,
         loading: bool,
+        opening: Option<PathBuf>,
         mode: ProjectOpenMode,
     },
     PullRequestRepositories {

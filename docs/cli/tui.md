@@ -8,6 +8,7 @@ Usage:
 ```bash
 quinjet
 quinjet [--pr <NUMBER>]
+quinjet --remote <SSH_TARGET> --folder <DIR>
 quinjet tui [PATH] [--pr <NUMBER>] [--theme <THEME>] [--appearance <APPEARANCE>] [--no-mouse] [--webhook-listen <ADDRESS>]
 ```
 
@@ -26,10 +27,17 @@ Options:
 | `--no-mouse` | flag | off | Starts with the mouse released, so the terminal keeps its own selection and copy behavior. Every feature stays reachable from the keyboard. |
 | `--webhook-listen <ADDRESS>` | port, or `host:port` | not listening | Binds a loopback HTTP listener. A forwarded GitHub delivery refreshes the open pull request immediately instead of waiting for the next poll. |
 | `--pr <NUMBER>` | unsigned integer | unset | Opens the interface already focused on this pull request: the Pull Requests tab is selected and the lookup starts before the first frame. Also accepted on a bare `quinjet` launch. With any other verb it is an error. |
-| `-C, --path <DIR>` | path | `.` | Global and unused here. The positional `PATH` is what the interface opens. |
+| `-C, --path, --folder <DIR>` | path | `.` | Selects a repository when the positional `PATH` is omitted. |
+| `--remote <SSH_TARGET>` | SSH target | local machine | Runs the interface on the SSH machine and allocates a remote terminal. |
 | `--json` | flag | off | Global. Parsed and ignored here, because the interface writes to a screen rather than to stdout. |
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |
 | `-V, --version` | flag | off | Prints the installed version and exits 0. |
+
+When the interface runs through `--remote`, the project picker displays the
+active SSH target. `Tab` opens a second-level machine picker containing recent
+targets ordered by use count. Reachable targets can take over the terminal
+session, while unavailable targets are shown but disabled. SSH machine
+switching is available only from this project picker.
 
 ## The two spellings
 
@@ -37,10 +45,11 @@ Options:
 `Launch::Terminal` for both, before any session is built, so no verb machinery
 runs and nothing is ever printed on stdout.
 
-The no-argument form always opens the current directory. A path belongs to the
-explicit verb, as in `quinjet tui ~/code/project`. This keeps the root command
-unambiguous: `quinjet statsu` is an unknown verb with exit 2 rather than a request
-to open a directory named `statsu`.
+The no-argument form opens the current directory. A path can use the explicit
+verb, as in `quinjet tui ~/code/project`, or the global folder option, as in
+`quinjet --folder ~/code/project`. This keeps the root command unambiguous:
+`quinjet statsu` is an unknown verb with exit 2 rather than a request to open a
+directory named `statsu`.
 
 ## Themes and appearance
 
@@ -181,9 +190,23 @@ capped at 34 cells.
 
 Each project heading starts with a bordered `[⌄]` or `[›]` control. Clicking
 that control collapses or expands only that project's worktrees without opening
-anything. `Ctrl+E` collapses every project. Filtering temporarily reveals
-matching worktrees inside collapsed projects, so collapse never hides a search
-result.
+anything. `Ctrl+E` expands every project when any project is collapsed, then
+collapses every project when all are expanded. The footer names the next action.
+Opening a selected worktree keeps the picker visible with the destination path
+until repository discovery finishes. A failed open returns to the picker and
+shows the error without losing the current filter or selection.
+Filtering temporarily reveals matching worktrees inside collapsed projects, so
+collapse never hides a search result.
+
+When recent SSH repositories exist, `Open a project` and both the `w` and `N`
+project pickers show the active machine. The originating computer appears
+first under its hostname and is marked as the host. The machine button opens a
+second-layer switcher, with SSH machines ordered by usage and labeled with
+their current reachability. Choosing the host returns to its local project
+picker without a reverse SSH connection. Choosing an SSH machine opens that
+machine's project picker. Closing the switcher returns to the same project
+picker. A machine switch from the `N` picker keeps `Open in new tab` mode, so
+the selected project is added as another tab on the destination machine.
 
 Drag a visible project tab to reorder it. When the strip overflows, its left
 and right controls cycle until the hidden tab becomes visible. Right-click a
@@ -371,7 +394,7 @@ The verbs in the right-hand column are documented in their groups:
 | `b` outside History, or `B` | `quinjet branch list`; Enter on a row is `quinjet branch switch <name>` |
 | `w`, clicking the header path, or clicking the worktree count in the footer | `quinjet worktree list` for this repository, plus the same listing for each recently opened project; Enter switches the current project tab, the same repository setup as `quinjet tui <path>` |
 | `N` | opens the recent-project picker in new-tab mode; no verb, because project tabs belong to the terminal session |
-| `Ctrl+E` in the project picker | collapses every project; presentation state, not a repository operation |
+| `Ctrl+E` in the project picker | expands all when any project is collapsed, or collapses all when every project is expanded; presentation state, not a repository operation |
 | `Ctrl+Tab`, `Ctrl+Shift+Tab` | no verb. Cycles through project tabs while retaining each tab's state |
 | `Ctrl+W` | no verb. Closes the active project tab |
 | dragging or right-clicking a project tab | no verb. Reorders it or opens Close, Close Others, and Close All |

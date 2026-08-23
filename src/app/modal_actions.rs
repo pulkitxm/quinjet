@@ -70,6 +70,28 @@ impl App {
                     }
                 }
             }
+            ModalAction::SwitchSshMachine(index) => {
+                let Some(Modal::Projects { mode, .. }) = self.modal.as_ref() else {
+                    return;
+                };
+                let Some(context) = self.ssh_context.as_ref() else {
+                    return;
+                };
+                self.project_machine_focus = Some(index);
+                if let Some(machine) = context.machines.get(index)
+                    && machine.accessible
+                    && machine.target != context.current
+                {
+                    effects.push(AppEffect::SwitchSshMachine(crate::ssh::SshSwitch {
+                        index,
+                        mode: if *mode == ProjectOpenMode::NewTab {
+                            crate::ssh::SshProjectOpenMode::NewTab
+                        } else {
+                            crate::ssh::SshProjectOpenMode::CurrentTab
+                        },
+                    }));
+                }
+            }
             ModalAction::PullRequestAction(index) => {
                 let Some(Modal::PullRequestActions { items, .. }) = self.modal.take() else {
                     return;
