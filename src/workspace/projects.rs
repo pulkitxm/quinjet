@@ -1,12 +1,11 @@
 use std::path::Path;
 use std::time::Instant;
 
+use super::{RepositoryRuntime, RepositoryWorkspace, RoutedEffects, WorkspaceContext};
 use crate::app::{Modal, ProjectOpenMode, ToastLevel};
 use crate::git::Repository;
 use crate::ssh::{SshProjectOpenMode, SshSwitch};
 use crate::tabs::TabId;
-
-use super::{RepositoryRuntime, RepositoryWorkspace, RoutedEffects, WorkspaceContext};
 
 impl RepositoryWorkspace {
     pub(crate) fn switch_repository(
