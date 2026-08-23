@@ -35,6 +35,11 @@ pub(crate) struct Onboarding {
     query: TextBuffer,
     collapsed: HashSet<PathBuf>,
     collapse_hits: Vec<(Rect, PathBuf)>,
+    project_hits: Vec<(Rect, usize)>,
+    project_len: usize,
+    project_max_scroll: usize,
+    project_scroll: usize,
+    project_free_scroll: bool,
     panel: OnboardingPanel,
     path_input: String,
     error: Option<String>,
@@ -86,6 +91,11 @@ impl Onboarding {
             query: TextBuffer::default(),
             collapsed,
             collapse_hits: Vec::new(),
+            project_hits: Vec::new(),
+            project_len: 0,
+            project_max_scroll: 0,
+            project_scroll: 0,
+            project_free_scroll: false,
             panel: OnboardingPanel::Projects,
             path_input: String::new(),
             error: None,
@@ -98,6 +108,7 @@ impl Onboarding {
 
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> OnboardingAction {
         self.error = None;
+        self.project_free_scroll = false;
         match self.panel {
             OnboardingPanel::Projects => self.handle_projects_key(key),
             OnboardingPanel::Path => self.handle_path_key(key),
@@ -114,16 +125,44 @@ impl Onboarding {
                 self.machine_selected = None;
                 self.query.insert_str(&sanitized);
                 self.selected = 0;
+                self.project_scroll = 0;
+                self.project_free_scroll = false;
             }
             OnboardingPanel::Path => self.path_input.push_str(&sanitized),
         }
     }
 
     pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent) -> OnboardingAction {
-        if self.panel != OnboardingPanel::Projects
-            || mouse.kind != MouseEventKind::Down(MouseButton::Left)
-        {
+        if self.panel != OnboardingPanel::Projects {
             return OnboardingAction::None;
+        }
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                self.project_scroll = self.project_scroll.saturating_sub(2);
+                self.project_free_scroll = true;
+                return OnboardingAction::None;
+            }
+            MouseEventKind::ScrollDown => {
+                self.project_scroll = self
+                    .project_scroll
+                    .saturating_add(2)
+                    .min(self.project_max_scroll);
+                self.project_free_scroll = true;
+                return OnboardingAction::None;
+            }
+            MouseEventKind::Moved => {
+                if let Some(index) = self
+                    .project_hits
+                    .iter()
+                    .find(|(area, _)| area.contains((mouse.column, mouse.row).into()))
+                    .map(|(_, index)| *index)
+                {
+                    self.selected = index;
+                }
+                return OnboardingAction::None;
+            }
+            MouseEventKind::Down(MouseButton::Left) => {}
+            _ => return OnboardingAction::None,
         }
         if let Some(index) = self
             .machine_hits
@@ -148,24 +187,40 @@ impl Onboarding {
                         })
                 });
         }
-        let Some(common_dir) = self
+        if let Some(common_dir) = self
             .collapse_hits
             .iter()
             .find(|(area, _)| area.contains((mouse.column, mouse.row).into()))
             .map(|(_, common_dir)| common_dir.clone())
+        {
+            if self.collapsed.contains(&common_dir) {
+                self.collapsed.retain(|candidate| candidate != &common_dir);
+            } else {
+                self.collapsed.extend([common_dir.clone()]);
+            }
+            #[cfg(not(test))]
+            crate::state::record_collapsed_project_groups(&self.collapsed);
+            let visible =
+                App::filtered_project_rows(&self.groups, &self.query.value, &self.collapsed);
+            self.selected = visible
+                .iter()
+                .position(|row| {
+                    matches!(row, ProjectRow::Group(group_index) if self.groups.get(*group_index).is_some_and(|group| group.common_dir == common_dir))
+                })
+                .unwrap_or_else(|| self.selected.min(visible.len().saturating_sub(1)));
+            return OnboardingAction::None;
+        }
+        let Some(index) = self
+            .project_hits
+            .iter()
+            .find(|(area, _)| area.contains((mouse.column, mouse.row).into()))
+            .map(|(_, index)| *index)
         else {
             return OnboardingAction::None;
         };
-        if self.collapsed.contains(&common_dir) {
-            self.collapsed.retain(|candidate| candidate != &common_dir);
-        } else {
-            self.collapsed.extend([common_dir]);
-        }
-        #[cfg(not(test))]
-        crate::state::record_collapsed_project_groups(&self.collapsed);
-        let visible = App::filtered_project_rows(&self.groups, &self.query.value, &self.collapsed);
-        self.selected = self.selected.min(visible.len().saturating_sub(1));
-        OnboardingAction::None
+        self.selected = index;
+        self.project_free_scroll = false;
+        self.handle_projects_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
     }
 
     pub(crate) fn show_error(&mut self, message: impl Into<String>) {
@@ -375,6 +430,14 @@ impl Onboarding {
         match self.panel {
             OnboardingPanel::Projects => {
                 self.collapse_hits.clear();
+                self.project_hits.clear();
+                let mut list = crate::ui::ModalList::new(
+                    &mut self.project_hits,
+                    &mut self.project_len,
+                    &mut self.project_max_scroll,
+                    self.project_scroll,
+                    self.project_free_scroll,
+                );
                 self.machine_hits = crate::ui::pickers::draw_projects(
                     frame,
                     &mut self.collapse_hits,
@@ -387,6 +450,7 @@ impl Onboarding {
                     self.mode,
                     self.ssh_context.as_ref(),
                     self.machine_selected,
+                    &mut list,
                     theme,
                 );
             }

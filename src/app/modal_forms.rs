@@ -55,6 +55,11 @@ impl App {
                 if key.code == KeyCode::Esc {
                     return effects;
                 }
+                if key.code == KeyCode::Tab {
+                    *amend = !*amend;
+                    self.modal = Some(modal);
+                    return effects;
+                }
                 if key.code == KeyCode::Enter
                     && key
                         .modifiers

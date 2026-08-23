@@ -21,6 +21,7 @@ pub(crate) fn draw_projects(
     mode: ProjectOpenMode,
     ssh: Option<&SshContext>,
     machine_focus: Option<usize>,
+    list: &mut ModalList<'_>,
     theme: &Theme,
 ) -> Vec<(Rect, usize)> {
     let height = frame.area().height.saturating_sub(6).min(28);
@@ -85,7 +86,7 @@ pub(crate) fn draw_projects(
         );
     } else {
         let rows = App::filtered_project_rows(groups, &query.value, collapsed);
-        let offset = selected.saturating_sub(list_area.height.saturating_sub(1) as usize);
+        let offset = list.offset(selected, list_area.height as usize, rows.len());
         let visible_lines = rows
             .iter()
             .enumerate()
@@ -105,6 +106,7 @@ pub(crate) fn draw_projects(
                             theme,
                         ),
                         Some(group.common_dir.clone()),
+                        index,
                     ))
                 }
                 ProjectRow::Worktree {
@@ -120,6 +122,7 @@ pub(crate) fn draw_projects(
                             theme,
                         ),
                         None,
+                        index,
                     ))
                 }
             })
@@ -136,7 +139,7 @@ pub(crate) fn draw_projects(
             );
         } else {
             collapse_hits.extend(visible_lines.iter().enumerate().filter_map(
-                |(line_index, (_, common_dir))| {
+                |(line_index, (_, common_dir, _))| {
                     common_dir.as_ref().map(|common_dir| {
                         (
                             Rect::new(
@@ -150,11 +153,22 @@ pub(crate) fn draw_projects(
                     })
                 },
             ));
+            for (line_index, (_, _, index)) in visible_lines.iter().enumerate() {
+                list.hit(
+                    Rect::new(
+                        list_area.x,
+                        list_area.y.saturating_add(cells(line_index)),
+                        list_area.width,
+                        1,
+                    ),
+                    *index,
+                );
+            }
             frame.render_widget(
                 Paragraph::new(
                     visible_lines
                         .into_iter()
-                        .map(|(line, _)| line)
+                        .map(|(line, _, _)| line)
                         .collect::<Vec<_>>(),
                 ),
                 list_area,
@@ -212,12 +226,17 @@ pub(crate) fn draw_projects(
     machine_hits
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the picker receives its modal state, list geometry, and palette"
+)]
 pub(super) fn draw_pull_request_repositories(
     frame: &mut Frame<'_>,
     items: &[GitHubRepository],
     selected: usize,
     query: &crate::app::TextBuffer,
     loading: bool,
+    list: &mut ModalList<'_>,
     theme: &Theme,
 ) {
     let height = (cells(items.len()) + 7)
@@ -259,7 +278,7 @@ pub(super) fn draw_pull_request_repositories(
         inner.height.saturating_sub(4),
     );
     let visible = App::filtered_github_repositories(items, &query.value);
-    let offset = selected.saturating_sub(list_area.height.saturating_sub(1) as usize);
+    let offset = list.offset(selected, list_area.height as usize, visible.len());
     let lines = visible
         .iter()
         .skip(offset)
@@ -300,6 +319,17 @@ pub(super) fn draw_pull_request_repositories(
             ]))
         })
         .collect::<Vec<_>>();
+    for index in 0..lines.len() {
+        list.hit(
+            Rect::new(
+                list_area.x,
+                list_area.y.saturating_add(cells(index)),
+                list_area.width,
+                1,
+            ),
+            offset.saturating_add(index),
+        );
+    }
     if loading {
         frame.render_widget(
             Paragraph::new("Discovering GitHub repositories from configured remotes…")
@@ -327,6 +357,7 @@ pub(super) fn draw_palette(
     app: &App,
     query: &crate::app::TextBuffer,
     selected: usize,
+    list: &mut ModalList<'_>,
     theme: &Theme,
 ) {
     let commands = app.palette_commands(&query.value);
@@ -374,7 +405,7 @@ pub(super) fn draw_palette(
         inner.width,
         inner.height.saturating_sub(2),
     );
-    let offset = selected.saturating_sub(list_area.height.saturating_sub(1) as usize);
+    let offset = list.offset(selected, list_area.height as usize, commands.len());
     let lines = commands
         .iter()
         .skip(offset)
@@ -382,6 +413,17 @@ pub(super) fn draw_palette(
         .enumerate()
         .map(|(index, command)| palette_line(*command, offset + index == selected, theme))
         .collect::<Vec<_>>();
+    for index in 0..lines.len() {
+        list.hit(
+            Rect::new(
+                list_area.x,
+                list_area.y.saturating_add(cells(index)),
+                list_area.width,
+                1,
+            ),
+            offset.saturating_add(index),
+        );
+    }
     frame.render_widget(Paragraph::new(lines), list_area);
 }
 
@@ -418,20 +460,29 @@ pub(super) fn draw_theme_picker(
     frame: &mut Frame<'_>,
     selected: usize,
     current: ThemeName,
+    list: &mut ModalList<'_>,
     theme: &Theme,
 ) {
     let choices = ThemeName::ALL.map(|name| (name.label(), name == current));
-    draw_choice_picker(frame, " Select Theme ", &choices, selected, theme);
+    draw_choice_picker(frame, " Select Theme ", &choices, selected, list, theme);
 }
 
 pub(super) fn draw_appearance_picker(
     frame: &mut Frame<'_>,
     selected: usize,
     current: AppearanceChoice,
+    list: &mut ModalList<'_>,
     theme: &Theme,
 ) {
     let choices = AppearanceChoice::ALL.map(|choice| (choice.label(), choice == current));
-    draw_choice_picker(frame, " Select Appearance ", &choices, selected, theme);
+    draw_choice_picker(
+        frame,
+        " Select Appearance ",
+        &choices,
+        selected,
+        list,
+        theme,
+    );
 }
 
 pub(super) fn draw_choice_picker(
@@ -439,6 +490,7 @@ pub(super) fn draw_choice_picker(
     title: &str,
     choices: &[(&'static str, bool)],
     selected: usize,
+    list: &mut ModalList<'_>,
     theme: &Theme,
 ) {
     let height = (cells(choices.len()) + 4)
@@ -455,7 +507,7 @@ pub(super) fn draw_choice_picker(
         inner.width,
         inner.height.saturating_sub(1),
     );
-    let offset = selected.saturating_sub(list_area.height.saturating_sub(1) as usize);
+    let offset = list.offset(selected, list_area.height as usize, choices.len());
     let lines = choices
         .iter()
         .skip(offset)
@@ -465,6 +517,17 @@ pub(super) fn draw_choice_picker(
             choice_line(label, *current, offset + index == selected, theme)
         })
         .collect::<Vec<_>>();
+    for index in 0..lines.len() {
+        list.hit(
+            Rect::new(
+                list_area.x,
+                list_area.y.saturating_add(cells(index)),
+                list_area.width,
+                1,
+            ),
+            offset.saturating_add(index),
+        );
+    }
     frame.render_widget(Paragraph::new(lines), list_area);
     draw_modal_hint(frame, area, "Enter apply   Esc close", theme);
 }

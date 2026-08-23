@@ -12,6 +12,10 @@ impl App {
     )]
     pub(crate) fn handle_mouse(&mut self, event: MouseEvent, now: Instant) -> Vec<AppEffect> {
         let mut effects = Vec::new();
+        if self.modal.is_none() {
+            self.modal_scroll = 0;
+            self.modal_free_scroll = false;
+        }
         self.link_hover = (event.kind == MouseEventKind::Moved
             && event.modifiers.intersects(
                 KeyModifiers::CONTROL
@@ -55,8 +59,55 @@ impl App {
             self.remember_collapsed_project_groups(&collapsed);
             return effects;
         }
+        if self.modal.is_some() && self.geometry.modal_list_len > 0 {
+            let point = (event.column, event.row).into();
+            match event.kind {
+                MouseEventKind::Moved => {
+                    if let Some(index) = self
+                        .geometry
+                        .modal_list_hits
+                        .iter()
+                        .find(|(area, _)| area.contains(point))
+                        .map(|(_, index)| *index)
+                    {
+                        self.select_modal_row(index);
+                    }
+                    return effects;
+                }
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if let Some(index) = self
+                        .geometry
+                        .modal_list_hits
+                        .iter()
+                        .find(|(area, _)| area.contains(point))
+                        .map(|(_, index)| *index)
+                    {
+                        self.select_modal_row(index);
+                        self.modal_free_scroll = false;
+                        return self
+                            .handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+                    }
+                }
+                MouseEventKind::ScrollUp => {
+                    self.modal_scroll = self.modal_scroll.saturating_sub(2);
+                    self.modal_free_scroll = true;
+                    return effects;
+                }
+                MouseEventKind::ScrollDown => {
+                    self.modal_scroll = self
+                        .modal_scroll
+                        .saturating_add(2)
+                        .min(self.geometry.modal_list_max_scroll);
+                    self.modal_free_scroll = true;
+                    return effects;
+                }
+                _ => {}
+            }
+        }
         if let Some(Modal::Help {
-            selected, hover, ..
+            selected,
+            scroll,
+            hover,
         }) = &mut self.modal
         {
             let point = (event.column, event.row).into();
@@ -79,15 +130,18 @@ impl App {
                     {
                         *selected = index;
                         *hover = Some(index);
+                        self.modal_free_scroll = false;
                     }
                 }
                 MouseEventKind::ScrollUp => {
-                    *selected = previous_list_index(*selected, crate::ui::help_shortcut_count());
+                    *scroll = scroll.saturating_sub(2);
                     *hover = None;
+                    self.modal_free_scroll = true;
                 }
                 MouseEventKind::ScrollDown => {
-                    *selected = next_list_index(*selected, crate::ui::help_shortcut_count());
+                    *scroll = scroll.saturating_add(2);
                     *hover = None;
+                    self.modal_free_scroll = true;
                 }
                 _ => {}
             }
@@ -98,8 +152,10 @@ impl App {
             Some(
                 Modal::Commit { .. }
                     | Modal::Confirm { .. }
+                    | Modal::Conflict { .. }
                     | Modal::Projects { .. }
                     | Modal::PullRequestActions { .. }
+                    | Modal::PullRequestReviewSubmit { .. }
                     | Modal::PullRequestReviewThreadActions { .. }
             )
         ) && event.kind == MouseEventKind::Down(MouseButton::Left)
@@ -392,5 +448,36 @@ impl App {
             _ => {}
         }
         effects
+    }
+
+    fn select_modal_row(&mut self, index: usize) {
+        match self.modal.as_mut() {
+            Some(
+                Modal::PullRequestReviewThreadActions { selected, .. }
+                | Modal::PullRequestActions { selected, .. }
+                | Modal::Branches { selected, .. }
+                | Modal::HistoryBranches { selected, .. }
+                | Modal::CompareBranches { selected, .. }
+                | Modal::Stashes { selected, .. }
+                | Modal::Projects { selected, .. }
+                | Modal::PullRequestRepositories { selected, .. }
+                | Modal::CommandPalette { selected, .. }
+                | Modal::Themes { selected, .. }
+                | Modal::Appearances { selected, .. },
+            ) => *selected = index,
+            _ => return,
+        }
+        if let Some(name) = self.modal.as_ref().and_then(|modal| match modal {
+            Modal::Themes { selected, .. } => ThemeName::ALL.get(*selected).copied(),
+            _ => None,
+        }) {
+            self.apply_theme(name);
+        }
+        if let Some(choice) = self.modal.as_ref().and_then(|modal| match modal {
+            Modal::Appearances { selected, .. } => AppearanceChoice::ALL.get(*selected).copied(),
+            _ => None,
+        }) {
+            self.set_theme_selection(self.theme_name, choice);
+        }
     }
 }

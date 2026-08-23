@@ -124,6 +124,8 @@ impl App {
             resize_target: None,
             filter: String::new(),
             modal: None,
+            modal_scroll: 0,
+            modal_free_scroll: false,
             toast: None,
             mouse_capture: true,
             mouse_capture_preference: true,

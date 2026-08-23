@@ -255,6 +255,7 @@ mod checks;
 mod diffs;
 mod discovery;
 mod interaction;
+mod modal_mouse;
 mod prefetch;
 mod projects;
 mod refresh;

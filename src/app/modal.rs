@@ -288,6 +288,10 @@ pub(crate) enum ModalAction {
     SwitchSshMachine(usize),
     PullRequestAction(usize),
     PullRequestReviewThreadAction(usize),
+    PullRequestReviewDecision(usize),
+    ConflictOurs,
+    ConflictTheirs,
+    ConflictResolved,
 }
 
 #[derive(Debug, Clone)]

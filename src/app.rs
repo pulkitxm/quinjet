@@ -306,6 +306,8 @@ pub(crate) struct App {
     pub resize_target: Option<ResizeTarget>,
     pub filter: String,
     pub modal: Option<Modal>,
+    pub modal_scroll: usize,
+    pub modal_free_scroll: bool,
     pub toast: Option<Toast>,
     pub mouse_capture: bool,
     pub mouse_capture_preference: bool,

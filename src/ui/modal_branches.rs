@@ -12,6 +12,7 @@ pub(super) fn draw_branches(
     query: &crate::app::TextBuffer,
     loading: bool,
     app: &App,
+    list: &mut ModalList<'_>,
     theme: &Theme,
 ) {
     let height = frame.area().height.saturating_sub(8).min(25);
@@ -58,7 +59,7 @@ pub(super) fn draw_branches(
             list_area,
         );
     } else {
-        let offset = selected.saturating_sub(list_area.height.saturating_sub(1) as usize);
+        let offset = list.offset(selected, list_area.height as usize, visible.len());
         let lines = visible
             .iter()
             .skip(offset)
@@ -110,6 +111,17 @@ pub(super) fn draw_branches(
                 ]))
             })
             .collect::<Vec<_>>();
+        for index in 0..lines.len() {
+            list.hit(
+                Rect::new(
+                    list_area.x,
+                    list_area.y.saturating_add(cells(index)),
+                    list_area.width,
+                    1,
+                ),
+                offset.saturating_add(index),
+            );
+        }
         frame.render_widget(Paragraph::new(lines), list_area);
     }
     draw_modal_hint(
@@ -120,12 +132,17 @@ pub(super) fn draw_branches(
     );
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the picker receives its modal state, list geometry, and palette"
+)]
 pub(super) fn draw_history_branches(
     frame: &mut Frame<'_>,
     items: &[HistoryBranch],
     selected: usize,
     query: &crate::app::TextBuffer,
     loading: bool,
+    list: &mut ModalList<'_>,
     theme: &Theme,
 ) {
     let height = frame.area().height.saturating_sub(8).min(25);
@@ -172,7 +189,7 @@ pub(super) fn draw_history_branches(
         );
     } else {
         let visible = App::filtered_history_branches(items, &query.value);
-        let offset = selected.saturating_sub(list_area.height.saturating_sub(1) as usize);
+        let offset = list.offset(selected, list_area.height as usize, visible.len());
         let lines = visible
             .iter()
             .skip(offset)
@@ -216,6 +233,17 @@ pub(super) fn draw_history_branches(
                 ]))
             })
             .collect::<Vec<_>>();
+        for index in 0..lines.len() {
+            list.hit(
+                Rect::new(
+                    list_area.x,
+                    list_area.y.saturating_add(cells(index)),
+                    list_area.width,
+                    1,
+                ),
+                offset.saturating_add(index),
+            );
+        }
         frame.render_widget(Paragraph::new(lines), list_area);
     }
     draw_modal_hint(
@@ -226,12 +254,17 @@ pub(super) fn draw_history_branches(
     );
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the picker receives its modal state, list geometry, and palette"
+)]
 pub(super) fn draw_compare_branches(
     frame: &mut Frame<'_>,
     items: &[HistoryBranch],
     selected: usize,
     query: &crate::app::TextBuffer,
     loading: bool,
+    list: &mut ModalList<'_>,
     theme: &Theme,
 ) {
     let height = frame.area().height.saturating_sub(8).min(25);
@@ -281,7 +314,7 @@ pub(super) fn draw_compare_branches(
             .into_iter()
             .filter(|index| items.get(*index).is_some_and(|item| !item.current))
             .collect::<Vec<_>>();
-        let offset = selected.saturating_sub(list_area.height.saturating_sub(1) as usize);
+        let offset = list.offset(selected, list_area.height as usize, visible.len());
         let lines = visible
             .iter()
             .skip(offset)
@@ -319,6 +352,17 @@ pub(super) fn draw_compare_branches(
                 ]))
             })
             .collect::<Vec<_>>();
+        for index in 0..lines.len() {
+            list.hit(
+                Rect::new(
+                    list_area.x,
+                    list_area.y.saturating_add(cells(index)),
+                    list_area.width,
+                    1,
+                ),
+                offset.saturating_add(index),
+            );
+        }
         frame.render_widget(Paragraph::new(lines), list_area);
         if visible.is_empty() {
             frame.render_widget(
@@ -336,12 +380,17 @@ pub(super) fn draw_compare_branches(
     );
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the picker receives its modal state, list geometry, and palette"
+)]
 pub(super) fn draw_stashes(
     frame: &mut Frame<'_>,
     items: &[Stash],
     selected: usize,
     query: &crate::app::TextBuffer,
     loading: bool,
+    list: &mut ModalList<'_>,
     theme: &Theme,
 ) {
     let height = frame.area().height.saturating_sub(6).min(27);
@@ -387,7 +436,7 @@ pub(super) fn draw_stashes(
         );
     } else {
         let visible = App::filtered_stashes(items, &query.value);
-        let offset = selected.saturating_sub(list_area.height.saturating_sub(1) as usize);
+        let offset = list.offset(selected, list_area.height as usize, visible.len());
         let lines = visible
             .iter()
             .skip(offset)
@@ -432,6 +481,17 @@ pub(super) fn draw_stashes(
                 ]))
             })
             .collect::<Vec<_>>();
+        for index in 0..lines.len() {
+            list.hit(
+                Rect::new(
+                    list_area.x,
+                    list_area.y.saturating_add(cells(index)),
+                    list_area.width,
+                    1,
+                ),
+                offset.saturating_add(index),
+            );
+        }
         frame.render_widget(Paragraph::new(lines), list_area);
         if visible.is_empty() {
             frame.render_widget(

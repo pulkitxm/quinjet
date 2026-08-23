@@ -110,6 +110,7 @@ pub(super) fn draw_ssh_project_modal(
     context: Option<&SshContext>,
     machine_focus: Option<usize>,
     hits: &mut Vec<(Rect, ModalAction)>,
+    list: &mut ModalList<'_>,
     theme: &Theme,
 ) {
     if let Modal::Projects {
@@ -135,6 +136,7 @@ pub(super) fn draw_ssh_project_modal(
                 *mode,
                 context,
                 machine_focus,
+                list,
                 theme,
             )
             .into_iter()
