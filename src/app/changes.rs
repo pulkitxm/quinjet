@@ -272,6 +272,7 @@ impl App {
             .unwrap_or_default();
         let is_collapsed = self.preview_file_collapsed(&path.to_string_lossy());
         self.rebuild_indexed_preview_document();
+        self.content_file_anchor = Some(path.clone());
         if was_collapsed && !is_collapsed {
             if self.view == View::PullRequests
                 && self.pull_request_file_view == PullRequestFileView::AllFiles
@@ -317,18 +318,7 @@ impl App {
             (current + count(amount)).min(paths.len() - 1)
         };
         self.selected_preview_file = paths.get(self.preview_file_cursor).cloned();
-        if let Some(line_index) = self.document.lines.iter().position(|line| {
-            line.kind == DiffLineKind::FileHeader
-                && line.spans.first().is_some_and(|span| {
-                    span.text.split("  · ").next().is_some_and(|path| {
-                        paths
-                            .get(self.preview_file_cursor)
-                            .is_some_and(|selected| Path::new(path) == selected)
-                    })
-                })
-        }) {
-            self.content_scroll = line_index;
-        }
+        self.content_file_anchor = self.selected_preview_file.clone();
     }
 
     pub(super) const fn select_change_target(&mut self, target: ChangeTarget) {

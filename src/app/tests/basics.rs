@@ -336,7 +336,7 @@ fn expanded_preview_files_are_selectable_from_the_content_pane() {
 
     assert_eq!(app.selected_preview_file, Some(PathBuf::from("src/lib.rs")));
     assert_eq!(app.preview_file_cursor, 1);
-    assert!(app.content_scroll > 0);
+    assert_eq!(app.content_file_anchor, Some(PathBuf::from("src/lib.rs")));
 }
 
 #[test]

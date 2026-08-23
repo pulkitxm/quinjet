@@ -102,6 +102,11 @@ pub(super) fn draw_content(
     } else {
         app.unified_diff_rows.len()
     };
+    if let Some(anchor) = app.content_file_anchor.take()
+        && let Some(row) = anchored_diff_row(app, side_by_side, &anchor)
+    {
+        app.content_scroll = details_rows.saturating_add(row);
+    }
     let visual_length = details_rows + diff_rows;
     let max_scroll = visual_length.saturating_sub(inner.height as usize);
     app.content_scroll = app.content_scroll.min(max_scroll);
@@ -184,6 +189,23 @@ pub(super) fn draw_content(
 #[doc = " Clickable shortcuts to either end of whatever the content pane holds, each"]
 #[doc = " shown on the border it points at whenever the reader is not already there."]
 #[doc = " On a huge diff or conversation they replace paging through thousands of rows."]
+fn anchored_diff_row(app: &App, side_by_side: bool, anchor: &Path) -> Option<usize> {
+    let matches_anchor = |index: &usize| {
+        app.document
+            .lines
+            .get(*index)
+            .and_then(file_header_path)
+            .is_some_and(|path| Path::new(path) == anchor)
+    };
+    if side_by_side {
+        app.side_by_side_diff_rows.iter().position(
+            |row| matches!(row, SideBySideRow::FileHeader(index) if matches_anchor(index)),
+        )
+    } else {
+        app.unified_diff_rows.iter().position(matches_anchor)
+    }
+}
+
 const JUMP_TOP_LABEL: &str = " ↑ Top ";
 const JUMP_BOTTOM_LABEL: &str = " ↓ Bottom ";
 const JUMP_CONTROL_MARGIN: u16 = 3;
