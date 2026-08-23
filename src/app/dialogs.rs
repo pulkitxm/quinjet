@@ -2,6 +2,12 @@
 use super::*;
 
 impl App {
+    pub(crate) fn open_projects_on_launch(&mut self, mode: ProjectOpenMode) -> Vec<AppEffect> {
+        let mut effects = Vec::new();
+        self.open_projects(mode, &mut effects);
+        effects
+    }
+
     pub(super) fn open_stashes(&mut self, effects: &mut Vec<AppEffect>) {
         self.stash_generation = self.stash_generation.wrapping_add(1);
         self.modal = Some(Modal::Stashes {
@@ -16,12 +22,14 @@ impl App {
     }
 
     pub(super) fn open_projects(&mut self, mode: ProjectOpenMode, effects: &mut Vec<AppEffect>) {
+        self.project_machine_focus = None;
         self.modal = Some(Modal::Projects {
             groups: self.project_groups.clone(),
             selected: 0,
             query: TextBuffer::default(),
             collapsed: HashSet::new(),
             loading: self.project_groups.is_empty(),
+            opening: None,
             mode,
         });
         self.request_recent_projects(effects);

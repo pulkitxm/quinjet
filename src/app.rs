@@ -28,6 +28,7 @@ use crate::git::{
     Branch, ConflictChoice, GitOperation, HistoryBranch, LocalDiffRequest, ProjectGroup, Stash,
     Worktree,
 };
+use crate::ssh::SshContext;
 use crate::tabs::{TabId, TabInfo};
 use crate::theme::{Appearance, AppearanceChoice, Theme, ThemeName};
 
@@ -173,6 +174,7 @@ pub(crate) enum AppEffect {
     Open(OpenTarget),
     SwitchRepository(PathBuf),
     OpenRepositoryTab(PathBuf),
+    SwitchSshMachine(crate::ssh::SshSwitch),
     ActivateRepositoryTab(TabId),
     ReorderRepositoryTab { source: TabId, target: TabId },
     CloseRepositoryTab(TabId),
@@ -200,6 +202,8 @@ pub(crate) struct App {
     pub history: Vec<Commit>,
     pub worktrees: Vec<Worktree>,
     pub project_groups: Vec<ProjectGroup>,
+    pub ssh_context: Option<SshContext>,
+    pub project_machine_focus: Option<usize>,
     pub history_branch: Option<HistoryBranch>,
     pub pull_request: Option<PullRequest>,
     pub github_repositories: Vec<GitHubRepository>,

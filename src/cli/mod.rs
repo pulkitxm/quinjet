@@ -2,6 +2,7 @@ pub(crate) mod command;
 mod completion;
 mod package_manager;
 mod pr_verbs;
+mod remote;
 mod render;
 mod review;
 mod update;
@@ -116,12 +117,17 @@ struct Cli {
     #[arg(
         short = 'C',
         long = "path",
+        visible_alias = "folder",
         value_name = "DIR",
         default_value = ".",
         global = true,
         value_hint = ValueHint::DirPath
     )]
     repository: PathBuf,
+
+    #[doc = " Run Quinjet on an SSH machine"]
+    #[arg(long, value_name = "SSH_TARGET", global = true, value_hint = ValueHint::Hostname)]
+    remote: Option<String>,
 
     #[doc = " Print one JSON document on stdout instead of text"]
     #[arg(long, global = true)]
@@ -186,6 +192,11 @@ enum Verb {
     Resolve(ResolveArgs),
     #[doc = " List the GitHub repositories this checkout points at"]
     Repos(ReposArgs),
+    #[doc = " Inspect recent SSH repositories"]
+    Remote {
+        #[command(subcommand)]
+        command: RemoteVerb,
+    },
     #[doc = " Read or update a pull request"]
     Pr {
         #[command(subcommand)]
@@ -205,7 +216,11 @@ enum Verb {
 impl Verb {
     const fn progress_label(&self) -> Option<&'static str> {
         match self {
-            Self::Tui(_) | Self::Completions(_) | Self::Man(_) | Self::Capabilities => None,
+            Self::Tui(_)
+            | Self::Remote { .. }
+            | Self::Completions(_)
+            | Self::Man(_)
+            | Self::Capabilities => None,
             Self::Status(args) if args.watch => None,
             Self::Status(_) => Some("Reading repository status"),
             Self::Diff(_) => Some("Loading the working-tree diff"),
@@ -436,6 +451,7 @@ pub(crate) use entry::dispatch;
 use output::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use pull_request::*;
+pub(crate) use remote::{local_ssh_context, run_selected_terminal};
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use repository::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]

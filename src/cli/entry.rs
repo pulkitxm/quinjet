@@ -4,11 +4,19 @@ use super::*;
 pub(crate) fn dispatch() -> Result<Launch> {
     completion::auto_install();
     let cli = Cli::parse();
+    if let Some(target) = cli.remote.as_deref() {
+        let (terminal, implicit_terminal, folder) = match cli.command.as_ref() {
+            None => (true, true, cli.repository.as_path()),
+            Some(Verb::Tui(args)) => (true, false, terminal_path(&args.path, &cli.repository)),
+            Some(_) => (false, false, cli.repository.as_path()),
+        };
+        return remote::run(target, terminal, implicit_terminal, folder).map(Launch::Finished);
+    }
     let mut out = Emitter::new(cli.json);
     let verb = match cli.command {
         None => {
             return Ok(Launch::Terminal(Box::new(TerminalOptions {
-                path: PathBuf::from("."),
+                path: cli.repository,
                 no_mouse: false,
                 webhook_listen: None,
                 theme: ThemeName::default(),
@@ -18,7 +26,7 @@ pub(crate) fn dispatch() -> Result<Launch> {
         }
         Some(Verb::Tui(args)) => {
             return Ok(Launch::Terminal(Box::new(TerminalOptions {
-                path: args.path,
+                path: terminal_path(&args.path, &cli.repository).to_path_buf(),
                 no_mouse: args.no_mouse,
                 webhook_listen: args.webhook_listen,
                 theme: args.theme,
@@ -31,6 +39,9 @@ pub(crate) fn dispatch() -> Result<Launch> {
         }
         Some(Verb::Man(args)) => return manual(&out, &args).map(Launch::Finished),
         Some(Verb::Capabilities) => return capabilities(&out).map(Launch::Finished),
+        Some(Verb::Remote { command }) => {
+            return remote::manage(&out, command).map(Launch::Finished);
+        }
         Some(Verb::Update(args)) => {
             out.start_progress("Checking for updates")?;
             let result = update::run(&out, args.check);
@@ -56,6 +67,14 @@ pub(crate) fn dispatch() -> Result<Launch> {
     })();
     out.finish_progress();
     result.map(Launch::Finished)
+}
+
+fn terminal_path<'a>(positional: &'a Path, repository: &'a Path) -> &'a Path {
+    if positional == Path::new(".") {
+        repository
+    } else {
+        positional
+    }
 }
 
 pub(super) fn completions(out: &Emitter, args: &CompletionsArgs) -> Result<u8> {

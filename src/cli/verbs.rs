@@ -63,6 +63,21 @@ pub(super) enum WorktreeVerb {
 }
 
 #[derive(Debug, Subcommand)]
+pub(super) enum RemoteVerb {
+    #[doc = " List recent SSH repositories and their reachability"]
+    List,
+    #[doc = " Forget recent SSH repositories"]
+    Forget {
+        #[doc = " SSH target to forget"]
+        #[arg(value_name = "SSH_TARGET", value_hint = ValueHint::Hostname)]
+        target: String,
+        #[doc = " Forget only this remote folder"]
+        #[arg(long = "only-folder", value_name = "DIR", value_hint = ValueHint::DirPath)]
+        folder: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 pub(super) enum StashVerb {
     #[doc = " List stashes"]
     List,

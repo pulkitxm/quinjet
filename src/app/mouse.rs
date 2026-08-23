@@ -91,6 +91,7 @@ impl App {
             Some(
                 Modal::Commit { .. }
                     | Modal::Confirm { .. }
+                    | Modal::Projects { .. }
                     | Modal::PullRequestActions { .. }
                     | Modal::PullRequestReviewThreadActions { .. }
             )

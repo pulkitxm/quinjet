@@ -80,6 +80,7 @@ fn project_shortcuts_choose_current_or_new_tab_mode() {
         effects.as_slice(),
         [AppEffect::SwitchRepository(path)] if path == Path::new("/target")
     ));
+    app.modal = None;
 
     let effects = app.handle_key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT), now);
     assert!(effects.iter().any(|effect| matches!(

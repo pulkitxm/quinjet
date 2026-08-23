@@ -9,16 +9,11 @@ pub(super) fn draw_modal(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     draw_modal_content(frame, app, theme);
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "the modal dispatcher keeps the complete modal vocabulary in one match"
-)]
 pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     match app.modal.as_ref() {
         None | Some(Modal::Help { .. }) => {}
         Some(Modal::Commit { input, amend }) => {
-            let input = input.clone();
-            let amend = *amend;
+            let (input, amend) = (input.clone(), *amend);
             draw_commit(
                 frame,
                 &mut app.geometry.modal_action_hits,
@@ -64,8 +59,7 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
             theme,
         ),
         Some(Modal::Confirm { title, message, .. }) => {
-            let title = title.clone();
-            let message = message.clone();
+            let (title, message) = (title.clone(), message.clone());
             draw_confirm(
                 frame,
                 &mut app.geometry.modal_action_hits,
@@ -99,24 +93,17 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
             query,
             loading,
         }) => draw_stashes(frame, items, *selected, query, *loading, theme),
-        Some(Modal::Projects {
-            groups,
-            selected,
-            query,
-            collapsed,
-            loading,
-            mode,
-        }) => draw_projects(
-            frame,
-            &mut app.geometry.project_collapse_hits,
-            groups,
-            *selected,
-            query,
-            collapsed,
-            *loading,
-            *mode,
-            theme,
-        ),
+        Some(modal @ Modal::Projects { .. }) => {
+            draw_ssh_project_modal(
+                frame,
+                modal,
+                &mut app.geometry.project_collapse_hits,
+                app.ssh_context.as_ref(),
+                app.project_machine_focus,
+                &mut app.geometry.modal_action_hits,
+                theme,
+            );
+        }
         Some(Modal::PullRequestRepositories {
             items,
             selected,

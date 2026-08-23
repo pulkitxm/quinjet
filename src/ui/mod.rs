@@ -33,6 +33,7 @@ use crate::git::github::{
 use crate::git::github::{PullRequestCheck, PullRequestFile, RecentPullRequest};
 use crate::git::status::{Change, ChangeArea, ChangeStatus};
 use crate::git::{Branch, HistoryBranch, ProjectGroup, Stash};
+use crate::ssh::SshContext;
 use crate::theme::{AppearanceChoice, Theme, ThemeName};
 
 const DETAIL_LABEL_WIDTH: usize = 12;
@@ -424,6 +425,7 @@ mod help;
 mod layout;
 mod modal_branches;
 mod modal_conflict;
+pub(crate) mod modal_ssh;
 mod modals;
 pub(crate) mod pickers;
 mod project_picker;
@@ -457,6 +459,7 @@ use layout::*;
 use modal_branches::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use modal_conflict::*;
+use modal_ssh::draw_ssh_project_modal;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use modals::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
@@ -493,8 +496,5 @@ use style::*;
 use unified_diff::*;
 
 #[cfg(test)]
-#[expect(
-    unused_results,
-    reason = "test helpers return values the assertions do not use"
-)]
+#[expect(unused_results, reason = "test helpers discard unused return values")]
 mod tests;

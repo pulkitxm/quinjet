@@ -20,6 +20,7 @@ impl App {
                 query,
                 collapsed,
                 loading,
+                opening,
                 mode,
             } => {
                 if key.code == KeyCode::Esc {
@@ -28,10 +29,63 @@ impl App {
                 if matches!(key.code, KeyCode::Char('e' | 'E'))
                     && key.modifiers.contains(KeyModifiers::CONTROL)
                 {
-                    collapsed.extend(groups.iter().map(|group| group.common_dir.clone()));
+                    Self::toggle_all_project_groups(groups, collapsed);
                     *selected = 0;
                     self.modal = Some(modal);
                     return effects;
+                }
+                if key.code == KeyCode::Tab
+                    && let Some(context) = self.ssh_context.as_ref()
+                {
+                    self.project_machine_focus = self.project_machine_focus.map_or_else(
+                        || {
+                            context
+                                .machines
+                                .iter()
+                                .position(|machine| machine.target == context.current)
+                        },
+                        |_| None,
+                    );
+                    self.modal = Some(modal);
+                    return effects;
+                }
+                if let Some(machine_selected) = self.project_machine_focus
+                    && let Some(context) = self.ssh_context.as_ref()
+                {
+                    let next = match key.code {
+                        KeyCode::Left | KeyCode::Up | KeyCode::Char('h' | 'k') => {
+                            crate::ssh::previous_accessible_machine_index(
+                                &context.machines,
+                                machine_selected,
+                            )
+                        }
+                        KeyCode::Right | KeyCode::Down | KeyCode::Char('j' | 'l') => {
+                            crate::ssh::next_accessible_machine_index(
+                                &context.machines,
+                                machine_selected,
+                            )
+                        }
+                        KeyCode::Enter => {
+                            if let Some(effect) =
+                                machine_switch_effect(context, machine_selected, *mode)
+                            {
+                                effects.push(effect);
+                            }
+                            self.modal = Some(modal);
+                            return effects;
+                        }
+                        _ => {
+                            self.project_machine_focus = None;
+                            None
+                        }
+                    };
+                    if let Some(next) = next {
+                        self.project_machine_focus = Some(next);
+                    }
+                    if self.project_machine_focus.is_some() {
+                        self.modal = Some(modal);
+                        return effects;
+                    }
                 }
                 let visible = Self::filtered_project_rows(groups, &query.value, collapsed);
                 let selected_tree = visible
@@ -52,14 +106,16 @@ impl App {
                     KeyCode::Down | KeyCode::Char('j') => {
                         *selected = next_list_index(*selected, visible.len());
                     }
-                    KeyCode::Enter if !*loading => {
+                    KeyCode::Enter if !*loading && opening.is_none() => {
                         if let Some(tree) = selected_tree.filter(|tree| !tree.current) {
+                            *opening = Some(tree.path.clone());
                             effects.push(match mode {
                                 ProjectOpenMode::Initial | ProjectOpenMode::CurrentTab => {
                                     AppEffect::SwitchRepository(tree.path)
                                 }
                                 ProjectOpenMode::NewTab => AppEffect::OpenRepositoryTab(tree.path),
                             });
+                            self.modal = Some(modal);
                         }
                         return effects;
                     }
@@ -221,4 +277,24 @@ impl App {
         }
         effects
     }
+}
+
+fn machine_switch_effect(
+    context: &SshContext,
+    index: usize,
+    project_mode: ProjectOpenMode,
+) -> Option<AppEffect> {
+    let machine = context.machines.get(index)?;
+    if !machine.accessible || machine.target == context.current {
+        return None;
+    }
+    let mode = if project_mode == ProjectOpenMode::NewTab {
+        crate::ssh::SshProjectOpenMode::NewTab
+    } else {
+        crate::ssh::SshProjectOpenMode::CurrentTab
+    };
+    Some(AppEffect::SwitchSshMachine(crate::ssh::SshSwitch {
+        index,
+        mode,
+    }))
 }
