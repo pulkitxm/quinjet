@@ -84,7 +84,8 @@ impl App {
                     hover: None,
                 });
             }
-            PaletteCommand::Quit => effects.push(AppEffect::Quit),
+            PaletteCommand::Quit if !self.exit_locked() => effects.push(AppEffect::Quit),
+            PaletteCommand::Quit => {}
         }
     }
 

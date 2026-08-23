@@ -42,7 +42,7 @@ impl App {
         }
 
         match key.code {
-            KeyCode::Char('q') => effects.push(AppEffect::Quit),
+            KeyCode::Char('q') if !self.exit_locked() => effects.push(AppEffect::Quit),
             KeyCode::Char('?') => {
                 self.modal = Some(Modal::Help {
                     selected: 0,

@@ -6,6 +6,7 @@ use ratatui::backend::TestBackend;
 
 use super::*;
 use crate::app::{AppEffect, RepositoryTabDrag, RepositoryTabMenu};
+use crate::integration::Client;
 use crate::ssh::SshMachine;
 use crate::tabs::{RepositoryTabs, TabId};
 
@@ -73,6 +74,29 @@ fn repository_tabs_render_close_icons_and_a_drag_destination() {
         .collect::<String>();
     assert_eq!(row.matches('×').count(), 3);
     assert!(row.contains('▏'));
+}
+
+#[test]
+fn edith_client_hides_repository_tab_close_icons() {
+    let (mut app, _) = app_with_tabs(1, 0);
+    app.set_host_client(Some(Client::Edith));
+    let mut terminal = Terminal::new(TestBackend::new(120, 24)).unwrap();
+
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+
+    let row = terminal.backend().buffer().content()[..120]
+        .iter()
+        .map(ratatui::buffer::Cell::symbol)
+        .collect::<String>();
+    assert!(!row.contains('×'));
+    assert!(
+        app.geometry
+            .repository_tab_hits
+            .iter()
+            .all(|hit| hit.close.is_empty())
+    );
 }
 
 #[test]

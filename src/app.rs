@@ -28,6 +28,7 @@ use crate::git::{
     Branch, ConflictChoice, GitOperation, HistoryBranch, LocalDiffRequest, ProjectGroup, Stash,
     Worktree,
 };
+use crate::integration::{Client, HostAction};
 use crate::ssh::SshContext;
 use crate::tabs::{TabId, TabInfo};
 use crate::theme::{Appearance, AppearanceChoice, Theme, ThemeName};
@@ -137,6 +138,7 @@ mod modal;
 mod modal_actions;
 mod modal_events;
 mod modal_forms;
+mod modal_help;
 mod modal_pickers;
 mod modal_review;
 mod mouse;
@@ -172,6 +174,7 @@ pub(crate) enum AppEffect {
     Git(Box<WorkerCommand>),
     Copy(String),
     SetMouseCapture(bool),
+    Host(HostAction),
     Open(OpenTarget),
     SwitchRepository(PathBuf),
     OpenRepositoryTab(PathBuf),
@@ -315,6 +318,7 @@ pub(crate) struct App {
     pub text_selection: Option<TextSelection>,
     pub rendered_cells: Vec<Vec<char>>,
     pub webhooks_listening: bool,
+    pub host_client: Option<Client>,
     pub busy: Option<String>,
     pub operation_frame: usize,
     pub refreshing: bool,
