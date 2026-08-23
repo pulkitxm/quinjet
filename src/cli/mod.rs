@@ -131,6 +131,10 @@ struct Cli {
     #[arg(long, value_name = "SSH_TARGET", global = true, value_hint = ValueHint::Hostname)]
     remote: Option<String>,
 
+    #[doc = " Reuse an existing SSH control socket"]
+    #[arg(long, value_name = "PATH", global = true, value_hint = ValueHint::FilePath)]
+    ssh_control_path: Option<PathBuf>,
+
     #[doc = " Print one JSON document on stdout instead of text"]
     #[arg(long, global = true)]
     json: bool,

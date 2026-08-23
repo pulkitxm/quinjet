@@ -32,20 +32,26 @@ pub(super) fn run(
     terminal: bool,
     implicit_terminal: bool,
     folder: &Path,
+    control_path: Option<&Path>,
 ) -> Result<u8> {
     validate_target(target)?;
     let binary = env::var(REMOTE_BINARY_ENV).unwrap_or_else(|_| "quinjet".to_owned());
     let original_arguments = wild::args_os().skip(1).collect::<Vec<_>>();
     if !terminal {
         let arguments = forwarded_arguments(original_arguments)?;
-        return run_once(target, folder, &binary, &arguments, None);
+        return run_once(target, folder, &binary, &arguments, None, control_path);
     }
     terminal::run_terminal_loop(
         target,
         folder,
         &binary,
         &original_arguments,
-        (implicit_terminal, false, None),
+        (
+            implicit_terminal,
+            false,
+            None,
+            control_path.map(Path::to_path_buf),
+        ),
         None,
     )
 }
@@ -56,8 +62,16 @@ fn run_once(
     binary: &str,
     arguments: &[OsString],
     context: Option<&SshContext>,
+    control_path: Option<&Path>,
 ) -> Result<u8> {
-    let outcome = ssh_status(target, binary, arguments, context, TerminalRelay::default())?;
+    let outcome = ssh_status(
+        target,
+        binary,
+        arguments,
+        context,
+        TerminalRelay::default(),
+        control_path,
+    )?;
     if outcome.status.success() {
         crate::state::record_recent_remote(target, folder);
     }
@@ -70,6 +84,7 @@ fn ssh_status(
     arguments: &[OsString],
     context: Option<&SshContext>,
     terminal: TerminalRelay,
+    control_path: Option<&Path>,
 ) -> Result<TerminalStatus> {
     let command = terminal::remote_command(
         binary,
@@ -79,10 +94,14 @@ fn ssh_status(
         terminal.project_mode,
     )?;
     let mut ssh = Command::new("ssh");
+    let ssh = match control_path {
+        Some(path) => ssh.arg("-S").arg(path),
+        None => &mut ssh,
+    };
     let ssh = if terminal.allocate && io::stdin().is_terminal() && io::stdout().is_terminal() {
         ssh.arg("-tt")
     } else {
-        &mut ssh
+        ssh
     };
     let _command = ssh.arg("--").arg(target).arg(command);
     if terminal.allocate {
@@ -325,6 +344,16 @@ fn forwarded_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<
             .to_str()
             .is_some_and(|value| value.starts_with("--remote="))
         {
+        } else if argument == OsStr::new("--ssh-control-path") {
+            drop(
+                arguments
+                    .next()
+                    .context("--ssh-control-path requires a path")?,
+            );
+        } else if argument
+            .to_str()
+            .is_some_and(|value| value.starts_with("--ssh-control-path="))
+        {
         } else if argument == OsStr::new("--folder") {
             forwarded.push(OsString::from("--path"));
             forwarded.push(arguments.next().context("--folder requires a directory")?);
@@ -405,6 +434,8 @@ mod tests {
         let arguments = [
             "--remote",
             "host",
+            "--ssh-control-path",
+            "/tmp/edith.sock",
             "--folder=/repos/a project",
             "status",
             "--json",
