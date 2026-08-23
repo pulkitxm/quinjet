@@ -1,9 +1,8 @@
 use std::path::Path;
 
+use super::{MAX_RECENT_PROJECTS, RecentEntry, read_entries, write_entries};
 use crate::git::{ProjectGroup, Repository, Worktree};
 use crate::state_sorting::{sort_project_groups, sort_worktrees};
-
-use super::{MAX_RECENT_PROJECTS, RecentEntry, read_entries, write_entries};
 
 pub(crate) fn record_recent_project(root: &Path) {
     let Ok(repository) = Repository::discover(root) else {
