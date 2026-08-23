@@ -28,6 +28,11 @@ impl App {
             self.refresh_pull_request_live(now, false, &mut effects);
             changed = true;
         }
+        let generation = crate::date_time::relative_time_generation();
+        if self.relative_time_generation != generation {
+            self.relative_time_generation = generation;
+            changed = true;
+        }
         if self.busy.is_some() {
             self.operation_frame = self.operation_frame.wrapping_add(1) % OPERATION_SPINNER.len();
             changed = true;

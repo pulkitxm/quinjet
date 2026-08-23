@@ -282,6 +282,18 @@ fn branch_dialog_renames_the_selected_local_branch() {
 }
 
 #[test]
+fn a_tick_ages_the_relative_time_generation_and_asks_for_a_redraw() {
+    let mut app = App::new("/tmp/repo", "repo");
+    let current = app.relative_time_generation;
+    app.relative_time_generation = current - 1;
+
+    let (_, changed) = app.tick(Instant::now());
+
+    assert!(changed);
+    assert_eq!(app.relative_time_generation, current);
+}
+
+#[test]
 fn long_running_git_operations_animate_until_completion() {
     let mut app = App::new("/tmp/repo", "repo");
     let mut effects = Vec::new();
