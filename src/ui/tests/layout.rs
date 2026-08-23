@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn header_registers_repository_branch_and_workspace_links() {
+fn header_opens_the_project_menu_from_the_name_and_links_the_branch() {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
@@ -21,54 +21,37 @@ fn header_registers_repository_branch_and_workspace_links() {
 
     assert!(app.geometry.link_hits.iter().any(|hit| matches!(
         &hit.target,
-        OpenTarget::Browser(url) if url == "https://github.com/acme/repo"
-    )));
-    assert!(app.geometry.link_hits.iter().any(|hit| matches!(
-        &hit.target,
         OpenTarget::Browser(url)
             if url == "https://github.com/acme/repo/tree/feature/link"
     )));
-    assert!(
-        app.geometry
-            .project_hits
-            .iter()
-            .any(|area| area.width > 0 && area.height > 0)
-    );
-    let repository_area = app
+    assert!(!app.geometry.link_hits.iter().any(|hit| matches!(
+        &hit.target,
+        OpenTarget::Browser(url) if url == "https://github.com/acme/repo"
+    )));
+
+    let name_hit = app
         .geometry
-        .link_hits
+        .project_hits
         .iter()
-        .find(|hit| {
-            matches!(
-                &hit.target,
-                OpenTarget::Browser(url) if url == "https://github.com/acme/repo"
-            )
-        })
-        .map(|hit| hit.area)
-        .unwrap();
-    assert!(
-        !terminal.backend().buffer()[(repository_area.x, repository_area.y)]
-            .modifier
-            .contains(Modifier::UNDERLINED)
-    );
-    let rendered = terminal
-        .backend()
-        .buffer()
+        .copied()
+        .min_by_key(|area| area.y)
+        .expect("repository name opens the project menu");
+    let buffer = terminal.backend().buffer();
+    let mut name = String::new();
+    for x in name_hit.x..name_hit.right() {
+        let cell = &buffer[(x, name_hit.y)];
+        name.push_str(cell.symbol());
+        assert!(cell.modifier.contains(Modifier::UNDERLINED));
+    }
+    assert_eq!(name, "repo");
+
+    let rendered = buffer
         .content()
         .iter()
         .map(ratatui::buffer::Cell::symbol)
         .collect::<String>();
+    assert!(!rendered.contains("/tmp/repo"));
     assert!(!rendered.contains("\x1b]8;;"));
-
-    app.link_hover = Some((repository_area.x, repository_area.y));
-    terminal
-        .draw(|frame| draw(frame, &mut app, &Theme::default()))
-        .unwrap();
-    assert!(
-        terminal.backend().buffer()[(repository_area.x, repository_area.y)]
-            .modifier
-            .contains(Modifier::UNDERLINED)
-    );
 
     app.configure_mouse_capture(false);
     terminal
@@ -81,11 +64,9 @@ fn header_registers_repository_branch_and_workspace_links() {
         .iter()
         .map(ratatui::buffer::Cell::symbol)
         .collect::<String>();
-    assert!(rendered.contains("\x1b]8;;https://github.com/acme/repo\x1b\\"));
     assert!(rendered.contains("\x1b]8;;https://github.com/acme/repo/tree/feature/link\x1b\\"));
 
     app.view = View::History;
-    app.link_hover = None;
     app.history = vec![crate::git::history::Commit {
         id: "abc123".to_owned(),
         short_id: "abc123".to_owned(),
