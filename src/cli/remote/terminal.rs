@@ -1,7 +1,8 @@
-use std::env;
 use std::ffi::OsString;
+use std::io::{self, Read, Write};
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::{env, thread};
 
 use anyhow::{Context, Result};
 
@@ -48,11 +49,11 @@ pub(super) fn run_terminal_loop(
         } else {
             super::forwarded_arguments(original_arguments.to_owned())?
         };
-        let status = if current_local {
+        let outcome = if current_local {
             local_status(
                 &arguments,
                 &context,
-                project_mode.unwrap_or(SshProjectOpenMode::CurrentTab),
+                project_mode.unwrap_or(SshProjectOpenMode::Current),
             )?
         } else {
             super::ssh_status(
@@ -67,6 +68,10 @@ pub(super) fn run_terminal_loop(
                 },
             )?
         };
+        if let Some(updated) = outcome.context {
+            context = updated;
+        }
+        let status = outcome.status;
         let code = status
             .code()
             .unwrap_or_else(|| i32::from(super::super::EXIT_FAILURE));
@@ -98,7 +103,7 @@ fn local_status(
     arguments: &[OsString],
     context: &SshContext,
     mode: SshProjectOpenMode,
-) -> Result<std::process::ExitStatus> {
+) -> Result<super::TerminalStatus> {
     let executable = env::var_os(LOCAL_BINARY_ENV).map_or_else(
         || {
             env::current_exe() // nosemgrep: rust.lang.security.current-exe.current-exe
@@ -107,13 +112,98 @@ fn local_status(
         |path| Ok(path.into()),
     )?;
     let serialized = serde_json::to_string(context)?;
-    Command::new(executable)
+    let mut command = Command::new(executable);
+    let _command = command
         .args(arguments)
         .env("QUINJET_SSH_CONTEXT", serialized)
         .env(crate::terminal::INHERITED_TERMINAL_ENV, "1")
-        .env(crate::ssh::OPEN_PROJECTS_ENV, mode.environment_value())
-        .status()
-        .context("failed to return to the local Quinjet session")
+        .env(crate::ssh::OPEN_PROJECTS_ENV, mode.environment_value());
+    relay_status(
+        &mut command,
+        "failed to return to the local Quinjet session",
+    )
+}
+
+pub(super) fn relay_status(command: &mut Command, failure: &str) -> Result<super::TerminalStatus> {
+    let mut child = command
+        .stdout(Stdio::piped())
+        .spawn()
+        .with_context(|| failure.to_owned())?;
+    let output = child
+        .stdout
+        .take()
+        .context("terminal output was not piped")?;
+    let relay = thread::spawn(move || relay_output(output, io::stdout()));
+    let status = child.wait().with_context(|| failure.to_owned())?;
+    let context = relay
+        .join()
+        .map_err(|_| anyhow::anyhow!("terminal output relay stopped unexpectedly"))??;
+    Ok(super::TerminalStatus { status, context })
+}
+
+fn relay_output(mut input: impl Read, mut output: impl Write) -> Result<Option<SshContext>> {
+    let prefix = crate::ssh::HANDOFF_CONTEXT_PREFIX;
+    let mut buffer = [0_u8; 8192];
+    let mut candidate = Vec::with_capacity(prefix.len());
+    let mut payload = None::<Vec<u8>>;
+    let mut context = None;
+    loop {
+        let read = input
+            .read(&mut buffer)
+            .context("failed to read terminal output")?;
+        if read == 0 {
+            break;
+        }
+        let Some(bytes) = buffer.get(..read) else {
+            continue;
+        };
+        for &byte in bytes {
+            if let Some(frame) = payload.as_mut() {
+                if byte == crate::ssh::HANDOFF_CONTEXT_SUFFIX {
+                    context = serde_json::from_slice(frame).ok();
+                    payload = None;
+                } else {
+                    frame.push(byte);
+                }
+                continue;
+            }
+            let expected = prefix.get(candidate.len()).copied();
+            if expected == Some(byte) {
+                candidate.push(byte);
+                if candidate.len() == prefix.len() {
+                    candidate.clear();
+                    payload = Some(Vec::new());
+                }
+                continue;
+            }
+            if !candidate.is_empty() {
+                output
+                    .write_all(&candidate)
+                    .context("failed to relay terminal output")?;
+                candidate.clear();
+            }
+            if prefix.first().copied() == Some(byte) {
+                candidate.push(byte);
+            } else {
+                output
+                    .write_all(&[byte])
+                    .context("failed to relay terminal output")?;
+            }
+        }
+        output.flush().context("failed to flush terminal output")?;
+    }
+    if let Some(frame) = payload {
+        output
+            .write_all(prefix)
+            .and_then(|()| output.write_all(&frame))
+            .context("failed to relay incomplete terminal handoff")?;
+    } else if !candidate.is_empty() {
+        output
+            .write_all(&candidate)
+            .context("failed to relay terminal output")?;
+    }
+    output.flush().context("failed to flush terminal output")?;
+    Ok(context)
 }
 
 pub(super) fn remote_command(
@@ -136,7 +226,7 @@ pub(super) fn remote_command(
         );
     }
     if inherited_terminal {
-        let mode = project_mode.unwrap_or(SshProjectOpenMode::CurrentTab);
+        let mode = project_mode.unwrap_or(SshProjectOpenMode::Current);
         command = format!(
             "{}=1 {}={} {command}",
             crate::terminal::INHERITED_TERMINAL_ENV,
@@ -149,6 +239,8 @@ pub(super) fn remote_command(
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
     use super::*;
 
     #[test]
@@ -167,10 +259,34 @@ mod tests {
     #[test]
     fn switched_terminal_inherits_the_existing_alternate_screen() {
         let command =
-            remote_command("quinjet", &[], None, true, Some(SshProjectOpenMode::NewTab)).unwrap();
+            remote_command("quinjet", &[], None, true, Some(SshProjectOpenMode::New)).unwrap();
         assert_eq!(
             command,
             "QUINJET_INHERITED_TERMINAL=1 QUINJET_OPEN_PROJECTS=new-tab quinjet"
         );
+    }
+
+    #[test]
+    fn terminal_relay_hides_and_decodes_a_fragmented_handoff_frame() {
+        let mut tabs = crate::ssh::SshTabs::default();
+        let _id = tabs.append("macbook", "repo", "/work/repo");
+        let context = SshContext {
+            current: "macbook".to_owned(),
+            machines: Vec::new(),
+            tabs,
+        };
+        let mut input = vec![b'x'; 8191];
+        input.extend_from_slice(crate::ssh::HANDOFF_CONTEXT_PREFIX);
+        input.extend_from_slice(&serde_json::to_vec(&context).unwrap());
+        input.push(crate::ssh::HANDOFF_CONTEXT_SUFFIX);
+        input.extend_from_slice(b"ready");
+        let mut output = Vec::new();
+
+        let decoded = relay_output(Cursor::new(input), &mut output).unwrap();
+
+        assert_eq!(decoded, Some(context));
+        assert_eq!(output.len(), 8196);
+        assert!(output.starts_with(&[b'x'; 8191]));
+        assert!(output.ends_with(b"ready"));
     }
 }

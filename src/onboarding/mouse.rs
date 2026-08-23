@@ -41,7 +41,6 @@ impl Onboarding {
             .find(|(area, _)| area.contains((mouse.column, mouse.row).into()))
             .map(|(_, index)| *index)
         {
-            self.machine_selected = Some(index);
             return self
                 .ssh_context
                 .as_ref()

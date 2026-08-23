@@ -20,10 +20,15 @@ transport failure exits with code 4.
 Successful sessions are stored locally as recent SSH repositories. Use
 [`quinjet remote list`](./list.md) to check which machines are currently
 reachable and [`quinjet remote forget`](./forget.md) to remove an entry.
-The project picker names the active SSH machine. Press `Tab` there to open the
-machine picker, which is the interface's machine-switching entry point. It lists
-the most-used machines first, marks reachability, and reconnects the terminal to
-the selected machine. Unavailable machines remain visible but cannot be opened.
+The project picker names the active SSH machine and lists the most-used machines
+first. Press `Tab` to move to the next reachable machine or `Shift+Tab` to move
+backward. Clicking a machine switches to it directly. Unavailable machines
+remain visible and are skipped by keyboard navigation.
+
+Open project tabs from every visited machine share one strip. A mixed strip
+adds `@machine` to each tab label. Selecting a remote tab reconnects directly
+to its machine and project, while the project picker remains the way to add a
+project from another machine.
 
 The terminal interface and `status --watch` execute on the remote machine, so
 its filesystem watcher observes remote edits directly. The normal periodic

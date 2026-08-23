@@ -100,6 +100,16 @@ pub(super) fn draw_repository_tabs(
         .saturating_sub(start)
         .min(capacity);
     let tab_width = (available / u16::try_from(visible_count).unwrap_or(1)).min(24);
+    let first_machine = app
+        .repository_tabs
+        .iter()
+        .find_map(|tab| tab.machine.as_deref());
+    let mixed_machines = first_machine.is_some_and(|first| {
+        app.repository_tabs
+            .iter()
+            .filter_map(|tab| tab.machine.as_deref())
+            .any(|machine| machine != first)
+    });
     let mut hits = Vec::with_capacity(visible_count);
     for (offset, tab) in app
         .repository_tabs
@@ -113,11 +123,15 @@ pub(super) fn draw_repository_tabs(
             .saturating_add(control_width)
             .saturating_add(cells(offset.saturating_mul(usize::from(tab_width))));
         let tab_area = Rect::new(x, tab_row.y, tab_width, tab_row.height);
-        let value = if tab.title.is_empty() {
+        let mut value = if tab.title.is_empty() {
             tab.root.display().to_string()
         } else {
             tab.title.clone()
         };
+        if mixed_machines && let Some(machine) = tab.machine.as_deref() {
+            value.push_str(" @");
+            value.push_str(machine.strip_suffix(".local").unwrap_or(machine));
+        }
         let label_width = tab_width.saturating_sub(4);
         let label = format!(
             " {}",

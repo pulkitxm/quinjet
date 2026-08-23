@@ -5,7 +5,6 @@ pub(super) fn draw_project_machines(
     frame: &mut Frame<'_>,
     area: Rect,
     context: &SshContext,
-    focused: Option<usize>,
     theme: &Theme,
 ) -> Vec<(Rect, usize)> {
     let label = Rect::new(area.x, area.y, 9_u16.min(area.width), 1);
@@ -23,21 +22,18 @@ pub(super) fn draw_project_machines(
         let desired = cells(machine.target.width().saturating_add(5));
         let width = desired.min(remaining);
         let rect = Rect::new(x, area.y, width, 1);
-        let selected = focused == Some(index);
         let current = machine.target == context.current;
-        let background = if selected {
-            theme.selected
-        } else if current {
+        let background = if current {
             theme.accent
         } else {
             theme.panel_alt
         };
-        let foreground = if current && !selected {
+        let foreground = if current {
             theme.background
         } else {
             theme.text
         };
-        let marker_color = if current && !selected {
+        let marker_color = if current {
             theme.background
         } else if machine.accessible {
             theme.success
@@ -52,7 +48,7 @@ pub(super) fn draw_project_machines(
             "○"
         };
         let target_width = width.saturating_sub(4) as usize;
-        let modifier = if selected || current {
+        let modifier = if current {
             Modifier::BOLD
         } else {
             Modifier::empty()
@@ -108,7 +104,6 @@ pub(super) fn draw_ssh_project_modal(
     modal: &Modal,
     collapse_hits: &mut Vec<(Rect, std::path::PathBuf)>,
     context: Option<&SshContext>,
-    machine_focus: Option<usize>,
     hits: &mut Vec<(Rect, ModalAction)>,
     list: &mut ModalList<'_>,
     theme: &Theme,
@@ -135,7 +130,6 @@ pub(super) fn draw_ssh_project_modal(
                 opening.as_deref(),
                 *mode,
                 context,
-                machine_focus,
                 list,
                 theme,
             )

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 const PROJECT_SESSION_FILE: &str = "project-session.json";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ProjectSession {
     pub(crate) roots: Vec<PathBuf>,

@@ -160,6 +160,7 @@ fn local_project_picker_uses_the_inline_machine_strip() {
                 local: false,
             },
         ],
+        tabs: crate::ssh::SshTabs::default(),
     };
     let mut onboarding = Onboarding::from_groups(Path::new("/work"), Vec::new(), Some(context));
     let backend = TestBackend::new(100, 30);
@@ -177,6 +178,7 @@ fn local_project_picker_uses_the_inline_machine_strip() {
     assert!(rendered.contains("Machine"));
     assert!(rendered.contains("Pulkits-MacBook-Pro.local"));
     assert!(rendered.contains("busy-host"));
+    assert!(rendered.contains("Tab next machine"));
     let button = onboarding
         .machine_hits
         .iter()
@@ -193,14 +195,8 @@ fn local_project_picker_uses_the_inline_machine_strip() {
         }),
         OnboardingAction::SwitchSshMachine(1)
     );
-    onboarding.machine_selected = None;
     assert_eq!(
         onboarding.handle_key(key(KeyCode::Tab)),
-        OnboardingAction::None
-    );
-    drop(onboarding.handle_key(key(KeyCode::Right)));
-    assert_eq!(
-        onboarding.handle_key(key(KeyCode::Enter)),
         OnboardingAction::SwitchSshMachine(1)
     );
 }

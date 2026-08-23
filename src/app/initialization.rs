@@ -32,7 +32,6 @@ impl App {
                     crate::state::load_collapsed_project_groups()
                 }
             },
-            project_machine_focus: None,
             ssh_context: SshContext::from_environment(),
             history_branch: None,
             pull_request: None,

@@ -1,13 +1,26 @@
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) struct TabId(u64);
+
+impl TabId {
+    pub(crate) const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub(crate) const fn value(self) -> u64 {
+        self.0
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TabInfo {
     pub(crate) id: TabId,
     pub(crate) title: String,
     pub(crate) root: PathBuf,
+    pub(crate) machine: Option<String>,
     pub(crate) active: bool,
 }
 
@@ -27,8 +40,17 @@ pub(crate) struct RepositoryTabs<T> {
 }
 
 impl<T> RepositoryTabs<T> {
+    #[cfg(test)]
     pub(crate) fn new(title: impl Into<String>, root: impl Into<PathBuf>, value: T) -> Self {
-        let id = TabId(0);
+        Self::new_with_id(TabId::new(0), title, root, value)
+    }
+
+    pub(crate) fn new_with_id(
+        id: TabId,
+        title: impl Into<String>,
+        root: impl Into<PathBuf>,
+        value: T,
+    ) -> Self {
         Self {
             tabs: vec![RepositoryTab {
                 id,
@@ -37,7 +59,7 @@ impl<T> RepositoryTabs<T> {
                 value,
             }],
             active: Some(id),
-            next_id: 1,
+            next_id: id.value().wrapping_add(1),
         }
     }
 
@@ -102,7 +124,17 @@ impl<T> RepositoryTabs<T> {
         value: T,
     ) -> TabId {
         let id = TabId(self.next_id);
-        self.next_id = self.next_id.wrapping_add(1);
+        self.append_with_id(id, title, root, value)
+    }
+
+    pub(crate) fn append_with_id(
+        &mut self,
+        id: TabId,
+        title: impl Into<String>,
+        root: impl Into<PathBuf>,
+        value: T,
+    ) -> TabId {
+        self.next_id = self.next_id.max(id.value().wrapping_add(1));
         self.tabs.push(RepositoryTab {
             id,
             title: title.into(),
@@ -237,6 +269,7 @@ impl<T> RepositoryTabs<T> {
                 id: tab.id,
                 title: tab.title.clone(),
                 root: tab.root.clone(),
+                machine: None,
                 active: self.active == Some(tab.id),
             })
             .collect()
@@ -264,6 +297,7 @@ mod tests {
                 id,
                 title: String::from("one"),
                 root: PathBuf::from("/one"),
+                machine: None,
                 active: true,
             }]
         );
