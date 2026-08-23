@@ -1,3 +1,4 @@
+use super::modal_help::handle_help_key;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
@@ -16,48 +17,12 @@ impl App {
         match &mut modal {
             Modal::Help {
                 selected, hover, ..
-            } => match key.code {
-                KeyCode::Esc | KeyCode::Char('?' | 'q') | KeyCode::Enter => {}
-                KeyCode::Up | KeyCode::Char('k') => {
-                    *selected = previous_list_index(
-                        *selected,
-                        crate::ui::help_shortcut_count(self.exit_locked()),
-                    );
-                    *hover = None;
+            } => {
+                let count = crate::ui::help_shortcut_count(self.exit_locked());
+                if handle_help_key(selected, hover, key, count) {
                     self.modal = Some(modal);
                 }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    *selected = next_list_index(
-                        *selected,
-                        crate::ui::help_shortcut_count(self.exit_locked()),
-                    );
-                    *hover = None;
-                    self.modal = Some(modal);
-                }
-                KeyCode::PageUp => {
-                    *selected = selected.saturating_sub(10);
-                    *hover = None;
-                    self.modal = Some(modal);
-                }
-                KeyCode::PageDown => {
-                    let count = crate::ui::help_shortcut_count(self.exit_locked());
-                    *selected = (*selected + 10).min(count.saturating_sub(1));
-                    *hover = None;
-                    self.modal = Some(modal);
-                }
-                KeyCode::Home | KeyCode::Char('g') => {
-                    *selected = 0;
-                    *hover = None;
-                    self.modal = Some(modal);
-                }
-                KeyCode::End | KeyCode::Char('G') => {
-                    *selected =
-                        crate::ui::help_shortcut_count(self.exit_locked()).saturating_sub(1);
-                    *hover = None;
-                    self.modal = Some(modal);
-                }
-                _ => self.modal = Some(modal),
-            },
+            }
             Modal::Commit { input, amend } => {
                 if key.code == KeyCode::Esc {
                     return effects;

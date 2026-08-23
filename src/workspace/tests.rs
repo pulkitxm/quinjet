@@ -23,8 +23,7 @@ fn workspace(repository: &Repository) -> RepositoryWorkspace {
         AppearanceChoice::Dark,
         false,
         false,
-        None,
-        None,
+        WorkspaceContext::new(None, None),
     )
 }
 
@@ -47,8 +46,7 @@ fn machine_session_restores_open_tabs_in_order_and_reactivates_the_saved_project
         AppearanceChoice::Dark,
         false,
         false,
-        None,
-        None,
+        WorkspaceContext::new(None, None),
     )
     .expect("restored workspace");
 
@@ -94,8 +92,7 @@ fn machine_picker_context_follows_replaced_and_appended_projects() {
         AppearanceChoice::Dark,
         false,
         false,
-        Some(context.clone()),
-        None,
+        WorkspaceContext::new(Some(context.clone()), None),
     );
     let now = Instant::now();
     let first = workspace.active_id().expect("first tab is active");
@@ -165,8 +162,7 @@ fn mixed_machine_tabs_share_one_order_and_remote_tabs_handoff_directly() {
         AppearanceChoice::Dark,
         false,
         false,
-        Some(&context),
-        None,
+        WorkspaceContext::new(Some(context), None),
     )
     .expect("mixed workspace");
 
@@ -320,8 +316,7 @@ fn edith_workspace_refuses_to_close_its_managed_session() {
         AppearanceChoice::Dark,
         false,
         false,
-        None,
-        Some(Client::Edith),
+        WorkspaceContext::new(None, Some(Client::Edith)),
     );
     let active = workspace.active_id().expect("managed tab is active");
 

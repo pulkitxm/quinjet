@@ -138,6 +138,7 @@ mod modal;
 mod modal_actions;
 mod modal_events;
 mod modal_forms;
+mod modal_help;
 mod modal_pickers;
 mod modal_review;
 mod mouse;

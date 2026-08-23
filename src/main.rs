@@ -34,7 +34,7 @@ use crate::onboarding::{Onboarding, OnboardingAction};
 use crate::ssh::SshContext;
 use crate::terminal::TerminalGuard;
 use crate::webhook::WebhookListener;
-use crate::workspace::{RepositoryWorkspace, RoutedEffects};
+use crate::workspace::{RepositoryWorkspace, RoutedEffects, WorkspaceContext};
 
 fn main() -> ExitCode {
     match cli::dispatch() {
@@ -128,8 +128,7 @@ fn open_terminal(
             options.appearance,
             !options.no_mouse,
             webhooks.is_some(),
-            ssh_context,
-            options.client,
+            WorkspaceContext::new(ssh_context.cloned(), options.client),
         )
     });
     let mut workspace = restored_workspace.or_else(|| {
@@ -140,8 +139,7 @@ fn open_terminal(
                 options.appearance,
                 !options.no_mouse,
                 webhooks.is_some(),
-                ssh_context.cloned(),
-                options.client,
+                WorkspaceContext::new(ssh_context.cloned(), options.client),
             );
             workspace.sync_tabs(Instant::now());
             workspace
@@ -305,8 +303,7 @@ fn open_terminal(
                                 options.appearance,
                                 !options.no_mouse,
                                 webhooks.is_some(),
-                                ssh_context.cloned(),
-                                options.client,
+                                WorkspaceContext::new(ssh_context.cloned(), options.client),
                             );
                             next.sync_tabs(Instant::now());
                             running &= dispatch_launch_effects(
