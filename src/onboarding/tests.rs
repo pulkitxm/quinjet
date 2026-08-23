@@ -160,6 +160,7 @@ fn local_project_picker_uses_the_inline_machine_strip() {
                 local: false,
             },
         ],
+        tabs: crate::ssh::SshTabs::default(),
     };
     let mut onboarding = Onboarding::from_groups(Path::new("/work"), Vec::new(), Some(context));
     let backend = TestBackend::new(100, 30);

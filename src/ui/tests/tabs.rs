@@ -241,6 +241,7 @@ fn project_picker_keeps_host_and_ssh_navigation_in_one_layout() {
                 local: false,
             },
         ],
+        tabs: crate::ssh::SshTabs::default(),
     });
     let now = Instant::now();
     let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();

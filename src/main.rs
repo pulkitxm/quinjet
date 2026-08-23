@@ -49,8 +49,11 @@ fn terminal_exit_code(options: &TerminalOptions) -> ExitCode {
     let context = inherited_context.or_else(|| cli::local_ssh_context(&options.path));
     match open_terminal(options, context.as_ref()) {
         Ok(TerminalOutcome::Finished) => ExitCode::SUCCESS,
-        Ok(TerminalOutcome::SwitchSshMachine(request)) if local_session => {
-            let Some(mut context) = context else {
+        Ok(TerminalOutcome::SwitchSshMachine {
+            request,
+            context: updated_context,
+        }) if local_session => {
+            let Some(mut context) = updated_context.or(context) else {
                 return ExitCode::from(cli::EXIT_FAILURE);
             };
             let Some(machine) = context.machines.get(request.index).cloned() else {
@@ -67,7 +70,7 @@ fn terminal_exit_code(options: &TerminalOptions) -> ExitCode {
                 Err(error) => ExitCode::from(cli::report(&error)),
             }
         }
-        Ok(TerminalOutcome::SwitchSshMachine(request)) => ssh::switch_exit_code(request)
+        Ok(TerminalOutcome::SwitchSshMachine { request, .. }) => ssh::switch_exit_code(request)
             .map_or_else(|| ExitCode::from(cli::EXIT_FAILURE), ExitCode::from),
         Err(error) => ExitCode::from(cli::report(&error)),
     }
@@ -75,7 +78,10 @@ fn terminal_exit_code(options: &TerminalOptions) -> ExitCode {
 
 enum TerminalOutcome {
     Finished,
-    SwitchSshMachine(ssh::SshSwitch),
+    SwitchSshMachine {
+        request: ssh::SshSwitch,
+        context: Option<SshContext>,
+    },
 }
 
 #[expect(
@@ -97,9 +103,12 @@ fn open_terminal(
         .map(WebhookListener::bind)
         .transpose()?;
     let handoff_mode = ssh::SshProjectOpenMode::from_environment();
-    let repository = (handoff_mode != Some(ssh::SshProjectOpenMode::CurrentTab))
-        .then(|| Repository::discover(&options.path).ok())
-        .flatten();
+    let repository = (!matches!(
+        handoff_mode,
+        Some(ssh::SshProjectOpenMode::CurrentTab | ssh::SshProjectOpenMode::ActivateTab)
+    ))
+    .then(|| Repository::discover(&options.path).ok())
+    .flatten();
     if let Some(repository) = repository.as_ref() {
         state::record_recent_project(repository.root());
     }
@@ -154,7 +163,7 @@ fn open_terminal(
         let project_mode = match handoff_mode {
             Some(ssh::SshProjectOpenMode::CurrentTab) => Some(app::ProjectOpenMode::CurrentTab),
             Some(ssh::SshProjectOpenMode::NewTab) => Some(app::ProjectOpenMode::NewTab),
-            None => None,
+            Some(ssh::SshProjectOpenMode::ActivateTab) | None => None,
         };
         if let Some(mode) = project_mode
             && let Some(effects) = current.open_projects_on_launch(mode)
@@ -311,9 +320,16 @@ fn open_terminal(
     {
         state::session::record_project_session(current.project_session());
     }
-    let outcome =
-        switch_ssh_machine.map_or(TerminalOutcome::Finished, TerminalOutcome::SwitchSshMachine);
-    if matches!(outcome, TerminalOutcome::SwitchSshMachine(_)) {
+    let outcome = switch_ssh_machine.map_or(TerminalOutcome::Finished, |request| {
+        TerminalOutcome::SwitchSshMachine {
+            request,
+            context: workspace
+                .as_ref()
+                .and_then(RepositoryWorkspace::ssh_context)
+                .or_else(|| ssh_context.cloned()),
+        }
+    });
+    if matches!(outcome, TerminalOutcome::SwitchSshMachine { .. }) {
         terminal.preserve_for_handoff();
     }
     Ok(outcome)
@@ -384,16 +400,27 @@ fn dispatch_effects(
                     running = false;
                 }
                 AppEffect::ActivateRepositoryTab(target) => {
-                    workspace.activate(target, Instant::now());
+                    if let Some(request) = workspace.activate(target, Instant::now()) {
+                        *switch_ssh_machine = Some(request);
+                        running = false;
+                    }
                 }
                 AppEffect::ReorderRepositoryTab { source, target } => {
                     workspace.reorder(source, target, Instant::now());
                 }
                 AppEffect::CloseRepositoryTab(target) => {
-                    running &= workspace.close(target, Instant::now());
+                    let (keep_running, handoff) = workspace.close(target, Instant::now());
+                    running &= keep_running;
+                    if let Some(request) = handoff {
+                        *switch_ssh_machine = Some(request);
+                        running = false;
+                    }
                 }
                 AppEffect::CloseOtherRepositoryTabs(target) => {
-                    workspace.close_others(target, Instant::now());
+                    if let Some(request) = workspace.close_others(target, Instant::now()) {
+                        *switch_ssh_machine = Some(request);
+                        running = false;
+                    }
                 }
                 AppEffect::CloseAllRepositoryTabs => {
                     workspace.close_all();

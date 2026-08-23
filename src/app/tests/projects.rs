@@ -338,6 +338,7 @@ fn project_picker_is_the_machine_switching_entry_point() {
                 local: false,
             },
         ],
+        tabs: crate::ssh::SshTabs::default(),
     });
     app.modal = Some(Modal::Projects {
         groups: Vec::new(),
@@ -390,6 +391,7 @@ fn machine_shortcut_skips_unavailable_machines() {
                 local: false,
             },
         ],
+        tabs: crate::ssh::SshTabs::default(),
     });
     app.modal = Some(Modal::Projects {
         groups: Vec::new(),

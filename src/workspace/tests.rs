@@ -83,6 +83,7 @@ fn machine_picker_context_follows_replaced_and_appended_projects() {
             uses: 5,
             local: false,
         }],
+        tabs: crate::ssh::SshTabs::default(),
     };
     let mut workspace = RepositoryWorkspace::new(
         &first_repository,
@@ -102,14 +103,98 @@ fn machine_picker_context_follows_replaced_and_appended_projects() {
     assert_eq!(
         workspace
             .app_mut(first)
-            .and_then(|app| app.ssh_context.clone()),
-        Some(context.clone())
+            .and_then(|app| app.ssh_context.as_ref())
+            .map(|saved| (&saved.current, &saved.machines)),
+        Some((&context.current, &context.machines))
     );
     assert_eq!(
         workspace
             .app_mut(second)
-            .and_then(|app| app.ssh_context.clone()),
-        Some(context)
+            .and_then(|app| app.ssh_context.as_ref())
+            .map(|saved| (&saved.current, &saved.machines)),
+        Some((&context.current, &context.machines))
+    );
+}
+
+#[test]
+fn mixed_machine_tabs_share_one_order_and_remote_tabs_handoff_directly() {
+    let (_first_directory, first_repository) = test_repository("first");
+    let (_second_directory, second_repository) = test_repository("second");
+    let mut tabs = crate::ssh::SshTabs::default();
+    let first = tabs.append(
+        "macbook",
+        first_repository.name(),
+        first_repository.root().to_path_buf(),
+    );
+    let remote = tabs.append("tof", "remote-repo", "/work/remote-repo");
+    let second = tabs.append(
+        "macbook",
+        second_repository.name(),
+        second_repository.root().to_path_buf(),
+    );
+    drop(tabs.activate(first));
+    let context = SshContext {
+        current: "macbook".to_owned(),
+        machines: vec![
+            SshMachine {
+                target: "macbook".to_owned(),
+                folder: first_repository.root().to_path_buf(),
+                accessible: true,
+                uses: 0,
+                local: true,
+            },
+            SshMachine {
+                target: "tof".to_owned(),
+                folder: "/work".into(),
+                accessible: true,
+                uses: 4,
+                local: false,
+            },
+        ],
+        tabs,
+    };
+    let session = ProjectSession {
+        roots: vec![first_repository.root().to_path_buf()],
+        active: Some(first_repository.root().to_path_buf()),
+    };
+    let mut workspace = RepositoryWorkspace::restore(
+        &session,
+        ThemeName::Quinjet,
+        AppearanceChoice::Dark,
+        false,
+        false,
+        Some(&context),
+    )
+    .expect("mixed workspace");
+
+    let visible = workspace
+        .active_app_mut()
+        .expect("active app")
+        .repository_tabs
+        .clone();
+    assert_eq!(
+        visible
+            .iter()
+            .map(|tab| (tab.id, tab.machine.as_deref()))
+            .collect::<Vec<_>>(),
+        vec![
+            (first, Some("macbook")),
+            (remote, Some("tof")),
+            (second, Some("macbook")),
+        ]
+    );
+    assert_eq!(
+        workspace.activate(remote, Instant::now()),
+        Some(SshSwitch {
+            index: 1,
+            mode: SshProjectOpenMode::ActivateTab,
+        })
+    );
+    assert_eq!(
+        workspace
+            .ssh_context()
+            .and_then(|saved| saved.tabs.active_id()),
+        Some(remote)
     );
 }
 
@@ -133,14 +218,14 @@ fn activating_real_repository_tabs_restores_each_apps_state() {
     second_app.view = View::PullRequests;
     second_app.content_scroll = 73;
 
-    workspace.activate(first, now);
+    assert_eq!(workspace.activate(first, now), None);
     let first_app = workspace.active_app_mut().expect("first app is active");
     assert_eq!(first_app.repository_root, first_repository.root());
     assert_eq!(first_app.view, View::History);
     assert_eq!(first_app.history_cursor, 4);
     assert_eq!(first_app.content_scroll, 31);
 
-    workspace.activate(second, now);
+    assert_eq!(workspace.activate(second, now), None);
     let second_app = workspace.active_app_mut().expect("second app is active");
     assert_eq!(second_app.repository_root, second_repository.root());
     assert_eq!(second_app.view, View::PullRequests);
@@ -167,7 +252,7 @@ fn replacement_keeps_tab_identity_and_new_tabs_follow_the_close_lifecycle() {
     assert_ne!(first, second);
     assert_eq!(workspace.active_id(), Some(second));
     assert_eq!(workspace.tabs.len(), 2);
-    workspace.activate(first, now);
+    assert_eq!(workspace.activate(first, now), None);
     let replacement_effects = workspace
         .replace_repository(first, &replacement_repository, now)
         .expect("replace first repository");
@@ -190,10 +275,10 @@ fn replacement_keeps_tab_identity_and_new_tabs_follow_the_close_lifecycle() {
         vec![first, second]
     );
 
-    assert!(workspace.close(first, now));
+    assert_eq!(workspace.close(first, now), (true, None));
     assert_eq!(workspace.active_id(), Some(second));
     assert_eq!(workspace.tabs.len(), 1);
-    assert!(!workspace.close(second, now));
+    assert_eq!(workspace.close(second, now), (false, None));
     assert!(workspace.tabs.is_empty());
 }
 

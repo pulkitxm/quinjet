@@ -176,6 +176,7 @@ fn context_with_reachability(
     SshContext {
         current: current.to_owned(),
         machines,
+        tabs: crate::ssh::SshTabs::default(),
     }
 }
 
