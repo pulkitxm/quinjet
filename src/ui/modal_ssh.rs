@@ -34,8 +34,13 @@ pub(super) fn draw_project_machines(
         };
         let foreground = if current && !selected {
             theme.background
-        } else if machine.accessible {
+        } else {
             theme.text
+        };
+        let marker_color = if current && !selected {
+            theme.background
+        } else if machine.accessible {
+            theme.success
         } else {
             theme.error
         };
@@ -47,18 +52,28 @@ pub(super) fn draw_project_machines(
             "○"
         };
         let target_width = width.saturating_sub(4) as usize;
+        let modifier = if selected || current {
+            Modifier::BOLD
+        } else {
+            Modifier::empty()
+        };
         frame.render_widget(
-            Paragraph::new(format!(
-                " {marker} {} ",
-                truncate_middle(&machine.target, target_width)
-            ))
-            .style(Style::default().fg(foreground).bg(background).add_modifier(
-                if selected || current {
-                    Modifier::BOLD
-                } else {
-                    Modifier::empty()
-                },
-            )),
+            Paragraph::new(Line::from(vec![
+                Span::styled(
+                    format!(" {marker} "),
+                    Style::default()
+                        .fg(marker_color)
+                        .bg(background)
+                        .add_modifier(modifier),
+                ),
+                Span::styled(
+                    format!("{} ", truncate_middle(&machine.target, target_width)),
+                    Style::default()
+                        .fg(foreground)
+                        .bg(background)
+                        .add_modifier(modifier),
+                ),
+            ])),
             rect,
         );
         hits.push((rect, index));
