@@ -272,6 +272,10 @@ pub(crate) struct App {
     pub pull_request_content_width: usize,
     pub pull_request_content_links: Vec<PullRequestContentLink>,
     pub pull_request_content_generation: u64,
+    #[doc = " The relative-time bucket the rendered rows were built in. The draw reads"]
+    #[doc = " it instead of the clock, so a frame is a function of state alone and only"]
+    #[doc = " a tick can age the timestamps out of their cache."]
+    pub relative_time_generation: i64,
     #[doc = " Whether the last draw left the content pane scrolled to its end. The"]
     #[doc = " renderer owns the row count, so it reports this back for the one decision"]
     #[doc = " that needs it: whether a growing log should keep following."]
