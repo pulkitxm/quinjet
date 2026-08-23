@@ -36,6 +36,39 @@ pub(crate) struct SshSwitch {
     pub mode: SshProjectOpenMode,
 }
 
+pub(crate) fn next_accessible_machine_index(
+    machines: &[SshMachine],
+    selected: usize,
+) -> Option<usize> {
+    machines
+        .iter()
+        .enumerate()
+        .skip(selected.saturating_add(1))
+        .chain(machines.iter().enumerate().take(selected))
+        .find(|(_, machine)| machine.accessible)
+        .map(|(index, _)| index)
+}
+
+pub(crate) fn previous_accessible_machine_index(
+    machines: &[SshMachine],
+    selected: usize,
+) -> Option<usize> {
+    machines
+        .iter()
+        .enumerate()
+        .take(selected)
+        .rev()
+        .chain(
+            machines
+                .iter()
+                .enumerate()
+                .skip(selected.saturating_add(1))
+                .rev(),
+        )
+        .find(|(_, machine)| machine.accessible)
+        .map(|(index, _)| index)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SshMachine {

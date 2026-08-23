@@ -20,8 +20,9 @@ pub(crate) fn draw_projects(
     opening: Option<&Path>,
     mode: ProjectOpenMode,
     ssh: Option<&SshContext>,
+    machine_focus: Option<usize>,
     theme: &Theme,
-) -> Option<Rect> {
+) -> Vec<(Rect, usize)> {
     let height = frame.area().height.saturating_sub(6).min(28);
     let area = centered_rect(
         frame.area().width.saturating_sub(10).min(88),
@@ -37,15 +38,7 @@ pub(crate) fn draw_projects(
     let block = modal_block(title, theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let machine_button = ssh.map(|context| {
-        let desired_width = cells(context.current.width().saturating_add(14));
-        let width = desired_width.min(inner.width.saturating_sub(12)).max(1);
-        Rect::new(inner.right().saturating_sub(width), inner.y, width, 1)
-    });
-    let query_width = machine_button.map_or(inner.width, |button| {
-        button.x.saturating_sub(inner.x).saturating_sub(1)
-    });
-    let query_area = Rect::new(inner.x, inner.y, query_width, 1);
+    let query_area = Rect::new(inner.x, inner.y, inner.width, 1);
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(" / ", Style::default().fg(theme.accent)),
@@ -54,37 +47,34 @@ pub(crate) fn draw_projects(
         .style(Style::default().bg(theme.panel_alt)),
         query_area,
     );
-    set_text_cursor(
-        frame,
-        Rect::new(
-            query_area.x + 3,
-            query_area.y,
-            query_area.width.saturating_sub(3),
-            1,
-        ),
-        query,
-        false,
-    );
-    if let (Some(context), Some(button)) = (ssh, machine_button) {
-        let label_width = button.width.saturating_sub(12) as usize;
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(" Machine: ", Style::default()),
-                Span::styled(
-                    truncate_middle(context.current.as_str(), label_width),
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(" ▾ ", Style::default()),
-            ]))
-            .style(Style::default().fg(theme.background).bg(theme.accent)),
-            button,
+    if machine_focus.is_none() {
+        set_text_cursor(
+            frame,
+            Rect::new(
+                query_area.x + 3,
+                query_area.y,
+                query_area.width.saturating_sub(3),
+                1,
+            ),
+            query,
+            false,
         );
     }
+    let machine_hits = ssh.map_or_else(Vec::new, |context| {
+        modal_ssh::draw_project_machines(
+            frame,
+            Rect::new(inner.x, inner.y.saturating_add(2), inner.width, 1),
+            context,
+            machine_focus,
+            theme,
+        )
+    });
+    let machine_rows = if ssh.is_some() { 2 } else { 0 };
     let list_area = Rect::new(
         inner.x,
-        inner.y + 2,
+        inner.y.saturating_add(2 + machine_rows),
         inner.width,
-        inner.height.saturating_sub(5),
+        inner.height.saturating_sub(5 + machine_rows),
     );
     if let Some(path) = opening {
         modal_ssh::draw_project_opening(frame, path, list_area, theme);
@@ -181,25 +171,33 @@ pub(crate) fn draw_projects(
     };
     let hint = if opening.is_some() {
         "Opening project…".to_owned()
+    } else if machine_focus.is_some() {
+        let escape = if mode == ProjectOpenMode::Initial {
+            "quit"
+        } else {
+            "close"
+        };
+        format!("←/→ choose machine   Enter switch   Tab projects   Esc {escape}")
     } else {
+        let machines = ssh.map_or("", |_| "   Tab machines");
         match mode {
             ProjectOpenMode::Initial => {
-                format!("Enter open   Ctrl+E {fold_action}   Ctrl+O path   Esc quit")
+                format!("Enter open{machines}   Ctrl+E {fold_action}   Ctrl+O path   Esc quit")
             }
             ProjectOpenMode::CurrentTab => {
                 format!(
-                    "Enter switch tab   Ctrl+E {fold_action}   Delete forget project   Esc close"
+                    "Enter switch tab{machines}   Ctrl+E {fold_action}   Delete forget   Esc close"
                 )
             }
             ProjectOpenMode::NewTab => {
                 format!(
-                    "Enter open in new tab   Ctrl+E {fold_action}   Delete forget project   Esc close"
+                    "Enter new tab{machines}   Ctrl+E {fold_action}   Delete forget   Esc close"
                 )
             }
         }
     };
     draw_modal_hint(frame, area, &hint, theme);
-    machine_button
+    machine_hits
 }
 
 pub(super) fn draw_pull_request_repositories(

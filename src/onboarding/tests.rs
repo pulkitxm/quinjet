@@ -134,7 +134,7 @@ fn pasted_control_characters_are_removed_from_paths() {
 }
 
 #[test]
-fn local_project_picker_opens_the_ranked_machine_switcher() {
+fn local_project_picker_uses_the_inline_machine_strip() {
     let context = SshContext {
         current: "Pulkits-MacBook-Pro.local".to_owned(),
         machines: vec![
@@ -174,8 +174,15 @@ fn local_project_picker_opens_the_ranked_machine_switcher() {
         Rect::new(0, 0, 100, 30),
     );
     let rendered = terminal.backend().to_string();
-    assert!(rendered.contains("Machine: Pulkits-MacBook-Pro.local"));
-    let button = onboarding.machine_button.expect("machine button");
+    assert!(rendered.contains("Machine"));
+    assert!(rendered.contains("Pulkits-MacBook-Pro.local"));
+    assert!(rendered.contains("busy-host"));
+    let button = onboarding
+        .machine_hits
+        .iter()
+        .find(|(_, index)| *index == 1)
+        .map(|(area, _)| *area)
+        .expect("SSH machine chip");
 
     assert_eq!(
         onboarding.handle_mouse(MouseEvent {
@@ -184,22 +191,14 @@ fn local_project_picker_opens_the_ranked_machine_switcher() {
             row: button.y,
             modifiers: KeyModifiers::NONE,
         }),
+        OnboardingAction::SwitchSshMachine(1)
+    );
+    onboarding.machine_selected = None;
+    assert_eq!(
+        onboarding.handle_key(key(KeyCode::Tab)),
         OnboardingAction::None
     );
-    assert_eq!(
-        terminal
-            .draw(|frame| onboarding.draw(frame, &theme))
-            .unwrap()
-            .area,
-        Rect::new(0, 0, 100, 30),
-    );
-    let rendered = terminal.backend().to_string();
-    assert!(rendered.contains("Switch machine"));
-    assert!(rendered.contains("Pulkits-MacBook-Pro.local"));
-    assert!(rendered.contains("host"));
-    assert!(rendered.contains("busy-host"));
-    assert!(rendered.contains("used 8"));
-    drop(onboarding.handle_key(key(KeyCode::Down)));
+    drop(onboarding.handle_key(key(KeyCode::Right)));
     assert_eq!(
         onboarding.handle_key(key(KeyCode::Enter)),
         OnboardingAction::SwitchSshMachine(1)

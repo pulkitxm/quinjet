@@ -22,6 +22,7 @@ impl App {
     }
 
     pub(super) fn open_projects(&mut self, mode: ProjectOpenMode, effects: &mut Vec<AppEffect>) {
+        self.project_machine_focus = None;
         self.modal = Some(Modal::Projects {
             groups: self.project_groups.clone(),
             selected: 0,

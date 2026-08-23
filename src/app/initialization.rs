@@ -22,6 +22,7 @@ impl App {
             history: Vec::new(),
             worktrees: Vec::new(),
             project_groups: Vec::new(),
+            project_machine_focus: None,
             ssh_context: SshContext::from_environment(),
             history_branch: None,
             pull_request: None,

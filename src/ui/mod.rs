@@ -33,7 +33,7 @@ use crate::git::github::{
 use crate::git::github::{PullRequestCheck, PullRequestFile, RecentPullRequest};
 use crate::git::status::{Change, ChangeArea, ChangeStatus};
 use crate::git::{Branch, HistoryBranch, ProjectGroup, Stash};
-use crate::ssh::{SshContext, SshMachine};
+use crate::ssh::SshContext;
 use crate::theme::{AppearanceChoice, Theme, ThemeName};
 
 const DETAIL_LABEL_WIDTH: usize = 12;

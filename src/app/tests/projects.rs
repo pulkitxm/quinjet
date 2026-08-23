@@ -1,4 +1,5 @@
 use super::*;
+use crate::ssh::SshMachine;
 
 fn sample_worktree(path: &str, branch: &str, current: bool) -> Worktree {
     Worktree {
@@ -255,11 +256,10 @@ fn project_picker_is_the_machine_switching_entry_point() {
         app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), now)
             .is_empty()
     );
-    assert!(matches!(
-        app.modal,
-        Some(Modal::SshMachines { selected: 1, .. })
-    ));
-    drop(app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), now));
+    assert!(matches!(app.modal, Some(Modal::Projects { .. })));
+    assert_eq!(app.project_machine_focus, Some(1));
+    drop(app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), now));
+    assert_eq!(app.project_machine_focus, Some(0));
     let effects = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
     assert!(matches!(
         effects.as_slice(),
@@ -273,30 +273,31 @@ fn project_picker_is_the_machine_switching_entry_point() {
 #[test]
 fn unavailable_machine_cannot_be_selected() {
     let mut app = App::new("/tmp/repo", "repo");
-    app.modal = Some(Modal::SshMachines {
-        items: vec![SshMachine {
+    app.ssh_context = Some(SshContext {
+        current: "current".to_owned(),
+        machines: vec![SshMachine {
             target: "offline".to_owned(),
             folder: PathBuf::from("/work/offline"),
             accessible: false,
             uses: 4,
             local: false,
         }],
-        selected: 0,
-        current: "current".to_owned(),
-        parent: Box::new(Modal::Projects {
-            groups: Vec::new(),
-            selected: 0,
-            query: TextBuffer::default(),
-            collapsed: HashSet::new(),
-            loading: false,
-            opening: None,
-            mode: ProjectOpenMode::NewTab,
-        }),
     });
+    app.modal = Some(Modal::Projects {
+        groups: Vec::new(),
+        selected: 0,
+        query: TextBuffer::default(),
+        collapsed: HashSet::new(),
+        loading: false,
+        opening: None,
+        mode: ProjectOpenMode::NewTab,
+    });
+    app.project_machine_focus = Some(0);
     let effects = app.handle_key(
         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
         Instant::now(),
     );
     assert!(effects.is_empty());
-    assert!(matches!(app.modal, Some(Modal::SshMachines { .. })));
+    assert!(matches!(app.modal, Some(Modal::Projects { .. })));
+    assert_eq!(app.project_machine_focus, Some(0));
 }

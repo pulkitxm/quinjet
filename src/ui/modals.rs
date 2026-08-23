@@ -93,12 +93,13 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
             query,
             loading,
         }) => draw_stashes(frame, items, *selected, query, *loading, theme),
-        Some(modal @ (Modal::Projects { .. } | Modal::SshMachines { .. })) => {
+        Some(modal @ Modal::Projects { .. }) => {
             draw_ssh_project_modal(
                 frame,
                 modal,
                 &mut app.geometry.project_collapse_hits,
                 app.ssh_context.as_ref(),
+                app.project_machine_focus,
                 &mut app.geometry.modal_action_hits,
                 theme,
             );

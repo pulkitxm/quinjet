@@ -5,7 +5,8 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
 use super::*;
-use crate::app::{RepositoryTabDrag, RepositoryTabMenu};
+use crate::app::{AppEffect, RepositoryTabDrag, RepositoryTabMenu};
+use crate::ssh::SshMachine;
 use crate::tabs::{RepositoryTabs, TabId};
 
 fn app_with_tabs(count: usize, active: usize) -> (App, Vec<TabId>) {
@@ -213,7 +214,7 @@ fn new_tab_picker_names_its_destination() {
 }
 
 #[test]
-fn remote_project_picker_shows_the_host_and_ranked_machine_popup() {
+fn project_picker_keeps_host_and_ssh_navigation_in_one_layout() {
     let mut app = App::new("/repo", "project");
     app.ssh_context = Some(SshContext {
         current: "current-host".to_owned(),
@@ -239,17 +240,10 @@ fn remote_project_picker_shows_the_host_and_ranked_machine_popup() {
                 uses: 3,
                 local: false,
             },
-            SshMachine {
-                target: "offline-host".to_owned(),
-                folder: "/offline".into(),
-                accessible: false,
-                uses: 1,
-                local: false,
-            },
         ],
     });
     let now = Instant::now();
-    let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
 
     drop(app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE), now));
     terminal
@@ -257,12 +251,15 @@ fn remote_project_picker_shows_the_host_and_ranked_machine_popup() {
         .unwrap();
     let rendered = terminal.backend().to_string();
     assert!(rendered.contains("Switch project"));
-    assert!(rendered.contains("Machine: current-host"));
+    assert!(rendered.contains("Machine"));
+    assert!(rendered.contains("Pulkits-MacBook-Pro.local"));
+    assert!(rendered.contains("busy-host"));
+    assert!(rendered.contains("current-host"));
     assert!(
         app.geometry
             .modal_action_hits
             .iter()
-            .any(|(_, action)| *action == ModalAction::OpenSshMachines)
+            .any(|(_, action)| *action == ModalAction::SwitchSshMachine(1))
     );
 
     drop(app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), now));
@@ -272,41 +269,34 @@ fn remote_project_picker_shows_the_host_and_ranked_machine_popup() {
         .unwrap();
     let rendered = terminal.backend().to_string();
     assert!(rendered.contains("Open in new tab"));
-    assert!(rendered.contains("Machine: current-host"));
+    assert!(rendered.contains("Pulkits-MacBook-Pro.local"));
+    assert!(rendered.contains("current-host"));
 
     let button = app
         .geometry
         .modal_action_hits
         .iter()
-        .find(|(_, action)| *action == ModalAction::OpenSshMachines)
+        .find(|(_, action)| *action == ModalAction::SwitchSshMachine(1))
         .map(|(area, _)| *area)
-        .expect("machine button");
-    assert!(
-        app.handle_mouse(
-            MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: button.x,
-                row: button.y,
-                modifiers: KeyModifiers::NONE,
-            },
-            now,
-        )
-        .is_empty()
+        .expect("SSH machine chip");
+    let effects = app.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: button.x,
+            row: button.y,
+            modifiers: KeyModifiers::NONE,
+        },
+        now,
     );
-    terminal
-        .draw(|frame| draw(frame, &mut app, &Theme::default()))
-        .unwrap();
-    let rendered = terminal.backend().to_string();
-    assert!(rendered.contains("Switch machine"));
-    assert!(rendered.contains("Pulkits-MacBook-Pro.local"));
-    assert!(rendered.contains("host"));
-    assert!(rendered.contains("busy-host"));
-    assert!(rendered.contains("used 14"));
-    assert!(rendered.contains("current-host"));
-    assert!(rendered.contains("current"));
-    assert!(rendered.contains("offline-host"));
-    assert!(rendered.contains("unavailable"));
-    assert!(rendered.find("busy-host") < rendered.find("current-host"));
+    assert!(matches!(
+        effects.as_slice(),
+        [AppEffect::SwitchSshMachine(crate::ssh::SshSwitch {
+            index: 1,
+            mode: crate::ssh::SshProjectOpenMode::NewTab,
+        })]
+    ));
+    assert!(matches!(app.modal, Some(Modal::Projects { .. })));
+    assert_eq!(app.project_machine_focus, Some(1));
 }
 
 #[test]

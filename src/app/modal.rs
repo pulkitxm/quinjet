@@ -285,7 +285,7 @@ pub(crate) enum ModalAction {
     CommitToggleAmend,
     ConfirmYes,
     ConfirmNo,
-    OpenSshMachines,
+    SwitchSshMachine(usize),
     PullRequestAction(usize),
     PullRequestReviewThreadAction(usize),
 }
@@ -360,12 +360,6 @@ pub(crate) enum Modal {
         loading: bool,
         opening: Option<PathBuf>,
         mode: ProjectOpenMode,
-    },
-    SshMachines {
-        items: Vec<SshMachine>,
-        selected: usize,
-        current: String,
-        parent: Box<Self>,
     },
     PullRequestRepositories {
         items: Vec<GitHubRepository>,

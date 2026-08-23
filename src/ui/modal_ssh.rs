@@ -1,6 +1,72 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
+pub(super) fn draw_project_machines(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    context: &SshContext,
+    focused: Option<usize>,
+    theme: &Theme,
+) -> Vec<(Rect, usize)> {
+    let label = Rect::new(area.x, area.y, 9_u16.min(area.width), 1);
+    frame.render_widget(
+        Paragraph::new(" Machine ").style(Style::default().fg(theme.muted)),
+        label,
+    );
+    let mut x = label.right();
+    let mut hits = Vec::new();
+    for (index, machine) in context.machines.iter().enumerate() {
+        let remaining = area.right().saturating_sub(x);
+        if remaining < 6 {
+            break;
+        }
+        let desired = cells(machine.target.width().saturating_add(5));
+        let width = desired.min(remaining);
+        let rect = Rect::new(x, area.y, width, 1);
+        let selected = focused == Some(index);
+        let current = machine.target == context.current;
+        let background = if selected {
+            theme.selected
+        } else if current {
+            theme.accent
+        } else {
+            theme.panel_alt
+        };
+        let foreground = if current && !selected {
+            theme.background
+        } else if machine.accessible {
+            theme.text
+        } else {
+            theme.error
+        };
+        let marker = if current {
+            "✓"
+        } else if machine.accessible {
+            "●"
+        } else {
+            "○"
+        };
+        let target_width = width.saturating_sub(4) as usize;
+        frame.render_widget(
+            Paragraph::new(format!(
+                " {marker} {} ",
+                truncate_middle(&machine.target, target_width)
+            ))
+            .style(Style::default().fg(foreground).bg(background).add_modifier(
+                if selected || current {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                },
+            )),
+            rect,
+        );
+        hits.push((rect, index));
+        x = rect.right().saturating_add(1);
+    }
+    hits
+}
+
 pub(super) fn draw_project_opening(frame: &mut Frame<'_>, path: &Path, area: Rect, theme: &Theme) {
     let width = area.width.saturating_sub(4) as usize;
     frame.render_widget(
@@ -18,25 +84,31 @@ pub(super) fn draw_project_opening(frame: &mut Frame<'_>, path: &Path, area: Rec
     );
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the shared picker needs modal state, hit targets, machine context, and its theme"
+)]
 pub(super) fn draw_ssh_project_modal(
     frame: &mut Frame<'_>,
     modal: &Modal,
     collapse_hits: &mut Vec<(Rect, std::path::PathBuf)>,
     context: Option<&SshContext>,
+    machine_focus: Option<usize>,
     hits: &mut Vec<(Rect, ModalAction)>,
     theme: &Theme,
 ) {
-    match modal {
-        Modal::Projects {
-            groups,
-            selected,
-            query,
-            collapsed,
-            loading,
-            opening,
-            mode,
-        } => {
-            if let Some(area) = draw_projects(
+    if let Modal::Projects {
+        groups,
+        selected,
+        query,
+        collapsed,
+        loading,
+        opening,
+        mode,
+    } = modal
+    {
+        hits.extend(
+            draw_projects(
                 frame,
                 collapse_hits,
                 groups,
@@ -47,90 +119,11 @@ pub(super) fn draw_ssh_project_modal(
                 opening.as_deref(),
                 *mode,
                 context,
+                machine_focus,
                 theme,
-            ) {
-                hits.push((area, ModalAction::OpenSshMachines));
-            }
-        }
-        Modal::SshMachines {
-            items,
-            selected,
-            current,
-            ..
-        } => draw_ssh_machines(frame, items, *selected, current, theme),
-        _ => {}
+            )
+            .into_iter()
+            .map(|(area, index)| (area, ModalAction::SwitchSshMachine(index))),
+        );
     }
-}
-
-pub(crate) fn draw_ssh_machines(
-    frame: &mut Frame<'_>,
-    items: &[SshMachine],
-    selected: usize,
-    current: &str,
-    theme: &Theme,
-) {
-    let height = cells(items.len()).saturating_add(4).max(7);
-    let area = centered_rect(
-        frame.area().width.saturating_sub(18).min(72),
-        height.min(frame.area().height.saturating_sub(10)),
-        frame.area(),
-    );
-    frame.render_widget(Clear, area);
-    let block = modal_block(" Switch machine ", theme);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-    let list_area = Rect::new(
-        inner.x,
-        inner.y,
-        inner.width,
-        inner.height.saturating_sub(2),
-    );
-    let offset = selected.saturating_sub(list_area.height.saturating_sub(1) as usize);
-    let lines = items
-        .iter()
-        .skip(offset)
-        .take(list_area.height as usize)
-        .enumerate()
-        .map(|(visible_index, machine)| {
-            let active = offset.saturating_add(visible_index) == selected;
-            let background = if active { theme.selected } else { theme.panel };
-            let current_marker = if machine.target == current {
-                "  current"
-            } else {
-                ""
-            };
-            let (glyph, color, status) = if machine.local {
-                ("●", theme.success, "host")
-            } else if machine.accessible {
-                ("●", theme.success, "reachable")
-            } else {
-                ("●", theme.error, "unavailable")
-            };
-            let details = if machine.local {
-                format!("  {status:<11}         {current_marker}")
-            } else {
-                format!("  {status:<11}  used {}{current_marker}", machine.uses)
-            };
-            Line::from(vec![
-                Span::styled(
-                    format!(" {glyph} "),
-                    Style::default().fg(color).bg(background),
-                ),
-                Span::styled(
-                    format!("{:<20}", machine.target),
-                    Style::default()
-                        .fg(theme.text)
-                        .bg(background)
-                        .add_modifier(if active {
-                            Modifier::BOLD
-                        } else {
-                            Modifier::empty()
-                        }),
-                ),
-                Span::styled(details, Style::default().fg(theme.muted).bg(background)),
-            ])
-        })
-        .collect::<Vec<_>>();
-    frame.render_widget(Paragraph::new(lines), list_area);
-    draw_modal_hint(frame, area, "Enter switch   Esc projects", theme);
 }
