@@ -34,10 +34,10 @@ Options:
 | `-V, --version` | flag | off | Prints the installed version and exits 0. |
 
 When the interface runs through `--remote`, the project picker displays the
-active SSH target. `Tab` opens a second-level machine picker containing recent
-targets ordered by use count. Reachable targets can take over the terminal
-session, while unavailable targets are shown but disabled. SSH machine
-switching is available only from this project picker.
+active SSH target alongside recent targets ordered by use count. `Tab` moves
+directly to the next reachable machine and `Shift+Tab` moves to the previous
+one. Unavailable targets are shown but skipped. SSH machine switching is
+available only from this project picker.
 
 ## The two spellings
 
@@ -215,13 +215,12 @@ omitted because their directories no longer exist and cannot be opened.
 
 When recent SSH repositories exist, `Open a project` and both the `w` and `N`
 project pickers show the active machine. The originating computer appears
-first under its hostname and is marked as the host. The machine button opens a
-second-layer switcher, with SSH machines ordered by usage and labeled with
-their current reachability. Choosing the host returns to its local project
-picker without a reverse SSH connection. Choosing an SSH machine opens that
-machine's project picker. Closing the switcher returns to the same project
-picker. A machine switch from the `N` picker keeps `Open in new tab` mode, so
-the selected project is added as another tab on the destination machine.
+first under its hostname and is marked as the host. `Tab` and `Shift+Tab`
+switch directly between reachable machines, while clicking a machine switches
+to it in one step. Choosing the host returns to its local project picker
+without a reverse SSH connection. A machine switch from the `N` picker keeps
+`Open in new tab` mode, so the selected project is added as another tab on the
+destination machine.
 
 Drag a visible project tab to reorder it. When the strip overflows, its left
 and right controls cycle until the hidden tab becomes visible. Right-click a

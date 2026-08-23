@@ -205,7 +205,6 @@ pub(crate) struct App {
     pub project_groups: Vec<ProjectGroup>,
     pub collapsed_project_groups: HashSet<PathBuf>,
     pub ssh_context: Option<SshContext>,
-    pub project_machine_focus: Option<usize>,
     pub history_branch: Option<HistoryBranch>,
     pub pull_request: Option<PullRequest>,
     pub github_repositories: Vec<GitHubRepository>,

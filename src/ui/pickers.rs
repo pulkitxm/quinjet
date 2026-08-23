@@ -20,7 +20,6 @@ pub(crate) fn draw_projects(
     opening: Option<&Path>,
     mode: ProjectOpenMode,
     ssh: Option<&SshContext>,
-    machine_focus: Option<usize>,
     list: &mut ModalList<'_>,
     theme: &Theme,
 ) -> Vec<(Rect, usize)> {
@@ -48,25 +47,22 @@ pub(crate) fn draw_projects(
         .style(Style::default().bg(theme.panel_alt)),
         query_area,
     );
-    if machine_focus.is_none() {
-        set_text_cursor(
-            frame,
-            Rect::new(
-                query_area.x + 3,
-                query_area.y,
-                query_area.width.saturating_sub(3),
-                1,
-            ),
-            query,
-            false,
-        );
-    }
+    set_text_cursor(
+        frame,
+        Rect::new(
+            query_area.x + 3,
+            query_area.y,
+            query_area.width.saturating_sub(3),
+            1,
+        ),
+        query,
+        false,
+    );
     let machine_hits = ssh.map_or_else(Vec::new, |context| {
         modal_ssh::draw_project_machines(
             frame,
             Rect::new(inner.x, inner.y.saturating_add(2), inner.width, 1),
             context,
-            machine_focus,
             theme,
         )
     });
@@ -186,15 +182,8 @@ pub(crate) fn draw_projects(
     );
     let hint = if opening.is_some() {
         "Opening project…".to_owned()
-    } else if machine_focus.is_some() {
-        let escape = if mode == ProjectOpenMode::Initial {
-            "quit"
-        } else {
-            "close"
-        };
-        format!("←/→ choose machine   Enter switch   Tab projects   Esc {escape}")
     } else {
-        let machines = ssh.map_or("", |_| "   Tab machines");
+        let machines = ssh.map_or("", |_| "   Tab next machine");
         if selected_group {
             let escape = if mode == ProjectOpenMode::Initial {
                 "quit"

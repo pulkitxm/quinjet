@@ -177,6 +177,7 @@ fn local_project_picker_uses_the_inline_machine_strip() {
     assert!(rendered.contains("Machine"));
     assert!(rendered.contains("Pulkits-MacBook-Pro.local"));
     assert!(rendered.contains("busy-host"));
+    assert!(rendered.contains("Tab next machine"));
     let button = onboarding
         .machine_hits
         .iter()

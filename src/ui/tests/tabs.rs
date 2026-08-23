@@ -255,6 +255,8 @@ fn project_picker_keeps_host_and_ssh_navigation_in_one_layout() {
     assert!(rendered.contains("Pulkits-MacBook-Pro.local"));
     assert!(rendered.contains("busy-host"));
     assert!(rendered.contains("current-host"));
+    assert!(rendered.contains("Tab next machine"));
+    assert!(!rendered.contains("choose machine"));
     assert!(
         app.geometry
             .modal_action_hits
@@ -296,7 +298,6 @@ fn project_picker_keeps_host_and_ssh_navigation_in_one_layout() {
         })]
     ));
     assert!(matches!(app.modal, Some(Modal::Projects { .. })));
-    assert_eq!(app.project_machine_focus, Some(1));
 }
 
 #[test]

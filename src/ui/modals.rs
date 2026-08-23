@@ -131,7 +131,6 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
                 modal,
                 &mut app.geometry.project_collapse_hits,
                 app.ssh_context.as_ref(),
-                app.project_machine_focus,
                 &mut app.geometry.modal_action_hits,
                 &mut list,
                 theme,

@@ -44,7 +44,6 @@ pub(crate) struct Onboarding {
     path_input: String,
     error: Option<String>,
     ssh_context: Option<SshContext>,
-    machine_selected: Option<usize>,
     machine_hits: Vec<(Rect, usize)>,
     mode: ProjectOpenMode,
 }
@@ -100,7 +99,6 @@ impl Onboarding {
             path_input: String::new(),
             error: None,
             ssh_context,
-            machine_selected: None,
             machine_hits: Vec::new(),
             mode,
         }
@@ -122,7 +120,6 @@ impl Onboarding {
             .collect::<String>();
         match self.panel {
             OnboardingPanel::Projects => {
-                self.machine_selected = None;
                 self.query.insert_str(&sanitized);
                 self.selected = 0;
                 self.project_scroll = 0;
@@ -314,7 +311,6 @@ impl Onboarding {
                     None,
                     self.mode,
                     self.ssh_context.as_ref(),
-                    self.machine_selected,
                     &mut list,
                     theme,
                 );
