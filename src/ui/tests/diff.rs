@@ -380,3 +380,66 @@ fn pull_request_preview_renders_cross_remote_metadata_and_diff() {
     assert!(rendered.contains("loading"));
     assert!(!rendered.contains(['⟳', '↻', '↺']));
 }
+
+#[test]
+fn collapsing_a_file_parks_its_banner_at_the_top_of_the_content_pane() {
+    use std::path::PathBuf;
+    use std::time::Instant;
+
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    let file = |path: &str, body: usize| {
+        let mut lines = vec![test_file_header(path, body, 0)];
+        lines.extend(
+            (0..body)
+                .map(|index| test_line(DiffLineKind::Context, &format!("{path} line {index}"))),
+        );
+        lines.push(test_line(DiffLineKind::FileFooter, ""));
+        lines
+    };
+    let mut lines = file("src/a.rs", 40);
+    let banner = lines.len();
+    lines.extend(file("src/b.rs", 40));
+    lines.extend(file("src/c.rs", 100));
+
+    let mut app = App::new("/tmp/repo", "repo");
+    app.set_document(DiffDocument {
+        title: "Changes".to_owned(),
+        truncated: false,
+        commit_details: None,
+        pull_request_details: None,
+        lines,
+    });
+    app.focus = Focus::Content;
+    app.selected_preview_file = Some(PathBuf::from("src/b.rs"));
+    app.content_scroll = 100;
+
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+
+    app.handle_key(
+        KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
+        Instant::now(),
+    );
+    assert!(app.preview_file_collapsed("src/b.rs"));
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+
+    assert_eq!(app.content_scroll, banner);
+
+    app.handle_key(
+        KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
+        Instant::now(),
+    );
+    assert!(!app.preview_file_collapsed("src/b.rs"));
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+
+    assert_eq!(app.content_scroll, banner);
+}
