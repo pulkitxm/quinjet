@@ -1,3 +1,4 @@
+#[cfg(test)]
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::{env, fs};
@@ -7,16 +8,19 @@ use serde::{Deserialize, Serialize};
 use crate::git::{ProjectGroup, Repository, Worktree};
 use crate::state_sorting::{sort_project_groups, sort_worktrees};
 
+mod project_picker;
 mod remote;
 pub(crate) mod session;
 
+#[cfg(test)]
+use project_picker::PROJECT_PICKER_FILE;
+pub(crate) use project_picker::{load_collapsed_project_groups, record_collapsed_project_groups};
 pub(crate) use remote::{
     forget_recent_remote, load_recent_remotes, load_recent_ssh_machines,
     load_recent_ssh_machines_with_current, record_recent_remote,
 };
 
 const MAX_RECENT_PROJECTS: usize = 20;
-const PROJECT_PICKER_FILE: &str = "project-picker.json";
 const RECENT_PROJECTS_FILE: &str = "recent-projects.json";
 
 #[cfg(test)]
@@ -30,42 +34,6 @@ thread_local! {
 struct RecentEntry {
     path: PathBuf,
     common_dir: PathBuf,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ProjectPickerState {
-    collapsed: Vec<PathBuf>,
-}
-
-pub(crate) fn load_collapsed_project_groups() -> HashSet<PathBuf> {
-    let Some(path) = state_root().map(|root| root.join(PROJECT_PICKER_FILE)) else {
-        return HashSet::new();
-    };
-    let Ok(data) = fs::read(path) else {
-        return HashSet::new();
-    };
-    serde_json::from_slice::<ProjectPickerState>(&data)
-        .map(|state| state.collapsed.into_iter().collect())
-        .unwrap_or_default()
-}
-
-pub(crate) fn record_collapsed_project_groups(collapsed: &HashSet<PathBuf>) {
-    let Some(path) = state_root().map(|root| root.join(PROJECT_PICKER_FILE)) else {
-        return;
-    };
-    if let Some(parent) = path.parent() {
-        drop(fs::create_dir_all(parent));
-    }
-    let mut collapsed = collapsed.iter().cloned().collect::<Vec<_>>();
-    collapsed.sort();
-    let Ok(data) = serde_json::to_vec_pretty(&ProjectPickerState { collapsed }) else {
-        return;
-    };
-    let staging = path.with_extension("json.tmp");
-    if fs::write(&staging, data).is_ok() {
-        drop(fs::rename(staging, path));
-    }
 }
 
 pub(crate) fn record_recent_project(root: &Path) {

@@ -390,22 +390,6 @@ pub(crate) enum Modal {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ProjectOpenMode {
-    Initial,
-    CurrentTab,
-    NewTab,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ProjectRow {
-    Group(usize),
-    Worktree {
-        group_index: usize,
-        tree_index: usize,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PaletteCommand {
     Refresh,
     StageAll,

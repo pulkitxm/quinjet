@@ -39,60 +39,6 @@ use crate::theme::{AppearanceChoice, Theme, ThemeName};
 const DETAIL_LABEL_WIDTH: usize = 12;
 const MAX_INTRALINE_SOURCE_BYTES: usize = 32 * 1024;
 
-pub(crate) struct ModalList<'a> {
-    hits: &'a mut Vec<(Rect, usize)>,
-    len: &'a mut usize,
-    max_scroll: &'a mut usize,
-    scroll: usize,
-    free_scroll: bool,
-}
-
-impl<'a> ModalList<'a> {
-    pub(crate) const fn new(
-        hits: &'a mut Vec<(Rect, usize)>,
-        len: &'a mut usize,
-        max_scroll: &'a mut usize,
-        scroll: usize,
-        free_scroll: bool,
-    ) -> Self {
-        Self {
-            hits,
-            len,
-            max_scroll,
-            scroll,
-            free_scroll,
-        }
-    }
-
-    pub(crate) fn offset(&mut self, selected: usize, visible: usize, total: usize) -> usize {
-        *self.len = total;
-        let maximum = total.saturating_sub(visible);
-        *self.max_scroll = maximum;
-        if self.free_scroll {
-            return self.scroll.min(maximum);
-        }
-        let lower = selected.saturating_sub(visible.saturating_sub(1));
-        self.scroll.clamp(lower, selected).min(maximum)
-    }
-
-    pub(crate) fn hit(&mut self, area: Rect, index: usize) {
-        self.hits.push((area, index));
-    }
-}
-
-fn file_icon_span(path: &Path, theme: &Theme) -> Span<'static> {
-    let icon = file_icons::for_path(path);
-    Span::styled(icon.glyph, Style::default().fg(theme.syntax(icon.color)))
-}
-
-const fn disclosure_glyph(expanded: bool) -> &'static str {
-    if expanded { "⌄" } else { "›" }
-}
-
-const fn disclosure_prefix(expanded: bool) -> &'static str {
-    if expanded { " ⌄ " } else { " › " }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HelpRow {
     Section(&'static str),
@@ -465,8 +411,11 @@ mod feedback;
 mod help;
 mod layout;
 mod modal_branches;
+mod modal_choices;
 mod modal_conflict;
+mod modal_list;
 pub(crate) mod modal_ssh;
+mod modal_stashes;
 mod modals;
 pub(crate) mod pickers;
 mod project_picker;
@@ -499,8 +448,13 @@ use layout::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use modal_branches::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
+use modal_choices::*;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use modal_conflict::*;
+pub(crate) use modal_list::ModalList;
 use modal_ssh::draw_ssh_project_modal;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
+use modal_stashes::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use modals::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]

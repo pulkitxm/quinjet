@@ -1,6 +1,22 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProjectOpenMode {
+    Initial,
+    CurrentTab,
+    NewTab,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProjectRow {
+    Group(usize),
+    Worktree {
+        group_index: usize,
+        tree_index: usize,
+    },
+}
+
 impl App {
     pub(crate) fn first_project_worktree_index(
         groups: &[ProjectGroup],

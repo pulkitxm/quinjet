@@ -160,6 +160,7 @@ mod worker_repository;
 
 pub(crate) use geometry::*;
 pub(crate) use modal::*;
+pub(crate) use projects::{ProjectOpenMode, ProjectRow};
 pub(crate) use pull_request_actions::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use support::*;
