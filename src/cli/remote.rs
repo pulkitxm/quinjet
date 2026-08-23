@@ -100,6 +100,11 @@ fn ssh_status(
         Some(path) => ssh.arg("-S").arg(path),
         None => &mut ssh,
     };
+    let ssh = if terminal.allocate {
+        ssh.arg("-q")
+    } else {
+        ssh
+    };
     let ssh = if terminal.allocate && io::stdin().is_terminal() && io::stdout().is_terminal() {
         ssh.arg("-tt")
     } else {

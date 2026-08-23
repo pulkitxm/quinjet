@@ -21,10 +21,14 @@ use ratatui::backend::CrosstermBackend;
 pub(crate) const INHERITED_TERMINAL_ENV: &str = "QUINJET_INHERITED_TERMINAL";
 
 static TERMINAL_ENTERED: AtomicBool = AtomicBool::new(false);
+static HANDOFF_RAW_MODE: AtomicBool = AtomicBool::new(false);
 static KEYBOARD_ENHANCED: AtomicBool = AtomicBool::new(false);
 static TERMINAL_THREAD: OnceLock<thread::ThreadId> = OnceLock::new();
 
 fn restore_terminal() {
+    if HANDOFF_RAW_MODE.swap(false, Ordering::SeqCst) {
+        drop(disable_raw_mode());
+    }
     if !TERMINAL_ENTERED.swap(false, Ordering::SeqCst) {
         return;
     }
@@ -79,6 +83,10 @@ pub(crate) struct TerminalGuard {
     pub(crate) terminal: Terminal<CrosstermBackend<io::Stdout>>,
     mouse: bool,
     restore: bool,
+}
+
+pub(crate) struct HandoffTerminalGuard {
+    active: bool,
 }
 
 struct TerminalRollback {
@@ -172,6 +180,27 @@ impl TerminalGuard {
 
     pub(crate) const fn preserve_for_handoff(&mut self) {
         self.restore = false;
+    }
+}
+
+impl HandoffTerminalGuard {
+    pub(crate) fn enter() -> Result<Self> {
+        install_panic_hook();
+        let active = io::stdin().is_terminal() && io::stdout().is_terminal();
+        if active {
+            enable_raw_mode()
+                .context("failed to preserve terminal input during machine handoff")?;
+            HANDOFF_RAW_MODE.store(true, Ordering::SeqCst);
+        }
+        Ok(Self { active })
+    }
+}
+
+impl Drop for HandoffTerminalGuard {
+    fn drop(&mut self) {
+        if self.active && HANDOFF_RAW_MODE.swap(false, Ordering::SeqCst) {
+            drop(disable_raw_mode());
+        }
     }
 }
 
