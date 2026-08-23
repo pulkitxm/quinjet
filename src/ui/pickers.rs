@@ -168,7 +168,7 @@ pub(crate) fn draw_projects(
                 Paragraph::new(
                     visible_lines
                         .into_iter()
-                        .map(|(line, _, _)| line)
+                        .map(|(line, ..)| line)
                         .collect::<Vec<_>>(),
                 ),
                 list_area,
