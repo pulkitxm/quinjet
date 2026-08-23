@@ -76,6 +76,39 @@ fn repository_tabs_render_close_icons_and_a_drag_destination() {
 }
 
 #[test]
+fn mixed_repository_tabs_show_their_owning_machine() {
+    let mut app = App::new("/repo", "one");
+    app.set_repository_tabs(vec![
+        crate::tabs::TabInfo {
+            id: TabId::new(0),
+            title: "one".to_owned(),
+            root: "/local/one".into(),
+            machine: Some("macbook.local".to_owned()),
+            active: true,
+        },
+        crate::tabs::TabInfo {
+            id: TabId::new(1),
+            title: "two".to_owned(),
+            root: "/remote/two".into(),
+            machine: Some("tof".to_owned()),
+            active: false,
+        },
+    ]);
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+
+    let row = terminal.backend().buffer().content()[..80]
+        .iter()
+        .map(ratatui::buffer::Cell::symbol)
+        .collect::<String>();
+    assert!(row.contains("one @macbook"));
+    assert!(row.contains("two @tof"));
+}
+
+#[test]
 fn repository_tab_strip_has_a_continuous_bottom_separator() {
     let (mut app, _) = app_with_tabs(2, 1);
     let theme = Theme::default();
@@ -295,7 +328,7 @@ fn project_picker_keeps_host_and_ssh_navigation_in_one_layout() {
         effects.as_slice(),
         [AppEffect::SwitchSshMachine(crate::ssh::SshSwitch {
             index: 1,
-            mode: crate::ssh::SshProjectOpenMode::NewTab,
+            mode: crate::ssh::SshProjectOpenMode::New,
         })]
     ));
     assert!(matches!(app.modal, Some(Modal::Projects { .. })));

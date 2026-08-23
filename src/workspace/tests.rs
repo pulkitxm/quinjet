@@ -132,6 +132,7 @@ fn mixed_machine_tabs_share_one_order_and_remote_tabs_handoff_directly() {
         second_repository.name(),
         second_repository.root().to_path_buf(),
     );
+    let _stale = tabs.append("macbook", "stale", "/missing/project");
     drop(tabs.activate(first));
     let context = SshContext {
         current: "macbook".to_owned(),
@@ -153,10 +154,7 @@ fn mixed_machine_tabs_share_one_order_and_remote_tabs_handoff_directly() {
         ],
         tabs,
     };
-    let session = ProjectSession {
-        roots: vec![first_repository.root().to_path_buf()],
-        active: Some(first_repository.root().to_path_buf()),
-    };
+    let session = ProjectSession::default();
     let mut workspace = RepositoryWorkspace::restore(
         &session,
         ThemeName::Quinjet,
@@ -187,7 +185,7 @@ fn mixed_machine_tabs_share_one_order_and_remote_tabs_handoff_directly() {
         workspace.activate(remote, Instant::now()),
         Some(SshSwitch {
             index: 1,
-            mode: SshProjectOpenMode::ActivateTab,
+            mode: SshProjectOpenMode::Activate,
         })
     );
     assert_eq!(

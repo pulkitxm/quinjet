@@ -356,7 +356,7 @@ fn project_picker_is_the_machine_switching_entry_point() {
         effects.as_slice(),
         [AppEffect::SwitchSshMachine(crate::ssh::SshSwitch {
             index: 2,
-            mode: crate::ssh::SshProjectOpenMode::NewTab,
+            mode: crate::ssh::SshProjectOpenMode::New,
         })]
     ));
 
@@ -365,7 +365,7 @@ fn project_picker_is_the_machine_switching_entry_point() {
         effects.as_slice(),
         [AppEffect::SwitchSshMachine(crate::ssh::SshSwitch {
             index: 0,
-            mode: crate::ssh::SshProjectOpenMode::NewTab,
+            mode: crate::ssh::SshProjectOpenMode::New,
         })]
     ));
 }

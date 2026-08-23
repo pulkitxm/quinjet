@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::tabs::{TabId, TabInfo};
@@ -10,28 +12,30 @@ pub(crate) const SWITCH_EXIT_BASE: u8 = 80;
 pub(crate) const SWITCH_NEW_TAB_EXIT_BASE: u8 = 96;
 pub(crate) const SWITCH_TAB_EXIT_BASE: u8 = 112;
 pub(crate) const OPEN_PROJECTS_ENV: &str = "QUINJET_OPEN_PROJECTS";
+pub(crate) const HANDOFF_CONTEXT_PREFIX: &[u8] = b"\x1b]777;quinjet-context=";
+pub(crate) const HANDOFF_CONTEXT_SUFFIX: u8 = 0x07;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SshProjectOpenMode {
-    CurrentTab,
-    NewTab,
-    ActivateTab,
+    Current,
+    New,
+    Activate,
 }
 
 impl SshProjectOpenMode {
     pub(crate) const fn environment_value(self) -> &'static str {
         match self {
-            Self::CurrentTab => "current-tab",
-            Self::NewTab => "new-tab",
-            Self::ActivateTab => "activate-tab",
+            Self::Current => "current-tab",
+            Self::New => "new-tab",
+            Self::Activate => "activate-tab",
         }
     }
 
     pub(crate) fn from_environment() -> Option<Self> {
         match std::env::var(OPEN_PROJECTS_ENV).ok()?.as_str() {
-            "current-tab" => Some(Self::CurrentTab),
-            "new-tab" => Some(Self::NewTab),
-            "activate-tab" => Some(Self::ActivateTab),
+            "current-tab" => Some(Self::Current),
+            "new-tab" => Some(Self::New),
+            "activate-tab" => Some(Self::Activate),
             _ => None,
         }
     }
@@ -272,14 +276,25 @@ impl SshContext {
     }
 }
 
+pub(crate) fn emit_handoff_context(context: &SshContext) -> Result<()> {
+    let payload = serde_json::to_vec(context).context("failed to serialize terminal handoff")?;
+    let mut stdout = io::stdout().lock();
+    stdout
+        .write_all(HANDOFF_CONTEXT_PREFIX)
+        .and_then(|()| stdout.write_all(&payload))
+        .and_then(|()| stdout.write_all(&[HANDOFF_CONTEXT_SUFFIX]))
+        .and_then(|()| stdout.flush())
+        .context("failed to send terminal handoff")
+}
+
 pub(crate) fn switch_exit_code(request: SshSwitch) -> Option<u8> {
     let Ok(index) = u8::try_from(request.index) else {
         return None;
     };
     let base = match request.mode {
-        SshProjectOpenMode::CurrentTab => SWITCH_EXIT_BASE,
-        SshProjectOpenMode::NewTab => SWITCH_NEW_TAB_EXIT_BASE,
-        SshProjectOpenMode::ActivateTab => SWITCH_TAB_EXIT_BASE,
+        SshProjectOpenMode::Current => SWITCH_EXIT_BASE,
+        SshProjectOpenMode::New => SWITCH_NEW_TAB_EXIT_BASE,
+        SshProjectOpenMode::Activate => SWITCH_TAB_EXIT_BASE,
     };
     (usize::from(index) < MAX_SSH_MACHINES).then_some(base.saturating_add(index))
 }
@@ -287,11 +302,11 @@ pub(crate) fn switch_exit_code(request: SshSwitch) -> Option<u8> {
 pub(crate) fn switch_request(code: i32) -> Option<SshSwitch> {
     let code = u8::try_from(code).ok()?;
     let (base, mode) = if code >= SWITCH_TAB_EXIT_BASE {
-        (SWITCH_TAB_EXIT_BASE, SshProjectOpenMode::ActivateTab)
+        (SWITCH_TAB_EXIT_BASE, SshProjectOpenMode::Activate)
     } else if code >= SWITCH_NEW_TAB_EXIT_BASE {
-        (SWITCH_NEW_TAB_EXIT_BASE, SshProjectOpenMode::NewTab)
+        (SWITCH_NEW_TAB_EXIT_BASE, SshProjectOpenMode::New)
     } else {
-        (SWITCH_EXIT_BASE, SshProjectOpenMode::CurrentTab)
+        (SWITCH_EXIT_BASE, SshProjectOpenMode::Current)
     };
     let index = code.checked_sub(base)? as usize;
     (index < MAX_SSH_MACHINES).then_some(SshSwitch { index, mode })
@@ -305,15 +320,15 @@ mod tests {
     fn switch_codes_cover_only_the_machine_limit() {
         let current = |index| SshSwitch {
             index,
-            mode: SshProjectOpenMode::CurrentTab,
+            mode: SshProjectOpenMode::Current,
         };
         let new_tab = |index| SshSwitch {
             index,
-            mode: SshProjectOpenMode::NewTab,
+            mode: SshProjectOpenMode::New,
         };
         let activate_tab = |index| SshSwitch {
             index,
-            mode: SshProjectOpenMode::ActivateTab,
+            mode: SshProjectOpenMode::Activate,
         };
         assert_eq!(switch_exit_code(current(0)), Some(80));
         assert_eq!(switch_exit_code(current(15)), Some(95));

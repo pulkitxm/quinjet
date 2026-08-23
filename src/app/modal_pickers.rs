@@ -296,9 +296,9 @@ fn machine_switch_effect(
         return None;
     }
     let mode = if project_mode == ProjectOpenMode::NewTab {
-        crate::ssh::SshProjectOpenMode::NewTab
+        crate::ssh::SshProjectOpenMode::New
     } else {
-        crate::ssh::SshProjectOpenMode::CurrentTab
+        crate::ssh::SshProjectOpenMode::Current
     };
     Some(AppEffect::SwitchSshMachine(crate::ssh::SshSwitch {
         index,

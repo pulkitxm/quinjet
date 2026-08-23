@@ -187,10 +187,13 @@ keeps that tab's identity and position.
 `N` opens the same picker in `Open in new tab` mode. Adding a second project
 reveals the project-tab strip. Every project tab owns its own Git worker,
 filesystem watcher, repository data, selected view, filters, folds, and scroll
-positions. `Ctrl+Tab` and `Ctrl+Shift+Tab` cycle through them without resetting
-that state. A project selected for a new tab activates its existing tab when
-the exact worktree root is already open. Different worktree roots remain
-separate tabs even when they belong to the same Git repository.
+positions. The strip mixes local and SSH projects in one order. Tabs show their
+machine when more than one machine is present. Selecting a tab on another
+machine connects directly to that tab's host and project. `Ctrl+Tab` and
+`Ctrl+Shift+Tab` cycle through the whole strip without resetting repository
+state. A project selected for a new tab activates its existing tab when the
+exact worktree root is already open on that machine. Different worktree roots
+remain separate tabs even when they belong to the same Git repository.
 
 The picker orders worktrees by their HEAD commit time, newest first. A project's
 time is the newest time among its worktrees, and projects use that time for the
@@ -220,7 +223,8 @@ switch directly between reachable machines, while clicking a machine switches
 to it in one step. Choosing the host returns to its local project picker
 without a reverse SSH connection. A machine switch from the `N` picker keeps
 `Open in new tab` mode, so the selected project is added as another tab on the
-destination machine.
+destination machine and appears in the same shared strip. The machine picker is
+only needed to open a project that does not already have a tab.
 
 Drag a visible project tab to reorder it. When the strip overflows, its left
 and right controls cycle until the hidden tab becomes visible. Right-click a

@@ -88,9 +88,9 @@ impl App {
                     effects.push(AppEffect::SwitchSshMachine(crate::ssh::SshSwitch {
                         index,
                         mode: if *mode == ProjectOpenMode::NewTab {
-                            crate::ssh::SshProjectOpenMode::NewTab
+                            crate::ssh::SshProjectOpenMode::New
                         } else {
-                            crate::ssh::SshProjectOpenMode::CurrentTab
+                            crate::ssh::SshProjectOpenMode::Current
                         },
                     }));
                 }

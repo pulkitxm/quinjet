@@ -115,4 +115,5 @@ pub(crate) fn report(error: &anyhow::Error) -> u8 {
 
 pub(crate) fn stdout_is_terminal() -> bool {
     io::stdout().is_terminal()
+        || std::env::var_os(crate::terminal::INHERITED_TERMINAL_ENV).is_some()
 }

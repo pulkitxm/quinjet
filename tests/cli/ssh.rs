@@ -9,7 +9,7 @@ fn fake_ssh(scratch: &Scratch) -> Result<(PathBuf, PathBuf)> {
     fs::create_dir_all(&bin)?;
     fs::write(
         &executable,
-        "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$SSH_CAPTURE\"\nif [ -n \"$SSH_EXIT_CODE\" ]; then\n  exit \"$SSH_EXIT_CODE\"\nfi\nif [ -n \"$SSH_SWITCH_TARGET\" ] && [ \"$2\" = \"$SSH_SWITCH_TARGET\" ]; then\n  case \"$3\" in\n    *QUINJET_SSH_CONTEXT*) exit \"$SSH_SWITCH_CODE\" ;;\n  esac\nfi\nexit 0\n",
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$SSH_CAPTURE\"\nif [ -n \"$SSH_EXIT_CODE\" ]; then\n  exit \"$SSH_EXIT_CODE\"\nfi\nif [ -n \"$SSH_SWITCH_TARGET\" ] && [ \"$2\" = \"$SSH_SWITCH_TARGET\" ]; then\n  case \"$3\" in\n    *QUINJET_SSH_CONTEXT*)\n      if [ -n \"$SSH_SWITCH_CONTEXT\" ]; then\n        printf '\\033]777;quinjet-context=%s\\007' \"$SSH_SWITCH_CONTEXT\"\n      fi\n      exit \"$SSH_SWITCH_CODE\"\n      ;;\n  esac\nfi\nexit 0\n",
     )?;
     let mut permissions = fs::metadata(&executable)?.permissions();
     permissions.set_mode(0o755);
@@ -237,5 +237,36 @@ fn terminal_machine_selection_preserves_new_tab_mode_on_the_host() -> Result<()>
     ensure!(local.contains("projects:new-tab"));
     let ssh = fs::read_to_string(ssh_capture)?;
     ensure!(ssh.matches("\nfirst-host\n").count() == 1);
+    Ok(())
+}
+
+#[test]
+fn terminal_tab_handoff_relays_the_shared_strip_to_its_owner() -> Result<()> {
+    let scratch = Scratch::directory()?;
+    let (bin, capture) = fake_ssh(&scratch)?;
+    let mut paths = vec![bin];
+    if let Some(existing) = std::env::var_os("PATH") {
+        paths.extend(std::env::split_paths(&existing));
+    }
+    let relayed = r#"{"current":"first-host","machines":[{"target":"local","folder":"/local","accessible":true,"uses":0,"local":true},{"target":"second-host","folder":"/second","accessible":true,"uses":2,"local":false}],"tabs":{"entries":[{"id":7,"machine":"second-host","title":"remote-repo","root":"/second/repo"}],"active":7,"activeByMachine":{"second-host":7},"nextId":8}}"#;
+    let mut command = ProcessCommand::new(env!("CARGO_BIN_EXE_quinjet"));
+    command
+        .args(["--remote", "first-host", "--folder", "/first"])
+        .env("PATH", std::env::join_paths(paths)?)
+        .env("SSH_CAPTURE", &capture)
+        .env("SSH_SWITCH_TARGET", "first-host")
+        .env("SSH_SWITCH_CODE", "113")
+        .env("SSH_SWITCH_CONTEXT", relayed)
+        .env("QUINJET_REMOTE_BINARY", "quinjet test");
+    isolate_git(&mut command);
+    isolate_quinjet(&mut command, &scratch.environment);
+
+    drop(Run::from(command.output()?)?.success()?);
+
+    let arguments = fs::read_to_string(capture)?;
+    ensure!(arguments.contains("\nsecond-host\n"));
+    ensure!(arguments.contains("QUINJET_OPEN_PROJECTS=activate-tab"));
+    ensure!(arguments.contains("remote-repo"));
+    ensure!(arguments.contains("/second/repo"));
     Ok(())
 }

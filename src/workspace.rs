@@ -151,7 +151,8 @@ impl RepositoryWorkspace {
                 restored_active = Some(id);
             }
         }
-        if let Some(id) = restored_active {
+        workspace.prune_missing_shared_tabs();
+        if let Some(id) = restored_active.or_else(|| workspace.active_id()) {
             let _handoff = workspace.activate(id, Instant::now());
         } else {
             workspace.sync_tabs(Instant::now());
@@ -450,6 +451,31 @@ impl RepositoryWorkspace {
         }
     }
 
+    fn prune_missing_shared_tabs(&mut self) {
+        let roots = self
+            .tabs
+            .infos()
+            .into_iter()
+            .map(|tab| tab.root)
+            .collect::<Vec<_>>();
+        let Some(context) = self.ssh_context.as_mut() else {
+            return;
+        };
+        let missing = context
+            .tabs
+            .entries_for_machine(&context.current)
+            .filter(|tab| {
+                !roots
+                    .iter()
+                    .any(|root| crate::git::support::same_path(root, &tab.root))
+            })
+            .map(|tab| tab.id)
+            .collect::<Vec<_>>();
+        for id in missing {
+            drop(context.tabs.close(id));
+        }
+    }
+
     fn switch_to_shared_tab(&mut self, id: TabId) -> Option<SshSwitch> {
         let context = self.ssh_context.as_mut()?;
         let machine = context.tabs.get(id)?.machine.clone();
@@ -460,7 +486,7 @@ impl RepositoryWorkspace {
         drop(context.tabs.activate(id));
         Some(SshSwitch {
             index,
-            mode: SshProjectOpenMode::ActivateTab,
+            mode: SshProjectOpenMode::Activate,
         })
     }
 

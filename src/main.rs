@@ -70,8 +70,15 @@ fn terminal_exit_code(options: &TerminalOptions) -> ExitCode {
                 Err(error) => ExitCode::from(cli::report(&error)),
             }
         }
-        Ok(TerminalOutcome::SwitchSshMachine { request, .. }) => ssh::switch_exit_code(request)
-            .map_or_else(|| ExitCode::from(cli::EXIT_FAILURE), ExitCode::from),
+        Ok(TerminalOutcome::SwitchSshMachine { request, context }) => {
+            if let Some(context) = context
+                && let Err(error) = ssh::emit_handoff_context(&context)
+            {
+                return ExitCode::from(cli::report(&error));
+            }
+            ssh::switch_exit_code(request)
+                .map_or_else(|| ExitCode::from(cli::EXIT_FAILURE), ExitCode::from)
+        }
         Err(error) => ExitCode::from(cli::report(&error)),
     }
 }
@@ -105,25 +112,24 @@ fn open_terminal(
     let handoff_mode = ssh::SshProjectOpenMode::from_environment();
     let repository = (!matches!(
         handoff_mode,
-        Some(ssh::SshProjectOpenMode::CurrentTab | ssh::SshProjectOpenMode::ActivateTab)
+        Some(ssh::SshProjectOpenMode::Current | ssh::SshProjectOpenMode::Activate)
     ))
     .then(|| Repository::discover(&options.path).ok())
     .flatten();
     if let Some(repository) = repository.as_ref() {
         state::record_recent_project(repository.root());
     }
-    let restored_workspace = handoff_mode
-        .and_then(|_| state::session::load_project_session())
-        .and_then(|session| {
-            RepositoryWorkspace::restore(
-                &session,
-                options.theme,
-                options.appearance,
-                !options.no_mouse,
-                webhooks.is_some(),
-                ssh_context,
-            )
-        });
+    let restored_workspace = handoff_mode.and_then(|_| {
+        let session = state::session::load_project_session().unwrap_or_default();
+        RepositoryWorkspace::restore(
+            &session,
+            options.theme,
+            options.appearance,
+            !options.no_mouse,
+            webhooks.is_some(),
+            ssh_context,
+        )
+    });
     let mut workspace = restored_workspace.or_else(|| {
         repository.as_ref().map(|repository| {
             let mut workspace = RepositoryWorkspace::new(
@@ -138,7 +144,7 @@ fn open_terminal(
             workspace
         })
     });
-    let onboarding_mode = if handoff_mode == Some(ssh::SshProjectOpenMode::NewTab) {
+    let onboarding_mode = if handoff_mode == Some(ssh::SshProjectOpenMode::New) {
         app::ProjectOpenMode::NewTab
     } else {
         app::ProjectOpenMode::Initial
@@ -161,9 +167,9 @@ fn open_terminal(
             &mut switch_ssh_machine,
         );
         let project_mode = match handoff_mode {
-            Some(ssh::SshProjectOpenMode::CurrentTab) => Some(app::ProjectOpenMode::CurrentTab),
-            Some(ssh::SshProjectOpenMode::NewTab) => Some(app::ProjectOpenMode::NewTab),
-            Some(ssh::SshProjectOpenMode::ActivateTab) | None => None,
+            Some(ssh::SshProjectOpenMode::Current) => Some(app::ProjectOpenMode::CurrentTab),
+            Some(ssh::SshProjectOpenMode::New) => Some(app::ProjectOpenMode::NewTab),
+            Some(ssh::SshProjectOpenMode::Activate) | None => None,
         };
         if let Some(mode) = project_mode
             && let Some(effects) = current.open_projects_on_launch(mode)
@@ -283,7 +289,7 @@ fn open_terminal(
                     OnboardingAction::SwitchSshMachine(index) => {
                         switch_ssh_machine = Some(ssh::SshSwitch {
                             index,
-                            mode: ssh::SshProjectOpenMode::CurrentTab,
+                            mode: ssh::SshProjectOpenMode::Current,
                         });
                         running = false;
                     }
