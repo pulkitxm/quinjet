@@ -1,5 +1,6 @@
 use super::*;
 use crate::convert::cells;
+use crate::integration::{Client, HostAction};
 use crate::tabs::{RepositoryTabs, TabId};
 
 fn repository_tabs() -> (RepositoryTabs<()>, TabId, TabId, TabId) {
@@ -100,6 +101,52 @@ fn project_shortcuts_choose_current_or_new_tab_mode() {
         effects.as_slice(),
         [AppEffect::OpenRepositoryTab(path)] if path == Path::new("/target")
     ));
+}
+
+#[test]
+fn edith_client_delegates_project_shortcuts_without_opening_quinjet_modals() {
+    let now = Instant::now();
+    let mut app = App::new("/one", "one");
+    app.set_host_client(Some(Client::Edith));
+
+    let effects = app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE), now);
+    assert!(matches!(
+        effects.as_slice(),
+        [AppEffect::Host(HostAction::OpenWorktreeCurrentTab)]
+    ));
+    assert!(app.modal.is_none());
+
+    let effects = app.handle_key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT), now);
+    assert!(matches!(
+        effects.as_slice(),
+        [AppEffect::Host(HostAction::OpenProjectNewTab)]
+    ));
+    assert!(app.modal.is_none());
+}
+
+#[test]
+fn edith_client_removes_interactive_exit_paths() {
+    let (tabs, ..) = repository_tabs();
+    let mut app = app_with_repository_tabs(&tabs);
+    app.set_host_client(Some(Client::Edith));
+    let now = Instant::now();
+
+    assert!(
+        app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE), now)
+            .is_empty()
+    );
+    assert!(
+        app.handle_key(
+            KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL),
+            now,
+        )
+        .is_empty()
+    );
+    assert_eq!(app.palette_commands("quit"), []);
+
+    let mut effects = Vec::new();
+    app.execute_palette(PaletteCommand::Quit, &mut effects, now);
+    assert!(effects.is_empty());
 }
 
 #[test]

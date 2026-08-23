@@ -132,7 +132,8 @@ pub(super) fn draw_repository_tabs(
             value.push_str(" @");
             value.push_str(machine.strip_suffix(".local").unwrap_or(machine));
         }
-        let label_width = tab_width.saturating_sub(4);
+        let close_width = if app.exit_locked() { 0 } else { 4 };
+        let label_width = tab_width.saturating_sub(close_width);
         let label = format!(
             " {}",
             truncate_end(&value, usize::from(label_width.saturating_sub(1)))
@@ -146,24 +147,30 @@ pub(super) fn draw_repository_tabs(
             Style::default().fg(theme.muted).bg(theme.panel_alt)
         };
         let label_area = Rect::new(tab_area.x, tab_area.y, label_width, tab_area.height);
-        let close = Rect::new(
-            tab_area.right().saturating_sub(4),
-            tab_area.y,
-            3_u16.min(tab_area.width),
-            tab_area.height,
-        );
+        let close = if app.exit_locked() {
+            Rect::default()
+        } else {
+            Rect::new(
+                tab_area.right().saturating_sub(4),
+                tab_area.y,
+                3_u16.min(tab_area.width),
+                tab_area.height,
+            )
+        };
         frame.render_widget(
             Paragraph::new(label)
                 .alignment(Alignment::Left)
                 .style(style),
             label_area,
         );
-        frame.render_widget(
-            Paragraph::new("×")
-                .alignment(Alignment::Center)
-                .style(style),
-            close,
-        );
+        if !app.exit_locked() {
+            frame.render_widget(
+                Paragraph::new("×")
+                    .alignment(Alignment::Center)
+                    .style(style),
+                close,
+            );
+        }
         frame.render_widget(
             Paragraph::new("│").style(Style::default().fg(theme.border).bg(if tab.active {
                 theme.accent_soft
@@ -222,6 +229,9 @@ fn draw_repository_tab_drop_marker(
 
 pub(super) fn draw_repository_tab_menu(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     app.geometry.repository_tab_menu_hits.clear();
+    if app.exit_locked() {
+        return;
+    }
     let Some(menu) = app.repository_tab_menu else {
         return;
     };

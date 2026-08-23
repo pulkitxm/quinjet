@@ -4,6 +4,7 @@ mod convert;
 mod date_time;
 mod file_icons;
 mod git;
+mod integration;
 mod onboarding;
 mod ssh;
 mod state;
@@ -33,7 +34,7 @@ use crate::onboarding::{Onboarding, OnboardingAction};
 use crate::ssh::SshContext;
 use crate::terminal::TerminalGuard;
 use crate::webhook::WebhookListener;
-use crate::workspace::{RepositoryWorkspace, RoutedEffects};
+use crate::workspace::{RepositoryWorkspace, RoutedEffects, WorkspaceContext};
 
 fn main() -> ExitCode {
     match cli::dispatch() {
@@ -127,7 +128,7 @@ fn open_terminal(
             options.appearance,
             !options.no_mouse,
             webhooks.is_some(),
-            ssh_context,
+            WorkspaceContext::new(ssh_context.cloned(), options.client),
         )
     });
     let mut workspace = restored_workspace.or_else(|| {
@@ -138,7 +139,7 @@ fn open_terminal(
                 options.appearance,
                 !options.no_mouse,
                 webhooks.is_some(),
-                ssh_context.cloned(),
+                WorkspaceContext::new(ssh_context.cloned(), options.client),
             );
             workspace.sync_tabs(Instant::now());
             workspace
@@ -302,7 +303,7 @@ fn open_terminal(
                                 options.appearance,
                                 !options.no_mouse,
                                 webhooks.is_some(),
-                                ssh_context.cloned(),
+                                WorkspaceContext::new(ssh_context.cloned(), options.client),
                             );
                             next.sync_tabs(Instant::now());
                             running &= dispatch_launch_effects(
@@ -387,6 +388,7 @@ fn dispatch_effects(
                 }
                 AppEffect::Copy(text) => terminal.copy_to_clipboard(&text),
                 AppEffect::SetMouseCapture(enabled) => terminal.set_mouse_capture(enabled),
+                AppEffect::Host(action) => terminal.send_host_action(action),
                 AppEffect::Open(app::OpenTarget::Browser(url)) => drop(cli::open_url(&url)),
                 AppEffect::SwitchRepository(path) => {
                     render_project_opening(workspace, terminal, id);
@@ -429,10 +431,16 @@ fn dispatch_effects(
                     }
                 }
                 AppEffect::CloseAllRepositoryTabs => {
-                    workspace.close_all();
-                    running = false;
+                    if !workspace.exit_locked() {
+                        workspace.close_all();
+                        running = false;
+                    }
                 }
-                AppEffect::Quit => running = false,
+                AppEffect::Quit => {
+                    if !workspace.exit_locked() {
+                        running = false;
+                    }
+                }
             }
         }
     }

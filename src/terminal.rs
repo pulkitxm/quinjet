@@ -11,6 +11,7 @@ use crossterm::event::{
     KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
+use crossterm::style::Print;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
@@ -93,6 +94,13 @@ impl Drop for TerminalRollback {
 }
 
 impl TerminalGuard {
+    pub(crate) fn send_host_action(&mut self, action: crate::integration::HostAction) {
+        drop(execute!(
+            self.terminal.backend_mut(),
+            Print(action.sequence())
+        ));
+    }
+
     pub(crate) fn copy_to_clipboard(&mut self, text: &str) {
         drop(execute!(
             self.terminal.backend_mut(),
