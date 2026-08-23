@@ -37,6 +37,8 @@ pub(super) fn draw_project_machines(
             theme.background
         } else if machine.accessible {
             theme.success
+        } else if context.probing {
+            theme.muted
         } else {
             theme.error
         };
@@ -44,6 +46,8 @@ pub(super) fn draw_project_machines(
             "✓"
         } else if machine.accessible {
             "●"
+        } else if context.probing {
+            "◌"
         } else {
             "○"
         };

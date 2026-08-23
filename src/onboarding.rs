@@ -11,14 +11,17 @@ use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 
 use crate::app::{App, ProjectOpenMode, ProjectRow, TextBuffer};
 use crate::git::ProjectGroup;
-use crate::ssh::SshContext;
+use crate::ssh::{SshContext, SshProjectOpenMode, SshSwitch};
 use crate::theme::Theme;
+
+mod loader;
+use loader::ProjectLoader;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum OnboardingAction {
     None,
     Open(PathBuf),
-    SwitchSshMachine(usize),
+    SwitchSshMachine(SshSwitch),
     Quit,
 }
 
@@ -46,6 +49,7 @@ pub(crate) struct Onboarding {
     ssh_context: Option<SshContext>,
     machine_hits: Vec<(Rect, usize)>,
     mode: ProjectOpenMode,
+    project_loader: ProjectLoader,
 }
 
 impl Onboarding {
@@ -54,12 +58,9 @@ impl Onboarding {
         ssh_context: Option<SshContext>,
         mode: ProjectOpenMode,
     ) -> Self {
-        let mut onboarding = Self::from_groups_with_mode(
-            launch_path,
-            crate::state::load_recent_projects(launch_path),
-            ssh_context,
-            mode,
-        );
+        let mut onboarding =
+            Self::from_groups_with_mode(launch_path, Vec::new(), ssh_context, mode);
+        onboarding.project_loader = ProjectLoader::start(launch_path);
         onboarding.collapsed = crate::state::load_collapsed_project_groups();
         onboarding.selected =
             App::first_project_worktree_index(&onboarding.groups, "", &onboarding.collapsed);
@@ -101,6 +102,7 @@ impl Onboarding {
             ssh_context,
             machine_hits: Vec::new(),
             mode,
+            project_loader: ProjectLoader::ready(),
         }
     }
 
@@ -133,9 +135,38 @@ impl Onboarding {
         self.error = Some(message.into());
     }
 
+    pub(crate) fn ssh_context(&self) -> Option<SshContext> {
+        self.ssh_context.clone()
+    }
+
+    pub(crate) fn apply_ssh_probe(&mut self, accessibility: &[(String, bool)]) {
+        let Some(context) = self.ssh_context.as_mut() else {
+            return;
+        };
+        for machine in &mut context.machines {
+            if let Some((_, accessible)) = accessibility
+                .iter()
+                .find(|(target, _)| target == &machine.target)
+            {
+                machine.accessible = *accessible;
+            }
+        }
+        context.probing = false;
+    }
+
+    pub(crate) fn poll_projects(&mut self) -> bool {
+        let Some(groups) = self.project_loader.poll() else {
+            return false;
+        };
+        self.groups = groups;
+        self.selected =
+            App::first_project_worktree_index(&self.groups, &self.query.value, &self.collapsed);
+        true
+    }
+
     fn handle_projects_key(&mut self, key: KeyEvent) -> OnboardingAction {
         match key.code {
-            KeyCode::Esc => return OnboardingAction::Quit,
+            KeyCode::Esc => return self.cancel_or_quit(),
             KeyCode::Char('e' | 'E') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 App::toggle_all_project_groups(&self.groups, &mut self.collapsed);
                 self.selected = 0;
@@ -146,11 +177,11 @@ impl Onboarding {
             KeyCode::Tab | KeyCode::BackTab => {
                 let reverse =
                     key.code == KeyCode::BackTab || key.modifiers.contains(KeyModifiers::SHIFT);
-                return self
+                let index = self
                     .ssh_context
                     .as_ref()
-                    .and_then(|context| context.adjacent_accessible_machine_index(reverse))
-                    .map_or(OnboardingAction::None, OnboardingAction::SwitchSshMachine);
+                    .and_then(|context| context.adjacent_accessible_machine_index(reverse));
+                return index.map_or(OnboardingAction::None, |index| self.switch_machine(index));
             }
             KeyCode::Char('o' | 'O') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.panel = OnboardingPanel::Path;
@@ -283,6 +314,61 @@ impl Onboarding {
         })
     }
 
+    fn switch_machine(&mut self, index: usize) -> OnboardingAction {
+        let mode = if self.mode == ProjectOpenMode::NewTab {
+            SshProjectOpenMode::New
+        } else {
+            SshProjectOpenMode::Current
+        };
+        let Some(context) = self.ssh_context.as_mut() else {
+            return OnboardingAction::None;
+        };
+        let Some(machine) = context.machines.get(index) else {
+            return OnboardingAction::None;
+        };
+        if !machine.accessible || machine.target == context.current {
+            return OnboardingAction::None;
+        }
+        if mode == SshProjectOpenMode::New
+            && let Some(pending) = context.tabs.active_pending_for_machine(&context.current)
+        {
+            let _moved =
+                context
+                    .tabs
+                    .move_pending(pending, machine.target.clone(), machine.folder.clone());
+        }
+        OnboardingAction::SwitchSshMachine(SshSwitch { index, mode })
+    }
+
+    fn cancel_or_quit(&mut self) -> OnboardingAction {
+        if self.mode != ProjectOpenMode::NewTab {
+            return OnboardingAction::Quit;
+        }
+        let Some(context) = self.ssh_context.as_mut() else {
+            return OnboardingAction::Quit;
+        };
+        let Some(pending) = context.tabs.active_pending_for_machine(&context.current) else {
+            return OnboardingAction::Quit;
+        };
+        drop(context.tabs.close(pending));
+        let Some(active) = context.tabs.active_id() else {
+            return OnboardingAction::Quit;
+        };
+        let Some(tab) = context.tabs.get(active) else {
+            return OnboardingAction::Quit;
+        };
+        context
+            .machines
+            .iter()
+            .position(|machine| machine.target == tab.machine && machine.accessible)
+            .map_or(OnboardingAction::Quit, |index| {
+                OnboardingAction::SwitchSshMachine(SshSwitch {
+                    index,
+                    mode: SshProjectOpenMode::Activate,
+                })
+            })
+    }
+
     pub(crate) fn draw(&mut self, frame: &mut Frame<'_>, theme: &Theme) {
         frame.render_widget(
             Block::default().style(Style::default().bg(theme.background)),
@@ -307,7 +393,7 @@ impl Onboarding {
                     self.selected,
                     &self.query,
                     &self.collapsed,
-                    false,
+                    self.project_loader.is_loading(),
                     None,
                     self.mode,
                     self.ssh_context.as_ref(),

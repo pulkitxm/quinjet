@@ -467,7 +467,7 @@ pub(crate) use entry::dispatch;
 use output::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use pull_request::*;
-pub(crate) use remote::{local_ssh_context, run_selected_terminal};
+pub(crate) use remote::{begin_ssh_probe, local_ssh_context, run_selected_terminal};
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use repository::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]

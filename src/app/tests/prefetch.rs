@@ -284,7 +284,9 @@ fn a_fast_tick_only_speeds_up_the_reads_that_change_that_fast() {
                 | AppEffect::Host(_)
                 | AppEffect::Open(_)
                 | AppEffect::SwitchRepository(_)
+                | AppEffect::OpenRepositoryTabPicker
                 | AppEffect::OpenRepositoryTab(_)
+                | AppEffect::CancelRepositoryTabPicker
                 | AppEffect::SwitchSshMachine(_)
                 | AppEffect::ActivateRepositoryTab(_)
                 | AppEffect::ReorderRepositoryTab { .. }

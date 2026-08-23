@@ -1,10 +1,9 @@
-use std::path::Path;
 use std::time::Instant;
 
-use crate::app::{App, AppEffect, Modal, ProjectOpenMode, ToastLevel};
+use crate::app::{App, AppEffect, ProjectOpenMode};
 use crate::git::Repository;
 use crate::git::worker::WorkerCommand;
-use crate::ssh::{SshContext, SshProjectOpenMode, SshSwitch};
+use crate::ssh::{SshContext, SshSwitch};
 use crate::state::session::ProjectSession;
 use crate::tabs::{RepositoryTabs, TabId};
 use crate::theme::{AppearanceChoice, ThemeName};
@@ -23,6 +22,13 @@ pub(crate) struct RepositoryWorkspace {
     ssh_context: Option<SshContext>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum InitialProjectMode {
+    Normal,
+    PendingHost,
+    ResolvePending,
+}
+
 impl RepositoryWorkspace {
     pub(crate) fn new(
         repository: &Repository,
@@ -30,21 +36,93 @@ impl RepositoryWorkspace {
         appearance: AppearanceChoice,
         mouse: bool,
         webhooks_listening: bool,
+        context: WorkspaceContext,
+    ) -> Self {
+        Self::new_with_mode(
+            repository,
+            theme,
+            appearance,
+            mouse,
+            webhooks_listening,
+            context,
+            InitialProjectMode::Normal,
+        )
+    }
+
+    pub(crate) fn new_pending_host(
+        repository: &Repository,
+        theme: ThemeName,
+        appearance: AppearanceChoice,
+        mouse: bool,
+        webhooks_listening: bool,
+        context: WorkspaceContext,
+    ) -> Self {
+        Self::new_with_mode(
+            repository,
+            theme,
+            appearance,
+            mouse,
+            webhooks_listening,
+            context,
+            InitialProjectMode::PendingHost,
+        )
+    }
+
+    pub(crate) fn new_resolving_pending(
+        repository: &Repository,
+        theme: ThemeName,
+        appearance: AppearanceChoice,
+        mouse: bool,
+        webhooks_listening: bool,
+        context: WorkspaceContext,
+    ) -> Self {
+        Self::new_with_mode(
+            repository,
+            theme,
+            appearance,
+            mouse,
+            webhooks_listening,
+            context,
+            InitialProjectMode::ResolvePending,
+        )
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the shared constructor adds one pending-tab mode to the public constructor inputs"
+    )]
+    fn new_with_mode(
+        repository: &Repository,
+        theme: ThemeName,
+        appearance: AppearanceChoice,
+        mouse: bool,
+        webhooks_listening: bool,
         mut context: WorkspaceContext,
+        mode: InitialProjectMode,
     ) -> Self {
         let title = repository.name();
         let root = repository.root().to_path_buf();
         let id = context.ssh.as_mut().map_or_else(
             || TabId::new(0),
             |context| {
-                let id = context
-                    .tabs
-                    .id_for_root(&context.current, &root)
-                    .unwrap_or_else(|| {
-                        context
-                            .tabs
-                            .append(context.current.clone(), title.clone(), root.clone())
-                    });
+                let pending = context.tabs.active_pending_for_machine(&context.current);
+                let id = match (mode, pending) {
+                    (InitialProjectMode::PendingHost, Some(id)) => id,
+                    (InitialProjectMode::ResolvePending, Some(id)) => {
+                        let _replaced = context.tabs.replace(id, title.clone(), root.clone());
+                        id
+                    }
+                    _ => context
+                        .tabs
+                        .id_for_root(&context.current, &root)
+                        .unwrap_or_else(|| {
+                            context.tabs.append(
+                                context.current.clone(),
+                                title.clone(),
+                                root.clone(),
+                            )
+                        }),
+                };
                 drop(context.tabs.activate(id));
                 id
             },
@@ -57,8 +135,17 @@ impl RepositoryWorkspace {
             webhooks_listening,
             context.clone(),
         );
+        let pending = context
+            .ssh
+            .as_ref()
+            .is_some_and(|context| context.tabs.is_pending(id));
+        let tabs = if pending {
+            RepositoryTabs::new_pending_with_id(id, "New project", root, runtime)
+        } else {
+            RepositoryTabs::new_with_id(id, title, root, runtime)
+        };
         Self {
-            tabs: RepositoryTabs::new_with_id(id, title, root, runtime),
+            tabs,
             ssh_context: context.ssh,
         }
     }
@@ -73,6 +160,9 @@ impl RepositoryWorkspace {
     ) -> Option<Self> {
         let ssh_context = context.ssh.as_ref();
         let current_machine = ssh_context.map(|context| context.current.as_str());
+        let pending = current_machine.and_then(|machine| {
+            ssh_context.and_then(|context| context.tabs.active_pending_for_machine(machine))
+        });
         let shared_roots = current_machine.map_or_else(Vec::new, |machine| {
             ssh_context.map_or_else(Vec::new, |context| {
                 context
@@ -125,7 +215,11 @@ impl RepositoryWorkspace {
             }
         }
         workspace.prune_missing_shared_tabs();
-        if let Some(id) = restored_active.or_else(|| workspace.active_id()) {
+        let restored_pending = workspace.restore_pending_runtime(pending, Instant::now());
+        if let Some(id) = restored_pending
+            .or(restored_active)
+            .or_else(|| workspace.active_id())
+        {
             let _handoff = workspace.activate(id, Instant::now());
         } else {
             workspace.sync_tabs(Instant::now());
@@ -134,7 +228,12 @@ impl RepositoryWorkspace {
     }
 
     pub(crate) fn project_session(&self) -> ProjectSession {
-        let infos = self.tabs.infos();
+        let infos = self
+            .tabs
+            .infos()
+            .into_iter()
+            .filter(|tab| !self.tabs.is_pending(tab.id))
+            .collect::<Vec<_>>();
         ProjectSession {
             roots: infos.iter().map(|tab| tab.root.clone()).collect(),
             active: infos.into_iter().find(|tab| tab.active).map(|tab| tab.root),
@@ -143,6 +242,22 @@ impl RepositoryWorkspace {
 
     pub(crate) fn ssh_context(&self) -> Option<SshContext> {
         self.ssh_context.clone()
+    }
+
+    pub(crate) fn apply_ssh_probe(&mut self, accessibility: &[(String, bool)], now: Instant) {
+        let Some(context) = self.ssh_context.as_mut() else {
+            return;
+        };
+        for machine in &mut context.machines {
+            if let Some((_, accessible)) = accessibility
+                .iter()
+                .find(|(target, _)| target == &machine.target)
+            {
+                machine.accessible = *accessible;
+            }
+        }
+        context.probing = false;
+        self.sync_tabs(now);
     }
 
     pub(crate) const fn active_id(&self) -> Option<TabId> {
@@ -194,7 +309,9 @@ impl RepositoryWorkspace {
             .as_ref()
             .map_or_else(|| self.tabs.infos(), |context| context.tabs.infos());
         let active = self.active_id();
+        let ssh_context = self.ssh_context.clone();
         for (id, runtime) in self.tabs.iter_mut() {
+            runtime.app.ssh_context.clone_from(&ssh_context);
             runtime.app.set_tab_active(active == Some(id), now);
             if active == Some(id) {
                 runtime.app.set_repository_tabs(infos.clone());
@@ -292,190 +409,9 @@ impl RepositoryWorkspace {
             context.tabs.close_all();
         }
     }
-
-    pub(crate) fn switch_repository(
-        &mut self,
-        source: TabId,
-        path: &Path,
-        now: Instant,
-    ) -> Option<RoutedEffects> {
-        let repository = match Repository::discover(path) {
-            Ok(repository) => repository,
-            Err(error) => {
-                if let Some(app) = self.app_mut(source) {
-                    if let Some(Modal::Projects { opening, .. }) = app.modal.as_mut() {
-                        *opening = None;
-                    }
-                    app.show_toast(error.to_string(), ToastLevel::Error, now);
-                }
-                return None;
-            }
-        };
-        crate::state::record_recent_project(repository.root());
-        self.replace_repository(source, &repository, now)
-    }
-
-    pub(crate) fn open_repository_tab(
-        &mut self,
-        source: TabId,
-        path: &Path,
-        now: Instant,
-    ) -> Option<RoutedEffects> {
-        let repository = match Repository::discover(path) {
-            Ok(repository) => repository,
-            Err(error) => {
-                if let Some(app) = self.app_mut(source) {
-                    if let Some(Modal::Projects { opening, .. }) = app.modal.as_mut() {
-                        *opening = None;
-                    }
-                    app.show_toast(error.to_string(), ToastLevel::Error, now);
-                }
-                return None;
-            }
-        };
-        if let Some(app) = self.app_mut(source) {
-            app.modal = None;
-        }
-        if let Some(id) = self.tabs.id_for_root(repository.root()) {
-            let _handoff = self.activate(id, now);
-            return None;
-        }
-        crate::state::record_recent_project(repository.root());
-        self.append_repository(source, &repository, now)
-    }
-
-    fn replace_repository(
-        &mut self,
-        source: TabId,
-        repository: &Repository,
-        now: Instant,
-    ) -> Option<RoutedEffects> {
-        let source_runtime = self.tabs.get(source)?;
-        let theme = source_runtime.app.theme_name;
-        let appearance = source_runtime.app.appearance_choice;
-        let mouse = source_runtime.app.mouse_capture_preference;
-        let webhooks_listening = source_runtime.app.webhooks_listening;
-        let context = WorkspaceContext::new(
-            source_runtime.app.ssh_context.clone(),
-            source_runtime.app.host_client,
-        );
-        let title = repository.name();
-        let root = repository.root().to_path_buf();
-        let runtime = RepositoryRuntime::new(
-            repository,
-            theme,
-            appearance,
-            mouse,
-            webhooks_listening,
-            context,
-        );
-        drop(self.tabs.replace(source, title, root, runtime));
-        if let Some(context) = self.ssh_context.as_mut() {
-            let _replaced =
-                context
-                    .tabs
-                    .replace(source, repository.name(), repository.root().to_path_buf());
-            drop(context.tabs.activate(source));
-        }
-        self.sync_tabs(now);
-        let effects = self.app_mut(source)?.initial_effects();
-        Some(RoutedEffects {
-            id: source,
-            effects,
-        })
-    }
-
-    fn append_repository(
-        &mut self,
-        source: TabId,
-        repository: &Repository,
-        now: Instant,
-    ) -> Option<RoutedEffects> {
-        let source = self.tabs.get(source).or_else(|| self.tabs.active())?;
-        let theme = source.app.theme_name;
-        let appearance = source.app.appearance_choice;
-        let mouse = source.app.mouse_capture_preference;
-        let webhooks_listening = source.app.webhooks_listening;
-        let context = WorkspaceContext::new(self.ssh_context.clone(), source.app.host_client);
-        let title = repository.name();
-        let root = repository.root().to_path_buf();
-        let runtime = RepositoryRuntime::new(
-            repository,
-            theme,
-            appearance,
-            mouse,
-            webhooks_listening,
-            context,
-        );
-        let id = if let Some(context) = self.ssh_context.as_mut() {
-            let id = context
-                .tabs
-                .id_for_root(&context.current, &root)
-                .unwrap_or_else(|| {
-                    context
-                        .tabs
-                        .append(context.current.clone(), title.clone(), root.clone())
-                });
-            drop(context.tabs.activate(id));
-            self.tabs.append_with_id(id, title, root, runtime)
-        } else {
-            self.tabs.append(title, root, runtime)
-        };
-        self.sync_tabs(now);
-        let effects = self.app_mut(id)?.initial_effects();
-        Some(RoutedEffects { id, effects })
-    }
-
-    fn follow_shared_active(&mut self, now: Instant) -> Option<SshSwitch> {
-        let active = self.ssh_context.as_ref()?.tabs.active_id()?;
-        if self.tabs.activate(active) {
-            self.sync_tabs(now);
-            None
-        } else {
-            self.switch_to_shared_tab(active)
-        }
-    }
-
-    fn prune_missing_shared_tabs(&mut self) {
-        let roots = self
-            .tabs
-            .infos()
-            .into_iter()
-            .map(|tab| tab.root)
-            .collect::<Vec<_>>();
-        let Some(context) = self.ssh_context.as_mut() else {
-            return;
-        };
-        let missing = context
-            .tabs
-            .entries_for_machine(&context.current)
-            .filter(|tab| {
-                !roots
-                    .iter()
-                    .any(|root| crate::git::support::same_path(root, &tab.root))
-            })
-            .map(|tab| tab.id)
-            .collect::<Vec<_>>();
-        for id in missing {
-            drop(context.tabs.close(id));
-        }
-    }
-
-    fn switch_to_shared_tab(&mut self, id: TabId) -> Option<SshSwitch> {
-        let context = self.ssh_context.as_mut()?;
-        let machine = context.tabs.get(id)?.machine.clone();
-        let index = context
-            .machines
-            .iter()
-            .position(|candidate| candidate.target == machine && candidate.accessible)?;
-        drop(context.tabs.activate(id));
-        Some(SshSwitch {
-            index,
-            mode: SshProjectOpenMode::Activate,
-        })
-    }
 }
 
+mod projects;
 mod runtime;
 
 #[cfg(test)]

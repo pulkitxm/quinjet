@@ -187,8 +187,10 @@ path, and the worktree count open the project picker in `Switch project` mode.
 Choosing a project or worktree replaces the repository in the current tab and
 keeps that tab's identity and position.
 
-`N` opens the same picker in `Open in new tab` mode. Adding a second project
-reveals the project-tab strip. Every project tab owns its own Git worker,
+`N` immediately creates and activates a `New project` tab, then opens the
+picker inside that tab. Choosing a project resolves only that tab. `Esc` closes
+the pending tab and returns to the previously active project. Adding a second
+project reveals the project-tab strip. Every project tab owns its own Git worker,
 filesystem watcher, repository data, selected view, filters, folds, and scroll
 positions. The strip mixes local and SSH projects in one order. Tabs show their
 machine when more than one machine is present. Selecting a tab on another
@@ -203,6 +205,11 @@ time is the newest time among its worktrees, and projects use that time for the
 same newest-first ordering. Both levels show live relative ages. Long worktree
 paths keep their beginning and ending text around a middle ellipsis and are
 capped at 34 cells.
+
+Recent-project discovery runs after the picker is visible. Skeleton rows keep
+the interface responsive and make that work visible until the project list is
+ready. The footer uses compact action names so its final `Esc` action remains
+visible at the minimum supported width.
 
 Each project heading starts with a bordered `[⌄]` or `[›]` control. Clicking
 that control collapses or expands only that project's worktrees without opening
@@ -226,8 +233,11 @@ switch directly between reachable machines, while clicking a machine switches
 to it in one step. Choosing the host returns to its local project picker
 without a reverse SSH connection. A machine switch from the `N` picker keeps
 `Open in new tab` mode, so the selected project is added as another tab on the
-destination machine and appears in the same shared strip. The machine picker is
-only needed to open a project that does not already have a tab.
+destination machine and appears in the same shared strip. Existing tabs remain
+visible in their original order throughout the handoff. SSH reachability checks
+run in the background, with a pending marker shown until each result arrives.
+Those results update the current workspace without replacing its tabs. The
+machine picker is only needed to open a project that does not already have a tab.
 
 Drag a visible project tab to reorder it. When the strip overflows, its left
 and right controls cycle until the hidden tab becomes visible. Right-click a
