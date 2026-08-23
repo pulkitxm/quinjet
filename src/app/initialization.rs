@@ -87,6 +87,7 @@ impl App {
             pull_request_content_width: 0,
             pull_request_content_links: Vec::new(),
             pull_request_content_generation: 0,
+            relative_time_generation: crate::date_time::relative_time_generation(),
             content_at_bottom: true,
             pull_request_progress: None,
             auxiliary_preview: None,

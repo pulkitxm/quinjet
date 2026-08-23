@@ -20,7 +20,7 @@ use crate::app::{
     SidebarHitArea, ToastLevel, UiGeometry, View,
 };
 use crate::convert::cells;
-use crate::date_time::{format_relative_timestamp, relative_time_generation};
+use crate::date_time::format_relative_timestamp;
 use crate::file_icons;
 #[cfg(test)]
 use crate::git::diff::PullRequestDetails;
