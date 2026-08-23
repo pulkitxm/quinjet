@@ -11,6 +11,7 @@ mod state;
 mod state_sorting;
 mod tabs;
 mod terminal;
+mod terminal_launch;
 mod theme;
 mod ui;
 mod watch;
@@ -38,58 +39,10 @@ use crate::workspace::{RepositoryWorkspace, RoutedEffects, WorkspaceContext};
 
 fn main() -> ExitCode {
     match cli::dispatch() {
-        Ok(Launch::Terminal(options)) => terminal_exit_code(&options),
+        Ok(Launch::Terminal(options)) => terminal_launch::exit_code(&options),
         Ok(Launch::Finished(code)) => ExitCode::from(code),
         Err(error) => ExitCode::from(cli::report(&error)),
     }
-}
-
-fn terminal_exit_code(options: &TerminalOptions) -> ExitCode {
-    let inherited_context = SshContext::from_environment();
-    let local_session = inherited_context.is_none();
-    let context = inherited_context.or_else(|| cli::local_ssh_context(&options.path));
-    match open_terminal(options, context.as_ref()) {
-        Ok(TerminalOutcome::Finished) => ExitCode::SUCCESS,
-        Ok(TerminalOutcome::SwitchSshMachine {
-            request,
-            context: updated_context,
-        }) if local_session => {
-            let Some(mut context) = updated_context.or(context) else {
-                return ExitCode::from(cli::EXIT_FAILURE);
-            };
-            let Some(machine) = context.machines.get(request.index).cloned() else {
-                return ExitCode::from(cli::EXIT_FAILURE);
-            };
-            context.current.clone_from(&machine.target);
-            match cli::run_selected_terminal(
-                &machine.target,
-                &machine.folder,
-                context,
-                request.mode,
-            ) {
-                Ok(code) => ExitCode::from(code),
-                Err(error) => ExitCode::from(cli::report(&error)),
-            }
-        }
-        Ok(TerminalOutcome::SwitchSshMachine { request, context }) => {
-            if let Some(context) = context
-                && let Err(error) = ssh::emit_handoff_context(&context)
-            {
-                return ExitCode::from(cli::report(&error));
-            }
-            ssh::switch_exit_code(request)
-                .map_or_else(|| ExitCode::from(cli::EXIT_FAILURE), ExitCode::from)
-        }
-        Err(error) => ExitCode::from(cli::report(&error)),
-    }
-}
-
-enum TerminalOutcome {
-    Finished,
-    SwitchSshMachine {
-        request: ssh::SshSwitch,
-        context: Option<SshContext>,
-    },
 }
 
 #[expect(
@@ -99,7 +52,7 @@ enum TerminalOutcome {
 fn open_terminal(
     options: &TerminalOptions,
     ssh_context: Option<&SshContext>,
-) -> Result<TerminalOutcome> {
+) -> Result<terminal_launch::Outcome> {
     if !io::stdin().is_terminal() || !cli::stdout_is_terminal() {
         anyhow::bail!("Quinjet requires an interactive terminal");
     }
@@ -377,8 +330,8 @@ fn open_terminal(
     {
         state::session::record_project_session(current.project_session());
     }
-    let outcome = switch_ssh_machine.map_or(TerminalOutcome::Finished, |request| {
-        TerminalOutcome::SwitchSshMachine {
+    let outcome = switch_ssh_machine.map_or(terminal_launch::Outcome::Finished, |request| {
+        terminal_launch::Outcome::SwitchSshMachine {
             request,
             context: workspace
                 .as_ref()
@@ -387,7 +340,7 @@ fn open_terminal(
                 .or_else(|| ssh_context.cloned()),
         }
     });
-    if matches!(outcome, TerminalOutcome::SwitchSshMachine { .. }) {
+    if matches!(outcome, terminal_launch::Outcome::SwitchSshMachine { .. }) {
         terminal.preserve_for_handoff();
     }
     Ok(outcome)

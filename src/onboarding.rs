@@ -14,6 +14,9 @@ use crate::git::ProjectGroup;
 use crate::ssh::{SshContext, SshProjectOpenMode, SshSwitch};
 use crate::theme::Theme;
 
+mod loader;
+use loader::ProjectLoader;
+
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum OnboardingAction {
     None,
@@ -46,8 +49,7 @@ pub(crate) struct Onboarding {
     ssh_context: Option<SshContext>,
     machine_hits: Vec<(Rect, usize)>,
     mode: ProjectOpenMode,
-    project_loader: Option<crossbeam_channel::Receiver<Vec<ProjectGroup>>>,
-    loading: bool,
+    project_loader: ProjectLoader,
 }
 
 impl Onboarding {
@@ -56,15 +58,9 @@ impl Onboarding {
         ssh_context: Option<SshContext>,
         mode: ProjectOpenMode,
     ) -> Self {
-        let (sender, receiver) = crossbeam_channel::bounded(1);
-        let project_root = launch_path.to_path_buf();
-        let _thread = std::thread::spawn(move || {
-            drop(sender.send(crate::state::load_recent_projects(&project_root)));
-        });
         let mut onboarding =
             Self::from_groups_with_mode(launch_path, Vec::new(), ssh_context, mode);
-        onboarding.project_loader = Some(receiver);
-        onboarding.loading = true;
+        onboarding.project_loader = ProjectLoader::start(launch_path);
         onboarding.collapsed = crate::state::load_collapsed_project_groups();
         onboarding.selected =
             App::first_project_worktree_index(&onboarding.groups, "", &onboarding.collapsed);
@@ -106,8 +102,7 @@ impl Onboarding {
             ssh_context,
             machine_hits: Vec::new(),
             mode,
-            project_loader: None,
-            loading: false,
+            project_loader: ProjectLoader::ready(),
         }
     }
 
@@ -160,16 +155,10 @@ impl Onboarding {
     }
 
     pub(crate) fn poll_projects(&mut self) -> bool {
-        let Some(groups) = self
-            .project_loader
-            .as_ref()
-            .and_then(|loader| loader.try_recv().ok())
-        else {
+        let Some(groups) = self.project_loader.poll() else {
             return false;
         };
         self.groups = groups;
-        self.project_loader = None;
-        self.loading = false;
         self.selected =
             App::first_project_worktree_index(&self.groups, &self.query.value, &self.collapsed);
         true
@@ -404,7 +393,7 @@ impl Onboarding {
                     self.selected,
                     &self.query,
                     &self.collapsed,
-                    self.loading,
+                    self.project_loader.is_loading(),
                     None,
                     self.mode,
                     self.ssh_context.as_ref(),

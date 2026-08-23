@@ -57,8 +57,7 @@ fn empty_screen_reuses_the_grouped_project_picker() {
 fn project_loading_is_visible_until_background_results_arrive() {
     let mut onboarding = Onboarding::from_groups(Path::new("/tmp"), Vec::new(), None);
     let (sender, receiver) = crossbeam_channel::bounded(1);
-    onboarding.project_loader = Some(receiver);
-    onboarding.loading = true;
+    onboarding.project_loader = ProjectLoader::waiting(receiver);
     let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
     let theme = Theme::new(ThemeName::Quinjet, Appearance::Dark);
 
