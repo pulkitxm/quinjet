@@ -2,14 +2,14 @@ use std::collections::HashSet;
 use std::env;
 use std::path::{Path, PathBuf};
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 
-use crate::app::{App, ProjectOpenMode, TextBuffer};
+use crate::app::{App, ProjectOpenMode, ProjectRow, TextBuffer};
 use crate::git::ProjectGroup;
 use crate::ssh::SshContext;
 use crate::theme::Theme;
@@ -35,6 +35,11 @@ pub(crate) struct Onboarding {
     query: TextBuffer,
     collapsed: HashSet<PathBuf>,
     collapse_hits: Vec<(Rect, PathBuf)>,
+    project_hits: Vec<(Rect, usize)>,
+    project_len: usize,
+    project_max_scroll: usize,
+    project_scroll: usize,
+    project_free_scroll: bool,
     panel: OnboardingPanel,
     path_input: String,
     error: Option<String>,
@@ -50,12 +55,16 @@ impl Onboarding {
         ssh_context: Option<SshContext>,
         mode: ProjectOpenMode,
     ) -> Self {
-        Self::from_groups_with_mode(
+        let mut onboarding = Self::from_groups_with_mode(
             launch_path,
             crate::state::load_recent_projects(launch_path),
             ssh_context,
             mode,
-        )
+        );
+        onboarding.collapsed = crate::state::load_collapsed_project_groups();
+        onboarding.selected =
+            App::first_project_worktree_index(&onboarding.groups, "", &onboarding.collapsed);
+        onboarding
     }
 
     #[cfg(test)]
@@ -73,13 +82,20 @@ impl Onboarding {
         ssh_context: Option<SshContext>,
         mode: ProjectOpenMode,
     ) -> Self {
+        let collapsed = HashSet::new();
+        let selected = App::first_project_worktree_index(&groups, "", &collapsed);
         Self {
             launch_path: launch_path.to_path_buf(),
             groups,
-            selected: 0,
+            selected,
             query: TextBuffer::default(),
-            collapsed: HashSet::new(),
+            collapsed,
             collapse_hits: Vec::new(),
+            project_hits: Vec::new(),
+            project_len: 0,
+            project_max_scroll: 0,
+            project_scroll: 0,
+            project_free_scroll: false,
             panel: OnboardingPanel::Projects,
             path_input: String::new(),
             error: None,
@@ -92,6 +108,7 @@ impl Onboarding {
 
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> OnboardingAction {
         self.error = None;
+        self.project_free_scroll = false;
         match self.panel {
             OnboardingPanel::Projects => self.handle_projects_key(key),
             OnboardingPanel::Path => self.handle_path_key(key),
@@ -108,56 +125,11 @@ impl Onboarding {
                 self.machine_selected = None;
                 self.query.insert_str(&sanitized);
                 self.selected = 0;
+                self.project_scroll = 0;
+                self.project_free_scroll = false;
             }
             OnboardingPanel::Path => self.path_input.push_str(&sanitized),
         }
-    }
-
-    pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent) -> OnboardingAction {
-        if self.panel != OnboardingPanel::Projects
-            || mouse.kind != MouseEventKind::Down(MouseButton::Left)
-        {
-            return OnboardingAction::None;
-        }
-        if let Some(index) = self
-            .machine_hits
-            .iter()
-            .find(|(area, _)| area.contains((mouse.column, mouse.row).into()))
-            .map(|(_, index)| *index)
-        {
-            self.machine_selected = Some(index);
-            return self
-                .ssh_context
-                .as_ref()
-                .map_or(OnboardingAction::None, |context| {
-                    context
-                        .machines
-                        .get(index)
-                        .map_or(OnboardingAction::None, |machine| {
-                            if machine.accessible && machine.target != context.current {
-                                OnboardingAction::SwitchSshMachine(index)
-                            } else {
-                                OnboardingAction::None
-                            }
-                        })
-                });
-        }
-        let Some(common_dir) = self
-            .collapse_hits
-            .iter()
-            .find(|(area, _)| area.contains((mouse.column, mouse.row).into()))
-            .map(|(_, common_dir)| common_dir.clone())
-        else {
-            return OnboardingAction::None;
-        };
-        if self.collapsed.contains(&common_dir) {
-            self.collapsed.retain(|candidate| candidate != &common_dir);
-        } else {
-            self.collapsed.extend([common_dir]);
-        }
-        let visible = App::filtered_project_rows(&self.groups, &self.query.value, &self.collapsed);
-        self.selected = self.selected.min(visible.len().saturating_sub(1));
-        OnboardingAction::None
     }
 
     pub(crate) fn show_error(&mut self, message: impl Into<String>) {
@@ -170,6 +142,8 @@ impl Onboarding {
             KeyCode::Char('e' | 'E') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 App::toggle_all_project_groups(&self.groups, &mut self.collapsed);
                 self.selected = 0;
+                #[cfg(not(test))]
+                crate::state::record_collapsed_project_groups(&self.collapsed);
                 return OnboardingAction::None;
             }
             KeyCode::Tab if self.ssh_context.is_some() => {
@@ -212,16 +186,32 @@ impl Onboarding {
                 self.panel = OnboardingPanel::Path;
                 OnboardingAction::None
             }
-            KeyCode::Enter => visible
-                .get(self.selected)
-                .and_then(|(group_index, tree_index)| {
-                    self.groups
-                        .get(*group_index)
-                        .and_then(|group| group.worktrees.get(*tree_index))
-                })
-                .map_or(OnboardingAction::None, |tree| {
-                    OnboardingAction::Open(tree.path.clone())
-                }),
+            KeyCode::Enter => match visible.get(self.selected) {
+                Some(ProjectRow::Group(group_index)) => {
+                    if let Some(group) = self.groups.get(*group_index) {
+                        if self.collapsed.contains(&group.common_dir) {
+                            self.collapsed
+                                .retain(|candidate| candidate != &group.common_dir);
+                        } else {
+                            self.collapsed.extend([group.common_dir.clone()]);
+                        }
+                        #[cfg(not(test))]
+                        crate::state::record_collapsed_project_groups(&self.collapsed);
+                    }
+                    OnboardingAction::None
+                }
+                Some(ProjectRow::Worktree {
+                    group_index,
+                    tree_index,
+                }) => self
+                    .groups
+                    .get(*group_index)
+                    .and_then(|group| group.worktrees.get(*tree_index))
+                    .map_or(OnboardingAction::None, |tree| {
+                        OnboardingAction::Open(tree.path.clone())
+                    }),
+                None => OnboardingAction::None,
+            },
             KeyCode::Backspace => {
                 self.query.backspace();
                 self.selected = 0;
@@ -349,6 +339,14 @@ impl Onboarding {
         match self.panel {
             OnboardingPanel::Projects => {
                 self.collapse_hits.clear();
+                self.project_hits.clear();
+                let mut list = crate::ui::ModalList::new(
+                    &mut self.project_hits,
+                    &mut self.project_len,
+                    &mut self.project_max_scroll,
+                    self.project_scroll,
+                    self.project_free_scroll,
+                );
                 self.machine_hits = crate::ui::pickers::draw_projects(
                     frame,
                     &mut self.collapse_hits,
@@ -361,6 +359,7 @@ impl Onboarding {
                     self.mode,
                     self.ssh_context.as_ref(),
                     self.machine_selected,
+                    &mut list,
                     theme,
                 );
             }
@@ -453,5 +452,6 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     )
 }
 
+mod mouse;
 #[cfg(test)]
 mod tests;

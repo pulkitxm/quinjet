@@ -31,6 +31,7 @@ impl App {
                 {
                     Self::toggle_all_project_groups(groups, collapsed);
                     *selected = 0;
+                    self.remember_collapsed_project_groups(collapsed);
                     self.modal = Some(modal);
                     return effects;
                 }
@@ -88,17 +89,21 @@ impl App {
                     }
                 }
                 let visible = Self::filtered_project_rows(groups, &query.value, collapsed);
-                let selected_tree = visible
-                    .get(*selected)
-                    .and_then(|(group_index, tree_index)| {
-                        groups
-                            .get(*group_index)
-                            .and_then(|group| group.worktrees.get(*tree_index))
-                            .cloned()
-                    });
-                let selected_group = visible
-                    .get(*selected)
-                    .and_then(|(group_index, _)| groups.get(*group_index).cloned());
+                let selected_tree = visible.get(*selected).and_then(|row| match row {
+                    ProjectRow::Group(_) => None,
+                    ProjectRow::Worktree {
+                        group_index,
+                        tree_index,
+                    } => groups
+                        .get(*group_index)
+                        .and_then(|group| group.worktrees.get(*tree_index))
+                        .cloned(),
+                });
+                let selected_group = visible.get(*selected).and_then(|row| match row {
+                    ProjectRow::Group(group_index) | ProjectRow::Worktree { group_index, .. } => {
+                        groups.get(*group_index).cloned()
+                    }
+                });
                 match key.code {
                     KeyCode::Up | KeyCode::Char('k') => {
                         *selected = previous_list_index(*selected, visible.len());
@@ -106,7 +111,49 @@ impl App {
                     KeyCode::Down | KeyCode::Char('j') => {
                         *selected = next_list_index(*selected, visible.len());
                     }
+                    KeyCode::Left | KeyCode::Char('h') => {
+                        if let Some(group) = selected_group
+                            && !collapsed.contains(&group.common_dir)
+                        {
+                            let common_dir = group.common_dir;
+                            collapsed.extend([common_dir.clone()]);
+                            *selected = Self::filtered_project_rows(
+                                groups,
+                                &query.value,
+                                collapsed,
+                            )
+                            .iter()
+                            .position(|row| {
+                                matches!(row, ProjectRow::Group(index) if groups.get(*index).is_some_and(|candidate| candidate.common_dir == common_dir))
+                            })
+                            .unwrap_or_default();
+                            self.remember_collapsed_project_groups(collapsed);
+                        }
+                    }
+                    KeyCode::Right | KeyCode::Char('l') => {
+                        if let Some(group) = selected_group
+                            && collapsed.remove(&group.common_dir)
+                        {
+                            self.remember_collapsed_project_groups(collapsed);
+                        }
+                    }
+                    KeyCode::Char(' ') => {
+                        if let Some(ProjectRow::Group(group_index)) = visible.get(*selected)
+                            && let Some(group) = groups.get(*group_index)
+                        {
+                            toggle_membership(collapsed, group.common_dir.clone());
+                            self.remember_collapsed_project_groups(collapsed);
+                        }
+                    }
                     KeyCode::Enter if !*loading && opening.is_none() => {
+                        if let Some(ProjectRow::Group(group_index)) = visible.get(*selected)
+                            && let Some(group) = groups.get(*group_index)
+                        {
+                            toggle_membership(collapsed, group.common_dir.clone());
+                            self.remember_collapsed_project_groups(collapsed);
+                            self.modal = Some(modal);
+                            return effects;
+                        }
                         if let Some(tree) = selected_tree.filter(|tree| !tree.current) {
                             *opening = Some(tree.path.clone());
                             effects.push(match mode {
@@ -115,8 +162,8 @@ impl App {
                                 }
                                 ProjectOpenMode::NewTab => AppEffect::OpenRepositoryTab(tree.path),
                             });
-                            self.modal = Some(modal);
                         }
+                        self.modal = Some(modal);
                         return effects;
                     }
                     KeyCode::Delete if !*loading => {

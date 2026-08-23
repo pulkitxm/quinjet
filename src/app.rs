@@ -160,6 +160,7 @@ mod worker_repository;
 
 pub(crate) use geometry::*;
 pub(crate) use modal::*;
+pub(crate) use projects::{ProjectOpenMode, ProjectRow};
 pub(crate) use pull_request_actions::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use support::*;
@@ -202,6 +203,7 @@ pub(crate) struct App {
     pub history: Vec<Commit>,
     pub worktrees: Vec<Worktree>,
     pub project_groups: Vec<ProjectGroup>,
+    pub collapsed_project_groups: HashSet<PathBuf>,
     pub ssh_context: Option<SshContext>,
     pub project_machine_focus: Option<usize>,
     pub history_branch: Option<HistoryBranch>,
@@ -305,6 +307,8 @@ pub(crate) struct App {
     pub resize_target: Option<ResizeTarget>,
     pub filter: String,
     pub modal: Option<Modal>,
+    pub modal_scroll: usize,
+    pub modal_free_scroll: bool,
     pub toast: Option<Toast>,
     pub mouse_capture: bool,
     pub mouse_capture_preference: bool,

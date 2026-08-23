@@ -21,6 +21,7 @@ pub(crate) fn draw_projects(
     mode: ProjectOpenMode,
     ssh: Option<&SshContext>,
     machine_focus: Option<usize>,
+    list: &mut ModalList<'_>,
     theme: &Theme,
 ) -> Vec<(Rect, usize)> {
     let height = frame.area().height.saturating_sub(6).min(28);
@@ -84,49 +85,48 @@ pub(crate) fn draw_projects(
             list_area,
         );
     } else {
-        let matching = App::matching_project_rows(groups, &query.value);
-        let mut lines: Vec<(Line<'static>, Option<std::path::PathBuf>)> = Vec::new();
-        let mut selectable = 0_usize;
-        let mut selected_line = 0_usize;
-        for (group_index, group) in groups.iter().enumerate() {
-            let trees: Vec<usize> = matching
-                .iter()
-                .filter_map(|(matching_group, tree_index)| {
-                    (*matching_group == group_index).then_some(*tree_index)
-                })
-                .collect();
-            if trees.is_empty() {
-                continue;
-            }
-            let expanded = !collapsed.contains(&group.common_dir) || !query.value.is_empty();
-            lines.push((
-                project_header_line(group, expanded, list_area.width as usize, theme),
-                Some(group.common_dir.clone()),
-            ));
-            if !expanded {
-                continue;
-            }
-            for tree_index in trees {
-                let Some(tree) = group.worktrees.get(tree_index) else {
-                    continue;
-                };
-                let active = selectable == selected;
-                if active {
-                    selected_line = lines.len();
-                }
-                selectable = selectable.saturating_add(1);
-                lines.push((
-                    project_worktree_line(tree, active, list_area.width as usize, theme),
-                    None,
-                ));
-            }
-        }
-        let offset = selected_line.saturating_sub(list_area.height.saturating_sub(1) as usize);
-        let visible_lines: Vec<_> = lines
-            .into_iter()
+        let rows = App::filtered_project_rows(groups, &query.value, collapsed);
+        let offset = list.offset(selected, list_area.height as usize, rows.len());
+        let visible_lines = rows
+            .iter()
+            .enumerate()
             .skip(offset)
             .take(list_area.height as usize)
-            .collect();
+            .filter_map(|(index, row)| match row {
+                ProjectRow::Group(group_index) => {
+                    let group = groups.get(*group_index)?;
+                    let expanded =
+                        !collapsed.contains(&group.common_dir) || !query.value.is_empty();
+                    Some((
+                        project_header_line(
+                            group,
+                            expanded,
+                            index == selected,
+                            list_area.width as usize,
+                            theme,
+                        ),
+                        Some(group.common_dir.clone()),
+                        index,
+                    ))
+                }
+                ProjectRow::Worktree {
+                    group_index,
+                    tree_index,
+                } => {
+                    let tree = groups.get(*group_index)?.worktrees.get(*tree_index)?;
+                    Some((
+                        project_worktree_line(
+                            tree,
+                            index == selected,
+                            list_area.width as usize,
+                            theme,
+                        ),
+                        None,
+                        index,
+                    ))
+                }
+            })
+            .collect::<Vec<_>>();
         if visible_lines.is_empty() {
             let empty = if groups.is_empty() && mode == ProjectOpenMode::Initial {
                 "No recent projects. Press Ctrl+O to enter a repository path."
@@ -139,7 +139,7 @@ pub(crate) fn draw_projects(
             );
         } else {
             collapse_hits.extend(visible_lines.iter().enumerate().filter_map(
-                |(line_index, (_, common_dir))| {
+                |(line_index, (_, common_dir, _))| {
                     common_dir.as_ref().map(|common_dir| {
                         (
                             Rect::new(
@@ -153,11 +153,22 @@ pub(crate) fn draw_projects(
                     })
                 },
             ));
+            for (line_index, (_, _, index)) in visible_lines.iter().enumerate() {
+                list.hit(
+                    Rect::new(
+                        list_area.x,
+                        list_area.y.saturating_add(cells(line_index)),
+                        list_area.width,
+                        1,
+                    ),
+                    *index,
+                );
+            }
             frame.render_widget(
                 Paragraph::new(
                     visible_lines
                         .into_iter()
-                        .map(|(line, _)| line)
+                        .map(|(line, ..)| line)
                         .collect::<Vec<_>>(),
                 ),
                 list_area,
@@ -169,6 +180,10 @@ pub(crate) fn draw_projects(
     } else {
         "expand all"
     };
+    let selected_group = matches!(
+        App::filtered_project_rows(groups, &query.value, collapsed).get(selected),
+        Some(ProjectRow::Group(_))
+    );
     let hint = if opening.is_some() {
         "Opening project…".to_owned()
     } else if machine_focus.is_some() {
@@ -180,19 +195,30 @@ pub(crate) fn draw_projects(
         format!("←/→ choose machine   Enter switch   Tab projects   Esc {escape}")
     } else {
         let machines = ssh.map_or("", |_| "   Tab machines");
-        match mode {
-            ProjectOpenMode::Initial => {
-                format!("Enter open{machines}   Ctrl+E {fold_action}   Ctrl+O path   Esc quit")
-            }
-            ProjectOpenMode::CurrentTab => {
-                format!(
-                    "Enter switch tab{machines}   Ctrl+E {fold_action}   Delete forget   Esc close"
-                )
-            }
-            ProjectOpenMode::NewTab => {
-                format!(
-                    "Enter new tab{machines}   Ctrl+E {fold_action}   Delete forget   Esc close"
-                )
+        if selected_group {
+            let escape = if mode == ProjectOpenMode::Initial {
+                "quit"
+            } else {
+                "close"
+            };
+            format!(
+                "Enter/Space fold   ← collapse   → expand{machines}   Ctrl+E {fold_action}   Esc {escape}"
+            )
+        } else {
+            match mode {
+                ProjectOpenMode::Initial => {
+                    format!("Enter open{machines}   Ctrl+E {fold_action}   Ctrl+O path   Esc quit")
+                }
+                ProjectOpenMode::CurrentTab => {
+                    format!(
+                        "Enter switch tab{machines}   Ctrl+E {fold_action}   Delete forget   Esc close"
+                    )
+                }
+                ProjectOpenMode::NewTab => {
+                    format!(
+                        "Enter new tab{machines}   Ctrl+E {fold_action}   Delete forget   Esc close"
+                    )
+                }
             }
         }
     };
@@ -200,12 +226,17 @@ pub(crate) fn draw_projects(
     machine_hits
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the picker receives its modal state, list geometry, and palette"
+)]
 pub(super) fn draw_pull_request_repositories(
     frame: &mut Frame<'_>,
     items: &[GitHubRepository],
     selected: usize,
     query: &crate::app::TextBuffer,
     loading: bool,
+    list: &mut ModalList<'_>,
     theme: &Theme,
 ) {
     let height = (cells(items.len()) + 7)
@@ -247,7 +278,7 @@ pub(super) fn draw_pull_request_repositories(
         inner.height.saturating_sub(4),
     );
     let visible = App::filtered_github_repositories(items, &query.value);
-    let offset = selected.saturating_sub(list_area.height.saturating_sub(1) as usize);
+    let offset = list.offset(selected, list_area.height as usize, visible.len());
     let lines = visible
         .iter()
         .skip(offset)
@@ -288,6 +319,17 @@ pub(super) fn draw_pull_request_repositories(
             ]))
         })
         .collect::<Vec<_>>();
+    for index in 0..lines.len() {
+        list.hit(
+            Rect::new(
+                list_area.x,
+                list_area.y.saturating_add(cells(index)),
+                list_area.width,
+                1,
+            ),
+            offset.saturating_add(index),
+        );
+    }
     if loading {
         frame.render_widget(
             Paragraph::new("Discovering GitHub repositories from configured remotes…")
@@ -315,6 +357,7 @@ pub(super) fn draw_palette(
     app: &App,
     query: &crate::app::TextBuffer,
     selected: usize,
+    list: &mut ModalList<'_>,
     theme: &Theme,
 ) {
     let commands = app.palette_commands(&query.value);
@@ -362,7 +405,7 @@ pub(super) fn draw_palette(
         inner.width,
         inner.height.saturating_sub(2),
     );
-    let offset = selected.saturating_sub(list_area.height.saturating_sub(1) as usize);
+    let offset = list.offset(selected, list_area.height as usize, commands.len());
     let lines = commands
         .iter()
         .skip(offset)
@@ -370,6 +413,17 @@ pub(super) fn draw_palette(
         .enumerate()
         .map(|(index, command)| palette_line(*command, offset + index == selected, theme))
         .collect::<Vec<_>>();
+    for index in 0..lines.len() {
+        list.hit(
+            Rect::new(
+                list_area.x,
+                list_area.y.saturating_add(cells(index)),
+                list_area.width,
+                1,
+            ),
+            offset.saturating_add(index),
+        );
+    }
     frame.render_widget(Paragraph::new(lines), list_area);
 }
 
@@ -390,95 +444,6 @@ pub(super) fn palette_line(
         ),
         Span::styled(
             command.label(),
-            Style::default()
-                .fg(theme.text)
-                .bg(background)
-                .add_modifier(if selected {
-                    Modifier::BOLD
-                } else {
-                    Modifier::empty()
-                }),
-        ),
-    ])
-}
-
-pub(super) fn draw_theme_picker(
-    frame: &mut Frame<'_>,
-    selected: usize,
-    current: ThemeName,
-    theme: &Theme,
-) {
-    let choices = ThemeName::ALL.map(|name| (name.label(), name == current));
-    draw_choice_picker(frame, " Select Theme ", &choices, selected, theme);
-}
-
-pub(super) fn draw_appearance_picker(
-    frame: &mut Frame<'_>,
-    selected: usize,
-    current: AppearanceChoice,
-    theme: &Theme,
-) {
-    let choices = AppearanceChoice::ALL.map(|choice| (choice.label(), choice == current));
-    draw_choice_picker(frame, " Select Appearance ", &choices, selected, theme);
-}
-
-pub(super) fn draw_choice_picker(
-    frame: &mut Frame<'_>,
-    title: &str,
-    choices: &[(&'static str, bool)],
-    selected: usize,
-    theme: &Theme,
-) {
-    let height = (cells(choices.len()) + 4)
-        .min(frame.area().height.saturating_sub(6))
-        .max(7);
-    let area = centered_rect(44, height, frame.area());
-    frame.render_widget(Clear, area);
-    let block = modal_block(title, theme);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-    let list_area = Rect::new(
-        inner.x,
-        inner.y,
-        inner.width,
-        inner.height.saturating_sub(1),
-    );
-    let offset = selected.saturating_sub(list_area.height.saturating_sub(1) as usize);
-    let lines = choices
-        .iter()
-        .skip(offset)
-        .take(list_area.height as usize)
-        .enumerate()
-        .map(|(index, (label, current))| {
-            choice_line(label, *current, offset + index == selected, theme)
-        })
-        .collect::<Vec<_>>();
-    frame.render_widget(Paragraph::new(lines), list_area);
-    draw_modal_hint(frame, area, "Enter apply   Esc close", theme);
-}
-
-pub(super) fn choice_line(
-    label: &'static str,
-    current: bool,
-    selected: bool,
-    theme: &Theme,
-) -> Line<'static> {
-    let background = if selected {
-        theme.selected
-    } else {
-        theme.panel
-    };
-    Line::from(vec![
-        Span::styled(
-            if selected { " › " } else { "   " },
-            Style::default().fg(theme.accent).bg(background),
-        ),
-        Span::styled(
-            if current { "✓ " } else { "  " },
-            Style::default().fg(theme.success).bg(background),
-        ),
-        Span::styled(
-            label,
             Style::default()
                 .fg(theme.text)
                 .bg(background)

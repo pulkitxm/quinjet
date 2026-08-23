@@ -1,7 +1,12 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
-pub(super) fn draw_conflict(frame: &mut Frame<'_>, change: &Change, theme: &Theme) {
+pub(super) fn draw_conflict(
+    frame: &mut Frame<'_>,
+    hits: &mut Vec<(Rect, ModalAction)>,
+    change: &Change,
+    theme: &Theme,
+) {
     let area = centered_rect(
         frame.area().width.saturating_sub(14).min(72),
         10,
@@ -53,5 +58,22 @@ pub(super) fn draw_conflict(frame: &mut Frame<'_>, change: &Change, theme: &Them
             inner.height.saturating_sub(2),
         ),
     );
+    let actions_y = inner.y.saturating_add(3);
+    let ours = Rect::new(inner.x, actions_y, 18.min(inner.width), 1);
+    let theirs = Rect::new(
+        ours.right(),
+        actions_y,
+        20.min(inner.right().saturating_sub(ours.right())),
+        1,
+    );
+    let resolved = Rect::new(
+        theirs.right(),
+        actions_y,
+        inner.right().saturating_sub(theirs.right()),
+        1,
+    );
+    hits.push((ours, ModalAction::ConflictOurs));
+    hits.push((theirs, ModalAction::ConflictTheirs));
+    hits.push((resolved, ModalAction::ConflictResolved));
     draw_modal_hint(frame, area, "Esc cancel", theme);
 }

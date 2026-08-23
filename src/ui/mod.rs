@@ -14,10 +14,10 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use crate::app::{
     App, ChangeRow, ChangeSection, CheckListRow, ContentFileHit, ContentReviewHit, ContentStepHit,
     DiffLayout, Focus, HelpHit, LinkHit, Modal, ModalAction, OpenTarget, PaletteCommand,
-    PrActionItem, PrMenuItem, ProjectOpenMode, PullRequestContentLink, PullRequestContentRow,
-    PullRequestSection, PullRequestTreeEntry, RepositoryTabAction, RepositoryTabHit, ScmAction,
-    ScmActionHit, ScmMenuItem, SideBySideRow, SidebarHit, SidebarHitArea, ToastLevel, UiGeometry,
-    View,
+    PrActionItem, PrMenuItem, ProjectOpenMode, ProjectRow, PullRequestContentLink,
+    PullRequestContentRow, PullRequestSection, PullRequestTreeEntry, RepositoryTabAction,
+    RepositoryTabHit, ScmAction, ScmActionHit, ScmMenuItem, SideBySideRow, SidebarHit,
+    SidebarHitArea, ToastLevel, UiGeometry, View,
 };
 use crate::convert::cells;
 use crate::date_time::{format_relative_timestamp, relative_time_generation};
@@ -38,19 +38,6 @@ use crate::theme::{AppearanceChoice, Theme, ThemeName};
 
 const DETAIL_LABEL_WIDTH: usize = 12;
 const MAX_INTRALINE_SOURCE_BYTES: usize = 32 * 1024;
-
-fn file_icon_span(path: &Path, theme: &Theme) -> Span<'static> {
-    let icon = file_icons::for_path(path);
-    Span::styled(icon.glyph, Style::default().fg(theme.syntax(icon.color)))
-}
-
-const fn disclosure_glyph(expanded: bool) -> &'static str {
-    if expanded { "⌄" } else { "›" }
-}
-
-const fn disclosure_prefix(expanded: bool) -> &'static str {
-    if expanded { " ⌄ " } else { " › " }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HelpRow {
@@ -424,8 +411,11 @@ mod feedback;
 mod help;
 mod layout;
 mod modal_branches;
+mod modal_choices;
 mod modal_conflict;
+mod modal_list;
 pub(crate) mod modal_ssh;
+mod modal_stashes;
 mod modals;
 pub(crate) mod pickers;
 mod project_picker;
@@ -458,8 +448,13 @@ use layout::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use modal_branches::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
+use modal_choices::*;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use modal_conflict::*;
+pub(crate) use modal_list::ModalList;
 use modal_ssh::draw_ssh_project_modal;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
+use modal_stashes::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use modals::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]

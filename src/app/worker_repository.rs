@@ -321,12 +321,14 @@ impl App {
                             ..
                         }) = self.modal.as_mut()
                         {
-                            collapsed.retain(|common_dir| {
-                                groups.iter().any(|group| &group.common_dir == common_dir)
-                            });
+                            let initial = modal_groups.is_empty();
                             let visible =
                                 Self::filtered_project_rows(&groups, &query.value, collapsed);
-                            *selected = (*selected).min(visible.len().saturating_sub(1));
+                            *selected = if initial {
+                                Self::first_project_worktree_index(&groups, &query.value, collapsed)
+                            } else {
+                                (*selected).min(visible.len().saturating_sub(1))
+                            };
                             *modal_groups = groups;
                             *loading = false;
                         }

@@ -12,8 +12,11 @@ impl App {
             return self.handle_repository_tab_key(key).unwrap_or_default();
         }
         if let Some(modal) = self.modal.take() {
+            self.modal_free_scroll = false;
             return self.handle_modal_key(modal, key, now);
         }
+        self.modal_scroll = 0;
+        self.modal_free_scroll = false;
         if self.pull_request_lookup_active {
             return self.handle_pull_request_lookup_key(key, now);
         }
@@ -423,5 +426,7 @@ impl App {
             input.insert_str(text);
         }
         self.apply_live_modal_filter();
+        self.modal_scroll = 0;
+        self.modal_free_scroll = false;
     }
 }

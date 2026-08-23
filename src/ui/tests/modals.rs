@@ -82,6 +82,8 @@ fn repository_pick_lists_render_loaded_rows() {
             .map(ratatui::buffer::Cell::symbol)
             .collect::<String>();
         assert!(rendered.contains(expected));
+        assert_eq!(app.geometry.modal_list_len, 1);
+        assert_eq!(app.geometry.modal_list_hits.len(), 1);
     }
 }
 
@@ -114,10 +116,40 @@ fn pull_request_action_picker_renders_every_choice_as_a_hit_target() {
     assert!(rendered.contains("Submit review comment"));
     assert!(rendered.contains("Request changes"));
     assert_eq!(app.geometry.modal_action_hits.len(), 3);
+    assert_eq!(app.geometry.modal_list_len, 3);
+    assert_eq!(app.geometry.modal_list_hits.len(), 3);
     assert!(
         app.geometry
             .modal_action_hits
             .iter()
             .any(|(_, action)| *action == ModalAction::PullRequestAction(1))
     );
+}
+
+#[test]
+fn modal_free_scroll_keeps_selection_independent_from_the_viewport() {
+    let mut app = App::new("/tmp/repo", "repo");
+    app.modal = Some(Modal::CommandPalette {
+        query: crate::app::TextBuffer::default(),
+        selected: 0,
+    });
+    app.modal_scroll = 3;
+    app.modal_free_scroll = true;
+    let mut terminal = Terminal::new(TestBackend::new(90, 18)).unwrap();
+
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+
+    assert_eq!(
+        app.geometry
+            .modal_list_hits
+            .first()
+            .map(|(_, index)| *index),
+        Some(3)
+    );
+    assert!(matches!(
+        app.modal.as_ref(),
+        Some(Modal::CommandPalette { selected: 0, .. })
+    ));
 }

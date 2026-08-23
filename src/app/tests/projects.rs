@@ -37,21 +37,48 @@ fn recent_projects_nest_worktrees_and_open_another_tree() {
     ];
     assert_eq!(
         App::filtered_project_rows(&groups, "", &HashSet::new()),
-        vec![(0, 0), (0, 1), (1, 0)]
+        vec![
+            ProjectRow::Group(0),
+            ProjectRow::Worktree {
+                group_index: 0,
+                tree_index: 0,
+            },
+            ProjectRow::Worktree {
+                group_index: 0,
+                tree_index: 1,
+            },
+            ProjectRow::Group(1),
+            ProjectRow::Worktree {
+                group_index: 1,
+                tree_index: 0,
+            },
+        ]
     );
     assert_eq!(
         App::filtered_project_rows(&groups, "helix", &HashSet::new()),
-        vec![(1, 0)]
+        vec![
+            ProjectRow::Group(1),
+            ProjectRow::Worktree {
+                group_index: 1,
+                tree_index: 0,
+            },
+        ]
     );
     assert_eq!(
         App::filtered_project_rows(&groups, "topic", &HashSet::new()),
-        vec![(0, 1)]
+        vec![
+            ProjectRow::Group(0),
+            ProjectRow::Worktree {
+                group_index: 0,
+                tree_index: 1,
+            },
+        ]
     );
 
     app.project_groups.clone_from(&groups);
     app.modal = Some(Modal::Projects {
         groups,
-        selected: 1,
+        selected: 2,
         query: TextBuffer::default(),
         collapsed: HashSet::new(),
         loading: false,
@@ -163,11 +190,17 @@ fn control_e_expands_mixed_projects_then_collapses_all() {
         panic!("project picker closed");
     };
     assert!(collapsed.is_empty());
-    assert_eq!(App::filtered_project_rows(groups, "", collapsed).len(), 2);
+    assert_eq!(App::filtered_project_rows(groups, "", collapsed).len(), 4);
     query.insert_str("topic");
     assert_eq!(
         App::filtered_project_rows(groups, &query.value, collapsed),
-        vec![(1, 0)]
+        vec![
+            ProjectRow::Group(1),
+            ProjectRow::Worktree {
+                group_index: 1,
+                tree_index: 0,
+            },
+        ]
     );
     query.value.clear();
 
@@ -218,6 +251,63 @@ fn clicking_a_project_button_only_toggles_that_project() {
         panic!("project picker closed");
     };
     assert_eq!(collapsed, &HashSet::from([common_dir]));
+}
+
+#[test]
+fn project_headers_are_keyboard_rows_and_remember_their_fold() {
+    let mut app = App::new("/tmp/repo", "repo");
+    let common_dir = PathBuf::from("/tmp/repo/.git");
+    app.modal = Some(Modal::Projects {
+        groups: vec![ProjectGroup {
+            name: "repo".to_owned(),
+            common_dir: common_dir.clone(),
+            worktrees: vec![sample_worktree("/tmp/repo", "main", true)],
+        }],
+        selected: 1,
+        query: TextBuffer::default(),
+        collapsed: HashSet::new(),
+        loading: false,
+        opening: None,
+        mode: ProjectOpenMode::CurrentTab,
+    });
+    let now = Instant::now();
+
+    drop(app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), now));
+    drop(app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now));
+
+    let Some(Modal::Projects {
+        selected,
+        collapsed,
+        ..
+    }) = &app.modal
+    else {
+        panic!("project picker closed");
+    };
+    assert_eq!(*selected, 0);
+    assert_eq!(collapsed, &HashSet::from([common_dir.clone()]));
+    assert_eq!(app.collapsed_project_groups, HashSet::from([common_dir]));
+}
+
+#[test]
+fn project_picker_omits_prunable_worktrees() {
+    let mut stale = sample_worktree("/tmp/repo-stale", "stale", false);
+    stale.prunable = Some("gitdir file points to a missing path".to_owned());
+    let groups = vec![ProjectGroup {
+        name: "repo".to_owned(),
+        common_dir: PathBuf::from("/tmp/repo/.git"),
+        worktrees: vec![sample_worktree("/tmp/repo", "main", true), stale],
+    }];
+
+    assert_eq!(
+        App::filtered_project_rows(&groups, "", &HashSet::new()),
+        vec![
+            ProjectRow::Group(0),
+            ProjectRow::Worktree {
+                group_index: 0,
+                tree_index: 0,
+            },
+        ]
+    );
 }
 
 #[test]

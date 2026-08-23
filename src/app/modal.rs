@@ -288,6 +288,10 @@ pub(crate) enum ModalAction {
     SwitchSshMachine(usize),
     PullRequestAction(usize),
     PullRequestReviewThreadAction(usize),
+    PullRequestReviewDecision(usize),
+    ConflictOurs,
+    ConflictTheirs,
+    ConflictResolved,
 }
 
 #[derive(Debug, Clone)]
@@ -383,13 +387,6 @@ pub(crate) enum Modal {
     Conflict {
         change: Change,
     },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ProjectOpenMode {
-    Initial,
-    CurrentTab,
-    NewTab,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

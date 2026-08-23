@@ -2,6 +2,10 @@
 use super::*;
 
 impl App {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the exhaustive action match keeps mouse and keyboard behavior aligned"
+    )]
     pub(super) fn handle_modal_action(
         &mut self,
         action: ModalAction,
@@ -108,6 +112,33 @@ impl App {
                 if let Some(item) = items.get(index).cloned() {
                     self.handle_review_thread_action(item, effects);
                 }
+            }
+            ModalAction::PullRequestReviewDecision(index) => {
+                if let Some(Modal::PullRequestReviewSubmit { decision, .. }) = &mut self.modal
+                    && let Some(selected) = PullRequestReviewDecision::ALL.get(index)
+                {
+                    *decision = *selected;
+                }
+            }
+            ModalAction::ConflictOurs
+            | ModalAction::ConflictTheirs
+            | ModalAction::ConflictResolved => {
+                let Some(Modal::Conflict { change }) = self.modal.take() else {
+                    return;
+                };
+                let operation = match action {
+                    ModalAction::ConflictOurs => GitOperation::ResolveConflict {
+                        path: change.path,
+                        choice: ConflictChoice::Ours,
+                    },
+                    ModalAction::ConflictTheirs => GitOperation::ResolveConflict {
+                        path: change.path,
+                        choice: ConflictChoice::Theirs,
+                    },
+                    ModalAction::ConflictResolved => GitOperation::Stage(vec![change.path]),
+                    _ => return,
+                };
+                self.queue_operation(operation, effects);
             }
         }
     }

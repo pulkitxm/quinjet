@@ -9,7 +9,21 @@ pub(super) fn draw_modal(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     draw_modal_content(frame, app, theme);
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the exhaustive dispatcher keeps every modal and its hit targets together"
+)]
 pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
+    let mut list_hits = Vec::new();
+    let mut list_len = 0;
+    let mut list_max_scroll = 0;
+    let mut list = ModalList::new(
+        &mut list_hits,
+        &mut list_len,
+        &mut list_max_scroll,
+        app.modal_scroll,
+        app.modal_free_scroll,
+    );
     match app.modal.as_ref() {
         None | Some(Modal::Help { .. }) => {}
         Some(Modal::Commit { input, amend }) => {
@@ -29,7 +43,14 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
                 crate::app::PullRequestReviewTarget::Reply(_) => " Reply to review thread ",
                 crate::app::PullRequestReviewTarget::Edit { .. } => " Edit review comment ",
             };
-            draw_review_editor(frame, title, input, None, theme);
+            draw_review_editor(
+                frame,
+                &mut app.geometry.modal_action_hits,
+                title,
+                input,
+                None,
+                theme,
+            );
         }
         Some(Modal::PullRequestReviewThreadActions { items, selected }) => {
             draw_review_thread_actions(
@@ -37,11 +58,19 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
                 &mut app.geometry.modal_action_hits,
                 items,
                 *selected,
+                &mut list,
                 theme,
             );
         }
         Some(Modal::PullRequestReviewSubmit { input, decision }) => {
-            draw_review_editor(frame, " Submit review ", input, Some(*decision), theme);
+            draw_review_editor(
+                frame,
+                &mut app.geometry.modal_action_hits,
+                " Submit review ",
+                input,
+                Some(*decision),
+                theme,
+            );
         }
         Some(Modal::Prompt { title, input, .. }) => {
             draw_prompt(frame, title, input, theme);
@@ -56,6 +85,7 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
             title,
             items,
             *selected,
+            &mut list,
             theme,
         ),
         Some(Modal::Confirm { title, message, .. }) => {
@@ -74,25 +104,27 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
             query,
             loading,
             ..
-        }) => draw_branches(frame, items, *selected, query, *loading, app, theme),
+        }) => draw_branches(
+            frame, items, *selected, query, *loading, app, &mut list, theme,
+        ),
         Some(Modal::HistoryBranches {
             items,
             selected,
             query,
             loading,
-        }) => draw_history_branches(frame, items, *selected, query, *loading, theme),
+        }) => draw_history_branches(frame, items, *selected, query, *loading, &mut list, theme),
         Some(Modal::CompareBranches {
             items,
             selected,
             query,
             loading,
-        }) => draw_compare_branches(frame, items, *selected, query, *loading, theme),
+        }) => draw_compare_branches(frame, items, *selected, query, *loading, &mut list, theme),
         Some(Modal::Stashes {
             items,
             selected,
             query,
             loading,
-        }) => draw_stashes(frame, items, *selected, query, *loading, theme),
+        }) => draw_stashes(frame, items, *selected, query, *loading, &mut list, theme),
         Some(modal @ Modal::Projects { .. }) => {
             draw_ssh_project_modal(
                 frame,
@@ -101,6 +133,7 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
                 app.ssh_context.as_ref(),
                 app.project_machine_focus,
                 &mut app.geometry.modal_action_hits,
+                &mut list,
                 theme,
             );
         }
@@ -109,20 +142,27 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
             selected,
             query,
             loading,
-        }) => draw_pull_request_repositories(frame, items, *selected, query, *loading, theme),
+        }) => draw_pull_request_repositories(
+            frame, items, *selected, query, *loading, &mut list, theme,
+        ),
         Some(Modal::CommandPalette { query, selected }) => {
             let query = query.clone();
             let selected = *selected;
-            draw_palette(frame, app, &query, selected, theme);
+            draw_palette(frame, app, &query, selected, &mut list, theme);
         }
         Some(Modal::Themes { selected, .. }) => {
-            draw_theme_picker(frame, *selected, app.theme_name, theme);
+            draw_theme_picker(frame, *selected, app.theme_name, &mut list, theme);
         }
         Some(Modal::Appearances { selected, .. }) => {
-            draw_appearance_picker(frame, *selected, app.appearance_choice, theme);
+            draw_appearance_picker(frame, *selected, app.appearance_choice, &mut list, theme);
         }
-        Some(Modal::Conflict { change }) => draw_conflict(frame, change, theme),
+        Some(Modal::Conflict { change }) => {
+            draw_conflict(frame, &mut app.geometry.modal_action_hits, change, theme);
+        }
     }
+    app.geometry.modal_list_hits = list_hits;
+    app.geometry.modal_list_len = list_len;
+    app.geometry.modal_list_max_scroll = list_max_scroll;
 }
 
 pub(super) fn draw_help(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
@@ -145,7 +185,11 @@ pub(super) fn draw_help(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     frame.render_widget(block, area);
     let list_height = inner.height.saturating_sub(1) as usize;
     let display_selected = help_display_index(selected);
-    ensure_offset(&mut scroll, display_selected, list_height, HELP_ROWS.len());
+    if app.modal_free_scroll {
+        scroll = scroll.min(HELP_ROWS.len().saturating_sub(list_height));
+    } else {
+        ensure_offset(&mut scroll, display_selected, list_height, HELP_ROWS.len());
+    }
     let mut hits = Vec::new();
     let end = (scroll + list_height).min(HELP_ROWS.len());
     for (y, (display, row)) in (inner.y..inner.y.saturating_add(cells(list_height)))
@@ -250,11 +294,13 @@ pub(super) fn draw_commit(
     let buttons = Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
     let primary_label = if amend { "Amend" } else { "Commit" };
     let cancel_label = "Cancel";
-    let arrow = if amend { "◀" } else { "▶" };
+    let mode_label = if amend { "Tab: New" } else { "Tab: Amend" };
     let cancel_width = u16::try_from(cancel_label.width().saturating_add(2))
         .unwrap_or(8)
         .min(buttons.width.saturating_sub(3));
-    let arrow_width = 3.min(buttons.width.saturating_sub(cancel_width));
+    let arrow_width = u16::try_from(mode_label.width().saturating_add(2))
+        .unwrap_or(12)
+        .min(buttons.width.saturating_sub(cancel_width));
     let label_width = buttons
         .width
         .saturating_sub(cancel_width.saturating_add(arrow_width));
@@ -295,7 +341,7 @@ pub(super) fn draw_commit(
         label_area,
     );
     frame.render_widget(
-        Paragraph::new(arrow)
+        Paragraph::new(mode_label)
             .alignment(Alignment::Center)
             .style(Style::default().fg(theme.modified).bg(theme.panel_alt)),
         arrow_area,
@@ -330,12 +376,17 @@ pub(super) fn draw_prompt(
     draw_modal_hint(frame, area, "Enter accept   Esc cancel", theme);
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the picker receives its modal state, hit targets, list geometry, and palette"
+)]
 fn draw_pr_actions(
     frame: &mut Frame<'_>,
     hits: &mut Vec<(Rect, ModalAction)>,
     title: &str,
     items: &[PrActionItem],
     selected: usize,
+    list: &mut ModalList<'_>,
     theme: &Theme,
 ) {
     let width = items
@@ -355,10 +406,7 @@ fn draw_pr_actions(
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let visible = inner.height.saturating_sub(1) as usize;
-    let offset = selected
-        .saturating_add(1)
-        .saturating_sub(visible)
-        .min(items.len().saturating_sub(visible));
+    let offset = list.offset(selected, visible, items.len());
     for (row, (index, item)) in items
         .iter()
         .enumerate()
@@ -382,6 +430,7 @@ fn draw_pr_actions(
             row,
         );
         hits.push((row, ModalAction::PullRequestAction(index)));
+        list.hit(row, index);
     }
     draw_modal_hint(frame, area, "j/k select   Enter open   Esc cancel", theme);
 }

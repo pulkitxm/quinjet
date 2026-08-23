@@ -1,3 +1,5 @@
+#[cfg(test)]
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::{env, fs};
 
@@ -6,9 +8,13 @@ use serde::{Deserialize, Serialize};
 use crate::git::{ProjectGroup, Repository, Worktree};
 use crate::state_sorting::{sort_project_groups, sort_worktrees};
 
+mod project_picker;
 mod remote;
 pub(crate) mod session;
 
+#[cfg(test)]
+use project_picker::PROJECT_PICKER_FILE;
+pub(crate) use project_picker::{load_collapsed_project_groups, record_collapsed_project_groups};
 pub(crate) use remote::{
     forget_recent_remote, load_recent_remotes, load_recent_ssh_machines,
     load_recent_ssh_machines_with_current, record_recent_remote,
@@ -216,6 +222,21 @@ mod tests {
             br#"[{"path":"valid","commonDir":"common"},{"path":3,"commonDir":"broken"}]"#,
         );
         assert_eq!(read_entries(), Vec::<RecentEntry>::new());
+    }
+
+    #[test]
+    fn project_picker_folds_round_trip_and_ignore_invalid_state() {
+        let (state, _guard) = isolated_state();
+        let collapsed = HashSet::from([
+            PathBuf::from("/work/one/.git"),
+            PathBuf::from("/work/two/.git"),
+        ]);
+
+        record_collapsed_project_groups(&collapsed);
+
+        assert_eq!(load_collapsed_project_groups(), collapsed);
+        fs::write(state.path().join(PROJECT_PICKER_FILE), b"{").unwrap();
+        assert!(load_collapsed_project_groups().is_empty());
     }
 
     #[test]
