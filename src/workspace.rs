@@ -4,7 +4,7 @@ use std::time::Instant;
 use crate::app::{App, AppEffect, Modal, ProjectOpenMode, ToastLevel};
 use crate::git::Repository;
 use crate::git::worker::{GitWorker, WorkerCommand};
-use crate::ssh::SshContext;
+use crate::ssh::{SshContext, SshProjectOpenMode, SshSwitch};
 use crate::state::session::ProjectSession;
 use crate::tabs::{RepositoryTabs, TabId};
 use crate::theme::{AppearanceChoice, ThemeName};
@@ -48,6 +48,7 @@ impl RepositoryRuntime {
 
 pub(crate) struct RepositoryWorkspace {
     tabs: RepositoryTabs<RepositoryRuntime>,
+    ssh_context: Option<SshContext>,
 }
 
 impl RepositoryWorkspace {
@@ -57,20 +58,36 @@ impl RepositoryWorkspace {
         appearance: AppearanceChoice,
         mouse: bool,
         webhooks_listening: bool,
-        ssh_context: Option<SshContext>,
+        mut ssh_context: Option<SshContext>,
     ) -> Self {
         let title = repository.name();
         let root = repository.root().to_path_buf();
+        let id = ssh_context.as_mut().map_or_else(
+            || TabId::new(0),
+            |context| {
+                let id = context
+                    .tabs
+                    .id_for_root(&context.current, &root)
+                    .unwrap_or_else(|| {
+                        context
+                            .tabs
+                            .append(context.current.clone(), title.clone(), root.clone())
+                    });
+                drop(context.tabs.activate(id));
+                id
+            },
+        );
         let runtime = RepositoryRuntime::new(
             repository,
             theme,
             appearance,
             mouse,
             webhooks_listening,
-            ssh_context,
+            ssh_context.clone(),
         );
         Self {
-            tabs: RepositoryTabs::new(title, root, runtime),
+            tabs: RepositoryTabs::new_with_id(id, title, root, runtime),
+            ssh_context,
         }
     }
 
@@ -82,7 +99,33 @@ impl RepositoryWorkspace {
         webhooks_listening: bool,
         ssh_context: Option<&SshContext>,
     ) -> Option<Self> {
-        let mut repositories = session.roots.iter().filter_map(|root| {
+        let current_machine = ssh_context.map(|context| context.current.as_str());
+        let shared_roots = current_machine.map_or_else(Vec::new, |machine| {
+            ssh_context.map_or_else(Vec::new, |context| {
+                context
+                    .tabs
+                    .entries_for_machine(machine)
+                    .map(|tab| tab.root.clone())
+                    .collect()
+            })
+        });
+        let roots = if shared_roots.is_empty() {
+            session.roots.clone()
+        } else {
+            shared_roots
+        };
+        let desired_root = current_machine
+            .and_then(|machine| {
+                ssh_context.and_then(|context| {
+                    context
+                        .tabs
+                        .active_for_machine(machine)
+                        .and_then(|id| context.tabs.get(id))
+                        .map(|tab| tab.root.clone())
+                })
+            })
+            .or_else(|| session.active.clone());
+        let mut repositories = roots.iter().filter_map(|root| {
             Repository::discover(root)
                 .ok()
                 .map(|repository| (root, repository))
@@ -96,27 +139,21 @@ impl RepositoryWorkspace {
             webhooks_listening,
             ssh_context.cloned(),
         );
-        let mut restored_active = (session.active.as_ref() == Some(first_root))
+        let mut restored_active = (desired_root.as_ref() == Some(first_root))
             .then(|| workspace.active_id())
             .flatten();
         for (saved_root, repository) in repositories {
-            let title = repository.name();
-            let root = repository.root().to_path_buf();
-            let runtime = RepositoryRuntime::new(
-                &repository,
-                theme,
-                appearance,
-                mouse,
-                webhooks_listening,
-                ssh_context.cloned(),
-            );
-            let id = workspace.tabs.append(title, root.clone(), runtime);
-            if session.active.as_ref() == Some(saved_root) {
+            let source = workspace.active_id()?;
+            let id = workspace
+                .append_repository(source, &repository, Instant::now())?
+                .id;
+            if desired_root.as_ref() == Some(saved_root) {
                 restored_active = Some(id);
             }
         }
-        if let Some(id) = restored_active {
-            workspace.activate(id, Instant::now());
+        workspace.prune_missing_shared_tabs();
+        if let Some(id) = restored_active.or_else(|| workspace.active_id()) {
+            let _handoff = workspace.activate(id, Instant::now());
         } else {
             workspace.sync_tabs(Instant::now());
         }
@@ -129,6 +166,10 @@ impl RepositoryWorkspace {
             roots: infos.iter().map(|tab| tab.root.clone()).collect(),
             active: infos.into_iter().find(|tab| tab.active).map(|tab| tab.root),
         }
+    }
+
+    pub(crate) fn ssh_context(&self) -> Option<SshContext> {
+        self.ssh_context.clone()
     }
 
     pub(crate) const fn active_id(&self) -> Option<TabId> {
@@ -169,7 +210,10 @@ impl RepositoryWorkspace {
     }
 
     pub(crate) fn sync_tabs(&mut self, now: Instant) {
-        let infos = self.tabs.infos();
+        let infos = self
+            .ssh_context
+            .as_ref()
+            .map_or_else(|| self.tabs.infos(), |context| context.tabs.infos());
         let active = self.active_id();
         for (id, runtime) in self.tabs.iter_mut() {
             runtime.app.set_tab_active(active == Some(id), now);
@@ -202,34 +246,69 @@ impl RepositoryWorkspace {
             .is_some_and(|runtime| runtime.worker.send(command))
     }
 
-    pub(crate) fn activate(&mut self, id: TabId, now: Instant) {
+    pub(crate) fn activate(&mut self, id: TabId, now: Instant) -> Option<SshSwitch> {
         if self.tabs.activate(id) {
+            if let Some(context) = self.ssh_context.as_mut() {
+                drop(context.tabs.activate(id));
+            }
             self.sync_tabs(now);
+            return None;
         }
+        self.switch_to_shared_tab(id)
     }
 
     pub(crate) fn reorder(&mut self, source: TabId, target: TabId, now: Instant) {
-        if self.tabs.reorder(source, target) {
+        let reordered = self.ssh_context.as_mut().map_or_else(
+            || self.tabs.reorder(source, target),
+            |context| context.tabs.reorder(source, target),
+        );
+        if reordered {
+            if self.tabs.get(source).is_some() && self.tabs.get(target).is_some() {
+                let _reordered = self.tabs.reorder(source, target);
+            }
             self.sync_tabs(now);
         }
     }
 
-    pub(crate) fn close(&mut self, id: TabId, now: Instant) -> bool {
+    pub(crate) fn close(&mut self, id: TabId, now: Instant) -> (bool, Option<SshSwitch>) {
         drop(self.tabs.close(id));
+        if let Some(context) = self.ssh_context.as_mut() {
+            drop(context.tabs.close(id));
+            if context.tabs.infos().is_empty() {
+                return (false, None);
+            }
+            let handoff = self.follow_shared_active(now);
+            return (handoff.is_some() || !self.tabs.is_empty(), handoff);
+        }
         if self.tabs.is_empty() {
-            return false;
+            return (false, None);
         }
         self.sync_tabs(now);
-        true
+        (true, None)
     }
 
-    pub(crate) fn close_others(&mut self, id: TabId, now: Instant) {
+    pub(crate) fn close_others(&mut self, id: TabId, now: Instant) -> Option<SshSwitch> {
+        if let Some(context) = self.ssh_context.as_mut() {
+            if !context.tabs.close_others(id) {
+                return None;
+            }
+            if self.tabs.get(id).is_some() {
+                drop(self.tabs.close_others(id));
+            } else {
+                drop(self.tabs.close_all());
+            }
+            return self.follow_shared_active(now);
+        }
         drop(self.tabs.close_others(id));
         self.sync_tabs(now);
+        None
     }
 
     pub(crate) fn close_all(&mut self) {
         drop(self.tabs.close_all());
+        if let Some(context) = self.ssh_context.as_mut() {
+            context.tabs.close_all();
+        }
     }
 
     pub(crate) fn switch_repository(
@@ -276,7 +355,7 @@ impl RepositoryWorkspace {
             app.modal = None;
         }
         if let Some(id) = self.tabs.id_for_root(repository.root()) {
-            self.activate(id, now);
+            let _handoff = self.activate(id, now);
             return None;
         }
         crate::state::record_recent_project(repository.root());
@@ -306,6 +385,13 @@ impl RepositoryWorkspace {
             ssh_context,
         );
         drop(self.tabs.replace(source, title, root, runtime));
+        if let Some(context) = self.ssh_context.as_mut() {
+            let _replaced =
+                context
+                    .tabs
+                    .replace(source, repository.name(), repository.root().to_path_buf());
+            drop(context.tabs.activate(source));
+        }
         self.sync_tabs(now);
         let effects = self.app_mut(source)?.initial_effects();
         Some(RoutedEffects {
@@ -325,7 +411,7 @@ impl RepositoryWorkspace {
         let appearance = source.app.appearance_choice;
         let mouse = source.app.mouse_capture_preference;
         let webhooks_listening = source.app.webhooks_listening;
-        let ssh_context = source.app.ssh_context.clone();
+        let ssh_context = self.ssh_context.clone();
         let title = repository.name();
         let root = repository.root().to_path_buf();
         let runtime = RepositoryRuntime::new(
@@ -336,72 +422,76 @@ impl RepositoryWorkspace {
             webhooks_listening,
             ssh_context,
         );
-        let id = self.tabs.append(title, root, runtime);
+        let id = if let Some(context) = self.ssh_context.as_mut() {
+            let id = context
+                .tabs
+                .id_for_root(&context.current, &root)
+                .unwrap_or_else(|| {
+                    context
+                        .tabs
+                        .append(context.current.clone(), title.clone(), root.clone())
+                });
+            drop(context.tabs.activate(id));
+            self.tabs.append_with_id(id, title, root, runtime)
+        } else {
+            self.tabs.append(title, root, runtime)
+        };
         self.sync_tabs(now);
         let effects = self.app_mut(id)?.initial_effects();
         Some(RoutedEffects { id, effects })
     }
 
-    pub(crate) fn drain_worker_events(&mut self, now: Instant) -> Vec<RoutedEffects> {
-        let mut routed = Vec::new();
-        for (id, runtime) in self.tabs.iter_mut() {
-            let events = runtime.worker.events().try_iter().collect::<Vec<_>>();
-            for event in events {
-                let effects = runtime.app.handle_worker_event(event, now);
-                routed.push(RoutedEffects { id, effects });
-            }
+    fn follow_shared_active(&mut self, now: Instant) -> Option<SshSwitch> {
+        let active = self.ssh_context.as_ref()?.tabs.active_id()?;
+        if self.tabs.activate(active) {
+            self.sync_tabs(now);
+            None
+        } else {
+            self.switch_to_shared_tab(active)
         }
-        routed
     }
 
-    pub(crate) fn poll_watchers(&mut self) -> Vec<RoutedEffects> {
-        let mut routed = Vec::new();
-        for (id, runtime) in self.tabs.iter_mut() {
-            let Some(receiver) = runtime.watcher.as_ref().map(RepoWatcher::changes) else {
-                continue;
-            };
-            if receiver.try_iter().next().is_none() {
-                continue;
-            }
-            let mut effects = Vec::new();
-            runtime.app.filesystem_changed(&mut effects);
-            routed.push(RoutedEffects { id, effects });
-        }
-        routed
-    }
-
-    pub(crate) fn tick(&mut self, now: Instant) -> (Vec<RoutedEffects>, bool) {
-        let active = self.active_id();
-        let mut dirty = false;
-        let mut routed = Vec::new();
-        for (id, runtime) in self.tabs.iter_mut() {
-            let (effects, changed) = runtime.app.tick(now);
-            dirty |= changed && active == Some(id);
-            routed.push(RoutedEffects { id, effects });
-        }
-        (routed, dirty)
-    }
-
-    pub(crate) fn periodic_refresh(&mut self) -> Vec<RoutedEffects> {
-        let mut routed = Vec::new();
-        for (id, runtime) in self.tabs.iter_mut() {
-            let mut effects = Vec::new();
-            runtime.app.periodic_refresh(&mut effects);
-            routed.push(RoutedEffects { id, effects });
-        }
-        routed
-    }
-
-    pub(crate) fn webhook_delivered(&mut self, now: Instant) -> Vec<RoutedEffects> {
-        self.tabs
-            .iter_mut()
-            .map(|(id, runtime)| RoutedEffects {
-                id,
-                effects: runtime.app.webhook_delivered(now),
+    fn prune_missing_shared_tabs(&mut self) {
+        let roots = self
+            .tabs
+            .infos()
+            .into_iter()
+            .map(|tab| tab.root)
+            .collect::<Vec<_>>();
+        let Some(context) = self.ssh_context.as_mut() else {
+            return;
+        };
+        let missing = context
+            .tabs
+            .entries_for_machine(&context.current)
+            .filter(|tab| {
+                !roots
+                    .iter()
+                    .any(|root| crate::git::support::same_path(root, &tab.root))
             })
-            .collect()
+            .map(|tab| tab.id)
+            .collect::<Vec<_>>();
+        for id in missing {
+            drop(context.tabs.close(id));
+        }
+    }
+
+    fn switch_to_shared_tab(&mut self, id: TabId) -> Option<SshSwitch> {
+        let context = self.ssh_context.as_mut()?;
+        let machine = context.tabs.get(id)?.machine.clone();
+        let index = context
+            .machines
+            .iter()
+            .position(|candidate| candidate.target == machine && candidate.accessible)?;
+        drop(context.tabs.activate(id));
+        Some(SshSwitch {
+            index,
+            mode: SshProjectOpenMode::Activate,
+        })
     }
 }
+
+mod runtime;
 
 #[cfg(test)]
 mod tests;

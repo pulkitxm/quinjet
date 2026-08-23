@@ -22,7 +22,6 @@ impl App {
     }
 
     pub(super) fn open_projects(&mut self, mode: ProjectOpenMode, effects: &mut Vec<AppEffect>) {
-        self.project_machine_focus = None;
         self.modal_scroll = 0;
         self.modal_free_scroll = false;
         let collapsed = self.collapsed_project_groups.clone();

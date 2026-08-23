@@ -15,6 +15,11 @@ mod terminal;
 
 pub(crate) use terminal::run_selected_terminal;
 
+struct TerminalStatus {
+    status: std::process::ExitStatus,
+    context: Option<SshContext>,
+}
+
 #[derive(Clone, Copy, Default)]
 struct TerminalRelay {
     allocate: bool,
@@ -52,11 +57,11 @@ fn run_once(
     arguments: &[OsString],
     context: Option<&SshContext>,
 ) -> Result<u8> {
-    let status = ssh_status(target, binary, arguments, context, TerminalRelay::default())?;
-    if status.success() {
+    let outcome = ssh_status(target, binary, arguments, context, TerminalRelay::default())?;
+    if outcome.status.success() {
         crate::state::record_recent_remote(target, folder);
     }
-    Ok(exit_code(status))
+    Ok(exit_code(outcome.status))
 }
 
 fn ssh_status(
@@ -65,7 +70,7 @@ fn ssh_status(
     arguments: &[OsString],
     context: Option<&SshContext>,
     terminal: TerminalRelay,
-) -> Result<std::process::ExitStatus> {
+) -> Result<TerminalStatus> {
     let command = terminal::remote_command(
         binary,
         arguments,
@@ -79,13 +84,17 @@ fn ssh_status(
     } else {
         &mut ssh
     };
+    let _command = ssh.arg("--").arg(target).arg(command);
+    if terminal.allocate {
+        return terminal::relay_status(ssh, &format!("failed to start ssh for {target}"));
+    }
     let status = ssh
-        .arg("--")
-        .arg(target)
-        .arg(command)
         .status()
         .with_context(|| format!("failed to start ssh for {target}"))?;
-    Ok(status)
+    Ok(TerminalStatus {
+        status,
+        context: None,
+    })
 }
 
 fn exit_code(status: std::process::ExitStatus) -> u8 {
@@ -176,6 +185,7 @@ fn context_with_reachability(
     SshContext {
         current: current.to_owned(),
         machines,
+        tabs: crate::ssh::SshTabs::default(),
     }
 }
 

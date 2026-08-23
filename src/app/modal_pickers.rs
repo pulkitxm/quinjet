@@ -35,58 +35,18 @@ impl App {
                     self.modal = Some(modal);
                     return effects;
                 }
-                if key.code == KeyCode::Tab
+                if matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
                     && let Some(context) = self.ssh_context.as_ref()
                 {
-                    self.project_machine_focus = self.project_machine_focus.map_or_else(
-                        || {
-                            context
-                                .machines
-                                .iter()
-                                .position(|machine| machine.target == context.current)
-                        },
-                        |_| None,
-                    );
+                    let reverse =
+                        key.code == KeyCode::BackTab || key.modifiers.contains(KeyModifiers::SHIFT);
+                    if let Some(index) = context.adjacent_accessible_machine_index(reverse)
+                        && let Some(effect) = machine_switch_effect(context, index, *mode)
+                    {
+                        effects.push(effect);
+                    }
                     self.modal = Some(modal);
                     return effects;
-                }
-                if let Some(machine_selected) = self.project_machine_focus
-                    && let Some(context) = self.ssh_context.as_ref()
-                {
-                    let next = match key.code {
-                        KeyCode::Left | KeyCode::Up | KeyCode::Char('h' | 'k') => {
-                            crate::ssh::previous_accessible_machine_index(
-                                &context.machines,
-                                machine_selected,
-                            )
-                        }
-                        KeyCode::Right | KeyCode::Down | KeyCode::Char('j' | 'l') => {
-                            crate::ssh::next_accessible_machine_index(
-                                &context.machines,
-                                machine_selected,
-                            )
-                        }
-                        KeyCode::Enter => {
-                            if let Some(effect) =
-                                machine_switch_effect(context, machine_selected, *mode)
-                            {
-                                effects.push(effect);
-                            }
-                            self.modal = Some(modal);
-                            return effects;
-                        }
-                        _ => {
-                            self.project_machine_focus = None;
-                            None
-                        }
-                    };
-                    if let Some(next) = next {
-                        self.project_machine_focus = Some(next);
-                    }
-                    if self.project_machine_focus.is_some() {
-                        self.modal = Some(modal);
-                        return effects;
-                    }
                 }
                 let visible = Self::filtered_project_rows(groups, &query.value, collapsed);
                 let selected_tree = visible.get(*selected).and_then(|row| match row {
@@ -336,9 +296,9 @@ fn machine_switch_effect(
         return None;
     }
     let mode = if project_mode == ProjectOpenMode::NewTab {
-        crate::ssh::SshProjectOpenMode::NewTab
+        crate::ssh::SshProjectOpenMode::New
     } else {
-        crate::ssh::SshProjectOpenMode::CurrentTab
+        crate::ssh::SshProjectOpenMode::Current
     };
     Some(AppEffect::SwitchSshMachine(crate::ssh::SshSwitch {
         index,
