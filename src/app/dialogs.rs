@@ -4,7 +4,7 @@ use super::*;
 impl App {
     pub(crate) fn open_projects_on_launch(&mut self, mode: ProjectOpenMode) -> Vec<AppEffect> {
         let mut effects = Vec::new();
-        self.open_projects(mode, &mut effects);
+        self.show_projects(mode, &mut effects);
         effects
     }
 
@@ -30,6 +30,14 @@ impl App {
             effects.push(AppEffect::Host(action));
             return;
         }
+        if mode == ProjectOpenMode::NewTab {
+            effects.push(AppEffect::OpenRepositoryTabPicker);
+            return;
+        }
+        self.show_projects(mode, effects);
+    }
+
+    fn show_projects(&mut self, mode: ProjectOpenMode, effects: &mut Vec<AppEffect>) {
         self.modal_scroll = 0;
         self.modal_free_scroll = false;
         let collapsed = self.collapsed_project_groups.clone();

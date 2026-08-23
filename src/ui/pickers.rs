@@ -77,9 +77,28 @@ pub(crate) fn draw_projects(
         modal_ssh::draw_project_opening(frame, path, list_area, theme);
     } else if loading {
         frame.render_widget(
-            Paragraph::new("Loading projects…").style(Style::default().fg(theme.muted)),
-            list_area,
+            Paragraph::new("  ◐ Loading projects…")
+                .style(Style::default().fg(theme.accent).bg(theme.panel)),
+            Rect::new(list_area.x, list_area.y, list_area.width, 1),
         );
+        for offset in 1..list_area.height.min(7) {
+            let width = list_area
+                .width
+                .saturating_sub(8_u16.saturating_add((offset % 3).saturating_mul(7)));
+            frame.render_widget(
+                Paragraph::new(format!(
+                    "   ◌ {}",
+                    "─".repeat(width.saturating_sub(6) as usize)
+                ))
+                .style(Style::default().fg(theme.border).bg(theme.panel)),
+                Rect::new(
+                    list_area.x,
+                    list_area.y.saturating_add(offset),
+                    list_area.width,
+                    1,
+                ),
+            );
+        }
     } else {
         let rows = App::filtered_project_rows(groups, &query.value, collapsed);
         let offset = list.offset(selected, list_area.height as usize, rows.len());
@@ -171,11 +190,6 @@ pub(crate) fn draw_projects(
             );
         }
     }
-    let fold_action = if App::all_project_groups_expanded(groups, collapsed) {
-        "collapse all"
-    } else {
-        "expand all"
-    };
     let selected_group = matches!(
         App::filtered_project_rows(groups, &query.value, collapsed).get(selected),
         Some(ProjectRow::Group(_))
@@ -183,30 +197,24 @@ pub(crate) fn draw_projects(
     let hint = if opening.is_some() {
         "Opening project…".to_owned()
     } else {
-        let machines = ssh.map_or("", |_| "   Tab next machine");
+        let machines = ssh.map_or("", |_| "   Tab machine");
         if selected_group {
             let escape = if mode == ProjectOpenMode::Initial {
                 "quit"
             } else {
                 "close"
             };
-            format!(
-                "Enter/Space fold   ← collapse   → expand{machines}   Ctrl+E {fold_action}   Esc {escape}"
-            )
+            format!("Enter/Space fold   ←/→{machines}   Ctrl+E all   Esc {escape}")
         } else {
             match mode {
                 ProjectOpenMode::Initial => {
-                    format!("Enter open{machines}   Ctrl+E {fold_action}   Ctrl+O path   Esc quit")
+                    format!("Enter open{machines}   Ctrl+E all   Ctrl+O path   Esc quit")
                 }
                 ProjectOpenMode::CurrentTab => {
-                    format!(
-                        "Enter switch tab{machines}   Ctrl+E {fold_action}   Delete forget   Esc close"
-                    )
+                    format!("Enter switch{machines}   Ctrl+E all   Del forget   Esc close")
                 }
                 ProjectOpenMode::NewTab => {
-                    format!(
-                        "Enter new tab{machines}   Ctrl+E {fold_action}   Delete forget   Esc close"
-                    )
+                    format!("Enter new tab{machines}   Ctrl+E all   Del forget   Esc close")
                 }
             }
         }

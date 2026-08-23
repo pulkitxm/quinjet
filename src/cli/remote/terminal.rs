@@ -37,6 +37,7 @@ pub(super) fn run_terminal_loop(
     handoff: (bool, bool, Option<SshContext>, Option<std::path::PathBuf>),
     initial_project_mode: Option<SshProjectOpenMode>,
 ) -> Result<u8> {
+    let _terminal = crate::terminal::HandoffTerminalGuard::enter()?;
     let (implicit_terminal, mut switched, context, control_path) = handoff;
     let (mut current_target, mut current_folder) = (target.to_owned(), folder.to_path_buf());
     let mut current_local = false;
@@ -277,6 +278,7 @@ mod tests {
             current: "macbook".to_owned(),
             machines: Vec::new(),
             tabs,
+            probing: false,
         };
         let mut input = vec![b'x'; 8191];
         input.extend_from_slice(crate::ssh::HANDOFF_CONTEXT_PREFIX);

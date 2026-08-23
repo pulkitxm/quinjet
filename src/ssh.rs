@@ -97,6 +97,8 @@ pub(crate) struct SshTab {
     pub(crate) machine: String,
     pub(crate) title: String,
     pub(crate) root: PathBuf,
+    #[serde(default)]
+    pending: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -129,7 +131,7 @@ impl SshTabs {
     pub(crate) fn entries_for_machine(&self, machine: &str) -> impl Iterator<Item = &SshTab> {
         self.entries
             .iter()
-            .filter(move |tab| tab.machine == machine)
+            .filter(move |tab| tab.machine == machine && !tab.pending)
     }
 
     pub(crate) fn get(&self, id: TabId) -> Option<&SshTab> {
@@ -139,15 +141,30 @@ impl SshTabs {
     pub(crate) fn id_for_root(&self, machine: &str, root: &Path) -> Option<TabId> {
         self.entries
             .iter()
-            .find(|tab| tab.machine == machine && crate::git::support::same_path(&tab.root, root))
+            .find(|tab| {
+                !tab.pending
+                    && tab.machine == machine
+                    && crate::git::support::same_path(&tab.root, root)
+            })
             .map(|tab| tab.id)
     }
 
+    pub(crate) fn active_pending_for_machine(&self, machine: &str) -> Option<TabId> {
+        let active = self.active?;
+        self.get(active)
+            .filter(|tab| tab.pending && tab.machine == machine)
+            .map(|tab| tab.id)
+    }
+
+    pub(crate) fn is_pending(&self, id: TabId) -> bool {
+        self.get(id).is_some_and(|tab| tab.pending)
+    }
+
     pub(crate) fn active_for_machine(&self, machine: &str) -> Option<TabId> {
-        self.active_by_machine
-            .get(machine)
-            .copied()
-            .filter(|id| self.get(*id).is_some_and(|tab| tab.machine == machine))
+        self.active_by_machine.get(machine).copied().filter(|id| {
+            self.get(*id)
+                .is_some_and(|tab| !tab.pending && tab.machine == machine)
+        })
     }
 
     pub(crate) fn append(
@@ -163,9 +180,47 @@ impl SshTabs {
             machine: machine.into(),
             title: title.into(),
             root: root.into(),
+            pending: false,
         });
         drop(self.activate(id));
         id
+    }
+
+    pub(crate) fn append_pending(
+        &mut self,
+        machine: impl Into<String>,
+        root: impl Into<PathBuf>,
+    ) -> TabId {
+        let id = TabId::new(self.next_id);
+        self.next_id = self.next_id.wrapping_add(1);
+        self.entries.push(SshTab {
+            id,
+            machine: machine.into(),
+            title: "New project".to_owned(),
+            root: root.into(),
+            pending: true,
+        });
+        self.active = Some(id);
+        id
+    }
+
+    pub(crate) fn move_pending(
+        &mut self,
+        id: TabId,
+        machine: impl Into<String>,
+        root: impl Into<PathBuf>,
+    ) -> bool {
+        let Some(tab) = self
+            .entries
+            .iter_mut()
+            .find(|tab| tab.id == id && tab.pending)
+        else {
+            return false;
+        };
+        tab.machine = machine.into();
+        tab.root = root.into();
+        self.active = Some(id);
+        true
     }
 
     pub(crate) fn replace(
@@ -179,13 +234,16 @@ impl SshTabs {
         };
         tab.title = title.into();
         tab.root = root.into();
+        tab.pending = false;
         true
     }
 
     pub(crate) fn activate(&mut self, id: TabId) -> Option<String> {
         let machine = self.get(id)?.machine.clone();
         self.active = Some(id);
-        let _previous = self.active_by_machine.insert(machine.clone(), id);
+        if !self.is_pending(id) {
+            let _previous = self.active_by_machine.insert(machine.clone(), id);
+        }
         Some(machine)
     }
 
@@ -237,7 +295,9 @@ impl SshTabs {
         self.entries.retain(|candidate| candidate.id == id);
         self.active = Some(id);
         self.active_by_machine.clear();
-        let _previous = self.active_by_machine.insert(tab.machine, id);
+        if !tab.pending {
+            let _previous = self.active_by_machine.insert(tab.machine, id);
+        }
         true
     }
 
@@ -254,6 +314,8 @@ pub(crate) struct SshContext {
     pub current: String,
     pub machines: Vec<SshMachine>,
     pub tabs: SshTabs,
+    #[serde(default)]
+    pub probing: bool,
 }
 
 impl SshContext {
@@ -372,5 +434,30 @@ mod tests {
         assert_eq!(tabs.close(local_one).map(|tab| tab.id), Some(local_one));
         assert_eq!(tabs.active_id(), Some(local_two));
         assert_eq!(tabs.active_for_machine("macbook"), Some(local_two));
+    }
+
+    #[test]
+    fn pending_tabs_move_without_replacing_a_machines_repository_selection() {
+        let mut tabs = SshTabs::default();
+        let local = tabs.append("macbook", "local", "/local/repo");
+        let remote = tabs.append("tof", "remote", "/remote/repo");
+        drop(tabs.activate(local));
+        let pending = tabs.append_pending("macbook", "/local/repo");
+
+        assert_eq!(tabs.active_id(), Some(pending));
+        assert_eq!(tabs.active_for_machine("macbook"), Some(local));
+        assert!(tabs.move_pending(pending, "tof", "/remote"));
+        assert_eq!(tabs.active_id(), Some(pending));
+        assert_eq!(tabs.active_for_machine("tof"), Some(remote));
+        assert_eq!(
+            tabs.get(pending)
+                .map(|tab| (tab.machine.as_str(), tab.root.as_path())),
+            Some(("tof", Path::new("/remote")))
+        );
+
+        assert!(tabs.replace(pending, "selected", "/remote/selected"));
+        drop(tabs.activate(pending));
+        assert!(!tabs.is_pending(pending));
+        assert_eq!(tabs.active_for_machine("tof"), Some(pending));
     }
 }

@@ -11,6 +11,7 @@ mod state;
 mod state_sorting;
 mod tabs;
 mod terminal;
+mod terminal_launch;
 mod theme;
 mod ui;
 mod watch;
@@ -38,58 +39,10 @@ use crate::workspace::{RepositoryWorkspace, RoutedEffects, WorkspaceContext};
 
 fn main() -> ExitCode {
     match cli::dispatch() {
-        Ok(Launch::Terminal(options)) => terminal_exit_code(&options),
+        Ok(Launch::Terminal(options)) => terminal_launch::exit_code(&options),
         Ok(Launch::Finished(code)) => ExitCode::from(code),
         Err(error) => ExitCode::from(cli::report(&error)),
     }
-}
-
-fn terminal_exit_code(options: &TerminalOptions) -> ExitCode {
-    let inherited_context = SshContext::from_environment();
-    let local_session = inherited_context.is_none();
-    let context = inherited_context.or_else(|| cli::local_ssh_context(&options.path));
-    match open_terminal(options, context.as_ref()) {
-        Ok(TerminalOutcome::Finished) => ExitCode::SUCCESS,
-        Ok(TerminalOutcome::SwitchSshMachine {
-            request,
-            context: updated_context,
-        }) if local_session => {
-            let Some(mut context) = updated_context.or(context) else {
-                return ExitCode::from(cli::EXIT_FAILURE);
-            };
-            let Some(machine) = context.machines.get(request.index).cloned() else {
-                return ExitCode::from(cli::EXIT_FAILURE);
-            };
-            context.current.clone_from(&machine.target);
-            match cli::run_selected_terminal(
-                &machine.target,
-                &machine.folder,
-                context,
-                request.mode,
-            ) {
-                Ok(code) => ExitCode::from(code),
-                Err(error) => ExitCode::from(cli::report(&error)),
-            }
-        }
-        Ok(TerminalOutcome::SwitchSshMachine { request, context }) => {
-            if let Some(context) = context
-                && let Err(error) = ssh::emit_handoff_context(&context)
-            {
-                return ExitCode::from(cli::report(&error));
-            }
-            ssh::switch_exit_code(request)
-                .map_or_else(|| ExitCode::from(cli::EXIT_FAILURE), ExitCode::from)
-        }
-        Err(error) => ExitCode::from(cli::report(&error)),
-    }
-}
-
-enum TerminalOutcome {
-    Finished,
-    SwitchSshMachine {
-        request: ssh::SshSwitch,
-        context: Option<SshContext>,
-    },
 }
 
 #[expect(
@@ -99,12 +52,13 @@ enum TerminalOutcome {
 fn open_terminal(
     options: &TerminalOptions,
     ssh_context: Option<&SshContext>,
-) -> Result<TerminalOutcome> {
+) -> Result<terminal_launch::Outcome> {
     if !io::stdin().is_terminal() || !cli::stdout_is_terminal() {
         anyhow::bail!("Quinjet requires an interactive terminal");
     }
 
     terminal::install_panic_hook();
+    let mut machine_probe = ssh_context.and_then(cli::begin_ssh_probe);
     let webhooks = options
         .webhook_listen
         .as_deref()
@@ -133,14 +87,26 @@ fn open_terminal(
     });
     let mut workspace = restored_workspace.or_else(|| {
         repository.as_ref().map(|repository| {
-            let mut workspace = RepositoryWorkspace::new(
-                repository,
-                options.theme,
-                options.appearance,
-                !options.no_mouse,
-                webhooks.is_some(),
-                WorkspaceContext::new(ssh_context.cloned(), options.client),
-            );
+            let context = WorkspaceContext::new(ssh_context.cloned(), options.client);
+            let mut workspace = if handoff_mode == Some(ssh::SshProjectOpenMode::New) {
+                RepositoryWorkspace::new_pending_host(
+                    repository,
+                    options.theme,
+                    options.appearance,
+                    !options.no_mouse,
+                    webhooks.is_some(),
+                    context,
+                )
+            } else {
+                RepositoryWorkspace::new(
+                    repository,
+                    options.theme,
+                    options.appearance,
+                    !options.no_mouse,
+                    webhooks.is_some(),
+                    context,
+                )
+            };
             workspace.sync_tabs(Instant::now());
             workspace
         })
@@ -150,7 +116,9 @@ fn open_terminal(
     } else {
         app::ProjectOpenMode::Initial
     };
-    let mut onboarding = Onboarding::new(&options.path, ssh_context.cloned(), onboarding_mode);
+    let mut onboarding = workspace
+        .is_none()
+        .then(|| Onboarding::new(&options.path, ssh_context.cloned(), onboarding_mode));
     let onboarding_theme = theme::Theme::new(options.theme, options.appearance.resolve());
     let mut terminal = TerminalGuard::enter(!options.no_mouse)?;
     let render_tick = tick(Duration::from_millis(16));
@@ -190,12 +158,32 @@ fn open_terminal(
                     .draw(|frame| ui::draw(frame, app, &theme))
                     .context("failed to render Quinjet")?;
             } else {
+                let Some(onboarding) = onboarding.as_mut() else {
+                    break;
+                };
                 let _ = terminal
                     .terminal
                     .draw(|frame| onboarding.draw(frame, &onboarding_theme))
                     .context("failed to render Quinjet onboarding")?;
             }
             dirty = false;
+        }
+
+        if let Some(accessibility) = machine_probe
+            .as_ref()
+            .and_then(|probe| probe.try_recv().ok())
+        {
+            if let Some(current) = workspace.as_mut() {
+                current.apply_ssh_probe(&accessibility, Instant::now());
+            }
+            if let Some(onboarding) = onboarding.as_mut() {
+                onboarding.apply_ssh_probe(&accessibility);
+            }
+            machine_probe = None;
+            dirty = true;
+        }
+        if workspace.is_none() && onboarding.as_mut().is_some_and(Onboarding::poll_projects) {
+            dirty = true;
         }
 
         if let Some(current) = workspace.as_mut() {
@@ -273,6 +261,9 @@ fn open_terminal(
                     &mut switch_ssh_machine,
                 );
             } else {
+                let Some(onboarding) = onboarding.as_mut() else {
+                    break;
+                };
                 let action = match event {
                     Event::Key(key) if key.kind != KeyEventKind::Release => {
                         onboarding.handle_key(key)
@@ -287,24 +278,36 @@ fn open_terminal(
                 match action {
                     OnboardingAction::None => {}
                     OnboardingAction::Quit => running = false,
-                    OnboardingAction::SwitchSshMachine(index) => {
-                        switch_ssh_machine = Some(ssh::SshSwitch {
-                            index,
-                            mode: ssh::SshProjectOpenMode::Current,
-                        });
+                    OnboardingAction::SwitchSshMachine(request) => {
+                        switch_ssh_machine = Some(request);
                         running = false;
                     }
                     OnboardingAction::Open(path) => match Repository::discover(&path) {
                         Ok(repository) => {
                             state::record_recent_project(repository.root());
-                            let mut next = RepositoryWorkspace::new(
-                                &repository,
-                                options.theme,
-                                options.appearance,
-                                !options.no_mouse,
-                                webhooks.is_some(),
-                                WorkspaceContext::new(ssh_context.cloned(), options.client),
+                            let context = WorkspaceContext::new(
+                                onboarding.ssh_context().or_else(|| ssh_context.cloned()),
+                                options.client,
                             );
+                            let mut next = if onboarding_mode == app::ProjectOpenMode::NewTab {
+                                RepositoryWorkspace::new_resolving_pending(
+                                    &repository,
+                                    options.theme,
+                                    options.appearance,
+                                    !options.no_mouse,
+                                    webhooks.is_some(),
+                                    context,
+                                )
+                            } else {
+                                RepositoryWorkspace::new(
+                                    &repository,
+                                    options.theme,
+                                    options.appearance,
+                                    !options.no_mouse,
+                                    webhooks.is_some(),
+                                    context,
+                                )
+                            };
                             next.sync_tabs(Instant::now());
                             running &= dispatch_launch_effects(
                                 &mut next,
@@ -327,16 +330,17 @@ fn open_terminal(
     {
         state::session::record_project_session(current.project_session());
     }
-    let outcome = switch_ssh_machine.map_or(TerminalOutcome::Finished, |request| {
-        TerminalOutcome::SwitchSshMachine {
+    let outcome = switch_ssh_machine.map_or(terminal_launch::Outcome::Finished, |request| {
+        terminal_launch::Outcome::SwitchSshMachine {
             request,
             context: workspace
                 .as_ref()
                 .and_then(RepositoryWorkspace::ssh_context)
+                .or_else(|| onboarding.as_ref().and_then(Onboarding::ssh_context))
                 .or_else(|| ssh_context.cloned()),
         }
     });
-    if matches!(outcome, TerminalOutcome::SwitchSshMachine { .. }) {
+    if matches!(outcome, terminal_launch::Outcome::SwitchSshMachine { .. }) {
         terminal.preserve_for_handoff();
     }
     Ok(outcome)
@@ -396,6 +400,12 @@ fn dispatch_effects(
                         pending.push_back(effects);
                     }
                 }
+                AppEffect::OpenRepositoryTabPicker => {
+                    if let Some(effects) = workspace.open_repository_tab_picker(id, Instant::now())
+                    {
+                        pending.push_back(effects);
+                    }
+                }
                 AppEffect::OpenRepositoryTab(path) => {
                     render_project_opening(workspace, terminal, id);
                     if let Some(effects) = workspace.open_repository_tab(id, &path, Instant::now())
@@ -403,7 +413,17 @@ fn dispatch_effects(
                         pending.push_back(effects);
                     }
                 }
+                AppEffect::CancelRepositoryTabPicker => {
+                    let (keep_running, handoff) =
+                        workspace.cancel_repository_tab_picker(id, Instant::now());
+                    running &= keep_running;
+                    if let Some(request) = handoff {
+                        *switch_ssh_machine = Some(request);
+                        running = false;
+                    }
+                }
                 AppEffect::SwitchSshMachine(request) => {
+                    workspace.prepare_ssh_switch(id, request);
                     *switch_ssh_machine = Some(request);
                     running = false;
                 }

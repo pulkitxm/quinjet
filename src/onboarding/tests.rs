@@ -49,8 +49,41 @@ fn empty_screen_reuses_the_grouped_project_picker() {
     assert!(rendered.contains("main"));
     assert!(rendered.contains("/repos/quinjet"));
     assert!(rendered.contains("[⌄]"));
-    assert!(rendered.contains("Ctrl+E collapse all"));
+    assert!(rendered.contains("Ctrl+E all"));
     assert!(!rendered.contains("fatal:"));
+}
+
+#[test]
+fn project_loading_is_visible_until_background_results_arrive() {
+    let mut onboarding = Onboarding::from_groups(Path::new("/tmp"), Vec::new(), None);
+    let (sender, receiver) = crossbeam_channel::bounded(1);
+    onboarding.project_loader = ProjectLoader::waiting(receiver);
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+    let theme = Theme::new(ThemeName::Quinjet, Appearance::Dark);
+
+    assert_eq!(
+        terminal
+            .draw(|frame| onboarding.draw(frame, &theme))
+            .unwrap()
+            .area,
+        Rect::new(0, 0, 100, 30),
+    );
+    let rendered = terminal.backend().to_string();
+    assert!(rendered.contains("Loading projects…"));
+    assert!(rendered.contains('◌'));
+
+    sender.send(vec![project_group()]).unwrap();
+    assert!(onboarding.poll_projects());
+    assert_eq!(
+        terminal
+            .draw(|frame| onboarding.draw(frame, &theme))
+            .unwrap()
+            .area,
+        Rect::new(0, 0, 100, 30),
+    );
+    let rendered = terminal.backend().to_string();
+    assert!(!rendered.contains("Loading projects…"));
+    assert!(rendered.contains("quinjet"));
 }
 
 #[test]
@@ -87,7 +120,7 @@ fn project_picker_compacts_long_paths_and_toggles_all_projects() {
     let rendered = terminal.backend().to_string();
     assert!(rendered.contains("[›]"));
     assert!(!rendered.contains("main"));
-    assert!(rendered.contains("Ctrl+E expand all"));
+    assert!(rendered.contains("Ctrl+E all"));
 
     drop(onboarding.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL)));
     assert_eq!(
@@ -100,7 +133,7 @@ fn project_picker_compacts_long_paths_and_toggles_all_projects() {
     let rendered = terminal.backend().to_string();
     assert!(rendered.contains("[⌄]"));
     assert!(rendered.contains("main"));
-    assert!(rendered.contains("Ctrl+E collapse all"));
+    assert!(rendered.contains("Ctrl+E all"));
 }
 
 #[test]
@@ -161,6 +194,7 @@ fn local_project_picker_uses_the_inline_machine_strip() {
             },
         ],
         tabs: crate::ssh::SshTabs::default(),
+        probing: false,
     };
     let mut onboarding = Onboarding::from_groups(Path::new("/work"), Vec::new(), Some(context));
     let backend = TestBackend::new(100, 30);
@@ -178,7 +212,7 @@ fn local_project_picker_uses_the_inline_machine_strip() {
     assert!(rendered.contains("Machine"));
     assert!(rendered.contains("Pulkits-MacBook-Pro.local"));
     assert!(rendered.contains("busy-host"));
-    assert!(rendered.contains("Tab next machine"));
+    assert!(rendered.contains("Tab machine"));
     let button = onboarding
         .machine_hits
         .iter()
@@ -193,10 +227,82 @@ fn local_project_picker_uses_the_inline_machine_strip() {
             row: button.y,
             modifiers: KeyModifiers::NONE,
         }),
-        OnboardingAction::SwitchSshMachine(1)
+        OnboardingAction::SwitchSshMachine(SshSwitch {
+            index: 1,
+            mode: SshProjectOpenMode::Current,
+        })
     );
     assert_eq!(
         onboarding.handle_key(key(KeyCode::Tab)),
-        OnboardingAction::SwitchSshMachine(1)
+        OnboardingAction::SwitchSshMachine(SshSwitch {
+            index: 1,
+            mode: SshProjectOpenMode::Current,
+        })
     );
+}
+
+#[test]
+fn new_tab_onboarding_keeps_its_pending_identity_across_switch_and_cancel() {
+    let machines = vec![
+        SshMachine {
+            target: "macbook".to_owned(),
+            folder: PathBuf::from("/local"),
+            accessible: true,
+            uses: 0,
+            local: true,
+        },
+        SshMachine {
+            target: "tof".to_owned(),
+            folder: PathBuf::from("/remote"),
+            accessible: true,
+            uses: 2,
+            local: false,
+        },
+    ];
+    let mut tabs = crate::ssh::SshTabs::default();
+    let local = tabs.append("macbook", "local", "/local/repo");
+    let pending = tabs.append_pending("macbook", "/local/repo");
+    let context = SshContext {
+        current: "macbook".to_owned(),
+        machines,
+        tabs,
+        probing: false,
+    };
+    let mut switching = Onboarding::from_groups_with_mode(
+        Path::new("/local"),
+        Vec::new(),
+        Some(context.clone()),
+        ProjectOpenMode::NewTab,
+    );
+
+    assert_eq!(
+        switching.handle_key(key(KeyCode::Tab)),
+        OnboardingAction::SwitchSshMachine(SshSwitch {
+            index: 1,
+            mode: SshProjectOpenMode::New,
+        })
+    );
+    assert_eq!(
+        switching
+            .ssh_context()
+            .and_then(|saved| saved.tabs.get(pending).map(|tab| tab.machine.clone())),
+        Some("tof".to_owned())
+    );
+
+    let mut canceling = Onboarding::from_groups_with_mode(
+        Path::new("/local"),
+        Vec::new(),
+        Some(context),
+        ProjectOpenMode::NewTab,
+    );
+    assert_eq!(
+        canceling.handle_key(key(KeyCode::Esc)),
+        OnboardingAction::SwitchSshMachine(SshSwitch {
+            index: 0,
+            mode: SshProjectOpenMode::Activate,
+        })
+    );
+    let saved = canceling.ssh_context().expect("updated context");
+    assert!(saved.tabs.get(pending).is_none());
+    assert_eq!(saved.tabs.active_id(), Some(local));
 }

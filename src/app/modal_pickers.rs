@@ -24,6 +24,9 @@ impl App {
                 mode,
             } => {
                 if key.code == KeyCode::Esc {
+                    if *mode == ProjectOpenMode::NewTab {
+                        effects.push(AppEffect::CancelRepositoryTabPicker);
+                    }
                     return effects;
                 }
                 if matches!(key.code, KeyCode::Char('e' | 'E'))

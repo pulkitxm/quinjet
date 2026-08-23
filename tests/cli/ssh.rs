@@ -9,7 +9,7 @@ fn fake_ssh(scratch: &Scratch) -> Result<(PathBuf, PathBuf)> {
     fs::create_dir_all(&bin)?;
     fs::write(
         &executable,
-        "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$SSH_CAPTURE\"\nif [ -n \"$SSH_EXIT_CODE\" ]; then\n  exit \"$SSH_EXIT_CODE\"\nfi\nif [ -n \"$SSH_SWITCH_TARGET\" ] && [ \"$2\" = \"$SSH_SWITCH_TARGET\" ]; then\n  case \"$3\" in\n    *QUINJET_SSH_CONTEXT*)\n      if [ -n \"$SSH_SWITCH_CONTEXT\" ]; then\n        printf '\\033]777;quinjet-context=%s\\007' \"$SSH_SWITCH_CONTEXT\"\n      fi\n      exit \"$SSH_SWITCH_CODE\"\n      ;;\n  esac\nfi\nexit 0\n",
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$SSH_CAPTURE\"\nif [ -n \"$SSH_EXIT_CODE\" ]; then\n  exit \"$SSH_EXIT_CODE\"\nfi\ntarget=\nremote_command=\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in\n    -q|-tt) shift ;;\n    -S) shift 2 ;;\n    --)\n      shift\n      target=$1\n      shift\n      remote_command=$1\n      break\n      ;;\n    *) shift ;;\n  esac\ndone\nif [ -n \"$SSH_SWITCH_TARGET\" ] && [ \"$target\" = \"$SSH_SWITCH_TARGET\" ]; then\n  case \"$remote_command\" in\n    *QUINJET_SSH_CONTEXT*)\n      if [ -n \"$SSH_SWITCH_CONTEXT\" ]; then\n        printf '\\033]777;quinjet-context=%s\\007' \"$SSH_SWITCH_CONTEXT\"\n      fi\n      exit \"$SSH_SWITCH_CODE\"\n      ;;\n  esac\nfi\nexit 0\n",
     )?;
     let mut permissions = fs::metadata(&executable)?.permissions();
     permissions.set_mode(0o755);
@@ -203,6 +203,7 @@ fn terminal_machine_selection_reconnects_to_the_ranked_target() -> Result<()> {
     drop(Run::from(command.output()?)?.success()?);
 
     let arguments = fs::read_to_string(capture)?;
+    ensure!(arguments.contains("-q\n--\nfirst-host\n"));
     ensure!(arguments.contains("\nfirst-host\n"));
     ensure!(arguments.contains("\nsecond-host\n"));
     ensure!(arguments.contains("\"current\":\"first-host\""));

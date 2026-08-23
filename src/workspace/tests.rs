@@ -8,7 +8,7 @@ use crate::app::{Modal, ProjectOpenMode, TextBuffer, View};
 use crate::git::support::same_path;
 use crate::git::tests::TestRepository;
 use crate::integration::Client;
-use crate::ssh::SshMachine;
+use crate::ssh::{SshMachine, SshProjectOpenMode};
 
 fn test_repository(branch: &str) -> (TestRepository, Repository) {
     let fixture = TestRepository::with_branch(branch);
@@ -85,6 +85,7 @@ fn machine_picker_context_follows_replaced_and_appended_projects() {
             local: false,
         }],
         tabs: crate::ssh::SshTabs::default(),
+        probing: false,
     };
     let mut workspace = RepositoryWorkspace::new(
         &first_repository,
@@ -114,6 +115,64 @@ fn machine_picker_context_follows_replaced_and_appended_projects() {
             .and_then(|app| app.ssh_context.as_ref())
             .map(|saved| (&saved.current, &saved.machines)),
         Some((&context.current, &context.machines))
+    );
+}
+
+#[test]
+fn reachability_results_update_apps_without_replacing_open_tabs() {
+    let (_directory, repository) = test_repository("main");
+    let context = SshContext {
+        current: "local".to_owned(),
+        machines: vec![
+            SshMachine {
+                target: "local".to_owned(),
+                folder: repository.root().to_path_buf(),
+                accessible: true,
+                uses: 0,
+                local: true,
+            },
+            SshMachine {
+                target: "remote".to_owned(),
+                folder: "/remote".into(),
+                accessible: false,
+                uses: 2,
+                local: false,
+            },
+        ],
+        tabs: crate::ssh::SshTabs::default(),
+        probing: true,
+    };
+    let mut workspace = RepositoryWorkspace::new(
+        &repository,
+        ThemeName::Quinjet,
+        AppearanceChoice::Dark,
+        false,
+        false,
+        WorkspaceContext::new(Some(context), None),
+    );
+    let now = Instant::now();
+    let active = workspace.active_id().expect("active tab");
+    let pending = workspace
+        .open_repository_tab_picker(active, now)
+        .expect("pending tab")
+        .id;
+    let tabs = workspace.tabs.infos();
+
+    workspace.apply_ssh_probe(
+        &[("local".to_owned(), true), ("remote".to_owned(), true)],
+        now,
+    );
+
+    assert_eq!(workspace.tabs.infos(), tabs);
+    let saved = workspace.ssh_context().expect("SSH context");
+    assert!(!saved.probing);
+    assert!(saved.machines[1].accessible);
+    assert_eq!(saved.tabs.active_id(), Some(pending));
+    assert!(
+        workspace
+            .app_mut(pending)
+            .and_then(|app| app.ssh_context.as_ref())
+            .is_some_and(|context| !context.probing && context.machines[1].accessible)
     );
 }
 
@@ -154,6 +213,7 @@ fn mixed_machine_tabs_share_one_order_and_remote_tabs_handoff_directly() {
             },
         ],
         tabs,
+        probing: false,
     };
     let session = ProjectSession::default();
     let mut workspace = RepositoryWorkspace::restore(
@@ -391,3 +451,5 @@ fn worker_events_update_only_the_repository_tab_that_owns_them() {
         Some("worker-beta")
     );
 }
+
+mod projects;
