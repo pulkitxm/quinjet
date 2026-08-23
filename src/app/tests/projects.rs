@@ -100,7 +100,7 @@ fn recent_projects_nest_worktrees_and_open_another_tree() {
 }
 
 #[test]
-fn header_path_and_w_open_the_projects_picker() {
+fn header_name_and_w_open_the_projects_picker() {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
     use ratatui::layout::Rect;
 

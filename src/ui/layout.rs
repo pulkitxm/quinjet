@@ -57,9 +57,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     }
     let (diff_divider, content_file_hits, content_step_hits, content_review_hits) =
         draw_content(frame, content_area, app, theme, &mut link_hits);
-    if let Some(hit) = draw_jump_to_bottom(frame, content_area, app, theme) {
-        scm_action_hits.push(hit);
-    }
+    scm_action_hits.extend(draw_jump_controls(frame, content_area, app, theme));
     draw_footer(frame, footer, app, theme, &mut link_hits, &mut project_hits);
 
     app.geometry = UiGeometry {

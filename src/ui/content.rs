@@ -58,6 +58,7 @@ pub(super) fn draw_content(
         .saturating_sub(loading.width())
         .saturating_sub(file_action.width())
         .saturating_sub(review_action.width())
+        .saturating_sub(jump_control_reserve())
         .saturating_sub(4);
     let title = format!(
         " {}{}{}{} ",
@@ -180,26 +181,67 @@ pub(super) fn draw_content(
     (divider, content_file_hits, Vec::new(), content_review_hits)
 }
 
-#[doc = " A clickable shortcut to the end of whatever the content pane holds, shown on"]
-#[doc = " its bottom border whenever the reader is not already there. On a huge diff"]
-#[doc = " or conversation it replaces paging through thousands of rows."]
-pub(super) fn draw_jump_to_bottom(
+#[doc = " Clickable shortcuts to either end of whatever the content pane holds, each"]
+#[doc = " shown on the border it points at whenever the reader is not already there."]
+#[doc = " On a huge diff or conversation they replace paging through thousands of rows."]
+const JUMP_TOP_LABEL: &str = " ↑ Top ";
+const JUMP_BOTTOM_LABEL: &str = " ↓ Bottom ";
+const JUMP_CONTROL_MARGIN: u16 = 3;
+
+fn jump_control_reserve() -> usize {
+    JUMP_TOP_LABEL
+        .width()
+        .saturating_add(JUMP_CONTROL_MARGIN as usize)
+}
+
+pub(super) fn draw_jump_controls(
     frame: &mut Frame<'_>,
     content: Rect,
     app: &App,
     theme: &Theme,
-) -> Option<ScmActionHit> {
-    if app.content_at_bottom || app.modal.is_some() || content.width < 20 || content.height < 3 {
-        return None;
+) -> Vec<ScmActionHit> {
+    if app.modal.is_some() || content.width < 20 || content.height < 3 {
+        return Vec::new();
     }
-    let label = " ↓ Bottom ";
+    let mut hits = Vec::new();
+    if app.content_scroll > 0 {
+        hits.push(draw_jump_control(
+            frame,
+            content,
+            JUMP_TOP_LABEL,
+            content.y,
+            ScmAction::JumpToTop,
+            theme,
+        ));
+    }
+    if !app.content_at_bottom {
+        hits.push(draw_jump_control(
+            frame,
+            content,
+            JUMP_BOTTOM_LABEL,
+            content.bottom().saturating_sub(1),
+            ScmAction::JumpToBottom,
+            theme,
+        ));
+    }
+    hits
+}
+
+fn draw_jump_control(
+    frame: &mut Frame<'_>,
+    content: Rect,
+    label: &'static str,
+    y: u16,
+    action: ScmAction,
+    theme: &Theme,
+) -> ScmActionHit {
     let width = cells(label.width());
     let area = Rect::new(
         content
             .right()
-            .saturating_sub(width.saturating_add(3))
+            .saturating_sub(width.saturating_add(JUMP_CONTROL_MARGIN))
             .max(content.x),
-        content.bottom().saturating_sub(1),
+        y,
         width,
         1,
     );
@@ -212,10 +254,7 @@ pub(super) fn draw_jump_to_bottom(
         ),
         area,
     );
-    Some(ScmActionHit {
-        area,
-        action: ScmAction::JumpToBottom,
-    })
+    ScmActionHit { area, action }
 }
 
 pub(super) fn commit_details_row_count(available_height: u16) -> usize {
