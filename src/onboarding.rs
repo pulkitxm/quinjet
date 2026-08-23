@@ -9,7 +9,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 
-use crate::app::{App, ProjectOpenMode, TextBuffer};
+use crate::app::{App, ProjectOpenMode, ProjectRow, TextBuffer};
 use crate::git::ProjectGroup;
 use crate::ssh::SshContext;
 use crate::theme::Theme;
@@ -50,12 +50,16 @@ impl Onboarding {
         ssh_context: Option<SshContext>,
         mode: ProjectOpenMode,
     ) -> Self {
-        Self::from_groups_with_mode(
+        let mut onboarding = Self::from_groups_with_mode(
             launch_path,
             crate::state::load_recent_projects(launch_path),
             ssh_context,
             mode,
-        )
+        );
+        onboarding.collapsed = crate::state::load_collapsed_project_groups();
+        onboarding.selected =
+            App::first_project_worktree_index(&onboarding.groups, "", &onboarding.collapsed);
+        onboarding
     }
 
     #[cfg(test)]
@@ -73,12 +77,14 @@ impl Onboarding {
         ssh_context: Option<SshContext>,
         mode: ProjectOpenMode,
     ) -> Self {
+        let collapsed = HashSet::new();
+        let selected = App::first_project_worktree_index(&groups, "", &collapsed);
         Self {
             launch_path: launch_path.to_path_buf(),
             groups,
-            selected: 0,
+            selected,
             query: TextBuffer::default(),
-            collapsed: HashSet::new(),
+            collapsed,
             collapse_hits: Vec::new(),
             panel: OnboardingPanel::Projects,
             path_input: String::new(),
@@ -155,6 +161,8 @@ impl Onboarding {
         } else {
             self.collapsed.extend([common_dir]);
         }
+        #[cfg(not(test))]
+        crate::state::record_collapsed_project_groups(&self.collapsed);
         let visible = App::filtered_project_rows(&self.groups, &self.query.value, &self.collapsed);
         self.selected = self.selected.min(visible.len().saturating_sub(1));
         OnboardingAction::None
@@ -170,6 +178,8 @@ impl Onboarding {
             KeyCode::Char('e' | 'E') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 App::toggle_all_project_groups(&self.groups, &mut self.collapsed);
                 self.selected = 0;
+                #[cfg(not(test))]
+                crate::state::record_collapsed_project_groups(&self.collapsed);
                 return OnboardingAction::None;
             }
             KeyCode::Tab if self.ssh_context.is_some() => {
@@ -212,16 +222,32 @@ impl Onboarding {
                 self.panel = OnboardingPanel::Path;
                 OnboardingAction::None
             }
-            KeyCode::Enter => visible
-                .get(self.selected)
-                .and_then(|(group_index, tree_index)| {
-                    self.groups
-                        .get(*group_index)
-                        .and_then(|group| group.worktrees.get(*tree_index))
-                })
-                .map_or(OnboardingAction::None, |tree| {
-                    OnboardingAction::Open(tree.path.clone())
-                }),
+            KeyCode::Enter => match visible.get(self.selected) {
+                Some(ProjectRow::Group(group_index)) => {
+                    if let Some(group) = self.groups.get(*group_index) {
+                        if self.collapsed.contains(&group.common_dir) {
+                            self.collapsed
+                                .retain(|candidate| candidate != &group.common_dir);
+                        } else {
+                            self.collapsed.extend([group.common_dir.clone()]);
+                        }
+                        #[cfg(not(test))]
+                        crate::state::record_collapsed_project_groups(&self.collapsed);
+                    }
+                    OnboardingAction::None
+                }
+                Some(ProjectRow::Worktree {
+                    group_index,
+                    tree_index,
+                }) => self
+                    .groups
+                    .get(*group_index)
+                    .and_then(|group| group.worktrees.get(*tree_index))
+                    .map_or(OnboardingAction::None, |tree| {
+                        OnboardingAction::Open(tree.path.clone())
+                    }),
+                None => OnboardingAction::None,
+            },
             KeyCode::Backspace => {
                 self.query.backspace();
                 self.selected = 0;

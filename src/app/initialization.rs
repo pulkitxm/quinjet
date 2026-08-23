@@ -22,6 +22,16 @@ impl App {
             history: Vec::new(),
             worktrees: Vec::new(),
             project_groups: Vec::new(),
+            collapsed_project_groups: {
+                #[cfg(test)]
+                {
+                    HashSet::new()
+                }
+                #[cfg(not(test))]
+                {
+                    crate::state::load_collapsed_project_groups()
+                }
+            },
             project_machine_focus: None,
             ssh_context: SshContext::from_environment(),
             history_branch: None,

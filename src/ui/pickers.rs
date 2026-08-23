@@ -84,49 +84,46 @@ pub(crate) fn draw_projects(
             list_area,
         );
     } else {
-        let matching = App::matching_project_rows(groups, &query.value);
-        let mut lines: Vec<(Line<'static>, Option<std::path::PathBuf>)> = Vec::new();
-        let mut selectable = 0_usize;
-        let mut selected_line = 0_usize;
-        for (group_index, group) in groups.iter().enumerate() {
-            let trees: Vec<usize> = matching
-                .iter()
-                .filter_map(|(matching_group, tree_index)| {
-                    (*matching_group == group_index).then_some(*tree_index)
-                })
-                .collect();
-            if trees.is_empty() {
-                continue;
-            }
-            let expanded = !collapsed.contains(&group.common_dir) || !query.value.is_empty();
-            lines.push((
-                project_header_line(group, expanded, list_area.width as usize, theme),
-                Some(group.common_dir.clone()),
-            ));
-            if !expanded {
-                continue;
-            }
-            for tree_index in trees {
-                let Some(tree) = group.worktrees.get(tree_index) else {
-                    continue;
-                };
-                let active = selectable == selected;
-                if active {
-                    selected_line = lines.len();
-                }
-                selectable = selectable.saturating_add(1);
-                lines.push((
-                    project_worktree_line(tree, active, list_area.width as usize, theme),
-                    None,
-                ));
-            }
-        }
-        let offset = selected_line.saturating_sub(list_area.height.saturating_sub(1) as usize);
-        let visible_lines: Vec<_> = lines
-            .into_iter()
+        let rows = App::filtered_project_rows(groups, &query.value, collapsed);
+        let offset = selected.saturating_sub(list_area.height.saturating_sub(1) as usize);
+        let visible_lines = rows
+            .iter()
+            .enumerate()
             .skip(offset)
             .take(list_area.height as usize)
-            .collect();
+            .filter_map(|(index, row)| match row {
+                ProjectRow::Group(group_index) => {
+                    let group = groups.get(*group_index)?;
+                    let expanded =
+                        !collapsed.contains(&group.common_dir) || !query.value.is_empty();
+                    Some((
+                        project_header_line(
+                            group,
+                            expanded,
+                            index == selected,
+                            list_area.width as usize,
+                            theme,
+                        ),
+                        Some(group.common_dir.clone()),
+                    ))
+                }
+                ProjectRow::Worktree {
+                    group_index,
+                    tree_index,
+                } => {
+                    let tree = groups.get(*group_index)?.worktrees.get(*tree_index)?;
+                    Some((
+                        project_worktree_line(
+                            tree,
+                            index == selected,
+                            list_area.width as usize,
+                            theme,
+                        ),
+                        None,
+                    ))
+                }
+            })
+            .collect::<Vec<_>>();
         if visible_lines.is_empty() {
             let empty = if groups.is_empty() && mode == ProjectOpenMode::Initial {
                 "No recent projects. Press Ctrl+O to enter a repository path."
@@ -169,6 +166,10 @@ pub(crate) fn draw_projects(
     } else {
         "expand all"
     };
+    let selected_group = matches!(
+        App::filtered_project_rows(groups, &query.value, collapsed).get(selected),
+        Some(ProjectRow::Group(_))
+    );
     let hint = if opening.is_some() {
         "Opening project…".to_owned()
     } else if machine_focus.is_some() {
@@ -180,19 +181,30 @@ pub(crate) fn draw_projects(
         format!("←/→ choose machine   Enter switch   Tab projects   Esc {escape}")
     } else {
         let machines = ssh.map_or("", |_| "   Tab machines");
-        match mode {
-            ProjectOpenMode::Initial => {
-                format!("Enter open{machines}   Ctrl+E {fold_action}   Ctrl+O path   Esc quit")
-            }
-            ProjectOpenMode::CurrentTab => {
-                format!(
-                    "Enter switch tab{machines}   Ctrl+E {fold_action}   Delete forget   Esc close"
-                )
-            }
-            ProjectOpenMode::NewTab => {
-                format!(
-                    "Enter new tab{machines}   Ctrl+E {fold_action}   Delete forget   Esc close"
-                )
+        if selected_group {
+            let escape = if mode == ProjectOpenMode::Initial {
+                "quit"
+            } else {
+                "close"
+            };
+            format!(
+                "Enter/Space fold   ← collapse   → expand{machines}   Ctrl+E {fold_action}   Esc {escape}"
+            )
+        } else {
+            match mode {
+                ProjectOpenMode::Initial => {
+                    format!("Enter open{machines}   Ctrl+E {fold_action}   Ctrl+O path   Esc quit")
+                }
+                ProjectOpenMode::CurrentTab => {
+                    format!(
+                        "Enter switch tab{machines}   Ctrl+E {fold_action}   Delete forget   Esc close"
+                    )
+                }
+                ProjectOpenMode::NewTab => {
+                    format!(
+                        "Enter new tab{machines}   Ctrl+E {fold_action}   Delete forget   Esc close"
+                    )
+                }
             }
         }
     };

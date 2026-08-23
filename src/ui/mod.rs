@@ -14,10 +14,10 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use crate::app::{
     App, ChangeRow, ChangeSection, CheckListRow, ContentFileHit, ContentReviewHit, ContentStepHit,
     DiffLayout, Focus, HelpHit, LinkHit, Modal, ModalAction, OpenTarget, PaletteCommand,
-    PrActionItem, PrMenuItem, ProjectOpenMode, PullRequestContentLink, PullRequestContentRow,
-    PullRequestSection, PullRequestTreeEntry, RepositoryTabAction, RepositoryTabHit, ScmAction,
-    ScmActionHit, ScmMenuItem, SideBySideRow, SidebarHit, SidebarHitArea, ToastLevel, UiGeometry,
-    View,
+    PrActionItem, PrMenuItem, ProjectOpenMode, ProjectRow, PullRequestContentLink,
+    PullRequestContentRow, PullRequestSection, PullRequestTreeEntry, RepositoryTabAction,
+    RepositoryTabHit, ScmAction, ScmActionHit, ScmMenuItem, SideBySideRow, SidebarHit,
+    SidebarHitArea, ToastLevel, UiGeometry, View,
 };
 use crate::convert::cells;
 use crate::date_time::{format_relative_timestamp, relative_time_generation};

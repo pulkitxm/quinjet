@@ -202,6 +202,7 @@ pub(crate) struct App {
     pub history: Vec<Commit>,
     pub worktrees: Vec<Worktree>,
     pub project_groups: Vec<ProjectGroup>,
+    pub collapsed_project_groups: HashSet<PathBuf>,
     pub ssh_context: Option<SshContext>,
     pub project_machine_focus: Option<usize>,
     pub history_branch: Option<HistoryBranch>,

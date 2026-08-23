@@ -43,9 +43,16 @@ impl App {
                 ..
             }) = self.modal.as_mut()
         {
-            toggle_membership(collapsed, common_dir);
+            toggle_membership(collapsed, common_dir.clone());
             let visible = Self::filtered_project_rows(groups, &query.value, collapsed);
-            *selected = (*selected).min(visible.len().saturating_sub(1));
+            *selected = visible
+                .iter()
+                .position(|row| {
+                    matches!(row, ProjectRow::Group(group_index) if groups.get(*group_index).is_some_and(|group| group.common_dir == common_dir))
+                })
+                .unwrap_or_else(|| (*selected).min(visible.len().saturating_sub(1)));
+            let collapsed = collapsed.clone();
+            self.remember_collapsed_project_groups(&collapsed);
             return effects;
         }
         if let Some(Modal::Help {

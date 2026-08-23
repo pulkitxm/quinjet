@@ -23,11 +23,13 @@ impl App {
 
     pub(super) fn open_projects(&mut self, mode: ProjectOpenMode, effects: &mut Vec<AppEffect>) {
         self.project_machine_focus = None;
+        let collapsed = self.collapsed_project_groups.clone();
+        let selected = Self::first_project_worktree_index(&self.project_groups, "", &collapsed);
         self.modal = Some(Modal::Projects {
             groups: self.project_groups.clone(),
-            selected: 0,
+            selected,
             query: TextBuffer::default(),
-            collapsed: HashSet::new(),
+            collapsed,
             loading: self.project_groups.is_empty(),
             opening: None,
             mode,
