@@ -41,3 +41,43 @@ pub(crate) fn record_collapsed_project_groups(collapsed: &HashSet<PathBuf>) {
         drop(fs::rename(staging, path));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct StateRootGuard {
+        previous: Option<PathBuf>,
+    }
+
+    impl StateRootGuard {
+        fn new(root: &std::path::Path) -> Self {
+            let previous = super::super::STATE_ROOT_OVERRIDE
+                .with(|cell| cell.replace(Some(root.to_path_buf())));
+            Self { previous }
+        }
+    }
+
+    impl Drop for StateRootGuard {
+        fn drop(&mut self) {
+            let previous = self.previous.take();
+            drop(super::super::STATE_ROOT_OVERRIDE.with(|cell| cell.replace(previous)));
+        }
+    }
+
+    #[test]
+    fn folds_round_trip_and_ignore_invalid_state() {
+        let state = tempfile::tempdir().unwrap();
+        let _guard = StateRootGuard::new(state.path());
+        let collapsed = HashSet::from([
+            PathBuf::from("/work/one/.git"),
+            PathBuf::from("/work/two/.git"),
+        ]);
+
+        record_collapsed_project_groups(&collapsed);
+
+        assert_eq!(load_collapsed_project_groups(), collapsed);
+        fs::write(state.path().join(PROJECT_PICKER_FILE), b"{").unwrap();
+        assert!(load_collapsed_project_groups().is_empty());
+    }
+}

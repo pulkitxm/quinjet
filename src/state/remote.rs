@@ -81,7 +81,7 @@ fn grouped_ssh_machines() -> Vec<SshMachine> {
         {
             machine.uses = machine.uses.saturating_add(entry.uses);
             let folder = Path::new(&entry.folder);
-            if machine.folder.is_relative() && folder.is_absolute() {
+            if !is_remote_absolute(&machine.folder) && is_remote_absolute(folder) {
                 machine.folder = folder.to_path_buf();
             }
         } else {
@@ -97,6 +97,10 @@ fn grouped_ssh_machines() -> Vec<SshMachine> {
     machines.sort_by_key(|machine| std::cmp::Reverse(machine.uses));
     machines.truncate(MAX_SSH_MACHINES);
     machines
+}
+
+fn is_remote_absolute(path: &Path) -> bool {
+    path.is_absolute() || path.as_os_str().to_string_lossy().starts_with('/')
 }
 
 pub(crate) fn forget_recent_remote(target: &str, folder: Option<&str>) {

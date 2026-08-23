@@ -10,7 +10,14 @@ pub(crate) fn dispatch() -> Result<Launch> {
             Some(Verb::Tui(args)) => (true, false, terminal_path(&args.path, &cli.repository)),
             Some(_) => (false, false, cli.repository.as_path()),
         };
-        return remote::run(target, terminal, implicit_terminal, folder).map(Launch::Finished);
+        return remote::run(
+            target,
+            terminal,
+            implicit_terminal,
+            folder,
+            cli.ssh_control_path.as_deref(),
+        )
+        .map(Launch::Finished);
     }
     let mut out = Emitter::new(cli.json);
     let verb = match cli.command {

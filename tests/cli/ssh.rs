@@ -83,6 +83,45 @@ fn remote_command_forwards_the_folder_and_records_a_reachable_recent() -> Result
 }
 
 #[test]
+fn remote_command_reuses_an_existing_control_socket() -> Result<()> {
+    let scratch = Scratch::directory()?;
+    let (bin, capture) = fake_ssh(&scratch)?;
+    let socket = scratch.environment.join("edith.sock");
+    drop(
+        ssh_command(
+            &scratch,
+            &bin,
+            &capture,
+            &[
+                "--remote",
+                "test-host",
+                "--ssh-control-path",
+                socket.to_str().context("socket path was not UTF-8")?,
+                "--folder",
+                "/srv/project",
+                "status",
+            ],
+        )?
+        .success()?,
+    );
+
+    let arguments = fs::read_to_string(&capture)?;
+    ensure!(
+        arguments.starts_with(&format!("-S\n{}\n--\ntest-host\n", socket.display())),
+        "unexpected SSH arguments: {arguments}"
+    );
+    ensure!(
+        !arguments
+            .lines()
+            .last()
+            .unwrap_or_default()
+            .contains("ssh-control-path"),
+        "the remote command received a host-only option: {arguments}"
+    );
+    Ok(())
+}
+
+#[test]
 fn implicit_remote_terminal_opens_the_folder_through_the_tui_verb() -> Result<()> {
     let scratch = Scratch::directory()?;
     let (bin, capture) = fake_ssh(&scratch)?;
