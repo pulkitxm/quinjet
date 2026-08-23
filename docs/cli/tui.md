@@ -150,6 +150,16 @@ activating a control.
 Horizontal trackpad swipes scroll wide preview lines. Terminals that encode a
 horizontal gesture as `Shift` plus vertical wheel events are supported too.
 
+Modal lists use one interaction contract. Up and down move the keyboard
+selection, `Enter` activates it, moving the pointer highlights the row beneath
+it, and clicking activates that row. The wheel pans a long modal list freely
+without dragging the keyboard selection along with it. Returning to the
+keyboard reveals the selected row again. This applies to branches, history
+branches, comparisons, stashes, projects, pull-request repositories, command
+and review actions, themes, and appearances. Visible modal controls have both a
+mouse target and a key: `Tab` switches a commit between new and amend, `y` and
+`n` answer confirmations, and `o`, `t`, and `s` resolve conflicts.
+
 Releasing the mouse costs nothing else. Clickable rows, group actions and
 divider dragging are the only things that stop working, and every one of them
 has a key.
@@ -190,13 +200,18 @@ capped at 34 cells.
 
 Each project heading starts with a bordered `[⌄]` or `[›]` control. Clicking
 that control collapses or expands only that project's worktrees without opening
-anything. `Ctrl+E` expands every project when any project is collapsed, then
-collapses every project when all are expanded. The footer names the next action.
+anything. Project headings also participate in keyboard selection. Move onto a
+heading with `j`, `k`, or the arrow keys, then use `Enter`, `Space`, left, or
+right to change its fold. `Ctrl+E` expands every project when any project is
+collapsed, then collapses every project when all are expanded. Fold choices are
+stored in Quinjet's state directory and restored when the picker is reopened or
+Quinjet is started again. The footer names the next action.
 Opening a selected worktree keeps the picker visible with the destination path
 until repository discovery finishes. A failed open returns to the picker and
 shows the error without losing the current filter or selection.
 Filtering temporarily reveals matching worktrees inside collapsed projects, so
-collapse never hides a search result.
+collapse never hides a search result. Worktrees that Git marks as prunable are
+omitted because their directories no longer exist and cannot be opened.
 
 When recent SSH repositories exist, `Open a project` and both the `w` and `N`
 project pickers show the active machine. The originating computer appears

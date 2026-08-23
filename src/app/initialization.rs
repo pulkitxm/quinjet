@@ -22,6 +22,16 @@ impl App {
             history: Vec::new(),
             worktrees: Vec::new(),
             project_groups: Vec::new(),
+            collapsed_project_groups: {
+                #[cfg(test)]
+                {
+                    HashSet::new()
+                }
+                #[cfg(not(test))]
+                {
+                    crate::state::load_collapsed_project_groups()
+                }
+            },
             project_machine_focus: None,
             ssh_context: SshContext::from_environment(),
             history_branch: None,
@@ -114,6 +124,8 @@ impl App {
             resize_target: None,
             filter: String::new(),
             modal: None,
+            modal_scroll: 0,
+            modal_free_scroll: false,
             toast: None,
             mouse_capture: true,
             mouse_capture_preference: true,

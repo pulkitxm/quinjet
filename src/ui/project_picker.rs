@@ -4,9 +4,11 @@ use super::*;
 pub(super) fn project_header_line(
     group: &ProjectGroup,
     expanded: bool,
+    active: bool,
     width: usize,
     theme: &Theme,
 ) -> Line<'static> {
+    let background = if active { theme.selected } else { theme.panel };
     let button = if expanded { "[⌄]" } else { "[›]" };
     let updated = group
         .updated_at()
@@ -18,23 +20,27 @@ pub(super) fn project_header_line(
         .saturating_add(updated.width());
     let padding = " ".repeat(width.saturating_sub(used));
     Line::from(vec![
-        Span::styled(" ", Style::default().bg(theme.panel)),
+        Span::styled(" ", Style::default().bg(background)),
         Span::styled(
             button,
             Style::default()
                 .fg(theme.accent)
-                .bg(theme.panel_alt)
+                .bg(if active {
+                    theme.selected
+                } else {
+                    theme.panel_alt
+                })
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!(" {name}"),
             Style::default()
                 .fg(theme.muted)
-                .bg(theme.panel)
+                .bg(background)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(padding, Style::default().bg(theme.panel)),
-        Span::styled(updated, Style::default().fg(theme.muted).bg(theme.panel)),
+        Span::styled(padding, Style::default().bg(background)),
+        Span::styled(updated, Style::default().fg(theme.muted).bg(background)),
     ])
 }
 

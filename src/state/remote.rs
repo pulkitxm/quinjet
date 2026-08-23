@@ -208,12 +208,13 @@ mod tests {
     fn machine_folder_prefers_an_absolute_recent_project() {
         let state = tempfile::tempdir().unwrap();
         let _guard = StateRootGuard::new(state.path());
-        record_recent_remote("remote", Path::new("/work/project"));
+        let project = state.path().join("work").join("project");
+        record_recent_remote("remote", &project);
         record_recent_remote("remote", Path::new("."));
 
         let machines = load_recent_ssh_machines();
 
-        assert_eq!(machines[0].folder, Path::new("/work/project"));
+        assert_eq!(machines[0].folder, project);
         assert_eq!(machines[0].uses, 2);
     }
 

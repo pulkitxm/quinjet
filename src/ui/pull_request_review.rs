@@ -22,6 +22,7 @@ pub(super) fn review_line_selected(app: &App, line: &DiffLine, old_side: Option<
 
 pub(super) fn draw_review_editor(
     frame: &mut Frame<'_>,
+    hits: &mut Vec<(Rect, ModalAction)>,
     title: &str,
     input: &crate::app::TextBuffer,
     decision: Option<crate::git::github::PullRequestReviewDecision>,
@@ -35,7 +36,8 @@ pub(super) fn draw_review_editor(
     frame.render_widget(block, area);
     let input_y = inner.y + u16::from(decision.is_some());
     if let Some(selected) = decision {
-        let labels = crate::git::github::PullRequestReviewDecision::ALL
+        let choices = crate::git::github::PullRequestReviewDecision::ALL;
+        let labels = choices
             .iter()
             .map(|choice| {
                 if *choice == selected {
@@ -58,6 +60,15 @@ pub(super) fn draw_review_editor(
             Paragraph::new(Line::from(labels)).style(Style::default().bg(theme.panel_alt)),
             Rect::new(inner.x, inner.y, inner.width, 1),
         );
+        let mut x = inner.x;
+        for (index, choice) in choices.iter().enumerate() {
+            let width = u16::try_from(choice.label().width().saturating_add(2)).unwrap_or(0);
+            hits.push((
+                Rect::new(x, inner.y, width.min(inner.right().saturating_sub(x)), 1),
+                ModalAction::PullRequestReviewDecision(index),
+            ));
+            x = x.saturating_add(width);
+        }
     }
     let input_area = Rect::new(
         inner.x,
@@ -94,6 +105,7 @@ pub(super) fn draw_review_thread_actions(
     hits: &mut Vec<(Rect, ModalAction)>,
     items: &[crate::app::PullRequestReviewThreadAction],
     selected: usize,
+    list: &mut ModalList<'_>,
     theme: &Theme,
 ) {
     let width = items
@@ -112,10 +124,20 @@ pub(super) fn draw_review_thread_actions(
     let block = modal_block(" Review Thread ", theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    for (index, item) in items.iter().enumerate() {
+    let visible = inner.height.saturating_sub(1) as usize;
+    let offset = list.offset(selected, visible, items.len());
+    for (row_index, (index, item)) in items
+        .iter()
+        .enumerate()
+        .skip(offset)
+        .take(visible)
+        .enumerate()
+    {
         let row = Rect::new(
             inner.x,
-            inner.y.saturating_add(u16::try_from(index).unwrap_or(0)),
+            inner
+                .y
+                .saturating_add(u16::try_from(row_index).unwrap_or(0)),
             inner.width,
             1,
         );
@@ -128,6 +150,7 @@ pub(super) fn draw_review_thread_actions(
             row,
         );
         hits.push((row, ModalAction::PullRequestReviewThreadAction(index)));
+        list.hit(row, index);
     }
     draw_modal_hint(frame, area, "j/k select   Enter open   Esc cancel", theme);
 }

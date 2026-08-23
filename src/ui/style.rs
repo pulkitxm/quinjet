@@ -1,5 +1,17 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
+pub(super) fn file_icon_span(path: &Path, theme: &Theme) -> Span<'static> {
+    let icon = file_icons::for_path(path);
+    Span::styled(icon.glyph, Style::default().fg(theme.syntax(icon.color)))
+}
+
+pub(super) const fn disclosure_glyph(expanded: bool) -> &'static str {
+    if expanded { "⌄" } else { "›" }
+}
+
+pub(super) const fn disclosure_prefix(expanded: bool) -> &'static str {
+    if expanded { " ⌄ " } else { " › " }
+}
 
 pub(super) fn set_text_cursor(
     frame: &mut Frame<'_>,
