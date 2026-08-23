@@ -1,9 +1,8 @@
-use std::env;
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::thread;
+use std::{env, thread};
 
 use anyhow::{Context, Result};
 
