@@ -193,14 +193,8 @@ fn local_project_picker_uses_the_inline_machine_strip() {
         }),
         OnboardingAction::SwitchSshMachine(1)
     );
-    onboarding.machine_selected = None;
     assert_eq!(
         onboarding.handle_key(key(KeyCode::Tab)),
-        OnboardingAction::None
-    );
-    drop(onboarding.handle_key(key(KeyCode::Right)));
-    assert_eq!(
-        onboarding.handle_key(key(KeyCode::Enter)),
         OnboardingAction::SwitchSshMachine(1)
     );
 }

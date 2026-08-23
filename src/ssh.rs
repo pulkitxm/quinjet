@@ -92,6 +92,18 @@ impl SshContext {
             .ok()
             .and_then(|value| serde_json::from_str(&value).ok())
     }
+
+    pub(crate) fn adjacent_accessible_machine_index(&self, reverse: bool) -> Option<usize> {
+        let current = self
+            .machines
+            .iter()
+            .position(|machine| machine.target == self.current)?;
+        if reverse {
+            previous_accessible_machine_index(&self.machines, current)
+        } else {
+            next_accessible_machine_index(&self.machines, current)
+        }
+    }
 }
 
 pub(crate) fn switch_exit_code(request: SshSwitch) -> Option<u8> {

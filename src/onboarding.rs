@@ -146,28 +146,20 @@ impl Onboarding {
                 crate::state::record_collapsed_project_groups(&self.collapsed);
                 return OnboardingAction::None;
             }
-            KeyCode::Tab if self.ssh_context.is_some() => {
-                self.machine_selected = self.machine_selected.map_or_else(
-                    || {
-                        self.ssh_context.as_ref().and_then(|context| {
-                            context
-                                .machines
-                                .iter()
-                                .position(|machine| machine.target == context.current)
-                        })
-                    },
-                    |_| None,
-                );
-                return OnboardingAction::None;
+            KeyCode::Tab | KeyCode::BackTab => {
+                let reverse =
+                    key.code == KeyCode::BackTab || key.modifiers.contains(KeyModifiers::SHIFT);
+                return self
+                    .ssh_context
+                    .as_ref()
+                    .and_then(|context| context.adjacent_accessible_machine_index(reverse))
+                    .map_or(OnboardingAction::None, OnboardingAction::SwitchSshMachine);
             }
             KeyCode::Char('o' | 'O') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.panel = OnboardingPanel::Path;
                 return OnboardingAction::None;
             }
             _ => {}
-        }
-        if let Some(action) = self.handle_focused_machine_key(key) {
-            return action;
         }
         let visible = App::filtered_project_rows(&self.groups, &self.query.value, &self.collapsed);
         match key.code {
@@ -248,42 +240,6 @@ impl Onboarding {
                 OnboardingAction::None
             }
             _ => OnboardingAction::None,
-        }
-    }
-
-    fn handle_focused_machine_key(&mut self, key: KeyEvent) -> Option<OnboardingAction> {
-        let selected = self.machine_selected?;
-        let Some(context) = self.ssh_context.as_ref() else {
-            self.machine_selected = None;
-            return None;
-        };
-        match key.code {
-            KeyCode::Left | KeyCode::Up | KeyCode::Char('h' | 'k') => {
-                self.machine_selected =
-                    crate::ssh::previous_accessible_machine_index(&context.machines, selected)
-                        .or(Some(selected));
-                Some(OnboardingAction::None)
-            }
-            KeyCode::Right | KeyCode::Down | KeyCode::Char('j' | 'l') => {
-                self.machine_selected =
-                    crate::ssh::next_accessible_machine_index(&context.machines, selected)
-                        .or(Some(selected));
-                Some(OnboardingAction::None)
-            }
-            KeyCode::Enter => Some(context.machines.get(selected).map_or(
-                OnboardingAction::None,
-                |machine| {
-                    if machine.accessible && machine.target != context.current {
-                        OnboardingAction::SwitchSshMachine(selected)
-                    } else {
-                        OnboardingAction::None
-                    }
-                },
-            )),
-            _ => {
-                self.machine_selected = None;
-                None
-            }
         }
     }
 

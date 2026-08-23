@@ -81,7 +81,6 @@ impl App {
                 let Some(context) = self.ssh_context.as_ref() else {
                     return;
                 };
-                self.project_machine_focus = Some(index);
                 if let Some(machine) = context.machines.get(index)
                     && machine.accessible
                     && machine.target != context.current
