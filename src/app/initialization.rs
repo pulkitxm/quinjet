@@ -108,6 +108,7 @@ impl App {
             preview_file_cursor: 0,
             collapsed_preview_files: HashSet::new(),
             expanded_preview_files: HashSet::new(),
+            content_file_anchor: None,
             change_cursor: 0,
             history_cursor: 0,
             sidebar_offset: 0,

@@ -299,6 +299,11 @@ pub(crate) struct App {
     pub preview_file_cursor: usize,
     pub collapsed_preview_files: HashSet<PathBuf>,
     pub expanded_preview_files: HashSet<PathBuf>,
+    #[doc = " The file whose header the next draw should park at the top of the content"]
+    #[doc = " pane. Only the renderer knows how many rows a folded document occupies, so"]
+    #[doc = " collapsing, expanding and file navigation name the file and let the draw"]
+    #[doc = " turn it into a scroll offset."]
+    pub content_file_anchor: Option<PathBuf>,
     pub change_cursor: usize,
     pub history_cursor: usize,
     pub sidebar_offset: usize,

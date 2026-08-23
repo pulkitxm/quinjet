@@ -57,9 +57,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     }
     let (diff_divider, content_file_hits, content_step_hits, content_review_hits) =
         draw_content(frame, content_area, app, theme, &mut link_hits);
-    if let Some(hit) = draw_jump_to_bottom(frame, content_area, app, theme) {
-        scm_action_hits.push(hit);
-    }
+    scm_action_hits.extend(draw_jump_controls(frame, content_area, app, theme));
     draw_footer(frame, footer, app, theme, &mut link_hits, &mut project_hits);
 
     app.geometry = UiGeometry {
@@ -247,8 +245,6 @@ pub(super) fn draw_tabs(
     theme: &Theme,
 ) -> (Rect, Rect, Rect, Vec<LinkHit>, Option<Rect>) {
     let mut link_hits = Vec::new();
-    let path = app.repository_root.display().to_string();
-    let show_path = path != app.repository_name;
     let branch = if app.status.branch.head.is_empty() {
         "detecting branch…".to_owned()
     } else {
@@ -307,41 +303,21 @@ pub(super) fn draw_tabs(
         app.repository_name.width(),
         title_area,
     );
-    let mut title = vec![
+    let projects_hit = Some(repository_area).filter(|area| area.width > 0 && area.height > 0);
+    let title = vec![
         Span::styled(
             prefix,
             Style::default()
                 .fg(theme.accent)
                 .add_modifier(Modifier::BOLD),
         ),
-        link_span(
+        Span::styled(
             app.repository_name.clone(),
-            app.repository_open_target(),
-            repository_area,
-            theme,
-            &mut link_hits,
+            Style::default()
+                .fg(theme.text)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
         ),
     ];
-    let mut projects_hit = None;
-    if show_path {
-        let path_x = repository_x
-            .saturating_add(cells(app.repository_name.width()))
-            .saturating_add(2);
-        title.push(Span::raw("  "));
-        let path_area = clipped_link_area(
-            path_x,
-            title_area.y.saturating_add(1),
-            path.width(),
-            title_area,
-        );
-        projects_hit = Some(path_area).filter(|area| area.width > 0 && area.height > 0);
-        title.push(Span::styled(
-            path,
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(Modifier::UNDERLINED),
-        ));
-    }
     frame.render_widget(
         Paragraph::new(Line::from(title)).block(
             Block::default()

@@ -80,6 +80,7 @@ pub(crate) enum ScmAction {
     PrPrimary,
     PrToggleMenu,
     PrMenu(PrMenuItem),
+    JumpToTop,
     JumpToBottom,
 }
 

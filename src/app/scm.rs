@@ -115,6 +115,10 @@ impl App {
                 self.pr_menu_open = false;
                 self.handle_pr_menu_item(item, effects);
             }
+            ScmAction::JumpToTop => {
+                self.set_focus(Focus::Content, effects);
+                self.content_scroll = 0;
+            }
             ScmAction::JumpToBottom => {
                 self.set_focus(Focus::Content, effects);
                 self.content_scroll = usize::MAX;
