@@ -41,21 +41,7 @@ impl Onboarding {
             .find(|(area, _)| area.contains((mouse.column, mouse.row).into()))
             .map(|(_, index)| *index)
         {
-            return self
-                .ssh_context
-                .as_ref()
-                .map_or(OnboardingAction::None, |context| {
-                    context
-                        .machines
-                        .get(index)
-                        .map_or(OnboardingAction::None, |machine| {
-                            if machine.accessible && machine.target != context.current {
-                                OnboardingAction::SwitchSshMachine(index)
-                            } else {
-                                OnboardingAction::None
-                            }
-                        })
-                });
+            return self.switch_machine(index);
         }
         if let Some(common_dir) = self
             .collapse_hits

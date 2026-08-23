@@ -84,23 +84,11 @@ fn project_shortcuts_choose_current_or_new_tab_mode() {
     app.modal = None;
 
     let effects = app.handle_key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT), now);
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        AppEffect::Git(command)
-            if matches!(command.as_ref(), WorkerCommand::LoadRecentProjects { .. })
-    )));
-    assert!(matches!(
-        app.modal,
-        Some(Modal::Projects {
-            mode: ProjectOpenMode::NewTab,
-            ..
-        })
-    ));
-    let effects = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
     assert!(matches!(
         effects.as_slice(),
-        [AppEffect::OpenRepositoryTab(path)] if path == Path::new("/target")
+        [AppEffect::OpenRepositoryTabPicker]
     ));
+    assert!(app.modal.is_none());
 }
 
 #[test]
@@ -370,17 +358,10 @@ fn right_click_menu_opens_projects_and_routes_close_all() {
     drop(app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Right), 14, 0), now));
     let effects = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
     assert!(matches!(
-        app.modal,
-        Some(Modal::Projects {
-            mode: ProjectOpenMode::NewTab,
-            ..
-        })
+        effects.as_slice(),
+        [AppEffect::OpenRepositoryTabPicker]
     ));
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        AppEffect::Git(command)
-            if matches!(command.as_ref(), WorkerCommand::LoadRecentProjects { .. })
-    )));
+    assert!(app.modal.is_none());
     assert_eq!(app.repository_tab_menu, None);
 
     app.modal = None;

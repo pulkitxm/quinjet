@@ -193,10 +193,81 @@ fn local_project_picker_uses_the_inline_machine_strip() {
             row: button.y,
             modifiers: KeyModifiers::NONE,
         }),
-        OnboardingAction::SwitchSshMachine(1)
+        OnboardingAction::SwitchSshMachine(SshSwitch {
+            index: 1,
+            mode: SshProjectOpenMode::Current,
+        })
     );
     assert_eq!(
         onboarding.handle_key(key(KeyCode::Tab)),
-        OnboardingAction::SwitchSshMachine(1)
+        OnboardingAction::SwitchSshMachine(SshSwitch {
+            index: 1,
+            mode: SshProjectOpenMode::Current,
+        })
     );
+}
+
+#[test]
+fn new_tab_onboarding_keeps_its_pending_identity_across_switch_and_cancel() {
+    let machines = vec![
+        SshMachine {
+            target: "macbook".to_owned(),
+            folder: PathBuf::from("/local"),
+            accessible: true,
+            uses: 0,
+            local: true,
+        },
+        SshMachine {
+            target: "tof".to_owned(),
+            folder: PathBuf::from("/remote"),
+            accessible: true,
+            uses: 2,
+            local: false,
+        },
+    ];
+    let mut tabs = crate::ssh::SshTabs::default();
+    let local = tabs.append("macbook", "local", "/local/repo");
+    let pending = tabs.append_pending("macbook", "/local/repo");
+    let context = SshContext {
+        current: "macbook".to_owned(),
+        machines: machines.clone(),
+        tabs,
+    };
+    let mut switching = Onboarding::from_groups_with_mode(
+        Path::new("/local"),
+        Vec::new(),
+        Some(context.clone()),
+        ProjectOpenMode::NewTab,
+    );
+
+    assert_eq!(
+        switching.handle_key(key(KeyCode::Tab)),
+        OnboardingAction::SwitchSshMachine(SshSwitch {
+            index: 1,
+            mode: SshProjectOpenMode::New,
+        })
+    );
+    assert_eq!(
+        switching
+            .ssh_context()
+            .and_then(|saved| saved.tabs.get(pending).map(|tab| tab.machine.clone())),
+        Some("tof".to_owned())
+    );
+
+    let mut canceling = Onboarding::from_groups_with_mode(
+        Path::new("/local"),
+        Vec::new(),
+        Some(context),
+        ProjectOpenMode::NewTab,
+    );
+    assert_eq!(
+        canceling.handle_key(key(KeyCode::Esc)),
+        OnboardingAction::SwitchSshMachine(SshSwitch {
+            index: 0,
+            mode: SshProjectOpenMode::Activate,
+        })
+    );
+    let saved = canceling.ssh_context().expect("updated context");
+    assert!(saved.tabs.get(pending).is_none());
+    assert_eq!(saved.tabs.active_id(), Some(local));
 }

@@ -29,6 +29,7 @@ struct RepositoryTab<T> {
     id: TabId,
     title: String,
     root: PathBuf,
+    pending: bool,
     value: T,
 }
 
@@ -51,11 +52,31 @@ impl<T> RepositoryTabs<T> {
         root: impl Into<PathBuf>,
         value: T,
     ) -> Self {
+        Self::new_with_pending(id, title, root, value, false)
+    }
+
+    pub(crate) fn new_pending_with_id(
+        id: TabId,
+        title: impl Into<String>,
+        root: impl Into<PathBuf>,
+        value: T,
+    ) -> Self {
+        Self::new_with_pending(id, title, root, value, true)
+    }
+
+    fn new_with_pending(
+        id: TabId,
+        title: impl Into<String>,
+        root: impl Into<PathBuf>,
+        value: T,
+        pending: bool,
+    ) -> Self {
         Self {
             tabs: vec![RepositoryTab {
                 id,
                 title: title.into(),
                 root: root.into(),
+                pending,
                 value,
             }],
             active: Some(id),
@@ -139,10 +160,47 @@ impl<T> RepositoryTabs<T> {
             id,
             title: title.into(),
             root: root.into(),
+            pending: false,
             value,
         });
         self.active = Some(id);
         id
+    }
+
+    pub(crate) fn append_pending_with_id(
+        &mut self,
+        id: TabId,
+        title: impl Into<String>,
+        root: impl Into<PathBuf>,
+        value: T,
+    ) -> TabId {
+        self.next_id = self.next_id.max(id.value().wrapping_add(1));
+        self.tabs.push(RepositoryTab {
+            id,
+            title: title.into(),
+            root: root.into(),
+            pending: true,
+            value,
+        });
+        self.active = Some(id);
+        id
+    }
+
+    pub(crate) fn append_pending(
+        &mut self,
+        title: impl Into<String>,
+        root: impl Into<PathBuf>,
+        value: T,
+    ) -> TabId {
+        let id = TabId(self.next_id);
+        self.append_pending_with_id(id, title, root, value)
+    }
+
+    pub(crate) fn is_pending(&self, id: TabId) -> bool {
+        self.tabs
+            .iter()
+            .find(|tab| tab.id == id)
+            .is_some_and(|tab| tab.pending)
     }
 
     pub(crate) fn id_for_root(&self, root: &Path) -> Option<TabId> {
@@ -171,6 +229,7 @@ impl<T> RepositoryTabs<T> {
         let tab = self.tabs.iter_mut().find(|tab| tab.id == id)?;
         tab.title = title.into();
         tab.root = root.into();
+        tab.pending = false;
         Some(std::mem::replace(&mut tab.value, value))
     }
 

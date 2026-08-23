@@ -133,14 +133,26 @@ fn open_terminal(
     });
     let mut workspace = restored_workspace.or_else(|| {
         repository.as_ref().map(|repository| {
-            let mut workspace = RepositoryWorkspace::new(
-                repository,
-                options.theme,
-                options.appearance,
-                !options.no_mouse,
-                webhooks.is_some(),
-                WorkspaceContext::new(ssh_context.cloned(), options.client),
-            );
+            let context = WorkspaceContext::new(ssh_context.cloned(), options.client);
+            let mut workspace = if handoff_mode == Some(ssh::SshProjectOpenMode::New) {
+                RepositoryWorkspace::new_pending_host(
+                    repository,
+                    options.theme,
+                    options.appearance,
+                    !options.no_mouse,
+                    webhooks.is_some(),
+                    context,
+                )
+            } else {
+                RepositoryWorkspace::new(
+                    repository,
+                    options.theme,
+                    options.appearance,
+                    !options.no_mouse,
+                    webhooks.is_some(),
+                    context,
+                )
+            };
             workspace.sync_tabs(Instant::now());
             workspace
         })
@@ -287,24 +299,36 @@ fn open_terminal(
                 match action {
                     OnboardingAction::None => {}
                     OnboardingAction::Quit => running = false,
-                    OnboardingAction::SwitchSshMachine(index) => {
-                        switch_ssh_machine = Some(ssh::SshSwitch {
-                            index,
-                            mode: ssh::SshProjectOpenMode::Current,
-                        });
+                    OnboardingAction::SwitchSshMachine(request) => {
+                        switch_ssh_machine = Some(request);
                         running = false;
                     }
                     OnboardingAction::Open(path) => match Repository::discover(&path) {
                         Ok(repository) => {
                             state::record_recent_project(repository.root());
-                            let mut next = RepositoryWorkspace::new(
-                                &repository,
-                                options.theme,
-                                options.appearance,
-                                !options.no_mouse,
-                                webhooks.is_some(),
-                                WorkspaceContext::new(ssh_context.cloned(), options.client),
+                            let context = WorkspaceContext::new(
+                                onboarding.ssh_context().or_else(|| ssh_context.cloned()),
+                                options.client,
                             );
+                            let mut next = if onboarding_mode == app::ProjectOpenMode::NewTab {
+                                RepositoryWorkspace::new_resolving_pending(
+                                    &repository,
+                                    options.theme,
+                                    options.appearance,
+                                    !options.no_mouse,
+                                    webhooks.is_some(),
+                                    context,
+                                )
+                            } else {
+                                RepositoryWorkspace::new(
+                                    &repository,
+                                    options.theme,
+                                    options.appearance,
+                                    !options.no_mouse,
+                                    webhooks.is_some(),
+                                    context,
+                                )
+                            };
                             next.sync_tabs(Instant::now());
                             running &= dispatch_launch_effects(
                                 &mut next,
@@ -333,6 +357,7 @@ fn open_terminal(
             context: workspace
                 .as_ref()
                 .and_then(RepositoryWorkspace::ssh_context)
+                .or_else(|| onboarding.ssh_context())
                 .or_else(|| ssh_context.cloned()),
         }
     });
@@ -396,6 +421,12 @@ fn dispatch_effects(
                         pending.push_back(effects);
                     }
                 }
+                AppEffect::OpenRepositoryTabPicker => {
+                    if let Some(effects) = workspace.open_repository_tab_picker(id, Instant::now())
+                    {
+                        pending.push_back(effects);
+                    }
+                }
                 AppEffect::OpenRepositoryTab(path) => {
                     render_project_opening(workspace, terminal, id);
                     if let Some(effects) = workspace.open_repository_tab(id, &path, Instant::now())
@@ -403,7 +434,17 @@ fn dispatch_effects(
                         pending.push_back(effects);
                     }
                 }
+                AppEffect::CancelRepositoryTabPicker => {
+                    let (keep_running, handoff) =
+                        workspace.cancel_repository_tab_picker(id, Instant::now());
+                    running &= keep_running;
+                    if let Some(request) = handoff {
+                        *switch_ssh_machine = Some(request);
+                        running = false;
+                    }
+                }
                 AppEffect::SwitchSshMachine(request) => {
+                    workspace.prepare_ssh_switch(id, request);
                     *switch_ssh_machine = Some(request);
                     running = false;
                 }

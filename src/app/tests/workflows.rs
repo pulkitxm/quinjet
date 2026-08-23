@@ -188,18 +188,17 @@ fn command_palette_exposes_new_project_tabs() {
     let commands = app.palette_commands("new tab");
 
     assert_eq!(commands, vec![PaletteCommand::OpenProjectNewTab]);
+    let mut effects = Vec::new();
     app.execute_palette(
         PaletteCommand::OpenProjectNewTab,
-        &mut Vec::new(),
+        &mut effects,
         Instant::now(),
     );
     assert!(matches!(
-        app.modal,
-        Some(Modal::Projects {
-            mode: ProjectOpenMode::NewTab,
-            ..
-        })
+        effects.as_slice(),
+        [AppEffect::OpenRepositoryTabPicker]
     ));
+    assert!(app.modal.is_none());
 }
 
 #[test]

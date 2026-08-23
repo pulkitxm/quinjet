@@ -250,10 +250,7 @@ fn repository_tab_menu_registers_four_clamped_actions() {
 #[test]
 fn new_tab_picker_names_its_destination() {
     let mut app = App::new("/repo", "project");
-    drop(app.handle_key(
-        KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT),
-        Instant::now(),
-    ));
+    drop(app.open_projects_on_launch(ProjectOpenMode::NewTab));
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
 
     terminal
@@ -323,7 +320,7 @@ fn project_picker_keeps_host_and_ssh_navigation_in_one_layout() {
     );
 
     drop(app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), now));
-    drop(app.handle_key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT), now));
+    drop(app.open_projects_on_launch(ProjectOpenMode::NewTab));
     terminal
         .draw(|frame| draw(frame, &mut app, &Theme::default()))
         .unwrap();
