@@ -30,6 +30,7 @@ Options:
 | `--pr <NUMBER>` | unsigned integer | unset | Opens the interface already focused on this pull request: the Pull Requests tab is selected and the lookup starts before the first frame. Also accepted on a bare `quinjet` launch. With any other verb it is an error. |
 | `-C, --path, --folder <DIR>` | path | `.` | Selects a repository when the positional `PATH` is omitted. |
 | `--remote <SSH_TARGET>` | SSH target | local machine | Runs the interface on the SSH machine and allocates a remote terminal. |
+| `--ssh-control-path <PATH>` | path | unset | Reuses an existing SSH control socket for the remote session. |
 | `--client <CLIENT>` | `edith` | unset | Runs inside a supported embedding client. `edith` delegates project and worktree navigation to Edith. |
 | `--json` | flag | off | Global. Parsed and ignored here, because the interface writes to a screen rather than to stdout. |
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |

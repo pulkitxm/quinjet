@@ -1,4 +1,4 @@
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::io::{self, IsTerminal};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -11,8 +11,10 @@ use super::{EXIT_FAILURE, EXIT_UNAVAILABLE, Emitter, RemoteVerb};
 use crate::ssh::{SshContext, SshProjectOpenMode};
 
 const REMOTE_BINARY_ENV: &str = "QUINJET_REMOTE_BINARY";
+mod arguments;
 mod terminal;
 
+use arguments::{forwarded as forwarded_arguments, switched as switched_terminal_arguments};
 pub(crate) use terminal::run_selected_terminal;
 
 struct TerminalStatus {
@@ -32,20 +34,26 @@ pub(super) fn run(
     terminal: bool,
     implicit_terminal: bool,
     folder: &Path,
+    control_path: Option<&Path>,
 ) -> Result<u8> {
     validate_target(target)?;
     let binary = env::var(REMOTE_BINARY_ENV).unwrap_or_else(|_| "quinjet".to_owned());
     let original_arguments = wild::args_os().skip(1).collect::<Vec<_>>();
     if !terminal {
         let arguments = forwarded_arguments(original_arguments)?;
-        return run_once(target, folder, &binary, &arguments, None);
+        return run_once(target, folder, &binary, &arguments, None, control_path);
     }
     terminal::run_terminal_loop(
         target,
         folder,
         &binary,
         &original_arguments,
-        (implicit_terminal, false, None),
+        (
+            implicit_terminal,
+            false,
+            None,
+            control_path.map(Path::to_path_buf),
+        ),
         None,
     )
 }
@@ -56,8 +64,16 @@ fn run_once(
     binary: &str,
     arguments: &[OsString],
     context: Option<&SshContext>,
+    control_path: Option<&Path>,
 ) -> Result<u8> {
-    let outcome = ssh_status(target, binary, arguments, context, TerminalRelay::default())?;
+    let outcome = ssh_status(
+        target,
+        binary,
+        arguments,
+        context,
+        TerminalRelay::default(),
+        control_path,
+    )?;
     if outcome.status.success() {
         crate::state::record_recent_remote(target, folder);
     }
@@ -70,6 +86,7 @@ fn ssh_status(
     arguments: &[OsString],
     context: Option<&SshContext>,
     terminal: TerminalRelay,
+    control_path: Option<&Path>,
 ) -> Result<TerminalStatus> {
     let command = terminal::remote_command(
         binary,
@@ -79,10 +96,14 @@ fn ssh_status(
         terminal.project_mode,
     )?;
     let mut ssh = Command::new("ssh");
+    let ssh = match control_path {
+        Some(path) => ssh.arg("-S").arg(path),
+        None => &mut ssh,
+    };
     let ssh = if terminal.allocate && io::stdin().is_terminal() && io::stdout().is_terminal() {
         ssh.arg("-tt")
     } else {
-        &mut ssh
+        ssh
     };
     let _command = ssh.arg("--").arg(target).arg(command);
     if terminal.allocate {
@@ -311,85 +332,6 @@ fn validate_target(target: &str) -> Result<()> {
     Ok(())
 }
 
-fn forwarded_arguments(arguments: impl IntoIterator<Item = OsString>) -> Result<Vec<OsString>> {
-    let mut forwarded = Vec::new();
-    let mut arguments = arguments.into_iter();
-    while let Some(argument) = arguments.next() {
-        if argument == OsStr::new("--remote") {
-            drop(
-                arguments
-                    .next()
-                    .context("--remote requires an SSH target")?,
-            );
-        } else if argument
-            .to_str()
-            .is_some_and(|value| value.starts_with("--remote="))
-        {
-        } else if argument == OsStr::new("--folder") {
-            forwarded.push(OsString::from("--path"));
-            forwarded.push(arguments.next().context("--folder requires a directory")?);
-        } else if let Some(folder) = argument
-            .to_str()
-            .and_then(|value| value.strip_prefix("--folder="))
-        {
-            forwarded.push(OsString::from("--path"));
-            forwarded.push(OsString::from(folder));
-        } else {
-            forwarded.push(argument);
-        }
-    }
-    Ok(forwarded)
-}
-
-fn implicit_terminal_arguments(
-    arguments: impl IntoIterator<Item = OsString>,
-    folder: &Path,
-) -> Result<Vec<OsString>> {
-    let forwarded = forwarded_arguments(arguments)?;
-    let mut terminal = vec![OsString::from("tui"), folder.as_os_str().to_os_string()];
-    let mut forwarded = forwarded.into_iter();
-    while let Some(argument) = forwarded.next() {
-        if argument == OsStr::new("--path") || argument == OsStr::new("-C") {
-            drop(
-                forwarded
-                    .next()
-                    .context("repository path requires a directory")?,
-            );
-        } else if argument
-            .to_str()
-            .is_some_and(|value| value.starts_with("--path=") || value.starts_with("-C"))
-        {
-        } else {
-            terminal.push(argument);
-        }
-    }
-    Ok(terminal)
-}
-
-fn switched_terminal_arguments(
-    arguments: impl IntoIterator<Item = OsString>,
-    folder: &Path,
-) -> Result<Vec<OsString>> {
-    let forwarded = forwarded_arguments(arguments)?;
-    let Some(tui) = forwarded
-        .iter()
-        .position(|argument| argument == OsStr::new("tui"))
-    else {
-        return implicit_terminal_arguments(forwarded, folder);
-    };
-    let mut terminal = vec![OsString::from("tui"), folder.as_os_str().to_os_string()];
-    let mut trailing = forwarded.into_iter().skip(tui.saturating_add(1));
-    if let Some(argument) = trailing.next()
-        && argument
-            .to_str()
-            .is_some_and(|value| value.starts_with('-'))
-    {
-        terminal.push(argument);
-    }
-    terminal.extend(trailing);
-    Ok(terminal)
-}
-
 fn quote(value: &str) -> Result<String> {
     shlex::try_quote(value)
         .map(std::borrow::Cow::into_owned)
@@ -399,25 +341,6 @@ fn quote(value: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn transport_flags_are_removed_and_folder_becomes_path() {
-        let arguments = [
-            "--remote",
-            "host",
-            "--folder=/repos/a project",
-            "status",
-            "--json",
-        ]
-        .into_iter()
-        .map(OsString::from);
-        assert_eq!(
-            forwarded_arguments(arguments).unwrap(),
-            ["--path", "/repos/a project", "status", "--json"]
-                .map(OsString::from)
-                .to_vec()
-        );
-    }
 
     #[test]
     fn host_machine_is_named_and_pinned_before_remotes() {
@@ -436,37 +359,6 @@ mod tests {
         assert_ne!(machines[0].target, "");
         assert_eq!(machines[0].folder, Path::new("/host"));
         assert_eq!(machines[1].target, "remote");
-    }
-
-    #[test]
-    fn implicit_terminal_uses_the_tui_path_for_released_remote_binaries() {
-        let arguments = ["--remote", "host", "--folder", "/repos/a project"]
-            .into_iter()
-            .map(OsString::from);
-        assert_eq!(
-            implicit_terminal_arguments(arguments, Path::new("/repos/a project")).unwrap(),
-            ["tui", "/repos/a project"].map(OsString::from).to_vec()
-        );
-    }
-
-    #[test]
-    fn switched_terminal_replaces_the_repository_and_preserves_options() {
-        let arguments = [
-            "--remote",
-            "host",
-            "tui",
-            "/old/repository",
-            "--theme",
-            "quinjet",
-        ]
-        .into_iter()
-        .map(OsString::from);
-        assert_eq!(
-            switched_terminal_arguments(arguments, Path::new("/new/repository")).unwrap(),
-            ["tui", "/new/repository", "--theme", "quinjet"]
-                .map(OsString::from)
-                .to_vec()
-        );
     }
 
     #[test]

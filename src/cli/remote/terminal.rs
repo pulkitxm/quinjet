@@ -24,7 +24,7 @@ pub(crate) fn run_selected_terminal(
         folder,
         &binary,
         &original_arguments,
-        (false, true, Some(context)),
+        (false, true, Some(context), None),
         Some(mode),
     )
 }
@@ -34,10 +34,10 @@ pub(super) fn run_terminal_loop(
     folder: &Path,
     binary: &str,
     original_arguments: &[OsString],
-    handoff: (bool, bool, Option<SshContext>),
+    handoff: (bool, bool, Option<SshContext>, Option<std::path::PathBuf>),
     initial_project_mode: Option<SshProjectOpenMode>,
 ) -> Result<u8> {
-    let (implicit_terminal, mut switched, context) = handoff;
+    let (implicit_terminal, mut switched, context, control_path) = handoff;
     let (mut current_target, mut current_folder) = (target.to_owned(), folder.to_path_buf());
     let mut current_local = false;
     let mut project_mode = initial_project_mode;
@@ -66,6 +66,9 @@ pub(super) fn run_terminal_loop(
                     inherited: switched,
                     project_mode,
                 },
+                (current_target == target)
+                    .then_some(control_path.as_deref())
+                    .flatten(),
             )?
         };
         if let Some(updated) = outcome.context {
