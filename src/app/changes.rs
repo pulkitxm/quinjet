@@ -398,10 +398,6 @@ impl App {
             .and_then(|index| self.history.get(*index))
     }
 
-    #[expect(
-        clippy::unused_self,
-        reason = "the method belongs to the app surface even without state"
-    )]
     pub(crate) fn palette_commands(&self, query: &str) -> Vec<PaletteCommand> {
         let words: Vec<_> = query
             .split_ascii_whitespace()
@@ -409,6 +405,7 @@ impl App {
             .collect();
         PaletteCommand::ALL
             .into_iter()
+            .filter(|command| !self.exit_locked() || *command != PaletteCommand::Quit)
             .filter(|command| {
                 let label = command.label().to_lowercase();
                 words.iter().all(|word| label.contains(word))

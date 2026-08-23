@@ -22,6 +22,14 @@ impl App {
     }
 
     pub(super) fn open_projects(&mut self, mode: ProjectOpenMode, effects: &mut Vec<AppEffect>) {
+        if self.host_client == Some(Client::Edith) {
+            let action = match mode {
+                ProjectOpenMode::Initial | ProjectOpenMode::NewTab => HostAction::OpenProjectNewTab,
+                ProjectOpenMode::CurrentTab => HostAction::OpenWorktreeCurrentTab,
+            };
+            effects.push(AppEffect::Host(action));
+            return;
+        }
         self.modal_scroll = 0;
         self.modal_free_scroll = false;
         let collapsed = self.collapsed_project_groups.clone();

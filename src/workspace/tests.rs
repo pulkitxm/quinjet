@@ -7,6 +7,7 @@ use super::*;
 use crate::app::{Modal, ProjectOpenMode, TextBuffer, View};
 use crate::git::support::same_path;
 use crate::git::tests::TestRepository;
+use crate::integration::Client;
 use crate::ssh::SshMachine;
 
 fn test_repository(branch: &str) -> (TestRepository, Repository) {
@@ -22,6 +23,7 @@ fn workspace(repository: &Repository) -> RepositoryWorkspace {
         AppearanceChoice::Dark,
         false,
         false,
+        None,
         None,
     )
 }
@@ -45,6 +47,7 @@ fn machine_session_restores_open_tabs_in_order_and_reactivates_the_saved_project
         AppearanceChoice::Dark,
         false,
         false,
+        None,
         None,
     )
     .expect("restored workspace");
@@ -92,6 +95,7 @@ fn machine_picker_context_follows_replaced_and_appended_projects() {
         false,
         false,
         Some(context.clone()),
+        None,
     );
     let now = Instant::now();
     let first = workspace.active_id().expect("first tab is active");
@@ -162,6 +166,7 @@ fn mixed_machine_tabs_share_one_order_and_remote_tabs_handoff_directly() {
         false,
         false,
         Some(&context),
+        None,
     )
     .expect("mixed workspace");
 
@@ -304,6 +309,27 @@ fn failed_project_open_returns_to_the_picker() {
         workspace.app_mut(source).and_then(|app| app.modal.as_ref()),
         Some(Modal::Projects { opening: None, .. })
     ));
+}
+
+#[test]
+fn edith_workspace_refuses_to_close_its_managed_session() {
+    let (_directory, repository) = test_repository("managed");
+    let mut workspace = RepositoryWorkspace::new(
+        &repository,
+        ThemeName::Quinjet,
+        AppearanceChoice::Dark,
+        false,
+        false,
+        None,
+        Some(Client::Edith),
+    );
+    let active = workspace.active_id().expect("managed tab is active");
+
+    assert!(workspace.exit_locked());
+    let (keep_running, handoff) = workspace.close(active, Instant::now());
+    assert!(keep_running);
+    assert!(handoff.is_none());
+    assert_eq!(workspace.active_id(), Some(active));
 }
 
 #[test]

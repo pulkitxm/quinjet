@@ -132,6 +132,7 @@ impl App {
             text_selection: None,
             rendered_cells: Vec::new(),
             webhooks_listening: false,
+            host_client: None,
             busy: None,
             operation_frame: 0,
             refreshing: false,
@@ -191,6 +192,14 @@ impl App {
             pending_g: None,
             last_resize_tap: None,
         }
+    }
+
+    pub(crate) const fn set_host_client(&mut self, client: Option<Client>) {
+        self.host_client = client;
+    }
+
+    pub(crate) const fn exit_locked(&self) -> bool {
+        matches!(self.host_client, Some(Client::Edith))
     }
 
     pub(crate) fn set_theme_selection(&mut self, name: ThemeName, choice: AppearanceChoice) {

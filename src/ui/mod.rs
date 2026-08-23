@@ -38,7 +38,6 @@ use crate::theme::{AppearanceChoice, Theme, ThemeName};
 
 const DETAIL_LABEL_WIDTH: usize = 12;
 const MAX_INTRALINE_SOURCE_BYTES: usize = 32 * 1024;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HelpRow {
     Section(&'static str),
@@ -440,7 +439,9 @@ use content::*;
 use diff_render::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use feedback::*;
-pub(crate) use help::{help_display_index, help_shortcut_count, help_shortcut_index_at};
+pub(crate) use help::{draw_help, help_shortcut_count};
+#[cfg(test)]
+pub(crate) use help::{help_display_index, help_rows, help_shortcut_index_at};
 pub(crate) use layout::draw;
 #[cfg(test)]
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]

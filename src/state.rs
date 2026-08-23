@@ -63,16 +63,32 @@ pub(crate) fn forget_recent_project(common_dir: &Path) {
 }
 
 pub(crate) fn load_recent_projects(session_root: &Path) -> Vec<ProjectGroup> {
+    load_project_groups(
+        recent_entries_with_current(session_root),
+        Some(session_root),
+    )
+}
+
+pub(crate) fn load_stored_projects() -> Vec<ProjectGroup> {
+    load_project_groups(read_entries(), None)
+}
+
+fn load_project_groups(
+    entries: Vec<RecentEntry>,
+    session_root: Option<&Path>,
+) -> Vec<ProjectGroup> {
     let mut groups = Vec::new();
     let mut seen = Vec::new();
-    for entry in recent_entries_with_current(session_root) {
+    for entry in entries {
         if seen.iter().any(|common| common == &entry.common_dir) {
             continue;
         }
         let Some(repository) = open_repository(&entry) else {
             continue;
         };
-        let Ok(mut worktrees) = repository.worktrees_relative_to(session_root) else {
+        let Ok(mut worktrees) =
+            repository.worktrees_relative_to(session_root.unwrap_or(&entry.path))
+        else {
             continue;
         };
         sort_worktrees(&mut worktrees);
@@ -420,6 +436,19 @@ mod tests {
         );
         forget_recent_project(&entries[0].common_dir);
         assert_eq!(read_entries(), Vec::<RecentEntry>::new());
+    }
+
+    #[test]
+    fn stored_projects_load_without_a_current_repository() {
+        let (_state, _guard) = isolated_state();
+        let repo = git_repo();
+        record_recent_project(repo.path());
+
+        let groups = load_stored_projects();
+
+        assert_eq!(groups.len(), 1);
+        assert!(same_path(&groups[0].worktrees[0].path, repo.path()));
+        assert!(groups[0].worktrees[0].current);
     }
 
     fn isolated_state() -> (tempfile::TempDir, StateRootGuard) {

@@ -168,10 +168,21 @@ fn help_catalog_covers_sections_and_previously_missing_bindings() {
     }
     assert!(keys.contains(&"o"));
 
-    assert_eq!(help_shortcut_count(), keys.len());
-    assert_eq!(help_display_index(0), 1);
-    assert_eq!(help_shortcut_index_at(1), Some(0));
-    assert_eq!(help_shortcut_index_at(0), None);
+    assert_eq!(help_shortcut_count(false), keys.len());
+    assert_eq!(help_display_index(0, false), 1);
+    assert_eq!(help_shortcut_index_at(1, false), Some(0));
+    assert_eq!(help_shortcut_index_at(0, false), None);
+
+    let managed_keys = help_rows(true)
+        .into_iter()
+        .filter_map(|row| match row {
+            HelpRow::Shortcut { keys, .. } => Some(*keys),
+            HelpRow::Section(_) | HelpRow::Spacer => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(!managed_keys.contains(&"q"));
+    assert!(!managed_keys.contains(&"Ctrl+W"));
+    assert!(!managed_keys.contains(&"Right-click project tab"));
 }
 
 #[test]

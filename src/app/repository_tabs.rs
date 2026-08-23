@@ -62,6 +62,9 @@ impl App {
         if !key.modifiers.contains(KeyModifiers::CONTROL) {
             return None;
         }
+        if self.exit_locked() && key.code == KeyCode::Char('w') {
+            return Some(Vec::new());
+        }
         let reverse = key.modifiers.contains(KeyModifiers::SHIFT) || key.code == KeyCode::BackTab;
         match key.code {
             KeyCode::Tab | KeyCode::BackTab => Some(
@@ -85,6 +88,10 @@ impl App {
         event: MouseEvent,
     ) -> Option<Vec<AppEffect>> {
         let point = (event.column, event.row).into();
+        if self.exit_locked() && event.kind == MouseEventKind::Down(MouseButton::Right) {
+            self.repository_tab_menu = None;
+            return Some(Vec::new());
+        }
         if event.kind == MouseEventKind::Down(MouseButton::Right) {
             if let Some(id) = self
                 .geometry
@@ -243,11 +250,19 @@ impl App {
             RepositoryTabAction::OpenProject => {
                 self.open_projects(ProjectOpenMode::NewTab, effects);
             }
-            RepositoryTabAction::Close => effects.push(AppEffect::CloseRepositoryTab(id)),
+            RepositoryTabAction::Close => {
+                if !self.exit_locked() {
+                    effects.push(AppEffect::CloseRepositoryTab(id));
+                }
+            }
             RepositoryTabAction::CloseOthers => {
                 effects.push(AppEffect::CloseOtherRepositoryTabs(id));
             }
-            RepositoryTabAction::CloseAll => effects.push(AppEffect::CloseAllRepositoryTabs),
+            RepositoryTabAction::CloseAll => {
+                if !self.exit_locked() {
+                    effects.push(AppEffect::CloseAllRepositoryTabs);
+                }
+            }
         }
     }
 }

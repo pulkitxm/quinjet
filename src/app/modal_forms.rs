@@ -19,12 +19,18 @@ impl App {
             } => match key.code {
                 KeyCode::Esc | KeyCode::Char('?' | 'q') | KeyCode::Enter => {}
                 KeyCode::Up | KeyCode::Char('k') => {
-                    *selected = previous_list_index(*selected, crate::ui::help_shortcut_count());
+                    *selected = previous_list_index(
+                        *selected,
+                        crate::ui::help_shortcut_count(self.exit_locked()),
+                    );
                     *hover = None;
                     self.modal = Some(modal);
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    *selected = next_list_index(*selected, crate::ui::help_shortcut_count());
+                    *selected = next_list_index(
+                        *selected,
+                        crate::ui::help_shortcut_count(self.exit_locked()),
+                    );
                     *hover = None;
                     self.modal = Some(modal);
                 }
@@ -34,7 +40,7 @@ impl App {
                     self.modal = Some(modal);
                 }
                 KeyCode::PageDown => {
-                    let count = crate::ui::help_shortcut_count();
+                    let count = crate::ui::help_shortcut_count(self.exit_locked());
                     *selected = (*selected + 10).min(count.saturating_sub(1));
                     *hover = None;
                     self.modal = Some(modal);
@@ -45,7 +51,8 @@ impl App {
                     self.modal = Some(modal);
                 }
                 KeyCode::End | KeyCode::Char('G') => {
-                    *selected = crate::ui::help_shortcut_count().saturating_sub(1);
+                    *selected =
+                        crate::ui::help_shortcut_count(self.exit_locked()).saturating_sub(1);
                     *hover = None;
                     self.modal = Some(modal);
                 }

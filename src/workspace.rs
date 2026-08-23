@@ -4,6 +4,7 @@ use std::time::Instant;
 use crate::app::{App, AppEffect, Modal, ProjectOpenMode, ToastLevel};
 use crate::git::Repository;
 use crate::git::worker::{GitWorker, WorkerCommand};
+use crate::integration::Client;
 use crate::ssh::{SshContext, SshProjectOpenMode, SshSwitch};
 use crate::state::session::ProjectSession;
 use crate::tabs::{RepositoryTabs, TabId};
@@ -29,6 +30,7 @@ impl RepositoryRuntime {
         mouse: bool,
         webhooks_listening: bool,
         ssh_context: Option<SshContext>,
+        host_client: Option<Client>,
     ) -> Self {
         let common_dir = repository.git_common_dir().ok();
         let worker = GitWorker::start(repository.clone());
@@ -38,6 +40,7 @@ impl RepositoryRuntime {
         app.configure_mouse_capture(mouse);
         app.webhooks_listening = webhooks_listening;
         app.ssh_context = ssh_context;
+        app.set_host_client(host_client);
         Self {
             app,
             worker,
@@ -59,6 +62,7 @@ impl RepositoryWorkspace {
         mouse: bool,
         webhooks_listening: bool,
         mut ssh_context: Option<SshContext>,
+        host_client: Option<Client>,
     ) -> Self {
         let title = repository.name();
         let root = repository.root().to_path_buf();
@@ -84,6 +88,7 @@ impl RepositoryWorkspace {
             mouse,
             webhooks_listening,
             ssh_context.clone(),
+            host_client,
         );
         Self {
             tabs: RepositoryTabs::new_with_id(id, title, root, runtime),
@@ -98,6 +103,7 @@ impl RepositoryWorkspace {
         mouse: bool,
         webhooks_listening: bool,
         ssh_context: Option<&SshContext>,
+        host_client: Option<Client>,
     ) -> Option<Self> {
         let current_machine = ssh_context.map(|context| context.current.as_str());
         let shared_roots = current_machine.map_or_else(Vec::new, |machine| {
@@ -138,6 +144,7 @@ impl RepositoryWorkspace {
             mouse,
             webhooks_listening,
             ssh_context.cloned(),
+            host_client,
         );
         let mut restored_active = (desired_root.as_ref() == Some(first_root))
             .then(|| workspace.active_id())
@@ -182,6 +189,12 @@ impl RepositoryWorkspace {
 
     pub(crate) fn app_mut(&mut self, id: TabId) -> Option<&mut App> {
         self.tabs.get_mut(id).map(|runtime| &mut runtime.app)
+    }
+
+    pub(crate) fn exit_locked(&self) -> bool {
+        self.tabs
+            .active()
+            .is_some_and(|runtime| runtime.app.exit_locked())
     }
 
     pub(crate) fn initial_effects(&mut self) -> Vec<RoutedEffects> {
@@ -271,6 +284,9 @@ impl RepositoryWorkspace {
     }
 
     pub(crate) fn close(&mut self, id: TabId, now: Instant) -> (bool, Option<SshSwitch>) {
+        if self.exit_locked() {
+            return (true, None);
+        }
         drop(self.tabs.close(id));
         if let Some(context) = self.ssh_context.as_mut() {
             drop(context.tabs.close(id));
@@ -374,6 +390,7 @@ impl RepositoryWorkspace {
         let mouse = source_runtime.app.mouse_capture_preference;
         let webhooks_listening = source_runtime.app.webhooks_listening;
         let ssh_context = source_runtime.app.ssh_context.clone();
+        let host_client = source_runtime.app.host_client;
         let title = repository.name();
         let root = repository.root().to_path_buf();
         let runtime = RepositoryRuntime::new(
@@ -383,6 +400,7 @@ impl RepositoryWorkspace {
             mouse,
             webhooks_listening,
             ssh_context,
+            host_client,
         );
         drop(self.tabs.replace(source, title, root, runtime));
         if let Some(context) = self.ssh_context.as_mut() {
@@ -412,6 +430,7 @@ impl RepositoryWorkspace {
         let mouse = source.app.mouse_capture_preference;
         let webhooks_listening = source.app.webhooks_listening;
         let ssh_context = self.ssh_context.clone();
+        let host_client = source.app.host_client;
         let title = repository.name();
         let root = repository.root().to_path_buf();
         let runtime = RepositoryRuntime::new(
@@ -421,6 +440,7 @@ impl RepositoryWorkspace {
             mouse,
             webhooks_listening,
             ssh_context,
+            host_client,
         );
         let id = if let Some(context) = self.ssh_context.as_mut() {
             let id = context
