@@ -179,7 +179,11 @@ fn shutdown_dominates_queued_work_and_rejects_later_sends() {
     }
     assert!(next_command(&mailbox).is_none());
 
-    let repository = Repository::discover(env!("CARGO_MANIFEST_DIR")).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let repository = Repository {
+        root: directory.path().to_path_buf(),
+        github_cli: None,
+    };
     let worker = GitWorker::start(repository);
     assert!(worker.send(WorkerCommand::Shutdown));
     assert!(!worker.send(WorkerCommand::Refresh { generation: 3 }));
