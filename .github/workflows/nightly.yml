@@ -93,12 +93,19 @@ jobs:
     if: always() && contains(needs.*.result, 'failure')
     needs: [full-check, future-toolchain, links, fuzz]
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      issues: write
+    environment: pukbot-production
     steps:
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.PUKBOT_CLIENT_ID }}
+          private-key: ${{ secrets.PUKBOT_PRIVATE_KEY }}
+          owner: pulkitxm
+          repositories: quinjet
+          permission-issues: write
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
         with:
+          github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const title = 'Nightly CI failed'
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`

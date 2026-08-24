@@ -10,6 +10,9 @@ rules:
   adhoc-packages:
     ignore:
       - nightly.yml
+  dangerous-triggers:
+    ignore:
+      - labeler.yml
   undocumented-permissions:
     ignore:
       - labeler.yml
