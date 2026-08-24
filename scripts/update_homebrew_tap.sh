@@ -13,8 +13,8 @@ stage_formula() {
         printf 'the tap already carries %s\n' "${stage_formula_tag}"
         return
     fi
-    git -C "${stage_formula_tap}" config user.name 'github-actions[bot]'
-    git -C "${stage_formula_tap}" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+    git -C "${stage_formula_tap}" config user.name 'pukbot[bot]'
+    git -C "${stage_formula_tap}" config user.email '320458784+pukbot[bot]@users.noreply.github.com'
     git -C "${stage_formula_tap}" commit --quiet -m "Update the Quinjet formula to ${stage_formula_tag}"
 }
 
