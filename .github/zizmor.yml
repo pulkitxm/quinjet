@@ -23,3 +23,6 @@ rules:
       - security.yml
       - stale.yml
       - wiki.yml
+  use-trusted-publishing:
+    ignore:
+      - release.yml

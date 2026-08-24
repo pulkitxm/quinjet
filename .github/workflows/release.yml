@@ -230,7 +230,6 @@ jobs:
     environment: crates-io
     permissions:
       contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -248,13 +247,10 @@ jobs:
           code=$(curl -sS -o /dev/null -w '%{http_code}' -A quinjet-release "https://crates.io/api/v1/crates/quinjet/${VERSION}")
           test "${code}" = 200 || test "${code}" = 404
           if [ "${code}" = 404 ]; then echo "publish=true" >>"${GITHUB_OUTPUT}"; fi
-      - id: crates
-        if: steps.crate.outputs.publish == 'true'
-        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18
       - name: Publish to crates.io
         if: steps.crate.outputs.publish == 'true'
         env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.crates.outputs.token }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: cargo publish --locked
 
   release:
