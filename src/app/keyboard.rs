@@ -56,6 +56,26 @@ impl App {
                     selected: 0,
                 });
             }
+            KeyCode::Char('1')
+                if self.view == View::PullRequests && self.pull_request_stack.is_some() =>
+            {
+                self.select_stack_member_section(StackMemberSection::Summary, &mut effects);
+            }
+            KeyCode::Char('2')
+                if self.view == View::PullRequests && self.pull_request_stack.is_some() =>
+            {
+                self.select_stack_member_section(StackMemberSection::Conversation, &mut effects);
+            }
+            KeyCode::Char('3')
+                if self.view == View::PullRequests && self.pull_request_stack.is_some() =>
+            {
+                self.select_stack_member_section(StackMemberSection::Checks, &mut effects);
+            }
+            KeyCode::Char('4')
+                if self.view == View::PullRequests && self.pull_request_stack.is_some() =>
+            {
+                self.select_stack_member_section(StackMemberSection::Commits, &mut effects);
+            }
             KeyCode::Char('1') => self.switch_view(View::Changes, &mut effects),
             KeyCode::Char('2') => self.switch_view(View::History, &mut effects),
             KeyCode::Char('3') => self.switch_view(View::PullRequests, &mut effects),
