@@ -65,18 +65,30 @@ impl App {
         self.pull_request_stack_anchor = selection.map(|(anchor, _)| anchor);
         self.pull_request_stack_cursor = selection.map(|(_, cursor)| cursor);
         self.pull_request_stack_error = None;
+        if self.pull_request_stack.is_some() {
+            self.pull_request_section = PullRequestSection::Stack;
+            self.sidebar_hidden = false;
+            self.pull_request_lookup_active = false;
+            self.pr_menu_open = false;
+        }
         self.reconcile_stack_inspector();
         if self.pull_request_stack.is_none()
             && self.pull_request_section == PullRequestSection::Stack
         {
             self.pull_request_section = PullRequestSection::Overview;
             self.reset_pull_request_diff_runtime();
+            self.request_pull_request_checks(false, effects);
+            self.request_pull_request_conversation(false, effects);
+            self.request_pull_request_review(false, effects);
             return;
         }
         self.request_stack_inspector(self.pull_request_lookup_refresh, effects);
         if changed && self.pull_request_section == PullRequestSection::Stack {
+            self.invalidate_preview();
             self.reset_pull_request_diff_runtime();
-            self.request_preview(effects);
+            if self.stack_inspector.diff_open {
+                self.request_preview(effects);
+            }
         }
     }
 
@@ -110,7 +122,9 @@ impl App {
         self.content_scroll = 0;
         self.horizontal_scroll = 0;
         self.reconcile_stack_inspector();
-        self.schedule_preview(now);
+        if self.stack_inspector.diff_open {
+            self.schedule_preview(now);
+        }
         true
     }
 
@@ -168,5 +182,42 @@ impl App {
                 SidebarHit::PullRequestStackMember(position) => Some(position),
                 _ => None,
             })
+    }
+
+    pub(super) fn open_pull_request_stack_diff(&mut self, effects: &mut Vec<AppEffect>) {
+        if self.pull_request_stack.is_none() {
+            return;
+        }
+        self.pull_request_section = PullRequestSection::Stack;
+        self.stack_inspector.diff_open = true;
+        self.content_scroll = 0;
+        self.horizontal_scroll = 0;
+        self.request_preview(effects);
+    }
+
+    pub(super) const fn close_pull_request_stack_diff(&mut self) -> bool {
+        if !self.stack_inspector.diff_open {
+            return false;
+        }
+        self.stack_inspector.diff_open = false;
+        self.content_scroll = 0;
+        self.horizontal_scroll = 0;
+        true
+    }
+
+    pub(super) fn inspect_pull_request_stack_tip(
+        &mut self,
+        now: Instant,
+        effects: &mut Vec<AppEffect>,
+    ) {
+        let tip = self
+            .pull_request_stack
+            .as_ref()
+            .and_then(PullRequestStack::tip)
+            .map(|member| member.position);
+        if let Some(position) = tip {
+            let _ = self.select_pull_request_stack_member(position, false, now);
+            self.select_stack_member_section(StackMemberSection::Checks, effects);
+        }
     }
 }

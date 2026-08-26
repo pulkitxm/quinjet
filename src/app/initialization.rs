@@ -49,6 +49,10 @@ impl App {
             pull_request_stack_anchor: None,
             pull_request_stack_cursor: None,
             stack_inspector: StackInspector::default(),
+            stack_inspector_content_rows: Vec::new(),
+            stack_inspector_content_rows_key: None,
+            stack_inspector_content_width: 0,
+            stack_inspector_content_links: Vec::new(),
             history_branches: Vec::new(),
             history_branches_loading: false,
             history_branches_loaded: false,
@@ -219,6 +223,7 @@ impl App {
         self.appearance_choice = choice;
         self.appearance = appearance;
         self.invalidate_pull_request_content_rows();
+        self.invalidate_stack_inspector_content_rows();
     }
 
     #[doc = " Launch straight into one pull request: the `--pr` flag arrives here"]

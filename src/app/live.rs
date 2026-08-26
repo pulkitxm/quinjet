@@ -104,13 +104,18 @@ impl App {
                 .checks
                 .iter()
                 .any(|check| check.status.is_running());
-        if selected_running
-            || self
+        let tip_running = self
+            .stack_inspector
+            .tip_checks
+            .checks
+            .iter()
+            .any(|check| check.status.is_running());
+        let root_running = self.pull_request_stack.is_none()
+            && self
                 .pull_request_checks
                 .iter()
-                .chain(self.stack_inspector.tip_checks.checks.iter())
-                .any(|check| check.status.is_running())
-        {
+                .any(|check| check.status.is_running());
+        if selected_running || tip_running || root_running {
             PULL_REQUEST_ACTIVE_POLL
         } else {
             PULL_REQUEST_IDLE_POLL
@@ -147,6 +152,23 @@ impl App {
             force || last.is_none_or(|last| now.duration_since(last) >= interval)
         };
 
+        let settled = self
+            .pull_request
+            .as_ref()
+            .is_some_and(|pull_request| matches!(pull_request.state.as_str(), "MERGED" | "CLOSED"));
+        if self.pull_request_stack.is_some() {
+            self.refresh_stack_inspector_live(now, force, effects);
+            if (!settled || force)
+                && due(self.pull_request_detail_read_at, PULL_REQUEST_DETAIL_POLL)
+            {
+                let issued = effects.len();
+                self.request_pull_request_lookup(number, true, true, effects);
+                if effects.len() > issued {
+                    self.pull_request_detail_read_at = Some(now);
+                }
+            }
+            return;
+        }
         if due(
             self.pull_request_checks_read_at,
             self.pull_request_poll_interval(),
@@ -157,11 +179,6 @@ impl App {
                 self.pull_request_checks_read_at = Some(now);
             }
         }
-        self.refresh_stack_inspector_live(now, force, effects);
-        let settled = self
-            .pull_request
-            .as_ref()
-            .is_some_and(|pull_request| matches!(pull_request.state.as_str(), "MERGED" | "CLOSED"));
         if settled && !force {
             return;
         }

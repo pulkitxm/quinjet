@@ -154,10 +154,13 @@ impl App {
                             self.pull_request_lookup_refresh,
                             &mut effects,
                         );
-                        self.request_pull_request_checks(true, &mut effects);
-                        self.request_pull_request_conversation(true, &mut effects);
+                        if self.pull_request_stack.is_none() {
+                            self.request_pull_request_checks(true, &mut effects);
+                            self.request_pull_request_conversation(true, &mut effects);
+                        }
                         if !same || head_moved {
-                            if self.view == View::PullRequests {
+                            if self.view == View::PullRequests && self.pull_request_stack.is_none()
+                            {
                                 self.preview_due = None;
                                 self.request_preview(&mut effects);
                             } else {

@@ -25,9 +25,12 @@ pub(crate) struct StackInspector {
     pub selected_pull_request: Option<PullRequest>,
     pub selected_from_cache: bool,
     pub selected_loading: bool,
+    pub selected_refresh_again: bool,
     pub selected_error: Option<String>,
     pub selected_generation: u64,
     pub section: StackMemberSection,
+    pub diff_open: bool,
+    pub content_generation: u64,
     pub conversation: PullRequestConversation,
     pub conversation_loaded: bool,
     pub conversation_loading: bool,
@@ -37,6 +40,7 @@ pub(crate) struct StackInspector {
     pub checks: PullRequestChecks,
     pub checks_loaded: bool,
     pub checks_loading: bool,
+    pub checks_refresh_again: bool,
     pub checks_error: Option<String>,
     pub checks_generation: u64,
     pub commits: PullRequestCommits,
@@ -51,6 +55,7 @@ pub(crate) struct StackInspector {
     pub tip_checks: PullRequestChecks,
     pub tip_checks_loaded: bool,
     pub tip_checks_loading: bool,
+    pub tip_checks_refresh_again: bool,
     pub tip_checks_error: Option<String>,
     pub tip_checks_generation: u64,
     pub tip_checks_read_at: Option<Instant>,
@@ -58,24 +63,55 @@ pub(crate) struct StackInspector {
 }
 
 impl StackInspector {
+    pub(crate) fn selected_uses_tip_checks(&self) -> bool {
+        self.selected_identity.is_some() && self.selected_identity == self.tip_identity
+    }
+
+    pub(crate) fn selected_checks(&self) -> &PullRequestChecks {
+        if self.selected_uses_tip_checks() {
+            &self.tip_checks
+        } else {
+            &self.checks
+        }
+    }
+
+    pub(crate) fn selected_checks_loaded(&self) -> bool {
+        if self.selected_uses_tip_checks() {
+            self.tip_checks_loaded
+        } else {
+            self.checks_loaded
+        }
+    }
+
+    pub(crate) fn selected_checks_loading(&self) -> bool {
+        if self.selected_uses_tip_checks() {
+            self.tip_checks_loading
+        } else {
+            self.checks_loading
+        }
+    }
+
+    pub(crate) fn selected_checks_error(&self) -> Option<&str> {
+        if self.selected_uses_tip_checks() {
+            self.tip_checks_error.as_deref()
+        } else {
+            self.checks_error.as_deref()
+        }
+    }
+
     pub(crate) fn select(
         &mut self,
         identity: PullRequestStackMemberIdentity,
         locator: PullRequest,
     ) -> bool {
         if self.selected_identity.as_ref() == Some(&identity) {
-            let revision_changed = self.selected_locator.as_ref().is_some_and(|current| {
-                current.base_oid != locator.base_oid || current.head_oid != locator.head_oid
-            });
-            if revision_changed {
+            if self.selected_locator.as_ref() != Some(&locator) {
                 self.clear_selected();
                 self.selected_identity = Some(identity);
                 self.selected_locator = Some(locator);
                 self.sync_due = true;
                 return true;
             }
-            self.sync_due |= self.selected_locator.as_ref() != Some(&locator);
-            self.selected_locator = Some(locator);
             return false;
         }
         self.clear_selected();
@@ -91,18 +127,13 @@ impl StackInspector {
         locator: PullRequest,
     ) -> bool {
         if self.tip_identity.as_ref() == Some(&identity) {
-            let revision_changed = self.tip_locator.as_ref().is_some_and(|current| {
-                current.base_oid != locator.base_oid || current.head_oid != locator.head_oid
-            });
-            if revision_changed {
+            if self.tip_locator.as_ref() != Some(&locator) {
                 self.clear_tip();
                 self.tip_identity = Some(identity);
                 self.tip_locator = Some(locator);
                 self.sync_due = true;
                 return true;
             }
-            self.sync_due |= self.tip_locator.as_ref() != Some(&locator);
-            self.tip_locator = Some(locator);
             return false;
         }
         self.clear_tip();
@@ -116,6 +147,7 @@ impl StackInspector {
         self.clear_selected();
         self.clear_tip();
         self.section = StackMemberSection::Summary;
+        self.diff_open = false;
         self.sync_due = false;
     }
 
@@ -125,6 +157,7 @@ impl StackInspector {
         self.selected_pull_request = None;
         self.selected_from_cache = false;
         self.selected_loading = false;
+        self.selected_refresh_again = false;
         self.selected_error = None;
         self.selected_generation = self.selected_generation.wrapping_add(1);
         self.conversation = PullRequestConversation::default();
@@ -136,6 +169,7 @@ impl StackInspector {
         self.checks = PullRequestChecks::default();
         self.checks_loaded = false;
         self.checks_loading = false;
+        self.checks_refresh_again = false;
         self.checks_error = None;
         self.checks_generation = self.checks_generation.wrapping_add(1);
         self.commits = PullRequestCommits::default();
@@ -143,6 +177,7 @@ impl StackInspector {
         self.commits_loading = false;
         self.commits_error = None;
         self.commits_generation = self.commits_generation.wrapping_add(1);
+        self.content_generation = self.content_generation.wrapping_add(1);
         self.detail_read_at = None;
         self.checks_read_at = None;
     }
@@ -153,6 +188,7 @@ impl StackInspector {
         self.tip_checks = PullRequestChecks::default();
         self.tip_checks_loaded = false;
         self.tip_checks_loading = false;
+        self.tip_checks_refresh_again = false;
         self.tip_checks_error = None;
         self.tip_checks_generation = self.tip_checks_generation.wrapping_add(1);
         self.tip_checks_read_at = None;
@@ -160,6 +196,12 @@ impl StackInspector {
 }
 
 impl super::App {
+    pub(super) const fn invalidate_stack_inspector_content_rows(&mut self) {
+        self.stack_inspector.content_generation =
+            self.stack_inspector.content_generation.wrapping_add(1);
+        self.stack_inspector_content_rows_key = None;
+    }
+
     pub(super) fn reconcile_stack_inspector(&mut self) {
         let selected = self.pull_request_stack.as_ref().and_then(|stack| {
             let position = self.pull_request_stack_cursor?;
@@ -169,7 +211,7 @@ impl super::App {
             ))
         });
         let tip = self.pull_request_stack.as_ref().and_then(|stack| {
-            let position = stack.members.last()?.position;
+            let position = stack.tip()?.position;
             Some((
                 stack.member_identity(position)?,
                 stack.member_pull_request(position)?,
@@ -201,7 +243,12 @@ impl super::App {
             StackMemberSection::Conversation => {
                 self.request_stack_member_conversation(refresh, effects);
             }
-            StackMemberSection::Checks => self.request_stack_member_checks(refresh, effects),
+            StackMemberSection::Checks
+                if self.stack_inspector.selected_identity != self.stack_inspector.tip_identity =>
+            {
+                self.request_stack_member_checks(refresh, effects);
+            }
+            StackMemberSection::Checks => {}
             StackMemberSection::Commits => self.request_stack_member_commits(effects),
         }
     }
@@ -248,7 +295,8 @@ impl super::App {
                 if due(
                     self.stack_inspector.checks_read_at,
                     self.pull_request_poll_interval(),
-                ) =>
+                ) && self.stack_inspector.selected_identity
+                    != self.stack_inspector.tip_identity =>
             {
                 let issued = effects.len();
                 self.request_stack_member_checks(true, effects);
@@ -270,25 +318,30 @@ impl super::App {
     ) {
         if self.stack_inspector.section != section {
             self.stack_inspector.section = section;
+            self.invalidate_stack_inspector_content_rows();
             self.reset_view_content_position(super::View::PullRequests);
         }
+        self.stack_inspector.diff_open = false;
         self.request_stack_inspector(false, effects);
     }
 
     fn stack_member_request(&self) -> Option<(PullRequestStackMemberIdentity, PullRequest)> {
         Some((
             self.stack_inspector.selected_identity.clone()?,
-            self.stack_inspector
-                .selected_pull_request
-                .clone()
-                .or_else(|| self.stack_inspector.selected_locator.clone())?,
+            self.stack_inspector.selected_locator.clone()?,
         ))
     }
 
-    fn request_stack_member(&mut self, refresh: bool, effects: &mut Vec<super::AppEffect>) {
-        if self.stack_inspector.selected_loading
-            || (!refresh && self.stack_inspector.selected_pull_request.is_some())
-        {
+    pub(super) fn request_stack_member(
+        &mut self,
+        refresh: bool,
+        effects: &mut Vec<super::AppEffect>,
+    ) {
+        if self.stack_inspector.selected_loading {
+            self.stack_inspector.selected_refresh_again |= refresh;
+            return;
+        }
+        if !refresh && self.stack_inspector.selected_pull_request.is_some() {
             return;
         }
         let Some((identity, pull_request)) = self.stack_member_request() else {
@@ -334,8 +387,16 @@ impl super::App {
         )));
     }
 
-    fn request_stack_member_checks(&mut self, refresh: bool, effects: &mut Vec<super::AppEffect>) {
-        if self.stack_inspector.checks_loading || (!refresh && self.stack_inspector.checks_loaded) {
+    pub(super) fn request_stack_member_checks(
+        &mut self,
+        refresh: bool,
+        effects: &mut Vec<super::AppEffect>,
+    ) {
+        if self.stack_inspector.checks_loading {
+            self.stack_inspector.checks_refresh_again |= refresh;
+            return;
+        }
+        if !refresh && self.stack_inspector.checks_loaded {
             return;
         }
         let Some((identity, pull_request)) = self.stack_member_request() else {
@@ -373,10 +434,16 @@ impl super::App {
         )));
     }
 
-    fn request_stack_tip_checks(&mut self, refresh: bool, effects: &mut Vec<super::AppEffect>) {
-        if self.stack_inspector.tip_checks_loading
-            || (!refresh && self.stack_inspector.tip_checks_loaded)
-        {
+    pub(super) fn request_stack_tip_checks(
+        &mut self,
+        refresh: bool,
+        effects: &mut Vec<super::AppEffect>,
+    ) {
+        if self.stack_inspector.tip_checks_loading {
+            self.stack_inspector.tip_checks_refresh_again |= refresh;
+            return;
+        }
+        if !refresh && self.stack_inspector.tip_checks_loaded {
             return;
         }
         let (Some(identity), Some(pull_request)) = (
