@@ -75,6 +75,7 @@ mod prepared;
 mod process;
 mod pull_request;
 mod review;
+mod stack;
 mod temporary;
 
 pub(crate) use cache::*;
@@ -94,6 +95,7 @@ pub(crate) use review::{
     PullRequestReviewDecision, PullRequestReviewOperation, PullRequestReviewSide,
     PullRequestReviewSnapshot, PullRequestReviewThread, PullRequestReviewThreadSubject,
 };
+pub(crate) use stack::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use temporary::*;
 

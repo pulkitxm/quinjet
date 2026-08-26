@@ -95,6 +95,12 @@ impl Session {
                     )?,
                 )))
             }
+            Command::PullRequestStack {
+                pull_request,
+                refresh,
+            } => Ok(Outcome::PullRequestStack(Box::new(
+                self.repository.pull_request_stack(&pull_request, refresh)?,
+            ))),
             Command::PreparePullRequest {
                 workspace,
                 pull_request,
@@ -102,6 +108,19 @@ impl Session {
                 let prepared = self
                     .repository
                     .prepare_pull_request_diff(&pull_request, progress)?;
+                let index = prepared.index();
+                self.pull_request_diff = Some((workspace, prepared));
+                Ok(Outcome::PullRequestIndex(Box::new(index)))
+            }
+            Command::PreparePullRequestStack {
+                workspace,
+                stack,
+                from,
+                to,
+            } => {
+                let prepared = self
+                    .repository
+                    .prepare_pull_request_stack_diff(&stack, from, to, progress)?;
                 let index = prepared.index();
                 self.pull_request_diff = Some((workspace, prepared));
                 Ok(Outcome::PullRequestIndex(Box::new(index)))

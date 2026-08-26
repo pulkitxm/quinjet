@@ -15,6 +15,9 @@ const GH_SCRIPT: &str = r#"#!/bin/sh
   printf '\n'
 } >> "$FAKE_GH_CAPTURE"
 case "$*" in
+  *"stackEntry"*)
+    printf '{"data":{"repository":{"pullRequest":{"stackEntry":{"position":2},"stack":{"id":"STACK_node","number":12,"size":2,"baseRefName":"main","entries":{"totalCount":2,"nodes":[{"id":"ENTRY_1","position":1,"pullRequest":{"id":"PR_41","number":41,"title":"Build stack model","author":{"login":"octocat"},"state":"OPEN","isDraft":false,"updatedAt":"2026-08-21T01:00:00Z","url":"https://github.com/acme/project/pull/41","baseRefName":"main","baseRefOid":"%s","headRefName":"stack-model","headRefOid":"%s","headRepository":{"nameWithOwner":"acme/project"},"isCrossRepository":false,"additions":1,"deletions":0,"changedFiles":1,"mergeStateStatus":"CLEAN","mergeable":"MERGEABLE","reviewDecision":"APPROVED","mergeQueueEntry":null,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]} }},{"id":"ENTRY_2","position":2,"pullRequest":{"id":"PR_42","number":42,"title":"Add stack view","author":{"login":"octocat"},"state":"OPEN","isDraft":false,"updatedAt":"2026-08-21T02:00:00Z","url":"https://github.com/acme/project/pull/42","baseRefName":"stack-model","baseRefOid":"%s","headRefName":"stack-view","headRefOid":"%s","headRepository":{"nameWithOwner":"acme/project"},"isCrossRepository":false,"additions":0,"deletions":0,"changedFiles":0,"mergeStateStatus":"CLEAN","mergeable":"MERGEABLE","reviewDecision":"REVIEW_REQUIRED","mergeQueueEntry":null,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING"}}}]}}}]}}}}}}' "$FAKE_BASE_OID" "$FAKE_HEAD_OID" "$FAKE_HEAD_OID" "$FAKE_HEAD_OID"
+    ;;
   *"number=42"*)
     printf 'PR_node\t42\tAdd feature\tBody from fixture\toctocat\tOPEN\tfalse\t2026-08-21T02:00:00Z\thttps://github.com/acme/project/pull/42\tmain\tfeature\tacme/project\tfalse\t1\t0\t1\t%s\t%s\t2026-08-20T01:00:00Z\tfalse\ttrue\tfalse\ttrue\ttrue\ttrue\ttrue\ttrue\tSUBSCRIBED\tCLEAN\tMERGEABLE\ttrue\ttrue\t\t\t0\t\t\tAPPROVED\n' "$FAKE_BASE_OID" "$FAKE_HEAD_OID"
     ;;
@@ -261,6 +264,44 @@ fn pull_request_diff_renders_the_real_patch_in_plain_and_json() -> Result<()> {
     ensure!(json["title"] == "PR #42");
     ensure!(json.to_string().contains("from pull request"));
     Ok(())
+}
+
+#[test]
+fn stack_reads_show_the_ladder_and_exact_composed_diff() -> Result<()> {
+    let fixture = GitHubFixture::new()?;
+
+    let view = fixture.read(&["stack", "view", "42"])?.success()?;
+    ensure!(view.stdout.contains("Stack #12"), "{}", view.stdout);
+    ensure!(view.stdout.contains("#41"), "{}", view.stdout);
+    ensure!(view.stdout.contains(">   2  #42"), "{}", view.stdout);
+
+    let json = fixture
+        .read(&["stack", "view", "42", "--json"])?
+        .success()?
+        .json()?;
+    ensure!(json["stack"]["number"] == 12);
+    ensure!(json["stack"]["selectedPosition"] == 2);
+    ensure!(
+        json["stack"]["members"]
+            .as_array()
+            .is_some_and(|members| members.len() == 2)
+    );
+
+    let files = fixture
+        .read(&["stack", "files", "42", "--from", "1", "--to", "2"])?
+        .success()?;
+    ensure!(files.stdout.contains("A feature.txt"), "{}", files.stdout);
+
+    let diff = fixture
+        .read(&["stack", "diff", "42", "--from", "1", "--to", "2"])?
+        .success()?;
+    ensure!(diff.stdout.contains("feature.txt"), "{}", diff.stdout);
+    ensure!(
+        diff.stdout.contains("+from pull request"),
+        "{}",
+        diff.stdout
+    );
+    fixture.assert_noninteractive_transport()
 }
 
 #[test]

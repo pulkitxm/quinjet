@@ -6,7 +6,8 @@ use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
     CheckRunLog, GitHubRepository, PullRequest, PullRequestCheck, PullRequestChecks,
     PullRequestConversation, PullRequestDiffIndex, PullRequestOperation,
-    PullRequestReviewOperation, PullRequestReviewSnapshot, PullRequestSnapshot,
+    PullRequestReviewOperation, PullRequestReviewSnapshot, PullRequestSnapshot, PullRequestStack,
+    PullRequestStackSnapshot,
 };
 use crate::git::history::Commit;
 use crate::git::status::RepoStatus;
@@ -45,9 +46,19 @@ pub(crate) enum Command {
         number: u64,
         refresh: bool,
     },
+    PullRequestStack {
+        pull_request: Box<PullRequest>,
+        refresh: bool,
+    },
     PreparePullRequest {
         workspace: u64,
         pull_request: Box<PullRequest>,
+    },
+    PreparePullRequestStack {
+        workspace: u64,
+        stack: Box<PullRequestStack>,
+        from: usize,
+        to: usize,
     },
     PullRequestFile {
         workspace: u64,
@@ -99,7 +110,10 @@ impl Command {
             Self::GitHubRepositories { .. } => "Discovering GitHub repositories",
             Self::LocalGitHubRepository => "Reading repository link",
             Self::PullRequestLookup { .. } => "Fetching pull-request metadata",
-            Self::PreparePullRequest { .. } => "Preparing pull-request diff",
+            Self::PullRequestStack { .. } => "Fetching pull-request stack",
+            Self::PreparePullRequest { .. } | Self::PreparePullRequestStack { .. } => {
+                "Preparing pull-request diff"
+            }
             Self::PullRequestFile { .. } | Self::PullRequestFileBatch { .. } => {
                 "Loading pull-request patches"
             }
@@ -135,6 +149,7 @@ pub(crate) enum Outcome {
     },
     LocalGitHubRepository(Option<Box<GitHubRepository>>),
     PullRequest(Box<PullRequestSnapshot>),
+    PullRequestStack(Box<PullRequestStackSnapshot>),
     PullRequestIndex(Box<PullRequestDiffIndex>),
     PullRequestDiff(Box<DiffDocument>),
     PullRequestDiffBatch(Vec<(PathBuf, DiffDocument)>),
@@ -175,6 +190,8 @@ answers! {
     recent_projects, RecentProjects -> Vec<ProjectGroup>, |value| value;
     local_diff_index, LocalDiffIndex -> DiffIndex, |value: Box<DiffIndex>| *value;
     pull_request, PullRequest -> PullRequestSnapshot, |value: Box<PullRequestSnapshot>| *value;
+    pull_request_stack, PullRequestStack -> PullRequestStackSnapshot,
+        |value: Box<PullRequestStackSnapshot>| *value;
     pull_request_index, PullRequestIndex -> PullRequestDiffIndex,
         |value: Box<PullRequestDiffIndex>| *value;
     pull_request_diff, PullRequestDiff -> DiffDocument, |value: Box<DiffDocument>| *value;
