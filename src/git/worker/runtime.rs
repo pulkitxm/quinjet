@@ -162,6 +162,21 @@ pub(super) fn run_worker(
                         .and_then(Outcome::pull_request),
                 ),
             },
+            WorkerCommand::LoadPullRequestStack {
+                generation,
+                pull_request,
+                refresh,
+            } => WorkerEvent::PullRequestStack {
+                generation,
+                result: answer(
+                    session
+                        .execute(Command::PullRequestStack {
+                            pull_request,
+                            refresh,
+                        })
+                        .and_then(Outcome::pull_request_stack),
+                ),
+            },
             WorkerCommand::PreparePullRequest {
                 generation,
                 pull_request,
@@ -173,6 +188,34 @@ pub(super) fn run_worker(
                             Command::PreparePullRequest {
                                 workspace: generation,
                                 pull_request,
+                            },
+                            &mut |progress| {
+                                drop(events.send(WorkerEvent::PullRequestProgress {
+                                    generation,
+                                    diff: true,
+                                    progress,
+                                }));
+                            },
+                            &|| true,
+                        )
+                        .and_then(Outcome::pull_request_index),
+                ),
+            },
+            WorkerCommand::PreparePullRequestStack {
+                generation,
+                stack,
+                from,
+                to,
+            } => WorkerEvent::PullRequestIndex {
+                generation,
+                result: answer(
+                    session
+                        .execute_with(
+                            Command::PreparePullRequestStack {
+                                workspace: generation,
+                                stack,
+                                from,
+                                to,
                             },
                             &mut |progress| {
                                 drop(events.send(WorkerEvent::PullRequestProgress {

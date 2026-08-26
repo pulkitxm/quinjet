@@ -255,13 +255,15 @@ impl App {
             KeyCode::Char('F') if self.view == View::PullRequests => {
                 self.select_pull_request_section(PullRequestSection::Files, &mut effects);
             }
+            KeyCode::Char('S') if self.view == View::PullRequests => {
+                self.select_pull_request_section(PullRequestSection::Stack, &mut effects);
+            }
             KeyCode::Char('C') if self.view == View::History => self.confirm_cherry_pick(),
             KeyCode::Char('R') if self.view == View::History => self.confirm_revert(),
             KeyCode::Char('n') if self.view == View::History => self.prompt_branch_at_commit(),
             KeyCode::Char('f' | 'p') if self.view == View::PullRequests => {
                 self.show_toast(
-                    "Fetch and push live in Changes · Shift+P and Shift+F switch section"
-                        .to_owned(),
+                    "Fetch and push live in Changes · Shift+P/F/S switch section".to_owned(),
                     ToastLevel::Error,
                     now,
                 );
@@ -271,7 +273,10 @@ impl App {
             KeyCode::Char('l')
                 if self.focus == Focus::Sidebar
                     && !(self.view == View::PullRequests
-                        && self.pull_request_section == PullRequestSection::Files) =>
+                        && matches!(
+                            self.pull_request_section,
+                            PullRequestSection::Files | PullRequestSection::Stack
+                        )) =>
             {
                 self.queue_operation(GitOperation::Pull, &mut effects);
             }
@@ -320,6 +325,20 @@ impl App {
             }
             KeyCode::Down | KeyCode::Char('j') if self.review_surface_active() => {
                 self.move_review_cursor(1);
+            }
+            KeyCode::Up
+                if self.view == View::PullRequests
+                    && self.pull_request_section == PullRequestSection::Stack
+                    && key.modifiers.contains(KeyModifiers::SHIFT) =>
+            {
+                let _ = self.move_pull_request_stack_cursor(-1, true, now);
+            }
+            KeyCode::Down
+                if self.view == View::PullRequests
+                    && self.pull_request_section == PullRequestSection::Stack
+                    && key.modifiers.contains(KeyModifiers::SHIFT) =>
+            {
+                let _ = self.move_pull_request_stack_cursor(1, true, now);
             }
             KeyCode::Up | KeyCode::Char('k') => self.navigate(-1, now),
             KeyCode::Down | KeyCode::Char('j') => self.navigate(1, now),

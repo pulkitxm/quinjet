@@ -134,6 +134,12 @@ impl App {
         if self.view != View::PullRequests {
             return None;
         }
+        if self.pull_request_section == PullRequestSection::Stack {
+            return self
+                .selected_pull_request_stack_member()
+                .map(|member| member.url.as_str())
+                .filter(|url| !url.is_empty());
+        }
         let check = self
             .selected_pull_request_check()
             .map(|check| check.link.as_str())

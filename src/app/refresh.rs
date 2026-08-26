@@ -64,6 +64,8 @@ impl App {
         }
         self.pull_request_generation = self.pull_request_generation.wrapping_add(1);
         self.pull_request_loading = true;
+        self.pull_request_stack_loading = false;
+        self.pull_request_lookup_refresh = refresh;
         self.pull_request_exact_number = Some(number);
         if !silent {
             self.pull_request_error = None;
@@ -84,6 +86,25 @@ impl App {
             number,
             refresh,
         })));
+    }
+
+    pub(super) fn request_pull_request_stack(
+        &mut self,
+        refresh: bool,
+        effects: &mut Vec<AppEffect>,
+    ) {
+        let Some(pull_request) = self.pull_request.clone() else {
+            return;
+        };
+        self.pull_request_stack_loading = true;
+        self.pull_request_stack_error = None;
+        effects.push(AppEffect::Git(Box::new(
+            WorkerCommand::LoadPullRequestStack {
+                generation: self.pull_request_generation,
+                pull_request: Box::new(pull_request),
+                refresh,
+            },
+        )));
     }
 
     pub(super) fn request_history(&mut self, reset: bool, effects: &mut Vec<AppEffect>) {
@@ -277,14 +298,29 @@ impl App {
                     }
                     return;
                 };
-                let preparing = self.prepare_pull_request_workspace(&pull_request, effects);
+                let Some(source) = self.pull_request_diff_source_for_section() else {
+                    self.document_loading = self.pull_request_stack_loading;
+                    self.set_document(DiffDocument::empty(
+                        "Pull Request Stack",
+                        if self.pull_request_stack_loading {
+                            "Fetching pull-request stack…"
+                        } else {
+                            "This pull request is not part of a stack"
+                        },
+                    ));
+                    return;
+                };
+                let comparison = self
+                    .pull_request_for_diff_source(source)
+                    .unwrap_or_else(|| pull_request.clone());
+                let preparing = self.prepare_pull_request_workspace(&pull_request, source, effects);
                 if self.pull_request_section == PullRequestSection::Overview {
                     self.request_check_run_log(false, effects);
                     return;
                 }
                 if preparing {
                     self.set_document(pull_request_loading_document(
-                        &pull_request,
+                        &comparison,
                         PullRequestProgress::PreparingRepository.label(),
                     ));
                     return;
@@ -315,23 +351,51 @@ impl App {
     pub(super) fn prepare_pull_request_workspace(
         &mut self,
         pull_request: &PullRequest,
+        source: PullRequestDiffSource,
         effects: &mut Vec<AppEffect>,
     ) -> bool {
-        if self.pull_request_workspace_generation.is_some() {
-            return false;
-        }
-        if self.document_loading && self.pull_request_progress.is_some() {
-            return true;
+        if self.pull_request_diff_source == Some(source) {
+            if self.pull_request_workspace_generation.is_some() {
+                return false;
+            }
+            if self.document_loading && self.pull_request_progress.is_some() {
+                return true;
+            }
+        } else {
+            self.reset_pull_request_diff_runtime();
+            self.pull_request_files.clear();
+            self.pull_request_tree.clear();
+            self.pull_request_total_files = 0;
+            self.pull_request_files_truncated = false;
+            self.pull_request_file_cursor = 0;
+            self.pull_request_tree_cursor = 0;
+            self.pull_request_file_view = PullRequestFileView::AllFiles;
         }
         self.diff_generation = self.diff_generation.wrapping_add(1);
         self.document_loading = true;
         self.pull_request_progress = Some(PullRequestProgress::PreparingRepository);
-        effects.push(AppEffect::Git(Box::new(
-            WorkerCommand::PreparePullRequest {
+        self.pull_request_diff_source = Some(source);
+        let command = match source {
+            PullRequestDiffSource::PullRequest => WorkerCommand::PreparePullRequest {
                 generation: self.diff_generation,
                 pull_request: Box::new(pull_request.clone()),
             },
-        )));
+            PullRequestDiffSource::Stack { from, to } => {
+                let Some(stack) = self.pull_request_stack.clone() else {
+                    self.document_loading = false;
+                    self.pull_request_progress = None;
+                    self.pull_request_diff_source = None;
+                    return false;
+                };
+                WorkerCommand::PreparePullRequestStack {
+                    generation: self.diff_generation,
+                    stack: Box::new(stack),
+                    from,
+                    to,
+                }
+            }
+        };
+        effects.push(AppEffect::Git(Box::new(command)));
         true
     }
 

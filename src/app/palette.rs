@@ -334,6 +334,9 @@ impl App {
                         self.move_check_cursor(amount);
                         self.schedule_preview(now);
                     }
+                    PullRequestSection::Stack => {
+                        let _ = self.move_pull_request_stack_cursor(amount, false, now);
+                    }
                 }
                 return;
             }
@@ -403,6 +406,9 @@ impl App {
                         };
                         self.select_check_list_target(target);
                         self.schedule_preview(now);
+                    }
+                    PullRequestSection::Stack => {
+                        let _ = self.move_pull_request_stack_to_edge(end, now);
                     }
                 }
                 return;

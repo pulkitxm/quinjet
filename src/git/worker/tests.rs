@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::git::github::PullRequestCheckStatus;
+use crate::git::github::{PullRequestCheckStatus, PullRequestStack};
 
 #[test]
 fn every_worker_command_has_the_expected_lane() {
     let scenarios = lane_scenarios();
-    assert_eq!(scenarios.len(), 24);
+    assert_eq!(scenarios.len(), 26);
     for (command, expected) in scenarios {
         assert_eq!(worker_lane(&command), expected, "{command:?}");
     }
@@ -73,6 +73,17 @@ fn every_coalesced_slot_keeps_only_its_latest_command() {
         ("local-repository", 0),
     );
     assert_latest(vec![lookup(1), lookup(2)], ("lookup", 2));
+    assert_latest(vec![lookup(1), stack_lookup(2)], ("stack", 2));
+    assert_latest(
+        vec![
+            WorkerCommand::PreparePullRequest {
+                generation: 1,
+                pull_request: pull_request(),
+            },
+            stack_prepare(2),
+        ],
+        ("prepare-stack", 2),
+    );
     assert_latest(vec![batch(1), batch(2)], ("pr-batch", 2));
     assert_latest(vec![checks(1), checks(2)], ("checks", 2));
     assert_latest(vec![conversation(1), conversation(2)], ("conversation", 2));
@@ -213,65 +224,67 @@ fn lane_scenarios() -> Vec<(WorkerCommand, WorkerLane)> {
             WorkerLane::Background,
         ),
         (lookup(6), WorkerLane::GitHubMetadata),
+        (stack_lookup(7), WorkerLane::GitHubMetadata),
         (
             WorkerCommand::PreparePullRequest {
-                generation: 7,
+                generation: 8,
                 pull_request: pull_request(),
             },
             WorkerLane::PullRequestPreview,
         ),
+        (stack_prepare(9), WorkerLane::PullRequestPreview),
         (
             WorkerCommand::LoadPullRequestFile {
-                generation: 8,
-                workspace_generation: 7,
+                generation: 10,
+                workspace_generation: 9,
                 path: PathBuf::from("pull.rs"),
             },
             WorkerLane::PullRequestPreview,
         ),
-        (batch(9), WorkerLane::PullRequestPreview),
-        (checks(10), WorkerLane::GitHubMetadata),
-        (conversation(11), WorkerLane::Conversation),
-        (review(12), WorkerLane::Review),
+        (batch(11), WorkerLane::PullRequestPreview),
+        (checks(12), WorkerLane::GitHubMetadata),
+        (conversation(13), WorkerLane::Conversation),
+        (review(14), WorkerLane::Review),
         (
             WorkerCommand::OperatePullRequestReview {
-                generation: 13,
+                generation: 15,
                 pull_request: pull_request(),
                 operation: PullRequestReviewOperation::Discard,
             },
             WorkerLane::Review,
         ),
-        (check_log(14), WorkerLane::GitHubMetadata),
-        (warm(15), WorkerLane::Warm),
+        (check_log(16), WorkerLane::GitHubMetadata),
+        (warm(17), WorkerLane::Warm),
         (
-            WorkerCommand::LoadBranches { generation: 16 },
+            WorkerCommand::LoadBranches { generation: 18 },
             WorkerLane::Background,
         ),
         (
-            WorkerCommand::LoadHistoryBranches { generation: 17 },
+            WorkerCommand::LoadHistoryBranches { generation: 19 },
             WorkerLane::Background,
         ),
         (
-            WorkerCommand::LoadStashes { generation: 18 },
+            WorkerCommand::LoadStashes { generation: 20 },
             WorkerLane::Background,
         ),
         (
-            WorkerCommand::LoadWorktrees { generation: 19 },
+            WorkerCommand::LoadWorktrees { generation: 21 },
             WorkerLane::Background,
         ),
         (
-            WorkerCommand::LoadRecentProjects { generation: 20 },
+            WorkerCommand::LoadRecentProjects { generation: 22 },
             WorkerLane::Background,
         ),
         (
             WorkerCommand::Operate {
-                id: 21,
+                id: 23,
                 operation: GitOperation::Fetch,
             },
             WorkerLane::Background,
         ),
         (
             WorkerCommand::OperatePullRequest {
-                id: 22,
+                id: 24,
                 pull_request: pull_request(),
                 operation: PullRequestOperation::SetDraft(true),
             },
@@ -308,6 +321,32 @@ fn lookup(generation: u64) -> WorkerCommand {
         repository: None,
         number: generation,
         refresh: false,
+    }
+}
+
+fn stack_lookup(generation: u64) -> WorkerCommand {
+    WorkerCommand::LoadPullRequestStack {
+        generation,
+        pull_request: pull_request(),
+        refresh: false,
+    }
+}
+
+fn stack_prepare(generation: u64) -> WorkerCommand {
+    WorkerCommand::PreparePullRequestStack {
+        generation,
+        stack: Box::new(PullRequestStack {
+            node_id: String::new(),
+            number: 1,
+            base_ref: "main".to_owned(),
+            size: 0,
+            selected_position: 1,
+            members: Vec::new(),
+            truncated: false,
+            repository: Default::default(),
+        }),
+        from: 1,
+        to: 1,
     }
 }
 
@@ -387,7 +426,9 @@ fn identity(command: &WorkerCommand) -> (&'static str, u64) {
         WorkerCommand::LoadGitHubRepositories { generation, .. } => ("repositories", *generation),
         WorkerCommand::LoadLocalGitHubRepository => ("local-repository", 0),
         WorkerCommand::LookupPullRequest { generation, .. } => ("lookup", *generation),
+        WorkerCommand::LoadPullRequestStack { generation, .. } => ("stack", *generation),
         WorkerCommand::PreparePullRequest { generation, .. } => ("prepare-pr", *generation),
+        WorkerCommand::PreparePullRequestStack { generation, .. } => ("prepare-stack", *generation),
         WorkerCommand::LoadPullRequestFile { generation, .. } => ("pr-file", *generation),
         WorkerCommand::LoadPullRequestFileBatch {
             workspace_generation,

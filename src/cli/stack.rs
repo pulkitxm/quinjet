@@ -63,7 +63,7 @@ fn stack_range(
             ),
         )
     })?;
-    let from = args.from.unwrap_or(1);
+    let from = args.from.unwrap_or(stack.selected_position);
     let to = args.to.unwrap_or(stack.selected_position);
     drop(stack.comparison(from, to)?);
     Ok((stack, from, to))

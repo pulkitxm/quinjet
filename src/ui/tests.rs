@@ -95,4 +95,5 @@ mod modals;
 mod overview;
 mod rendering;
 mod scrolling;
+mod stack;
 mod tabs;

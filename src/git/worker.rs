@@ -10,7 +10,7 @@ use super::diff::DiffDocument;
 use super::github::{
     CheckRunLog, PullRequest, PullRequestCheck, PullRequestChecks, PullRequestConversation,
     PullRequestDiffIndex, PullRequestOperation, PullRequestProgress, PullRequestReviewOperation,
-    PullRequestReviewSnapshot, PullRequestSnapshot,
+    PullRequestReviewSnapshot, PullRequestSnapshot, PullRequestStack, PullRequestStackSnapshot,
 };
 use super::history::Commit;
 use super::status::RepoStatus;
@@ -52,9 +52,20 @@ pub(crate) enum WorkerCommand {
         number: u64,
         refresh: bool,
     },
+    LoadPullRequestStack {
+        generation: u64,
+        pull_request: Box<PullRequest>,
+        refresh: bool,
+    },
     PreparePullRequest {
         generation: u64,
         pull_request: Box<PullRequest>,
+    },
+    PreparePullRequestStack {
+        generation: u64,
+        stack: Box<PullRequestStack>,
+        from: usize,
+        to: usize,
     },
     LoadPullRequestFile {
         generation: u64,
@@ -158,6 +169,10 @@ pub(crate) enum WorkerEvent {
         generation: u64,
         result: Result<PullRequestSnapshot, String>,
     },
+    PullRequestStack {
+        generation: u64,
+        result: Result<PullRequestStackSnapshot, String>,
+    },
     PullRequestProgress {
         generation: u64,
         diff: bool,
@@ -256,6 +271,7 @@ impl Mailbox {
             command @ (WorkerCommand::PrepareLocalDiff { .. }
             | WorkerCommand::LoadLocalDiffFile { .. }
             | WorkerCommand::PreparePullRequest { .. }
+            | WorkerCommand::PreparePullRequestStack { .. }
             | WorkerCommand::LoadPullRequestFile { .. }) => {
                 self.preview = Some(command);
             }
@@ -267,7 +283,8 @@ impl Mailbox {
             | WorkerCommand::LoadLocalGitHubRepository) => {
                 self.repositories = Some(command);
             }
-            command @ WorkerCommand::LookupPullRequest { .. } => {
+            command @ (WorkerCommand::LookupPullRequest { .. }
+            | WorkerCommand::LoadPullRequestStack { .. }) => {
                 self.pull_request = Some(command);
             }
             command @ WorkerCommand::LoadPullRequestChecks { .. } => self.checks = Some(command),
@@ -325,6 +342,7 @@ const fn worker_lane(command: &WorkerCommand) -> WorkerLane {
         }
         WorkerCommand::LoadGitHubRepositories { .. }
         | WorkerCommand::LookupPullRequest { .. }
+        | WorkerCommand::LoadPullRequestStack { .. }
         | WorkerCommand::LoadPullRequestChecks { .. }
         | WorkerCommand::LoadCheckRunLog { .. } => WorkerLane::GitHubMetadata,
         WorkerCommand::LoadPullRequestConversation { .. } => WorkerLane::Conversation,
@@ -332,6 +350,7 @@ const fn worker_lane(command: &WorkerCommand) -> WorkerLane {
         | WorkerCommand::OperatePullRequestReview { .. } => WorkerLane::Review,
         WorkerCommand::PrefetchCheckRunLogs { .. } => WorkerLane::Warm,
         WorkerCommand::PreparePullRequest { .. }
+        | WorkerCommand::PreparePullRequestStack { .. }
         | WorkerCommand::LoadPullRequestFile { .. }
         | WorkerCommand::LoadPullRequestFileBatch { .. } => WorkerLane::PullRequestPreview,
         _ => WorkerLane::Background,
