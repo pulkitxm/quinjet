@@ -176,15 +176,7 @@ impl App {
         }
         if event.modifiers.contains(KeyModifiers::SHIFT) {
             if event.kind == MouseEventKind::Down(MouseButton::Left)
-                && let Some(position) = self
-                    .geometry
-                    .sidebar_hits
-                    .iter()
-                    .find(|hit| hit.area.contains((event.column, event.row).into()))
-                    .and_then(|hit| match hit.target {
-                        SidebarHit::PullRequestStackMember(position) => Some(position),
-                        _ => None,
-                    })
+                && let Some(position) = self.pull_request_stack_hit_at(event.column, event.row)
             {
                 self.set_focus(Focus::Sidebar, &mut effects);
                 let _ = self.select_pull_request_stack_member(position, true, now);

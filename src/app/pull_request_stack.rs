@@ -89,10 +89,10 @@ impl App {
         extend: bool,
         now: Instant,
     ) -> bool {
-        if !self
+        if self
             .pull_request_stack
             .as_ref()
-            .is_some_and(|stack| stack.member(position).is_some())
+            .is_none_or(|stack| stack.member(position).is_none())
         {
             return false;
         }
@@ -154,5 +154,16 @@ impl App {
             .map(|member| member.position)
         });
         position.is_some_and(|position| self.select_pull_request_stack_member(position, false, now))
+    }
+
+    pub(super) fn pull_request_stack_hit_at(&self, column: u16, row: u16) -> Option<usize> {
+        self.geometry
+            .sidebar_hits
+            .iter()
+            .find(|hit| hit.area.contains((column, row).into()))
+            .and_then(|hit| match hit.target {
+                SidebarHit::PullRequestStackMember(position) => Some(position),
+                _ => None,
+            })
     }
 }

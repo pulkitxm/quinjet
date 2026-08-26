@@ -191,7 +191,15 @@ fn opening_a_pull_request_prefetches_diffs_checks_and_conversation_from_overview
         Instant::now(),
     );
 
-    assert_eq!(effects.len(), 3);
+    assert_eq!(effects.len(), 4);
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        AppEffect::Git(command) if matches!(
+            command.as_ref(),
+            WorkerCommand::LoadPullRequestStack { pull_request, .. }
+                if pull_request.number == 8
+        )
+    )));
     assert!(effects.iter().any(|effect| matches!(
         effect,
         AppEffect::Git(command) if matches!(

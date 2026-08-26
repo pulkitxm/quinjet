@@ -23,7 +23,7 @@ fn stack() -> PullRequestStack {
                 updated_at: "2026-08-20T10:00:00Z".to_owned(),
                 url: format!("https://github.com/acme/widget/pull/{}", 40 + position),
                 base_ref: "main".to_owned(),
-                base_oid: format!("{:040x}", position),
+                base_oid: format!("{position:040x}"),
                 head_ref: format!("layer-{position}"),
                 head_oid: format!("{:040x}", position + 10),
                 head_repository: Some("acme/widget".to_owned()),

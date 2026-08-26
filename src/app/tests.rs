@@ -78,7 +78,7 @@ fn pull_request_stack(selected_position: usize) -> PullRequestStack {
                 } else {
                     format!("layer-{}", position - 1)
                 },
-                base_oid: format!("{:040x}", position),
+                base_oid: format!("{position:040x}"),
                 head_ref: format!("layer-{position}"),
                 head_oid: format!("{:040x}", position + 10),
                 head_repository: Some("acme/widget".to_owned()),

@@ -343,7 +343,7 @@ fn stack_prepare(generation: u64) -> WorkerCommand {
             selected_position: 1,
             members: Vec::new(),
             truncated: false,
-            repository: Default::default(),
+            repository: crate::git::github::GitHubRepository::default(),
         }),
         from: 1,
         to: 1,
