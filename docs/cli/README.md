@@ -56,7 +56,7 @@ quinjet update --check           check the latest stable release
 
 | Page | What it covers |
 | --- | --- |
-| [`quinjet pr`](./pull-request/README.md) | Metadata, files, conversation, checks, reviews, lifecycle, merge, metadata editing, and notifications |
+| [`quinjet pr`](./pull-request/README.md) | Metadata, commits, files, conversation, checks, reviews, lifecycle, merge, metadata editing, and notifications |
 | [`quinjet stack`](./stack/README.md) | Ordered stacked pull requests and exact composed range comparisons |
 
 ## About Quinjet itself

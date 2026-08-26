@@ -144,6 +144,30 @@ pub(crate) struct PullRequestSnapshot {
     pub from_cache: bool,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PullRequestCommit {
+    pub oid: String,
+    pub abbreviated_oid: String,
+    pub subject: String,
+    pub author: String,
+    pub author_login: Option<String>,
+    pub authored_at: String,
+    pub committed_at: String,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PullRequestCommits {
+    pub commits: Vec<PullRequestCommit>,
+    pub total_commits: usize,
+    pub truncated: bool,
+    pub base_oid: String,
+    pub head_oid: String,
+    pub from_cache: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum PullRequestFileStatus {

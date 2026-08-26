@@ -2,7 +2,9 @@ use std::path::PathBuf;
 
 use super::*;
 use crate::git::diff::{DiffLine, HighlightSpan};
-use crate::git::github::{CheckLogLine, CheckLogSeverity, ConversationEntry, PullRequestFile};
+use crate::git::github::{
+    CheckLogLine, CheckLogSeverity, ConversationEntry, PullRequestCommit, PullRequestFile,
+};
 use crate::git::status::{BranchState, Change, ChangeStatus};
 
 fn span(text: &str) -> Vec<HighlightSpan> {
@@ -485,3 +487,5 @@ fn a_long_name_is_shortened_rather_than_wrapped() {
         "an over-long name is elided: {listing}"
     );
 }
+
+mod commits;

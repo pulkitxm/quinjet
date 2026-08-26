@@ -7,6 +7,8 @@ pub(super) enum PrVerb {
     View(PrWatchArgs),
     #[doc = " List the files a pull request changes"]
     Files(PrArgs),
+    #[doc = " List a pull request's commits"]
+    Commits(PrArgs),
     #[doc = " Print a pull request's patch"]
     Diff(PrDiffArgs),
     #[doc = " Print a pull request's timeline and review comments"]

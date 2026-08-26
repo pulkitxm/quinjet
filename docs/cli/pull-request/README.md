@@ -1,7 +1,7 @@
 # `quinjet pr`
 
 `quinjet pr` reads and operates on one pull request by number. Its read verbs
-cover metadata, changed files, patches, the conversation, checks, one check
+cover metadata, commits, changed files, patches, the conversation, checks, one check
 run's log, and browser opening. Its write verbs cover the full existing-PR
 workflow exposed by GitHub CLI, plus merge-queue removal, notification
 subscriptions, and fork maintainer-edit access through GitHub's GraphQL API.
@@ -74,6 +74,7 @@ when their check state settles.
 | Command | What it does |
 | --- | --- |
 | `quinjet pr view` | Prints one pull request's metadata and its description, optionally refreshing until stopped. |
+| `quinjet pr commits` | Lists the pull request's commits in chronological order. |
 | `quinjet pr files` | Lists the files the pull request changes, with per-file line counts. |
 | `quinjet pr diff` | Prints the whole patch, or one path's patch. |
 | `quinjet pr conversation` | Prints the timeline and the inline review comments as one thread, optionally refreshing until stopped. |
@@ -102,6 +103,7 @@ when their check state settles.
 ## Commands
 
 - [`quinjet pr view`](./view.md)
+- [`quinjet pr commits`](./commits.md)
 - [`quinjet pr files`](./files.md)
 - [`quinjet pr diff`](./diff.md)
 - [`quinjet pr conversation`](./conversation.md)
@@ -176,7 +178,8 @@ leaves stdout empty.
   read from; it never changes the number. There is no way to ask Quinjet for a
   list of open pull requests, by design: it reads one pull request at a time.
 - A cross-repository pull request from a fork whose head repository was deleted
-  still resolves for `view`, `conversation`, `checks` and `logs`, because those
+  still resolves for `view`, `commits`, `conversation`, `checks` and `logs`,
+  because those
   read the base repository. `files` and `diff` may not: if
   `refs/pull/<n>/head` has also gone, the fetch fails with
   `the base repository no longer exposes the PR head and its fork was deleted`.
@@ -204,8 +207,9 @@ leaves stdout empty.
   keyed by the new pair of commits. Pass `--refresh` when you know a push just
   landed.
 - Caching is shared with the terminal interface and split by whether the key
-  already names the content. The immutable keys are `pr-files-v1`,
-  `pr-numstat-v1` and `pr-patch-v1` (all keyed by merge base and head),
+  already names the content. The immutable keys are `pull-request-commits-v1`
+  (keyed by base and head), `pr-files-v1`, `pr-numstat-v1` and `pr-patch-v1`
+  (all keyed by merge base and head),
   `conversation-timeline-v1` and `conversation-comments-v1` (keyed by GitHub's
   `updatedAt` stamp), and `check-log-v1` and `check-steps-v1` for a settled job.
   The timed keys are `repository` at 24 hours, `pull-request-v4` at 5 minutes,

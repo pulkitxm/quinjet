@@ -195,6 +195,7 @@ fn clap_rejects_invalid_metadata_arguments_with_usage() -> Result<()> {
         &["status", "--interval", "0"][..],
         &["pr", "view", "1", "--watch", "--interval", "1"][..],
         &["pr", "conversation", "1", "--interval", "2"][..],
+        &["pr", "commits", "1", "--watch"][..],
         &["pr", "checks", "1", "--watch", "--interval", "1"][..],
         &["pr", "checks", "1", "--watch", "--exit-code"][..],
         &["pr", "logs", "1", "lint", "--watch", "--interval", "2"][..],
