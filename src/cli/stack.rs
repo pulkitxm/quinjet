@@ -7,13 +7,11 @@ pub(super) fn stack(session: &mut Session, out: &Emitter, command: StackVerb) ->
         StackVerb::View(args) => {
             let snapshot = lookup_stack(session, out, &args)?;
             out.emit(&snapshot, || render::pull_request_stack(&snapshot))?;
-            Ok(0)
         }
         StackVerb::Files(args) => {
             let (stack, from, to) = stack_range(session, out, &args)?;
             let index = prepare_stack(session, out, stack, from, to)?;
             out.emit(&index, || render::pull_request_files(&index))?;
-            Ok(0)
         }
         StackVerb::Diff(args) => {
             let (stack, from, to) = stack_range(session, out, &args.range)?;
@@ -22,9 +20,9 @@ pub(super) fn stack(session: &mut Session, out: &Emitter, command: StackVerb) ->
             let document =
                 prepared_pull_request_diff(session, out, &index, title, args.path.as_deref())?;
             out.emit(&document, || render::diff(&document))?;
-            Ok(0)
         }
     }
+    Ok(0)
 }
 
 fn lookup_stack(

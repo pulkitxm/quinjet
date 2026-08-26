@@ -1,7 +1,8 @@
-use super::*;
-use crate::git::github::{PullRequestStack, PullRequestStackMember};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+
+use super::*;
+use crate::git::github::{PullRequestStack, PullRequestStackMember};
 
 fn stack() -> PullRequestStack {
     PullRequestStack {
