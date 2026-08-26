@@ -33,7 +33,8 @@ When you add an operation, do all of it:
 src/
   main.rs          argv dispatch, terminal loop, panic hook, terminal guard
   cli/
-    command.rs     the command vocabulary, outcomes, and the session
+    command.rs     the command vocabulary and outcomes
+    session.rs     command execution and reusable diff workspaces
     mod.rs         the subcommand tree, exit codes, the --json emitter
     render.rs      plain-text renderings, no terminal and no color
     update.rs      verified release lookup and executable replacement

@@ -5,6 +5,7 @@ mod pr_verbs;
 mod remote;
 mod render;
 mod review;
+mod session;
 mod update;
 mod watch;
 
@@ -20,11 +21,12 @@ use anyhow::{Context, Result};
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
 use clap_mangen::Man;
-pub(crate) use command::{Command, Outcome, Session};
+pub(crate) use command::{Command, Outcome};
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use pr_verbs::*;
 use serde::Serialize;
+pub(crate) use session::Session;
 
 use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
