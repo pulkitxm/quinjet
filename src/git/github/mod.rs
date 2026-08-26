@@ -24,7 +24,7 @@ use super::diff::{
     DiffDocument, DiffLineCounts, PullRequestDetails, parse_diff, parse_numstat,
     split_patch_by_file,
 };
-use super::{MAX_DIFF_BYTES, Repository, text, trim_ascii};
+use super::{MAX_DIFF_BYTES, Repository, StackOperation, text, trim_ascii};
 
 const MAX_GIT_REMOTES: usize = 32;
 const MAX_REMOTE_URL_ENTRIES: usize = 64;

@@ -21,6 +21,15 @@ pub(super) fn stack(session: &mut Session, out: &Emitter, command: StackVerb) ->
                 prepared_pull_request_diff(session, out, &index, title, args.path.as_deref())?;
             out.emit(&document, || render::diff(&document))?;
         }
+        command => {
+            let (operation, yes) = command
+                .into_operation()
+                .ok_or_else(|| anyhow::anyhow!("stack command does not define an operation"))?;
+            if yes {
+                return operate(session, out, GitOperation::Stack(Box::new(operation)));
+            }
+            out.message(&operation.preview_message())?;
+        }
     }
     Ok(0)
 }

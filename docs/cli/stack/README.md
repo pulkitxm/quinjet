@@ -1,8 +1,8 @@
 # `quinjet stack`
 
-`quinjet stack` reads the stack containing one pull request and compares any
-contiguous range of its entries. Pull-request numbers identify the stack;
-one-based positions identify the range inside it.
+`quinjet stack` reads stacked pull requests natively and manages their branch
+and GitHub lifecycle through the `github/gh-stack` extension. Install and
+authenticate the GitHub CLI before running a lifecycle command.
 
 Quinjet asks GitHub for `PullRequest.stack` and `PullRequest.stackEntry` through
 GraphQL. The response supplies every entry's exact base and head commit. A range
@@ -22,16 +22,49 @@ refs without changing the caller's worktree, index, branches, or refs.
 
 ## Commands
 
+### Inspect
+
 - [`quinjet stack view`](./view.md)
 - [`quinjet stack files`](./files.md)
 - [`quinjet stack diff`](./diff.md)
+
+### Build
+
+- [`quinjet stack init`](./init.md)
+- [`quinjet stack add`](./add.md)
+- [`quinjet stack checkout`](./checkout.md)
+- [`quinjet stack modify`](./modify.md)
+- [`quinjet stack unstack`](./unstack.md)
+
+### Publish
+
+- [`quinjet stack link`](./link.md)
+- [`quinjet stack merge`](./merge.md)
+- [`quinjet stack push`](./push.md)
+- [`quinjet stack rebase`](./rebase.md)
+- [`quinjet stack submit`](./submit.md)
+- [`quinjet stack sync`](./sync.md)
+
+### Navigate
+
+- [`quinjet stack bottom`](./bottom.md)
+- [`quinjet stack down`](./down.md)
+- [`quinjet stack top`](./top.md)
+- [`quinjet stack trunk`](./trunk.md)
+- [`quinjet stack up`](./up.md)
+
+Lifecycle commands print a preview unless `--yes` is present. Quinjet disables
+terminal prompts and editors when it invokes `gh stack`. Commands that would
+open an interactive picker or editor are intentionally absent. Use
+`--git-remote` to select a Git remote because the global `--remote` option
+selects an SSH machine for Quinjet itself.
 
 ## Exit codes
 
 | Code | Meaning |
 | --- | --- |
-| 0 | The stack or comparison was printed. |
-| 1 | Repository discovery, GitHub lookup, stack parsing, or diff preparation failed. |
+| 0 | The read, preview, or confirmed lifecycle operation succeeded. |
+| 1 | Repository discovery, GitHub lookup, stack parsing, diff preparation, or `gh stack` failed. |
 | 2 | The command line was invalid. |
 | 3 | A position or path did not belong to the selected stack comparison. |
 
