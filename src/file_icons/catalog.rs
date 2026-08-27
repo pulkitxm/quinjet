@@ -5,6 +5,10 @@ pub(super) const FILE: FileIcon = FileIcon {
     glyph: "\u{f15b}",
     color: SyntaxColor::Text,
 };
+pub(super) const TEXT: FileIcon = FileIcon {
+    glyph: "\u{f15c}",
+    color: SyntaxColor::Text,
+};
 pub(super) const CODE: FileIcon = FileIcon {
     glyph: "\u{f1c9}",
     color: SyntaxColor::Blue,
@@ -76,6 +80,10 @@ pub(super) const PHP: FileIcon = FileIcon {
 pub(super) const SWIFT: FileIcon = FileIcon {
     glyph: "\u{efbe}",
     color: SyntaxColor::Orange,
+};
+pub(super) const APPLE: FileIcon = FileIcon {
+    glyph: "\u{e711}",
+    color: SyntaxColor::Blue,
 };
 pub(super) const GO: FileIcon = FileIcon {
     glyph: "\u{e724}",
