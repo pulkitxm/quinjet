@@ -410,6 +410,22 @@ pub(super) fn pull_request_diff(
     path: Option<&Path>,
 ) -> Result<DiffDocument> {
     let index = prepare(session, out, request)?;
+    prepared_pull_request_diff(
+        session,
+        out,
+        &index,
+        format!("PR #{}", request.number),
+        path,
+    )
+}
+
+pub(super) fn prepared_pull_request_diff(
+    session: &mut Session,
+    out: &Emitter,
+    index: &PullRequestDiffIndex,
+    title: String,
+    path: Option<&Path>,
+) -> Result<DiffDocument> {
     let paths: Vec<PathBuf> = match path {
         Some(wanted) => {
             if !index.files.iter().any(|file| file.path == wanted) {
@@ -417,7 +433,7 @@ pub(super) fn pull_request_diff(
                     EXIT_NOT_FOUND,
                     format!("`{}` is not part of this pull request", wanted.display()),
                 )
-                .hint("run `quinjet pr files <number>` for the files it changes")
+                .hint("list the files in this pull-request comparison first")
                 .into());
             }
             vec![wanted.to_path_buf()]
@@ -440,7 +456,7 @@ pub(super) fn pull_request_diff(
         }
     }
     let index = DiffIndex {
-        title: format!("PR #{}", request.number),
+        title,
         files: index
             .files
             .iter()

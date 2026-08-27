@@ -89,4 +89,5 @@ pub(super) fn pull_request(base: GitHubRepository, number: u64) -> PullRequest {
 
 mod operations;
 mod parsing;
+mod stack;
 mod workspace;

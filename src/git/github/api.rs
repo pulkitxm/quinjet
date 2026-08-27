@@ -32,6 +32,28 @@ impl Repository {
         Ok(operation.success_message(pull_request))
     }
 
+    pub(crate) fn perform_stack_operation(&self, operation: &StackOperation) -> Result<String> {
+        let output = self.run_gh(operation.arguments())?;
+        if !output.status.success() {
+            bail!(
+                "{}",
+                bounded_command_error("unable to update the pull request stack", &output)
+            );
+        }
+        if output.stdout_truncated || output.stderr_truncated {
+            bail!("gh stack output exceeded the safety limit");
+        }
+        let stdout = text(&output.stdout);
+        if !stdout.trim().is_empty() {
+            return Ok(stdout.trim().to_owned());
+        }
+        let stderr = text(&output.stderr);
+        if !stderr.trim().is_empty() {
+            return Ok(stderr.trim().to_owned());
+        }
+        Ok(operation.success_message().to_owned())
+    }
+
     #[doc = " One bounded page of a listing endpoint: its body trimmed to whole"]
     #[doc = " records, plus whether GitHub advertises another page after it."]
     pub(super) fn api_page(
@@ -178,10 +200,16 @@ impl Repository {
         let _ = command
             .current_dir(&self.root)
             .args(args)
+            .env_remove("GH_FORCE_TTY")
             .env("GH_PROMPT_DISABLED", "1")
             .env("GH_PAGER", "cat")
             .env("GH_NO_UPDATE_NOTIFIER", "1")
-            .env("NO_COLOR", "1");
+            .env("NO_COLOR", "1")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_EDITOR", "true")
+            .env("GIT_SEQUENCE_EDITOR", "true")
+            .env("EDITOR", "true")
+            .env("VISUAL", "true");
         run_bounded_command(&mut command, stdout_limit, MAX_GH_ERROR_BYTES).with_context(|| {
             format!(
                 "failed to execute GitHub CLI (`gh`) in {}; install it and run `gh auth login`",
@@ -204,10 +232,16 @@ impl Repository {
         let _ = command
             .current_dir(&self.root)
             .args(args)
+            .env_remove("GH_FORCE_TTY")
             .env("GH_PROMPT_DISABLED", "1")
             .env("GH_PAGER", "cat")
             .env("GH_NO_UPDATE_NOTIFIER", "1")
-            .env("NO_COLOR", "1");
+            .env("NO_COLOR", "1")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_EDITOR", "true")
+            .env("GIT_SEQUENCE_EDITOR", "true")
+            .env("EDITOR", "true")
+            .env("VISUAL", "true");
         process::run_bounded_command_with_input(
             &mut command,
             input,

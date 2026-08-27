@@ -233,8 +233,8 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
         description: "Discover or choose the base repository",
     },
     HelpRow::Shortcut {
-        keys: "Shift+P / Shift+F",
-        description: "The PR and its checks / all changed files",
+        keys: "Shift+P / F / S",
+        description: "PR details / changed files / stack range",
     },
     HelpRow::Shortcut {
         keys: "j / k",
@@ -425,6 +425,7 @@ mod pull_request_details;
 mod pull_request_files;
 mod pull_request_overview;
 mod pull_request_review;
+mod pull_request_stack;
 mod repository_tabs;
 mod side_by_side;
 mod sidebar_changes;
