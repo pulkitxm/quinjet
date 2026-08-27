@@ -94,13 +94,13 @@ jobs:
           git add Cargo.toml Cargo.lock
           git commit -m "chore: release v${VERSION}"
       - run: cargo package --locked
-      - name: Tag the release
+      - name: Publish the release commit and tag
         env:
           VERSION: ${{ steps.bump.outputs.version }}
         run: |
           set -euo pipefail
           git tag -a "v${VERSION}" -m "quinjet v${VERSION}"
-          git push origin "v${VERSION}"
+          git push --atomic origin HEAD:main "refs/tags/v${VERSION}"
 
   build:
     name: Build ${{ matrix.artifact }}
