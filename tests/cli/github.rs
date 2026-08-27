@@ -3,6 +3,7 @@ use std::os::unix::fs::PermissionsExt;
 use super::*;
 
 const GH_SCRIPT: &str = r#"#!/bin/sh
+input=$(cat)
 {
   printf 'argv'
   for argument in "$@"; do
@@ -10,13 +11,17 @@ const GH_SCRIPT: &str = r#"#!/bin/sh
   done
   printf '\n'
   printf 'env\t%s\t%s\t%s\t%s\n' "$GH_PROMPT_DISABLED" "$GH_PAGER" "$GH_NO_UPDATE_NOTIFIER" "$NO_COLOR"
-  printf 'stdin\t'
-  cat
-  printf '\n'
+  printf 'stdin\t%s\n' "$input"
 } >> "$FAKE_GH_CAPTURE"
-case "$*" in
+case "$* $input" in
   *"stackEntry"*)
     printf '{"data":{"repository":{"pullRequest":{"stackEntry":{"position":2},"stack":{"id":"STACK_node","number":12,"size":2,"baseRefName":"main","entries":{"totalCount":2,"nodes":[{"id":"ENTRY_1","position":1,"pullRequest":{"id":"PR_41","number":41,"title":"Build stack model","author":{"login":"octocat"},"state":"OPEN","isDraft":false,"updatedAt":"2026-08-21T01:00:00Z","url":"https://github.com/acme/project/pull/41","baseRefName":"main","baseRefOid":"%s","headRefName":"stack-model","headRefOid":"%s","headRepository":{"nameWithOwner":"acme/project"},"isCrossRepository":false,"additions":1,"deletions":0,"changedFiles":1,"mergeStateStatus":"CLEAN","mergeable":"MERGEABLE","reviewDecision":"APPROVED","mergeQueueEntry":null,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]} }},{"id":"ENTRY_2","position":2,"pullRequest":{"id":"PR_42","number":42,"title":"Add stack view","author":{"login":"octocat"},"state":"OPEN","isDraft":false,"updatedAt":"2026-08-21T02:00:00Z","url":"https://github.com/acme/project/pull/42","baseRefName":"stack-model","baseRefOid":"%s","headRefName":"stack-view","headRefOid":"%s","headRepository":{"nameWithOwner":"acme/project"},"isCrossRepository":false,"additions":0,"deletions":0,"changedFiles":0,"mergeStateStatus":"CLEAN","mergeable":"MERGEABLE","reviewDecision":"REVIEW_REQUIRED","mergeQueueEntry":null,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING"}}}]}}}]}}}}}}' "$FAKE_BASE_OID" "$FAKE_HEAD_OID" "$FAKE_HEAD_OID" "$FAKE_HEAD_OID"
+    ;;
+  *"older"*)
+    printf '{"data":{"repository":{"pullRequest":{"baseRefOid":"%s","headRefOid":"%s","commits":{"totalCount":2,"nodes":[{"commit":{"oid":"%s","abbreviatedOid":"base000","messageHeadline":"build the base","authoredDate":"2026-08-20T01:00:00Z","committedDate":"2026-08-20T01:00:00Z","url":"https://github.com/acme/project/commit/base","author":{"name":"Octo Cat","user":{"login":"octocat"}},"committer":{"name":"Octo Cat","user":{"login":"octocat"}}}}],"pageInfo":{"hasPreviousPage":false,"startCursor":"base"}}}}}}' "$FAKE_BASE_OID" "$FAKE_HEAD_OID" "$FAKE_BASE_OID"
+    ;;
+  *"commits(last:100,before:"*)
+    printf '{"data":{"repository":{"pullRequest":{"baseRefOid":"%s","headRefOid":"%s","commits":{"totalCount":2,"nodes":[{"commit":{"oid":"%s","abbreviatedOid":"feature0","messageHeadline":"add the feature","authoredDate":"2026-08-21T02:00:00Z","committedDate":"2026-08-21T02:00:00Z","url":"https://github.com/acme/project/commit/feature","author":{"name":"Octo Cat","user":{"login":"octocat"}},"committer":{"name":"Octo Cat","user":{"login":"octocat"}}}}],"pageInfo":{"hasPreviousPage":true,"startCursor":"older"}}}}}}' "$FAKE_BASE_OID" "$FAKE_HEAD_OID" "$FAKE_HEAD_OID"
     ;;
   *"number=42"*)
     printf 'PR_node\t42\tAdd feature\tBody from fixture\toctocat\tOPEN\tfalse\t2026-08-21T02:00:00Z\thttps://github.com/acme/project/pull/42\tmain\tfeature\tacme/project\tfalse\t1\t0\t1\t%s\t%s\t2026-08-20T01:00:00Z\tfalse\ttrue\tfalse\ttrue\ttrue\ttrue\ttrue\ttrue\tSUBSCRIBED\tCLEAN\tMERGEABLE\ttrue\ttrue\t\t\t0\t\t\tAPPROVED\n' "$FAKE_BASE_OID" "$FAKE_HEAD_OID"
@@ -240,6 +245,43 @@ fn pull_request_files_uses_real_local_commits_in_plain_and_json() -> Result<()> 
     ensure!(json["files"][0]["path"] == "feature.txt");
     ensure!(json["files"][0]["status"] == "added");
     ensure!(json["totalFiles"] == 1);
+    Ok(())
+}
+
+#[test]
+fn pull_request_commits_paginate_cache_and_render_in_both_modes() -> Result<()> {
+    let fixture = GitHubFixture::new()?;
+
+    let plain = fixture.read(&["pr", "commits", "42"])?.success()?;
+
+    ensure!(plain.stderr.is_empty(), "{}", plain.stderr);
+    let base = plain
+        .stdout
+        .find("build the base")
+        .context("plain commits omitted the older commit")?;
+    let feature = plain
+        .stdout
+        .find("add the feature")
+        .context("plain commits omitted the head commit")?;
+    ensure!(base < feature, "{}", plain.stdout);
+
+    let json = fixture
+        .read(&["pr", "commits", "42", "--json"])?
+        .success()?
+        .json()?;
+    ensure!(
+        json["commits"]
+            .as_array()
+            .is_some_and(|commits| commits.len() == 2)
+    );
+    ensure!(json["commits"][0]["oid"] == fixture.base_oid);
+    ensure!(json["commits"][1]["oid"] == fixture.head_oid);
+    ensure!(json["totalCommits"] == 2);
+    ensure!(json["truncated"] == false);
+    ensure!(json["fromCache"] == true);
+
+    let calls = fixture.gh_calls()?;
+    ensure!(calls.matches("commits(last:100,before:").count() == 2);
     Ok(())
 }
 

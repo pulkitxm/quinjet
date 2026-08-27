@@ -197,6 +197,30 @@ pub(crate) fn pull_request_files(index: &PullRequestDiffIndex) -> String {
     out.finish()
 }
 
+pub(crate) fn pull_request_commits(commits: &PullRequestCommits) -> String {
+    if commits.commits.is_empty() {
+        return "No commits reported\n".to_owned();
+    }
+    let mut out = Report::default();
+    for commit in &commits.commits {
+        out.line(&format!(
+            "{:<12} {:<20} {:<20} {}",
+            commit.abbreviated_oid,
+            format_local_timestamp(&commit.authored_at),
+            truncate(&commit.author, 20),
+            commit.subject
+        ));
+    }
+    if commits.truncated {
+        out.line(&format!(
+            "\n[{} newest commits shown of {}]",
+            commits.commits.len(),
+            commits.total_commits
+        ));
+    }
+    out.finish()
+}
+
 pub(crate) fn checks(checks: &[PullRequestCheck]) -> String {
     if checks.is_empty() {
         return "No checks reported\n".to_owned();

@@ -8,6 +8,13 @@ impl App {
         now: Instant,
     ) -> Vec<AppEffect> {
         match event {
+            event @ (WorkerEvent::PullRequestStackMember { .. }
+            | WorkerEvent::PullRequestStackMemberChecks { .. }
+            | WorkerEvent::PullRequestStackTipChecks { .. }
+            | WorkerEvent::PullRequestStackMemberConversation { .. }
+            | WorkerEvent::PullRequestStackMemberCommits { .. }) => {
+                self.handle_stack_worker_event(event)
+            }
             event @ (WorkerEvent::Status { .. }
             | WorkerEvent::LocalDiffIndex { .. }
             | WorkerEvent::LocalDiffFile { .. }

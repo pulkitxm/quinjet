@@ -154,17 +154,20 @@ mod refresh;
 mod repository_tabs;
 mod scm;
 mod selection;
+mod stack_inspector;
 mod support;
 mod view;
 mod view_state;
 mod worker_content;
 mod worker_events;
 mod worker_repository;
+mod worker_stack;
 
 pub(crate) use geometry::*;
 pub(crate) use modal::*;
 pub(crate) use projects::{ProjectOpenMode, ProjectRow};
 pub(crate) use pull_request_actions::*;
+pub(crate) use stack_inspector::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use support::*;
 pub(crate) use view::*;
@@ -229,6 +232,7 @@ pub(crate) struct App {
     pub pull_request_lookup_refresh: bool,
     pub pull_request_stack_anchor: Option<usize>,
     pub pull_request_stack_cursor: Option<usize>,
+    pub stack_inspector: StackInspector,
     pub history_branches: Vec<HistoryBranch>,
     pub history_branches_loading: bool,
     pub history_branches_loaded: bool,

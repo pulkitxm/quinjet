@@ -19,6 +19,10 @@ impl App {
         }
 
         let mut effects = Vec::new();
+        if self.stack_inspector.sync_due {
+            self.request_stack_inspector(false, &mut effects);
+            changed = true;
+        }
         if self.preview_due.is_some_and(|due| now >= due) {
             self.preview_due = None;
             self.request_preview(&mut effects);
@@ -68,6 +72,11 @@ impl App {
             || self.pull_request_conversation_loading
             || self.pull_request_review_loading
             || self.pull_request_check_log_loading
+            || self.stack_inspector.selected_loading
+            || self.stack_inspector.conversation_loading
+            || self.stack_inspector.checks_loading
+            || self.stack_inspector.commits_loading
+            || self.stack_inspector.tip_checks_loading
     }
 
     #[doc = " Whether the pull request itself was answered from disk rather than the"]
@@ -88,10 +97,19 @@ impl App {
         if !self.tab_active || self.view != View::PullRequests {
             return PULL_REQUEST_BACKGROUND_POLL;
         }
-        if self
-            .pull_request_checks
-            .iter()
-            .any(|check| check.status.is_running())
+        let selected_running = self.stack_inspector.section == StackMemberSection::Checks
+            && self
+                .stack_inspector
+                .checks
+                .checks
+                .iter()
+                .any(|check| check.status.is_running());
+        if selected_running
+            || self
+                .pull_request_checks
+                .iter()
+                .chain(self.stack_inspector.tip_checks.checks.iter())
+                .any(|check| check.status.is_running())
         {
             PULL_REQUEST_ACTIVE_POLL
         } else {
@@ -139,6 +157,7 @@ impl App {
                 self.pull_request_checks_read_at = Some(now);
             }
         }
+        self.refresh_stack_inspector_live(now, force, effects);
         let settled = self
             .pull_request
             .as_ref()

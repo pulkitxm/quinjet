@@ -25,6 +25,7 @@ impl App {
         self.pull_request_stack_error = None;
         self.pull_request_stack_anchor = None;
         self.pull_request_stack_cursor = None;
+        self.stack_inspector.clear();
         self.pull_request_section = PullRequestSection::Overview;
         self.pull_request_file_view = PullRequestFileView::AllFiles;
         self.pull_request_files.clear();

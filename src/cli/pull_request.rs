@@ -1,6 +1,7 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
+mod commits;
 mod monitor;
 pub(super) use monitor::select_check;
 use monitor::{checks, logs, watch_conversation, watch_pull_request};
@@ -28,6 +29,7 @@ pub(super) fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb
             out.emit(&index, || render::pull_request_files(&index))?;
             Ok(0)
         }
+        PrVerb::Commits(args) => commits::commits(session, out, &args),
         PrVerb::Diff(args) => {
             let request = lookup(session, out, &args.pull_request)?;
             let document = pull_request_diff(session, out, &request, args.path.as_deref())?;
