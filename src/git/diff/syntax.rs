@@ -62,9 +62,78 @@ pub(super) fn advance_highlighter<'a>(
     }
 }
 
-fn syntax_for_path<'a>(syntaxes: &'a SyntaxSet, path: Option<&Path>) -> &'a SyntaxReference {
-    path.and_then(|path| syntaxes.find_syntax_for_file(path).ok().flatten())
-        .unwrap_or_else(|| syntaxes.find_syntax_plain_text())
+pub(super) fn syntax_for_path<'a>(
+    syntaxes: &'a SyntaxSet,
+    path: Option<&Path>,
+) -> &'a SyntaxReference {
+    path.and_then(|path| {
+        syntaxes
+            .find_syntax_for_file(path)
+            .ok()
+            .flatten()
+            .or_else(|| compound_syntax(syntaxes, path))
+            .or_else(|| aliased_syntax(syntaxes, path))
+    })
+    .unwrap_or_else(|| syntaxes.find_syntax_plain_text())
+}
+
+fn compound_syntax<'a>(syntaxes: &'a SyntaxSet, path: &Path) -> Option<&'a SyntaxReference> {
+    let mut name = path.file_name()?.to_str()?;
+    while let Some((stem, _)) = name.rsplit_once('.') {
+        name = stem;
+        if let Some(syntax) = syntaxes
+            .find_syntax_for_file(Path::new(name))
+            .ok()
+            .flatten()
+        {
+            return Some(syntax);
+        }
+    }
+    None
+}
+
+fn aliased_syntax<'a>(syntaxes: &'a SyntaxSet, path: &Path) -> Option<&'a SyntaxReference> {
+    const ALIASES: &[(&str, &str)] = &[
+        ("astro", "file.html"),
+        ("capnp", "file.proto"),
+        ("cjs", "file.js"),
+        ("cnf", "file.conf"),
+        ("csproj", "file.xml"),
+        ("def", "file.c"),
+        ("entitlements", "file.xml"),
+        ("gperf", "file.c"),
+        ("gyp", "file.py"),
+        ("hbs", "file.html"),
+        ("http2", "file.http"),
+        ("idl", "file.cpp"),
+        ("json5", "file.json"),
+        ("jsonc", "file.json"),
+        ("jsx", "file.js"),
+        ("lds", "file.c"),
+        ("manifest", "file.xml"),
+        ("mdx", "file.md"),
+        ("mjs", "file.js"),
+        ("pbxproj", "file.swift"),
+        ("pcss", "file.css"),
+        ("plist", "file.xml"),
+        ("prisma", "file.graphql"),
+        ("ps1", "file.sh"),
+        ("psd1", "file.sh"),
+        ("psm1", "file.sh"),
+        ("rc", "file.c"),
+        ("reg", "file.ini"),
+        ("strings", "file.swift"),
+        ("webmanifest", "file.json"),
+        ("winget", "file.yaml"),
+        ("xcscheme", "file.xml"),
+        ("xcworkspacedata", "file.xml"),
+    ];
+    let extension = path.extension()?.to_str()?;
+    let alias = ALIASES
+        .iter()
+        .find(|(candidate, _)| extension.eq_ignore_ascii_case(candidate))?
+        .1;
+    syntaxes.find_syntax_for_file(alias).ok().flatten()
 }
 
 #[expect(

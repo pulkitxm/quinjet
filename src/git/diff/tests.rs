@@ -1,5 +1,7 @@
 use super::*;
 
+mod syntax_audit;
+
 #[test]
 fn parses_hunks_and_tracks_line_numbers() {
     let raw = b"diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -10,3 +10,4 @@ fn main() {\n let value = 1;\n-old();\n+new();\n+more();\n end();\n";
