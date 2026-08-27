@@ -377,7 +377,7 @@ pub(crate) enum Modal {
     },
     Themes {
         selected: usize,
-        original: ThemeName,
+        original: ThemeSelection,
     },
     Appearances {
         selected: usize,

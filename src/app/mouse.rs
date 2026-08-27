@@ -411,7 +411,7 @@ impl App {
             Modal::Appearances { selected, .. } => AppearanceChoice::ALL.get(*selected).copied(),
             _ => None,
         }) {
-            self.set_theme_selection(self.theme_name, choice);
+            self.set_theme_selection(self.theme_selection, choice);
         }
     }
 }

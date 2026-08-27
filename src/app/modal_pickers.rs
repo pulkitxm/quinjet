@@ -214,7 +214,10 @@ impl App {
             Modal::Themes { selected, original } => {
                 match key.code {
                     KeyCode::Esc => {
-                        self.apply_theme(*original);
+                        self.theme_selection = *original;
+                        self.theme = Theme::new_selection(*original, self.appearance);
+                        self.invalidate_pull_request_content_rows();
+                        self.invalidate_stack_inspector_content_rows();
                         return effects;
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
@@ -253,7 +256,7 @@ impl App {
                     KeyCode::Esc => {
                         self.appearance_choice = *original_choice;
                         self.appearance = *original_appearance;
-                        self.theme = Theme::new(self.theme_name, self.appearance);
+                        self.theme = Theme::new_selection(self.theme_selection, self.appearance);
                         self.invalidate_pull_request_content_rows();
                         self.invalidate_stack_inspector_content_rows();
                         return effects;
@@ -261,18 +264,18 @@ impl App {
                     KeyCode::Up | KeyCode::Char('k') => {
                         *selected = previous_list_index(*selected, AppearanceChoice::ALL.len());
                         if let Some(choice) = AppearanceChoice::ALL.get(*selected).copied() {
-                            self.set_theme_selection(self.theme_name, choice);
+                            self.set_theme_selection(self.theme_selection, choice);
                         }
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
                         *selected = next_list_index(*selected, AppearanceChoice::ALL.len());
                         if let Some(choice) = AppearanceChoice::ALL.get(*selected).copied() {
-                            self.set_theme_selection(self.theme_name, choice);
+                            self.set_theme_selection(self.theme_selection, choice);
                         }
                     }
                     KeyCode::Enter => {
                         if let Some(choice) = AppearanceChoice::ALL.get(*selected).copied() {
-                            self.set_theme_selection(self.theme_name, choice);
+                            self.set_theme_selection(self.theme_selection, choice);
                             self.show_toast(
                                 format!("Appearance changed to {}", choice.label()),
                                 ToastLevel::Success,

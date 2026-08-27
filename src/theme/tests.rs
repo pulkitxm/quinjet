@@ -107,6 +107,28 @@ fn every_theme_has_distinct_light_and_dark_surfaces() {
 }
 
 #[test]
+fn host_theme_selects_the_requested_appearance() {
+    let selection = ThemeSelection::Host(host_theme().parse().unwrap());
+    let light = Theme::new_selection(selection, Appearance::Light);
+    let dark = Theme::new_selection(selection, Appearance::Dark);
+
+    assert_eq!(light.background, color(0xf7f3ec));
+    assert_eq!(dark.background, color(0x1a1714));
+    assert_ne!(light.accent, dark.accent);
+}
+
+#[test]
+fn host_theme_rejects_incomplete_and_invalid_colors() {
+    drop("{}".parse::<HostTheme>().unwrap_err());
+    drop(
+        host_theme()
+            .replace("#f7f3ec", "#bad")
+            .parse::<HostTheme>()
+            .unwrap_err(),
+    );
+}
+
+#[test]
 fn github_dark_uses_the_official_black_surfaces() {
     let theme = Theme::new(ThemeName::Github, Appearance::Dark);
 
@@ -190,6 +212,27 @@ fn every_theme_keeps_text_and_graphics_readable_on_every_surface() {
             }
         }
     }
+}
+
+fn host_theme() -> &'static str {
+    r##"{
+        "light": {
+            "background": "#f7f3ec", "panel": "#fffdf8", "panelAlt": "#ece5d8",
+            "border": "#d6cbb8", "muted": "#5c5247", "text": "#241f1a",
+            "textStrong": "#100f0d", "contrast": "#000000", "removed": "#c93c37",
+            "orange": "#c46b32", "modified": "#9a6700", "added": "#2f7d42",
+            "cyan": "#1b7c83", "accent": "#d97757", "purple": "#8250df",
+            "brown": "#8f5e15"
+        },
+        "dark": {
+            "background": "#1a1714", "panel": "#221d19", "panelAlt": "#2b2620",
+            "border": "#5f5549", "muted": "#bcae9c", "text": "#f1e9dc",
+            "textStrong": "#fffdf8", "contrast": "#ffffff", "removed": "#ff6961",
+            "orange": "#f0a35e", "modified": "#e5c07b", "added": "#78c091",
+            "cyan": "#70c5ce", "accent": "#e08a6a", "purple": "#c792ea",
+            "brown": "#d7a65c"
+        }
+    }"##
 }
 
 fn channel_span(color: Color) -> u8 {

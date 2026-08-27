@@ -399,7 +399,7 @@ fn theme_picker_shows_every_family_and_marks_the_current_one() {
     app.set_theme_selection(ThemeName::TokyoNight, AppearanceChoice::Dark);
     app.modal = Some(Modal::Themes {
         selected: 9,
-        original: ThemeName::TokyoNight,
+        original: ThemeName::TokyoNight.into(),
     });
     let theme = app.theme;
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
@@ -431,7 +431,7 @@ fn theme_picker_keeps_the_last_theme_visible_at_minimum_height() {
     app.set_theme_selection(ThemeName::Github, AppearanceChoice::Dark);
     app.modal = Some(Modal::Themes {
         selected: 12,
-        original: ThemeName::Github,
+        original: ThemeName::Github.into(),
     });
     let theme = app.theme;
     let mut terminal = Terminal::new(TestBackend::new(80, 18)).unwrap();

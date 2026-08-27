@@ -119,7 +119,7 @@ fn open_terminal(
     let mut onboarding = workspace
         .is_none()
         .then(|| Onboarding::new(&options.path, ssh_context.cloned(), onboarding_mode));
-    let onboarding_theme = theme::Theme::new(options.theme, options.appearance.resolve());
+    let onboarding_theme = theme::Theme::new_selection(options.theme, options.appearance.resolve());
     let mut terminal = TerminalGuard::enter(!options.no_mouse)?;
     let render_tick = tick(Duration::from_millis(16));
     let relative_time_tick = tick(Duration::from_secs(1));
