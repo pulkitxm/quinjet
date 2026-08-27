@@ -8,6 +8,7 @@ use crate::git::github::{
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum StackMemberSection {
     #[default]
+    Files,
     Summary,
     Conversation,
     Checks,
@@ -146,7 +147,7 @@ impl StackInspector {
     pub(crate) fn clear(&mut self) {
         self.clear_selected();
         self.clear_tip();
-        self.section = StackMemberSection::Summary;
+        self.section = StackMemberSection::Files;
         self.diff_open = false;
         self.sync_due = false;
     }
@@ -243,6 +244,10 @@ impl super::App {
         self.stack_inspector.sync_due = false;
         self.request_stack_tip_checks(refresh, effects);
         match self.stack_inspector.section {
+            StackMemberSection::Files if self.view == super::View::PullRequests => {
+                self.request_preview(effects);
+                self.request_pull_request_review(refresh, effects);
+            }
             StackMemberSection::Summary => self.request_stack_member(refresh, effects),
             StackMemberSection::Conversation => {
                 self.request_stack_member_conversation(refresh, effects);
@@ -252,7 +257,7 @@ impl super::App {
             {
                 self.request_stack_member_checks(refresh, effects);
             }
-            StackMemberSection::Checks => {}
+            StackMemberSection::Files | StackMemberSection::Checks => {}
             StackMemberSection::Commits => self.request_stack_member_commits(effects),
         }
     }
@@ -289,7 +294,9 @@ impl super::App {
                     StackMemberSection::Conversation => {
                         self.request_stack_member_conversation(true, effects);
                     }
-                    StackMemberSection::Checks | StackMemberSection::Commits => {}
+                    StackMemberSection::Files
+                    | StackMemberSection::Checks
+                    | StackMemberSection::Commits => {}
                 }
                 if effects.len() > issued {
                     self.stack_inspector.detail_read_at = Some(now);
@@ -308,7 +315,8 @@ impl super::App {
                     self.stack_inspector.checks_read_at = Some(now);
                 }
             }
-            StackMemberSection::Summary
+            StackMemberSection::Files
+            | StackMemberSection::Summary
             | StackMemberSection::Conversation
             | StackMemberSection::Checks
             | StackMemberSection::Commits => {}
@@ -326,6 +334,9 @@ impl super::App {
             self.reset_view_content_position(super::View::PullRequests);
         }
         self.stack_inspector.diff_open = false;
+        if section == StackMemberSection::Files {
+            self.pull_request_stack_anchor = self.pull_request_stack_cursor;
+        }
         self.request_stack_inspector(false, effects);
     }
 

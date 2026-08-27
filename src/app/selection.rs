@@ -53,7 +53,15 @@ impl App {
             .map_or_else(|| "HEAD".to_owned(), |branch| branch.reference.clone())
     }
 
-    pub(crate) const fn selected_pull_request(&self) -> Option<&PullRequest> {
+    pub(crate) fn selected_pull_request(&self) -> Option<&PullRequest> {
+        if self.pull_request_section == PullRequestSection::Stack {
+            return self
+                .stack_inspector
+                .selected_pull_request
+                .as_ref()
+                .or(self.stack_inspector.selected_locator.as_ref())
+                .or(self.pull_request.as_ref());
+        }
         self.pull_request.as_ref()
     }
 
