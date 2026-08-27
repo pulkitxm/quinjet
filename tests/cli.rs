@@ -247,3 +247,6 @@ mod shell;
 #[cfg(unix)]
 #[path = "cli/ssh.rs"]
 mod ssh;
+#[cfg(unix)]
+#[path = "cli/stack_lifecycle.rs"]
+mod stack_lifecycle;

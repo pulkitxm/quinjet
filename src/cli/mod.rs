@@ -5,6 +5,9 @@ mod pr_verbs;
 mod remote;
 mod render;
 mod review;
+mod session;
+mod stack;
+mod stack_verbs;
 mod update;
 mod watch;
 
@@ -20,11 +23,14 @@ use anyhow::{Context, Result};
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
 use clap_mangen::Man;
-pub(crate) use command::{Command, Outcome, Session};
+pub(crate) use command::{Command, Outcome};
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use pr_verbs::*;
 use serde::Serialize;
+pub(crate) use session::Session;
+use stack::stack;
+use stack_verbs::StackVerb;
 
 use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
@@ -32,7 +38,8 @@ use crate::git::github::{
     PullRequestCommentMode, PullRequestDiffIndex, PullRequestEdit, PullRequestLockReason,
     PullRequestMergeMethod, PullRequestMergeMode, PullRequestOperation, PullRequestReviewDecision,
     PullRequestReviewKind, PullRequestReviewOperation, PullRequestReviewSide,
-    PullRequestReviewThreadSubject, PullRequestSnapshot, PullRequestUpdateMethod,
+    PullRequestReviewThreadSubject, PullRequestSnapshot, PullRequestStack,
+    PullRequestStackSnapshot, PullRequestUpdateMethod,
 };
 use crate::git::status::{Change, ChangeArea};
 use crate::git::{ConflictChoice, GitOperation, LocalDiffRequest, Repository};
@@ -217,6 +224,11 @@ enum Verb {
         #[command(subcommand)]
         command: PrVerb,
     },
+    #[doc = " Read or update stacked pull requests"]
+    Stack {
+        #[command(subcommand)]
+        command: StackVerb,
+    },
     #[doc = " Print or install shell completions"]
     #[command(visible_alias = "completion")]
     Completions(CompletionsArgs),
@@ -274,6 +286,7 @@ impl Verb {
                 command: PrVerb::Reviews { .. },
             } => Some("Updating pull-request review"),
             Self::Pr { .. } => Some("Loading pull request"),
+            Self::Stack { .. } => Some("Loading pull-request stack"),
             Self::Update(_) => Some("Checking for updates"),
         }
     }

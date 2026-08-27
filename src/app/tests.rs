@@ -54,6 +54,54 @@ fn pull_request(number: u64, title: &str, repository: &str) -> PullRequest {
     }
 }
 
+fn pull_request_stack(selected_position: usize) -> PullRequestStack {
+    PullRequestStack {
+        node_id: "stack-node".to_owned(),
+        number: 19,
+        base_ref: "main".to_owned(),
+        size: 3,
+        selected_position,
+        members: (1..=3)
+            .map(|position| PullRequestStackMember {
+                node_id: format!("pr-node-{position}"),
+                entry_id: format!("entry-{position}"),
+                position,
+                number: 40 + u64::try_from(position).unwrap_or_default(),
+                title: format!("Layer {position}"),
+                author: "octocat".to_owned(),
+                state: "OPEN".to_owned(),
+                is_draft: false,
+                updated_at: "2026-08-20T10:00:00Z".to_owned(),
+                url: format!("https://github.com/acme/widget/pull/{}", 40 + position),
+                base_ref: if position == 1 {
+                    "main".to_owned()
+                } else {
+                    format!("layer-{}", position - 1)
+                },
+                base_oid: format!("{position:040x}"),
+                head_ref: format!("layer-{position}"),
+                head_oid: format!("{:040x}", position + 10),
+                head_repository: Some("acme/widget".to_owned()),
+                is_cross_repository: false,
+                additions: position * 10,
+                deletions: position,
+                changed_files: position,
+                merge_state: "CLEAN".to_owned(),
+                mergeable: "MERGEABLE".to_owned(),
+                review_decision: "APPROVED".to_owned(),
+                checks_state: "SUCCESS".to_owned(),
+                is_queued: false,
+            })
+            .collect(),
+        truncated: false,
+        repository: GitHubRepository {
+            name_with_owner: "acme/widget".to_owned(),
+            url: "https://github.com/acme/widget".to_owned(),
+            remotes: vec!["origin".to_owned()],
+        },
+    }
+}
+
 #[test]
 fn pull_request_cta_actions_follow_state_and_remembered_merge_method() {
     let mut app = App::new("/tmp/repo", "repo");
@@ -264,6 +312,7 @@ mod refresh_preview_interaction;
 mod refresh_preview_state;
 mod repository_tabs;
 mod reviews;
+mod stack;
 mod support;
 mod view_state;
 mod workflows;

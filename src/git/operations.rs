@@ -180,6 +180,7 @@ impl Repository {
                 drop(self.checked(strings(["revert", "--no-edit", commit]))?);
                 Ok(format!("Reverted {}", short_id(commit)))
             }
+            GitOperation::Stack(operation) => self.perform_stack_operation(operation),
         }
     }
 

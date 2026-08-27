@@ -150,6 +150,10 @@ impl App {
                         self.pull_request_progress = None;
                         self.pull_request_error = None;
                         self.schedule_pull_request_poll(now);
+                        self.request_pull_request_stack(
+                            self.pull_request_lookup_refresh,
+                            &mut effects,
+                        );
                         self.request_pull_request_checks(true, &mut effects);
                         self.request_pull_request_conversation(true, &mut effects);
                         if !same || head_moved {
@@ -162,6 +166,7 @@ impl App {
                         }
                     }
                     Err(error) => {
+                        self.pull_request_stack_loading = false;
                         self.pull_request_progress = None;
                         self.pull_request_error = Some(error.clone());
                         self.invalidate_pull_request_content_rows();
@@ -170,6 +175,29 @@ impl App {
                             DiffDocument::empty("Pull Requests", error.clone()),
                         );
                         self.show_toast(error, ToastLevel::Error, now);
+                    }
+                }
+            }
+            WorkerEvent::PullRequestStack { generation, result } => {
+                if generation != self.pull_request_generation {
+                    return effects;
+                }
+                self.pull_request_stack_loading = false;
+                match result {
+                    Ok(snapshot) => {
+                        for warning in snapshot.warnings {
+                            if !self.pull_request_warnings.contains(&warning) {
+                                self.pull_request_warnings.push(warning);
+                            }
+                        }
+                        self.apply_pull_request_stack_snapshot(snapshot.stack, &mut effects);
+                    }
+                    Err(error) => {
+                        let warning = format!("Unable to load pull-request stack: {error}");
+                        if !self.pull_request_warnings.contains(&warning) {
+                            self.pull_request_warnings.push(warning);
+                        }
+                        self.pull_request_stack_error = Some(error);
                     }
                 }
             }

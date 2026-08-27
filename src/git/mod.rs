@@ -20,6 +20,7 @@ use self::diff::{
 };
 use self::github::{bounded_command_error, run_bounded_command};
 use self::history::{Commit, LOG_FORMAT, parse_log};
+pub(crate) use self::stack_operation::{StackModifyAction, StackOperation, StackRebaseAction};
 use self::status::{Change, ChangeArea, ChangeStatus, RepoStatus, parse_porcelain_v2};
 
 const MAX_DIFF_BYTES: usize = 8 * 1024 * 1024;
@@ -216,6 +217,7 @@ pub(crate) enum GitOperation {
     },
     CherryPick(String),
     Revert(String),
+    Stack(Box<StackOperation>),
 }
 
 impl GitOperation {
@@ -245,6 +247,7 @@ impl GitOperation {
             Self::ResolveConflict { .. } => "Resolving conflict",
             Self::CherryPick(_) => "Cherry-picking commit",
             Self::Revert(_) => "Reverting commit",
+            Self::Stack(operation) => operation.progress_label(),
         }
     }
 
@@ -261,6 +264,7 @@ impl GitOperation {
                 | Self::DeleteBranch(_)
                 | Self::CherryPick(_)
                 | Self::Revert(_)
+                | Self::Stack(_)
         )
     }
 }
@@ -275,6 +279,7 @@ mod local_diff;
 mod operations;
 mod reads;
 mod repository;
+mod stack_operation;
 pub(crate) mod support;
 
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]

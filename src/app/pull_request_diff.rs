@@ -6,6 +6,7 @@ impl App {
     #[doc = " conversation stay exactly where the reader left them."]
     pub(super) fn reset_pull_request_diff_runtime(&mut self) {
         self.pull_request_workspace_generation = None;
+        self.pull_request_diff_source = None;
         self.pull_request_documents.clear();
         self.pull_request_document_order.clear();
         self.pull_request_document_bytes = 0;
@@ -19,6 +20,11 @@ impl App {
     pub(super) fn reset_pull_request_runtime(&mut self) {
         self.reset_pull_request_diff_runtime();
         self.reset_pull_request_review();
+        self.pull_request_stack = None;
+        self.pull_request_stack_loading = false;
+        self.pull_request_stack_error = None;
+        self.pull_request_stack_anchor = None;
+        self.pull_request_stack_cursor = None;
         self.pull_request_section = PullRequestSection::Overview;
         self.pull_request_file_view = PullRequestFileView::AllFiles;
         self.pull_request_files.clear();
@@ -89,13 +95,37 @@ impl App {
     }
 
     pub(super) fn rebuild_pull_request_all_files_document(&mut self) {
-        let Some(pull_request) = self.pull_request.as_ref() else {
+        let source = self
+            .pull_request_diff_source
+            .unwrap_or(PullRequestDiffSource::PullRequest);
+        let Some(mut pull_request) = self.pull_request_for_diff_source(source) else {
             return;
         };
-        let title = format!(
-            "PR #{} — All Files · {} changed",
-            pull_request.number, self.pull_request_total_files
-        );
+        let title = match source {
+            PullRequestDiffSource::PullRequest => format!(
+                "PR #{} — All Files · {} changed",
+                pull_request.number, self.pull_request_total_files
+            ),
+            PullRequestDiffSource::Stack { from, to } => format!(
+                "Stack · {from}..{to} · {} changed",
+                self.pull_request_total_files
+            ),
+        };
+        if matches!(source, PullRequestDiffSource::Stack { .. }) {
+            pull_request.changed_files = self.pull_request_total_files;
+            pull_request.additions = self
+                .pull_request_files
+                .iter()
+                .filter_map(|file| file.counts)
+                .map(|counts| counts.additions)
+                .sum();
+            pull_request.deletions = self
+                .pull_request_files
+                .iter()
+                .filter_map(|file| file.counts)
+                .map(|counts| counts.deletions)
+                .sum();
+        }
         if self.pull_request_files.is_empty() {
             let mut document = DiffDocument::empty(
                 title,
@@ -105,7 +135,7 @@ impl App {
                     "This pull request has no changed files"
                 },
             );
-            document.pull_request_details = Some(pull_request_details(pull_request));
+            document.pull_request_details = Some(pull_request_details(&pull_request));
             self.set_document(document);
             return;
         }
@@ -132,7 +162,7 @@ impl App {
         let visible = self.visible_preview_paths(&paths);
         let mut document = index
             .document_with_visibility(&self.pull_request_documents, |path| visible.contains(path));
-        document.pull_request_details = Some(pull_request_details(pull_request));
+        document.pull_request_details = Some(pull_request_details(&pull_request));
         self.set_document(document);
     }
 
@@ -210,34 +240,49 @@ impl App {
         section: PullRequestSection,
         effects: &mut Vec<AppEffect>,
     ) {
-        if section == PullRequestSection::Files {
-            if self.pull_request_section == PullRequestSection::Files
-                && self.pull_request_file_view == PullRequestFileView::AllFiles
-            {
-                return;
+        match section {
+            PullRequestSection::Overview => {
+                if self.pull_request_section == section {
+                    return;
+                }
+                self.invalidate_preview();
+                self.pull_request_section = section;
+                self.reset_sidebar_scroll();
+                self.content_scroll = 0;
+                self.horizontal_scroll = 0;
+                self.request_pull_request_checks(false, effects);
+                self.request_pull_request_conversation(false, effects);
+                self.request_pull_request_review(false, effects);
+                self.request_check_run_log(false, effects);
             }
-            self.invalidate_preview();
-            self.pull_request_section = PullRequestSection::Files;
-            self.reset_sidebar_scroll();
-            self.content_scroll = 0;
-            self.horizontal_scroll = 0;
-            self.show_pull_request_all_files();
-            self.request_pull_request_review(false, effects);
-            self.request_preview(effects);
-            return;
+            PullRequestSection::Files => {
+                if self.pull_request_section == section
+                    && self.pull_request_file_view == PullRequestFileView::AllFiles
+                {
+                    return;
+                }
+                self.invalidate_preview();
+                self.pull_request_section = section;
+                self.reset_sidebar_scroll();
+                self.content_scroll = 0;
+                self.horizontal_scroll = 0;
+                self.show_pull_request_all_files();
+                self.request_pull_request_review(false, effects);
+                self.request_preview(effects);
+            }
+            PullRequestSection::Stack => {
+                if self.pull_request_stack.is_none() || self.pull_request_section == section {
+                    return;
+                }
+                self.invalidate_preview();
+                self.pull_request_section = section;
+                self.pull_request_file_view = PullRequestFileView::AllFiles;
+                self.reset_sidebar_scroll();
+                self.content_scroll = 0;
+                self.horizontal_scroll = 0;
+                self.request_preview(effects);
+            }
         }
-        if self.pull_request_section == section {
-            return;
-        }
-        self.invalidate_preview();
-        self.pull_request_section = section;
-        self.reset_sidebar_scroll();
-        self.content_scroll = 0;
-        self.horizontal_scroll = 0;
-        self.request_pull_request_checks(false, effects);
-        self.request_pull_request_conversation(false, effects);
-        self.request_pull_request_review(false, effects);
-        self.request_check_run_log(false, effects);
     }
 
     pub(super) fn request_pull_request_diff_file(

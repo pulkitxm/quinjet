@@ -37,7 +37,8 @@ metadata verb ──► generated references / verified updater ──► text o
 --remote ──► SSH terminal or command relay ──► remote Quinjet process
 ```
 
-- `src/cli/command.rs`: the one command vocabulary. `Command` names every operation, `Outcome` names every answer, and `Session` owns the repository plus the two reusable diff workspaces.
+- `src/cli/command.rs`: the one command vocabulary. `Command` names every operation and `Outcome` names every answer.
+- `src/cli/session.rs`: command execution and the reusable local and pull-request diff workspaces.
 - `src/cli/mod.rs`: the subcommand tree, its dispatch ahead of terminal setup, the exit-code taxonomy, and the `--json` emitter.
 - `src/cli/render.rs`: plain-text renderings of every outcome, with no terminal, no color, and no width assumption.
 - `src/cli/update.rs`: latest-release lookup, target selection, checksum verification, and replacement of the running executable.

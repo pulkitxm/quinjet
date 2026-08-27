@@ -92,6 +92,7 @@ pub(super) fn changed_files_in_repository(
             stdout: data,
             stderr: Vec::new(),
             stdout_truncated: false,
+            stderr_truncated: false,
         }
     } else {
         let output = run_repository_git(repository, &args, MAX_PR_PATH_BYTES, 128 * 1024)?;

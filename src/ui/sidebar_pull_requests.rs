@@ -73,14 +73,30 @@ pub(super) fn draw_pull_requests_sidebar(
     let mut hits = Vec::new();
     let mut action_hits = Vec::new();
     if app.pull_request.is_some() && body_area.height > 0 {
-        let overview_width = body_area.width.saturating_mul(3) / 5;
+        let has_stack = app.pull_request_stack.is_some();
+        let overview_width = if has_stack {
+            body_area.width / 3
+        } else {
+            body_area.width.saturating_mul(3) / 5
+        };
+        let files_width = if has_stack {
+            body_area.width / 3
+        } else {
+            body_area.width.saturating_sub(overview_width)
+        };
         let overview_tab = Rect::new(body_area.x, body_area.y, overview_width, 1);
-        let files_tab = Rect::new(
-            overview_tab.right(),
-            body_area.y,
-            body_area.width.saturating_sub(overview_width),
-            1,
-        );
+        let files_tab = Rect::new(overview_tab.right(), body_area.y, files_width, 1);
+        let stack_tab = has_stack.then(|| {
+            Rect::new(
+                files_tab.right(),
+                body_area.y,
+                body_area
+                    .width
+                    .saturating_sub(overview_width)
+                    .saturating_sub(files_width),
+                1,
+            )
+        });
         let overview_label = "PR".to_owned();
         draw_pull_request_section_tab(
             frame,
@@ -89,6 +105,15 @@ pub(super) fn draw_pull_requests_sidebar(
             app.pull_request_section == PullRequestSection::Overview,
             theme,
         );
+        if let (Some(stack), Some(tab)) = (app.pull_request_stack.as_ref(), stack_tab) {
+            draw_pull_request_section_tab(
+                frame,
+                tab,
+                format!("Stack {}", stack.size),
+                app.pull_request_section == PullRequestSection::Stack,
+                theme,
+            );
+        }
         draw_pull_request_section_tab(
             frame,
             files_tab,
@@ -104,6 +129,12 @@ pub(super) fn draw_pull_requests_sidebar(
             area: files_tab,
             target: SidebarHit::PullRequestFiles,
         });
+        if let Some(tab) = stack_tab {
+            hits.push(SidebarHitArea {
+                area: tab,
+                target: SidebarHit::PullRequestStack,
+            });
+        }
 
         let list_area = Rect::new(
             body_area.x,
@@ -117,6 +148,11 @@ pub(super) fn draw_pull_requests_sidebar(
             }
             PullRequestSection::Overview => {
                 hits.extend(draw_pull_request_check_list(frame, list_area, app, theme));
+            }
+            PullRequestSection::Stack => {
+                hits.extend(pull_request_stack::draw_pull_request_stack(
+                    frame, list_area, app, theme,
+                ));
             }
         }
     } else if app.pull_request_loading {

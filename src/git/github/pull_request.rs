@@ -51,6 +51,32 @@ impl Repository {
     pub(crate) fn prepare_pull_request_diff<F>(
         &self,
         pull_request: &PullRequest,
+        progress: F,
+    ) -> Result<PreparedPullRequest>
+    where
+        F: FnMut(PullRequestProgress),
+    {
+        self.prepare_pull_request_comparison(pull_request, false, progress)
+    }
+
+    pub(crate) fn prepare_pull_request_stack_diff<F>(
+        &self,
+        stack: &PullRequestStack,
+        from: usize,
+        to: usize,
+        progress: F,
+    ) -> Result<PreparedPullRequest>
+    where
+        F: FnMut(PullRequestProgress),
+    {
+        let pull_request = stack.comparison(from, to)?;
+        self.prepare_pull_request_comparison(&pull_request, true, progress)
+    }
+
+    fn prepare_pull_request_comparison<F>(
+        &self,
+        pull_request: &PullRequest,
+        exact_base: bool,
         mut progress: F,
     ) -> Result<PreparedPullRequest>
     where
@@ -59,16 +85,29 @@ impl Repository {
         let (repository, merge_base, head, api_counts) =
             if self.has_commit(&pull_request.base_oid) && self.has_commit(&pull_request.head_oid) {
                 progress(PullRequestProgress::FindingMergeBase);
+                let base = if exact_base {
+                    pull_request.base_oid.clone()
+                } else {
+                    self.merge_base(&pull_request.base_oid, &pull_request.head_oid)?
+                };
                 (
                     PreparedRepository::Opened(self.root().to_path_buf()),
-                    self.merge_base(&pull_request.base_oid, &pull_request.head_oid)?,
+                    base,
                     pull_request.head_oid.clone(),
                     None,
                 )
             } else {
                 progress(PullRequestProgress::PreparingRepository);
-                let merge_base_hint = self.merge_base_from_api(pull_request);
-                let api_counts = self.pull_request_file_counts_from_api(pull_request);
+                let merge_base_hint = if exact_base {
+                    Some(pull_request.base_oid.clone())
+                } else {
+                    self.merge_base_from_api(pull_request)
+                };
+                let api_counts = if exact_base {
+                    None
+                } else {
+                    self.pull_request_file_counts_from_api(pull_request)
+                };
                 let temporary = TemporaryBareRepository::new()?;
                 temporary.borrow_local_objects(self);
                 let (merge_base, head) = fetch_pull_request(
@@ -92,9 +131,23 @@ impl Repository {
         } else {
             files.len()
         };
+        let mut pull_request = pull_request.clone();
+        if exact_base {
+            pull_request.changed_files = total_files;
+            pull_request.additions = files
+                .iter()
+                .filter_map(|file| file.counts)
+                .map(|counts| counts.additions)
+                .sum();
+            pull_request.deletions = files
+                .iter()
+                .filter_map(|file| file.counts)
+                .map(|counts| counts.deletions)
+                .sum();
+        }
         Ok(PreparedPullRequest {
             repository,
-            pull_request: pull_request.clone(),
+            pull_request,
             merge_base,
             head,
             index: PullRequestDiffIndex {

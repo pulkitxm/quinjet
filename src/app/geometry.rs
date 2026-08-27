@@ -8,6 +8,8 @@ pub(crate) enum SidebarHit {
     Commit(usize),
     PullRequestFiles,
     PullRequestOverview,
+    PullRequestStack,
+    PullRequestStackMember(usize),
     PullRequestConversation,
     PullRequestChooseRepository,
     PullRequestLookup,

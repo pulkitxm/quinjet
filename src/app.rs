@@ -19,7 +19,7 @@ use crate::git::github::{
     PullRequestMergeMode, PullRequestOperation, PullRequestProgress, PullRequestReviewDecision,
     PullRequestReviewKind, PullRequestReviewOperation, PullRequestReviewSide,
     PullRequestReviewSnapshot, PullRequestReviewThread, PullRequestReviewThreadSubject,
-    PullRequestUpdateMethod, RecentPullRequest,
+    PullRequestStack, PullRequestStackMember, PullRequestUpdateMethod, RecentPullRequest,
 };
 use crate::git::history::Commit;
 use crate::git::status::{Change, ChangeArea, ChangeStatus, RepoStatus};
@@ -149,6 +149,7 @@ mod pull_request_actions;
 mod pull_request_checks;
 mod pull_request_diff;
 mod pull_request_review;
+mod pull_request_stack;
 mod refresh;
 mod repository_tabs;
 mod scm;
@@ -222,6 +223,12 @@ pub(crate) struct App {
     pub pull_request_error: Option<String>,
     pub pull_request_exact_number: Option<u64>,
     pub pull_request_from_cache: bool,
+    pub pull_request_stack: Option<PullRequestStack>,
+    pub pull_request_stack_loading: bool,
+    pub pull_request_stack_error: Option<String>,
+    pub pull_request_lookup_refresh: bool,
+    pub pull_request_stack_anchor: Option<usize>,
+    pub pull_request_stack_cursor: Option<usize>,
     pub history_branches: Vec<HistoryBranch>,
     pub history_branches_loading: bool,
     pub history_branches_loaded: bool,
@@ -353,6 +360,7 @@ pub(crate) struct App {
     #[doc = " leaving its loading flag set with no reply ever able to clear it."]
     pub repository_generation: u64,
     pub pull_request_workspace_generation: Option<u64>,
+    pub pull_request_diff_source: Option<PullRequestDiffSource>,
     pub pull_request_documents: HashMap<PathBuf, DiffDocument>,
     pub pull_request_document_order: VecDeque<PathBuf>,
     pub pull_request_document_bytes: usize,

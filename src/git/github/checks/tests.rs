@@ -46,6 +46,7 @@ fn an_unpublished_log_is_pending_rather_than_a_failure() {
         stdout: Vec::new(),
         stderr: b"gh: HTTP 404".to_vec(),
         stdout_truncated: false,
+        stderr_truncated: false,
     };
     assert!(
         log_not_published(&output),

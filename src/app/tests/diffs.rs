@@ -277,6 +277,7 @@ fn pull_request_defaults_to_all_files_then_files_tab_restores_it_from_single_fil
     app.focus = Focus::Sidebar;
     app.pull_request = Some(pull_request(8, "Large change", "acme/widget"));
     app.diff_generation = 10;
+    app.pull_request_diff_source = Some(PullRequestDiffSource::PullRequest);
     let files = ["src/first.rs", "src/second.rs"]
         .into_iter()
         .map(|path| PullRequestFile {

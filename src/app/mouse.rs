@@ -175,6 +175,13 @@ impl App {
             return effects;
         }
         if event.modifiers.contains(KeyModifiers::SHIFT) {
+            if event.kind == MouseEventKind::Down(MouseButton::Left)
+                && let Some(position) = self.pull_request_stack_hit_at(event.column, event.row)
+            {
+                self.set_focus(Focus::Sidebar, &mut effects);
+                let _ = self.select_pull_request_stack_member(position, true, now);
+                return effects;
+            }
             match event.kind {
                 MouseEventKind::ScrollUp | MouseEventKind::ScrollLeft => {
                     self.scroll_horizontal(false);
@@ -299,6 +306,14 @@ impl App {
                                         PullRequestSection::Overview,
                                         &mut effects,
                                     ),
+                                SidebarHit::PullRequestStack => self.select_pull_request_section(
+                                    PullRequestSection::Stack,
+                                    &mut effects,
+                                ),
+                                SidebarHit::PullRequestStackMember(position) => {
+                                    let _ =
+                                        self.select_pull_request_stack_member(position, false, now);
+                                }
                                 SidebarHit::PullRequestConversation => {
                                     self.selected_check_section = None;
                                     self.select_pull_request_check(None, &mut effects);

@@ -6,6 +6,7 @@ pub(crate) struct BoundedOutput {
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
     pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
 }
 
 pub(crate) fn run_bounded_command(
@@ -86,7 +87,7 @@ fn run_bounded_command_inner(
     }
     drop(stdout);
     let status = child.wait()?;
-    let stderr = stderr_reader
+    let (stderr, stderr_truncated) = stderr_reader
         .join()
         .map_err(|_| anyhow::anyhow!("stderr reader thread panicked"))??;
     Ok(BoundedOutput {
@@ -94,6 +95,7 @@ fn run_bounded_command_inner(
         stdout: collected,
         stderr,
         stdout_truncated: truncated,
+        stderr_truncated,
     })
 }
 
@@ -101,9 +103,10 @@ fn run_bounded_command_inner(
     clippy::large_stack_arrays,
     reason = "the read buffer is deliberately one page of stack"
 )]
-pub(super) fn read_and_drain(mut reader: impl Read, limit: usize) -> io::Result<Vec<u8>> {
+pub(super) fn read_and_drain(mut reader: impl Read, limit: usize) -> io::Result<(Vec<u8>, bool)> {
     let mut collected = Vec::with_capacity(limit.min(32 * 1024));
     let mut buffer = [0_u8; 32 * 1024];
+    let mut truncated = false;
     loop {
         let read = match reader.read(&mut buffer) {
             Ok(0) => break,
@@ -112,9 +115,12 @@ pub(super) fn read_and_drain(mut reader: impl Read, limit: usize) -> io::Result<
             Err(error) => return Err(error),
         };
         let remaining = limit.saturating_sub(collected.len());
+        if read > remaining {
+            truncated = true;
+        }
         collected.extend_from_slice(buffer.get(..read.min(remaining)).unwrap_or(&buffer));
     }
-    Ok(collected)
+    Ok((collected, truncated))
 }
 
 pub(crate) fn bounded_command_error(context: &str, output: &BoundedOutput) -> String {
@@ -146,6 +152,15 @@ mod tests {
     }
 
     #[test]
+    fn stderr_limits_report_truncation() {
+        let mut command = shell("printf data >&2");
+        let output = run_bounded_command(&mut command, 32, 3).unwrap();
+
+        assert_eq!(output.stderr, b"dat");
+        assert!(output.stderr_truncated);
+    }
+
+    #[test]
     fn stdin_is_forwarded_without_text_conversion() {
         let input = b"first\n\0\xfflast";
         let mut command = shell("cat");
@@ -155,6 +170,7 @@ mod tests {
         assert!(output.status.success());
         assert_eq!(output.stdout, input);
         assert!(!output.stdout_truncated);
+        assert!(!output.stderr_truncated);
         assert_eq!(output.stderr, b"");
     }
 

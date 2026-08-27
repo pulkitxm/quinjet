@@ -63,6 +63,7 @@ impl App {
     #[doc = " not which of four endpoints is answering."]
     pub(crate) const fn pull_request_refreshing(&self) -> bool {
         self.pull_request_loading
+            || self.pull_request_stack_loading
             || self.pull_request_checks_loading
             || self.pull_request_conversation_loading
             || self.pull_request_review_loading

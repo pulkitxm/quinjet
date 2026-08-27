@@ -74,6 +74,39 @@ pub(crate) fn pull_request(pull_request: &PullRequest) -> String {
     out.finish()
 }
 
+pub(crate) fn pull_request_stack(snapshot: &PullRequestStackSnapshot) -> String {
+    let Some(stack) = snapshot.stack.as_ref() else {
+        return "This pull request is not part of a stack\n".to_owned();
+    };
+    let mut out = Report::default();
+    out.line(&format!(
+        "Stack #{}  {} layers  destination {}",
+        stack.number, stack.size, stack.base_ref
+    ));
+    for member in stack.members.iter().rev() {
+        let marker = if member.position == stack.selected_position {
+            ">"
+        } else {
+            " "
+        };
+        let state = if member.is_draft {
+            "DRAFT"
+        } else if member.is_queued {
+            "QUEUED"
+        } else {
+            member.state.as_str()
+        };
+        out.line(&format!(
+            "{marker} {:>3}  #{:<7} {:<9} {}",
+            member.position, member.number, state, member.title
+        ));
+    }
+    if stack.truncated {
+        out.line("\n[the stack response was incomplete]");
+    }
+    out.finish()
+}
+
 pub(crate) fn pull_request_review(review: &PullRequestReviewSnapshot) -> String {
     let mut out = Report::default();
     let decision = review.review_decision.as_deref().unwrap_or("NONE");
