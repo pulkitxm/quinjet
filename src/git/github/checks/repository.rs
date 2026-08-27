@@ -35,6 +35,7 @@ impl Repository {
         if !accepted_status {
             let error = String::from_utf8_lossy(&output.stderr);
             if error.to_ascii_lowercase().contains("no checks") {
+                super::super::cache_write(&key, b"");
                 return Ok(PullRequestChecks::default());
             }
             bail!(

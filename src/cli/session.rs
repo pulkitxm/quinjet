@@ -165,6 +165,33 @@ impl Session {
                         .prefetch_check_run_logs(&pull_request, &checks, wanted);
                 Ok(Outcome::Warmed)
             }
+            Command::WarmPullRequestStackMembers { pull_requests } => {
+                for pull_request in &pull_requests {
+                    if !wanted() {
+                        return Ok(Outcome::Warmed);
+                    }
+                    if self
+                        .repository
+                        .pull_request_checks(pull_request, false)
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                for pull_request in &pull_requests {
+                    if !wanted() {
+                        return Ok(Outcome::Warmed);
+                    }
+                    if self
+                        .repository
+                        .pull_request_conversation(pull_request)
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Ok(Outcome::Warmed)
+            }
             Command::Operate(operation) => {
                 let label = operation.label().to_owned();
                 let changes_history = operation.changes_history();

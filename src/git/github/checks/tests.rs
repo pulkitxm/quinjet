@@ -314,3 +314,50 @@ fn a_warm_up_stops_as_soon_as_the_pull_request_it_serves_is_left() {
     let warmed = repository.prefetch_check_run_logs(&PullRequest::default(), &checks, &|| false);
     assert_eq!(warmed, 0, "a superseded warm-up asks for nothing");
 }
+
+#[cfg(unix)]
+#[test]
+fn an_empty_check_list_is_cached() {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = tempfile::tempdir().unwrap();
+    let executable = directory.path().join("gh");
+    let calls = directory.path().join("calls");
+    fs::write(
+        &executable,
+        format!(
+            "#!/bin/sh\nprintf 'call\\n' >> '{}'\nprintf 'no checks reported\\n' >&2\nexit 1\n",
+            calls.display()
+        ),
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&executable).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&executable, permissions).unwrap();
+    let repository = Repository {
+        root: directory.path().to_path_buf(),
+        github_cli: Some(executable),
+    };
+    let pull_request = PullRequest {
+        number: 9,
+        head_oid: "empty-check-list".to_owned(),
+        base_repository: crate::git::github::GitHubRepository {
+            name_with_owner: "acme/empty".to_owned(),
+            url: format!("https://example.test/{}", directory.path().display()),
+            remotes: Vec::new(),
+        },
+        ..PullRequest::default()
+    };
+
+    let first = repository.pull_request_checks(&pull_request, true).unwrap();
+    let second = repository
+        .pull_request_checks(&pull_request, false)
+        .unwrap();
+
+    assert!(first.checks.is_empty());
+    assert!(!first.from_cache);
+    assert!(second.checks.is_empty());
+    assert!(second.from_cache);
+    assert_eq!(fs::read_to_string(calls).unwrap(), "call\n");
+}
