@@ -170,25 +170,13 @@ impl Session {
                     if !wanted() {
                         return Ok(Outcome::Warmed);
                     }
-                    if self
-                        .repository
-                        .pull_request_checks(pull_request, false)
-                        .is_err()
-                    {
-                        break;
-                    }
+                    drop(self.repository.pull_request_checks(pull_request, false));
                 }
                 for pull_request in &pull_requests {
                     if !wanted() {
                         return Ok(Outcome::Warmed);
                     }
-                    if self
-                        .repository
-                        .pull_request_conversation(pull_request)
-                        .is_err()
-                    {
-                        break;
-                    }
+                    drop(self.repository.pull_request_conversation(pull_request));
                 }
                 Ok(Outcome::Warmed)
             }
@@ -297,7 +285,14 @@ impl<T> LocalDiffWorkspaces<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::{LocalDiffWorkspaceKind, LocalDiffWorkspaces};
+    use std::cell::Cell;
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    use super::{Command, LocalDiffWorkspaceKind, LocalDiffWorkspaces, Outcome, Session};
+    use crate::git::github::{GitHubRepository, PullRequest};
+    use crate::git::tests::TestRepository;
 
     #[test]
     fn paused_changes_workspace_survives_history_browsing() {
@@ -323,5 +318,55 @@ mod tests {
         assert_eq!(workspaces.get(21), None);
         assert_eq!(workspaces.get(22), Some(&220));
         assert_eq!(workspaces.get(23), Some(&230));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stack_warming_continues_after_a_member_read_fails() {
+        let fixture = TestRepository::with_branch("main");
+        let repository = fixture.repository();
+        let executable = repository.root().join("gh");
+        let calls = repository.root().join("calls");
+        fs::write(
+            &executable,
+            format!(
+                "#!/bin/sh\nprintf 'call\\n' >> '{}'\nprintf 'failed\\n' >&2\nexit 1\n",
+                calls.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&executable).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&executable, permissions).unwrap();
+        let mut session = Session::new(fixture.repository_with_github_cli(executable));
+        let pull_requests = [41, 42]
+            .map(|number| PullRequest {
+                number,
+                head_oid: format!("head-{number}"),
+                base_repository: GitHubRepository {
+                    name_with_owner: "acme/widget".to_owned(),
+                    url: format!("https://example.test/warm/{number}"),
+                    remotes: Vec::new(),
+                },
+                ..PullRequest::default()
+            })
+            .into_iter()
+            .collect();
+        let wanted_calls = Cell::new(0);
+
+        let outcome = session
+            .execute_with(
+                Command::WarmPullRequestStackMembers { pull_requests },
+                &mut |_| {},
+                &|| {
+                    let current = wanted_calls.get();
+                    wanted_calls.set(current + 1);
+                    current < 2
+                },
+            )
+            .unwrap();
+
+        assert!(matches!(outcome, Outcome::Warmed));
+        assert_eq!(fs::read_to_string(calls).unwrap(), "call\ncall\n");
     }
 }
