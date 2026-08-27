@@ -79,3 +79,10 @@ pub(super) fn stack_member_commits(generation: u64) -> WorkerCommand {
         pull_request: Box::default(),
     }
 }
+
+pub(super) fn stack_warm(generation: u64) -> WorkerCommand {
+    WorkerCommand::PrefetchPullRequestStackMembers {
+        generation,
+        pull_requests: Vec::new(),
+    }
+}

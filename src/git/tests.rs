@@ -45,6 +45,14 @@ impl TestRepository {
             github_cli: None,
         }
     }
+
+    #[cfg(unix)]
+    pub(crate) fn repository_with_github_cli(&self, github_cli: PathBuf) -> Repository {
+        Repository {
+            root: self.path.clone(),
+            github_cli: Some(github_cli),
+        }
+    }
 }
 
 impl Drop for TestRepository {

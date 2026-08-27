@@ -4,13 +4,13 @@ use super::*;
 use crate::git::github::PullRequestCheckStatus;
 use crate::git::worker::stack_tests::{
     stack_lookup, stack_member, stack_member_checks, stack_member_commits,
-    stack_member_conversation, stack_prepare, stack_tip_checks,
+    stack_member_conversation, stack_prepare, stack_tip_checks, stack_warm,
 };
 
 #[test]
 fn every_worker_command_has_the_expected_lane() {
     let scenarios = lane_scenarios();
-    assert_eq!(scenarios.len(), 31);
+    assert_eq!(scenarios.len(), 32);
     for (command, expected) in scenarios {
         assert_eq!(worker_lane(&command), expected, "{command:?}");
     }
@@ -111,6 +111,7 @@ fn every_coalesced_slot_keeps_only_its_latest_command() {
     assert_latest(vec![review(1), review(2)], ("review", 2));
     assert_latest(vec![check_log(1), check_log(2)], ("check-log", 2));
     assert_latest(vec![warm(10), warm(20)], ("warm", 20));
+    assert_latest(vec![stack_warm(10), stack_warm(20)], ("stack-warm", 20));
 }
 
 #[test]
@@ -174,6 +175,7 @@ fn mailbox_pop_order_covers_every_priority_level() {
         history(17),
         batch(18),
         warm(19),
+        stack_warm(20),
     ];
     let expected = [
         ("operate", 1),
@@ -195,6 +197,7 @@ fn mailbox_pop_order_covers_every_priority_level() {
         ("history", 17),
         ("pr-batch", 18),
         ("warm", 19),
+        ("stack-warm", 20),
     ];
     let mut mailbox = Mailbox::default();
     for command in commands.into_iter().rev() {
@@ -291,6 +294,7 @@ fn lane_scenarios() -> Vec<(WorkerCommand, WorkerLane)> {
         ),
         (check_log(16), WorkerLane::GitHubMetadata),
         (warm(17), WorkerLane::Warm),
+        (stack_warm(30), WorkerLane::StackWarm),
         (
             WorkerCommand::LoadBranches { generation: 18 },
             WorkerLane::Background,
@@ -469,6 +473,9 @@ fn identity(command: &WorkerCommand) -> (&'static str, u64) {
         }
         WorkerCommand::LoadCheckRunLog { generation, .. } => ("check-log", *generation),
         WorkerCommand::PrefetchCheckRunLogs { generation, .. } => ("warm", *generation),
+        WorkerCommand::PrefetchPullRequestStackMembers { generation, .. } => {
+            ("stack-warm", *generation)
+        }
         WorkerCommand::LoadBranches { generation } => ("branches", *generation),
         WorkerCommand::LoadHistoryBranches { generation } => ("history-branches", *generation),
         WorkerCommand::LoadStashes { generation } => ("stashes", *generation),

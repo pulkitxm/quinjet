@@ -62,15 +62,6 @@ pub(super) fn draw_tip_gate(
         Line::from(vec![
             Span::styled("▌ ", Style::default().fg(color)),
             Span::styled(
-                heading,
-                Style::default()
-                    .fg(theme.muted)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("▌ ", Style::default().fg(color)),
-            Span::styled(
                 state.label(),
                 Style::default().fg(color).add_modifier(Modifier::BOLD),
             ),
@@ -114,9 +105,15 @@ pub(super) fn draw_tip_gate(
             ),
         ]),
     ];
+    frame.render_widget(section_separator_block(&heading, theme), area);
     frame.render_widget(
         Paragraph::new(Text::from(lines)).style(Style::default().bg(theme.panel_alt)),
-        area,
+        Rect::new(
+            area.x,
+            area.y.saturating_add(1),
+            area.width,
+            area.height.saturating_sub(1),
+        ),
     );
     StackInspectorHitArea {
         area,

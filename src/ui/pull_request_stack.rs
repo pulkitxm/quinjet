@@ -286,8 +286,7 @@ fn draw_stack_rail(
     theme: &Theme,
 ) -> Vec<SidebarHitArea> {
     frame.render_widget(
-        Paragraph::new(" BASE -> TIP · MEMBER HEALTH")
-            .style(Style::default().fg(theme.muted).bg(theme.panel_alt)),
+        section_separator_block("BASE -> TIP · MEMBER HEALTH", theme),
         Rect::new(area.x, area.y, area.width, area.height.min(1)),
     );
     let list = Rect::new(

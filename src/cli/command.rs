@@ -89,6 +89,9 @@ pub(crate) enum Command {
         pull_request: Box<PullRequest>,
         checks: Vec<PullRequestCheck>,
     },
+    WarmPullRequestStackMembers {
+        pull_requests: Vec<PullRequest>,
+    },
     Operate(GitOperation),
     OperatePullRequest {
         pull_request: Box<PullRequest>,
@@ -126,6 +129,7 @@ impl Command {
             Self::PullRequestReview { .. } => "Fetching pull-request review threads",
             Self::CheckRunLog { .. } => "Fetching check-run log",
             Self::WarmCheckRunLogs { .. } => "Caching check-run logs",
+            Self::WarmPullRequestStackMembers { .. } => "Caching stack member details",
             Self::Operate(operation) => operation.label(),
             Self::OperatePullRequest { operation, .. } => operation.label(),
             Self::OperatePullRequestReview { operation, .. } => operation.label(),

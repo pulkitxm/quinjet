@@ -9,7 +9,9 @@ pub(crate) struct GitWorker {
     local_preview_mailbox: Arc<SharedMailbox>,
     pull_request_preview_mailbox: Arc<SharedMailbox>,
     warm_mailbox: Arc<SharedMailbox>,
+    stack_warm_mailbox: Arc<SharedMailbox>,
     warm_generation: Arc<AtomicU64>,
+    stack_warm_generation: Arc<AtomicU64>,
     events: Receiver<WorkerEvent>,
 }
 
@@ -17,6 +19,10 @@ impl GitWorker {
     #[expect(
         clippy::expect_used,
         reason = "the interface cannot run without its worker threads"
+    )]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "all fixed worker lanes are constructed together"
     )]
     pub(crate) fn start(repository: Repository) -> Self {
         let mailbox = new_mailbox();
@@ -26,8 +32,11 @@ impl GitWorker {
         let local_preview_mailbox = new_mailbox();
         let pull_request_preview_mailbox = new_mailbox();
         let warm_mailbox = new_mailbox();
+        let stack_warm_mailbox = new_mailbox();
         let warm_generation = Arc::new(AtomicU64::new(0));
+        let stack_warm_generation = Arc::new(AtomicU64::new(0));
         let worker_warm_generation = Arc::clone(&warm_generation);
+        let worker_stack_warm_generation = Arc::clone(&stack_warm_generation);
         let worker_mailbox = Arc::clone(&mailbox);
         let worker_github_mailbox = Arc::clone(&github_mailbox);
         let worker_conversation_mailbox = Arc::clone(&conversation_mailbox);
@@ -35,12 +44,14 @@ impl GitWorker {
         let worker_local_preview_mailbox = Arc::clone(&local_preview_mailbox);
         let worker_pull_request_preview_mailbox = Arc::clone(&pull_request_preview_mailbox);
         let worker_warm_mailbox = Arc::clone(&warm_mailbox);
+        let worker_stack_warm_mailbox = Arc::clone(&stack_warm_mailbox);
         let github_repository = repository.clone_for_worker();
         let conversation_repository = repository.clone_for_worker();
         let review_repository = repository.clone_for_worker();
         let local_preview_repository = repository.clone_for_worker();
         let pull_request_preview_repository = repository.clone_for_worker();
         let warm_repository = repository.clone_for_worker();
+        let stack_warm_repository = repository.clone_for_worker();
         let (event_tx, event_rx) = unbounded();
         let github_events = event_tx.clone();
         let conversation_events = event_tx.clone();
@@ -119,6 +130,18 @@ impl GitWorker {
                 })
                 .expect("failed to start log warm-up worker"),
         );
+        drop(
+            thread::Builder::new()
+                .name("quinjet-stack-warm".to_owned())
+                .spawn(move || {
+                    run_stack_warm_worker(
+                        &stack_warm_repository,
+                        &worker_stack_warm_mailbox,
+                        &worker_stack_warm_generation,
+                    );
+                })
+                .expect("failed to start stack warm-up worker"),
+        );
         Self {
             mailbox,
             github_mailbox,
@@ -127,7 +150,9 @@ impl GitWorker {
             local_preview_mailbox,
             pull_request_preview_mailbox,
             warm_mailbox,
+            stack_warm_mailbox,
             warm_generation,
+            stack_warm_generation,
             events: event_rx,
         }
     }
@@ -139,6 +164,9 @@ impl GitWorker {
         if let WorkerCommand::PrefetchCheckRunLogs { generation, .. } = &mut command {
             *generation = self.warm_generation.fetch_add(1, Ordering::SeqCst) + 1;
         }
+        if let WorkerCommand::PrefetchPullRequestStackMembers { generation, .. } = &mut command {
+            *generation = self.stack_warm_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        }
         let target = match worker_lane(&command) {
             WorkerLane::GitHubMetadata => &self.github_mailbox,
             WorkerLane::Conversation => &self.conversation_mailbox,
@@ -146,6 +174,7 @@ impl GitWorker {
             WorkerLane::LocalPreview => &self.local_preview_mailbox,
             WorkerLane::PullRequestPreview => &self.pull_request_preview_mailbox,
             WorkerLane::Warm => &self.warm_mailbox,
+            WorkerLane::StackWarm => &self.stack_warm_mailbox,
             WorkerLane::Background => &self.mailbox,
         };
         let Ok(mut mailbox) = target.state.lock() else {
@@ -174,5 +203,6 @@ impl Drop for GitWorker {
         shutdown_mailbox(&self.local_preview_mailbox);
         shutdown_mailbox(&self.pull_request_preview_mailbox);
         shutdown_mailbox(&self.warm_mailbox);
+        shutdown_mailbox(&self.stack_warm_mailbox);
     }
 }
