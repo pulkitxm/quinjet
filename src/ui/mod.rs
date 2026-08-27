@@ -238,6 +238,18 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
         description: "PR details / changed files / stack range",
     },
     HelpRow::Shortcut {
+        keys: "Stack: p / n",
+        description: "Review the previous / next stack member from base to tip",
+    },
+    HelpRow::Shortcut {
+        keys: "Stack: 1..5",
+        description: "Files / summary / conversation / checks / commits",
+    },
+    HelpRow::Shortcut {
+        keys: "Stack: r / d",
+        description: "Submit a member review / compare the selected stack range",
+    },
+    HelpRow::Shortcut {
         keys: "j / k",
         description: "Select the conversation, a check, a file, or a folder",
     },
