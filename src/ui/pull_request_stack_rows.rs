@@ -68,7 +68,11 @@ fn stack_summary_rows(
             format!(" {error}"),
             Style::default().fg(theme.error),
         ));
-    } else if pull_request.description.trim().is_empty() {
+    }
+    if pull_request.description.trim().is_empty()
+        && (app.stack_inspector.selected_error.is_none()
+            || app.stack_inspector.selected_pull_request.is_some())
+    {
         rows.push(ContentRow::text(
             if app.stack_inspector.selected_loading {
                 " Loading the description…"
@@ -385,12 +389,13 @@ fn stack_check_summary(app: &App) -> String {
     let checks = &app.stack_inspector.selected_checks().checks;
     let count = |status| checks.iter().filter(|check| check.status == status).count();
     format!(
-        "{} PASS · {} FAIL · {} RUN · {} STALE · {} SKIP",
+        "{} PASS · {} FAIL · {} RUN · {} STALE · {} SKIP · {} UNKNOWN",
         count(PullRequestCheckStatus::Passed),
         count(PullRequestCheckStatus::Failed),
         count(PullRequestCheckStatus::Pending),
         count(PullRequestCheckStatus::Cancelled),
-        count(PullRequestCheckStatus::Skipped) + count(PullRequestCheckStatus::Unknown),
+        count(PullRequestCheckStatus::Skipped),
+        count(PullRequestCheckStatus::Unknown),
     )
 }
 
@@ -419,7 +424,15 @@ fn stack_check_summary_style(app: &App, theme: &Theme) -> Style {
         Style::default()
             .fg(theme.conflict)
             .add_modifier(Modifier::BOLD)
-    } else if app.stack_inspector.selected_checks_loaded() && !checks.is_empty() {
+    } else if app.stack_inspector.selected_checks_loaded()
+        && !checks.is_empty()
+        && checks
+            .iter()
+            .any(|check| check.status == PullRequestCheckStatus::Passed)
+        && checks
+            .iter()
+            .all(|check| check.status != PullRequestCheckStatus::Unknown)
+    {
         Style::default()
             .fg(theme.success)
             .add_modifier(Modifier::BOLD)

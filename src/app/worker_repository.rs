@@ -172,11 +172,20 @@ impl App {
                         self.pull_request_stack_loading = false;
                         self.pull_request_progress = None;
                         self.pull_request_error = Some(error.clone());
-                        self.invalidate_pull_request_content_rows();
-                        self.set_view_document(
-                            View::PullRequests,
-                            DiffDocument::empty("Pull Requests", error.clone()),
-                        );
+                        if self.pull_request_stack.is_some() {
+                            let warning = format!("Unable to refresh pull request: {error}");
+                            self.pull_request_warnings.retain(|warning| {
+                                !warning.starts_with("Unable to refresh pull request:")
+                            });
+                            self.pull_request_warnings.push(warning);
+                            self.pull_request_stack_error = Some(error.clone());
+                        } else {
+                            self.invalidate_pull_request_content_rows();
+                            self.set_view_document(
+                                View::PullRequests,
+                                DiffDocument::empty("Pull Requests", error.clone()),
+                            );
+                        }
                         self.show_toast(error, ToastLevel::Error, now);
                     }
                 }
@@ -188,18 +197,39 @@ impl App {
                 self.pull_request_stack_loading = false;
                 match result {
                     Ok(snapshot) => {
+                        let stale_error = snapshot
+                            .warnings
+                            .iter()
+                            .find(|warning| {
+                                warning.starts_with(
+                                    "GitHub is unavailable; showing stale cached stack data",
+                                )
+                            })
+                            .cloned();
+                        self.pull_request_warnings.retain(|warning| {
+                            !warning.starts_with("Unable to load pull-request stack:")
+                                && !warning.starts_with(
+                                    "GitHub is unavailable; showing stale cached stack data",
+                                )
+                        });
                         for warning in snapshot.warnings {
                             if !self.pull_request_warnings.contains(&warning) {
                                 self.pull_request_warnings.push(warning);
                             }
                         }
-                        self.apply_pull_request_stack_snapshot(snapshot.stack, &mut effects);
+                        if stale_error.is_none() || self.pull_request_stack.is_none() {
+                            self.apply_pull_request_stack_snapshot(snapshot.stack, &mut effects);
+                        }
+                        if let Some(error) = stale_error {
+                            self.pull_request_stack_error = Some(error);
+                        }
                     }
                     Err(error) => {
                         let warning = format!("Unable to load pull-request stack: {error}");
-                        if !self.pull_request_warnings.contains(&warning) {
-                            self.pull_request_warnings.push(warning);
-                        }
+                        self.pull_request_warnings.retain(|warning| {
+                            !warning.starts_with("Unable to load pull-request stack:")
+                        });
+                        self.pull_request_warnings.push(warning);
                         self.pull_request_stack_error = Some(error);
                     }
                 }

@@ -28,7 +28,12 @@ impl App {
                 .pull_request_exact_number
                 .or_else(|| self.pull_request_lookup.value.trim().parse::<u64>().ok())
         {
-            self.request_pull_request_lookup(number, true, false, effects);
+            self.request_pull_request_lookup(
+                number,
+                true,
+                self.pull_request_stack.is_some(),
+                effects,
+            );
         }
     }
 
@@ -49,9 +54,6 @@ impl App {
         }
     }
 
-    #[doc = " A `silent` lookup is a background poll: it keeps the loaded pull request,"]
-    #[doc = " its section, its cursors and its diff on screen, and only replaces them"]
-    #[doc = " once fresher metadata actually arrives."]
     pub(super) fn request_pull_request_lookup(
         &mut self,
         number: u64,
@@ -97,7 +99,9 @@ impl App {
             return;
         };
         self.pull_request_stack_loading = true;
-        self.pull_request_stack_error = None;
+        if self.pull_request_stack.is_none() {
+            self.pull_request_stack_error = None;
+        }
         effects.push(AppEffect::Git(Box::new(
             WorkerCommand::LoadPullRequestStack {
                 generation: self.pull_request_generation,

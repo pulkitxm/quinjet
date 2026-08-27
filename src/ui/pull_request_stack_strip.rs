@@ -19,7 +19,16 @@ pub(super) fn draw_compact_stack_strip(
         .iter()
         .position(|member| Some(member.position) == app.pull_request_stack_cursor)
         .unwrap_or_default();
-    let start = compact_stack_start(stack, cursor, area.width);
+    if app.sidebar_last_cursor != Some(cursor) {
+        app.sidebar_free_scroll = false;
+    }
+    let start = if app.sidebar_free_scroll {
+        let last = stack.members.len().saturating_sub(1);
+        app.sidebar_offset
+            .min(compact_stack_start(stack, last, area.width))
+    } else {
+        compact_stack_start(stack, cursor, area.width)
+    };
     app.sidebar_offset = start;
     app.sidebar_last_cursor = Some(cursor);
     let mut x = area.x;

@@ -17,6 +17,7 @@ pub(super) fn draw_tip_gate(
     let failed = count(PullRequestCheckStatus::Failed);
     let running = count(PullRequestCheckStatus::Pending);
     let skipped = count(PullRequestCheckStatus::Skipped);
+    let unknown = count(PullRequestCheckStatus::Unknown);
     let cancelled = count(PullRequestCheckStatus::Cancelled);
     let number = tip.map_or(0, |member| member.number);
     let title = tip.map_or("Stack tip", |member| member.title.as_str());
@@ -24,28 +25,25 @@ pub(super) fn draw_tip_gate(
     let updated = tip.map_or_else(String::new, |member| {
         format_relative_timestamp(&member.updated_at)
     });
-    let detail = if stack.truncated {
-        format!(
+    let stack_error = app.pull_request_stack_error.as_deref();
+    let detail = match (stack_error, tip) {
+        (Some(error), _) => format!("Stack metadata refresh failed: {error}"),
+        (None, None) => format!(
             "{} of {} members loaded · final tip checks unavailable",
             stack.members.len(),
             stack.size
-        )
-    } else {
-        app.stack_inspector.tip_checks_error.as_deref().map_or_else(
+        ),
+        (None, Some(_)) => app.stack_inspector.tip_checks_error.as_deref().map_or_else(
             || {
                 format!(
-                    "{passed} passed · {failed} failed · {running} running · {cancelled} stale · {skipped} skipped"
+                    "{passed} passed · {failed} failed · {running} running · {cancelled} stale · {skipped} skipped · {unknown} unknown"
                 )
             },
             ToOwned::to_owned,
-        )
+        ),
     };
-    let heading = if stack.truncated {
-        "STACK GATE / TIP UNAVAILABLE / PARTIAL STACK".to_owned()
-    } else {
-        format!("FINAL STACK GATE / TIP #{number} / FULL CHANGE SET")
-    };
-    let identity = if stack.truncated {
+    let heading = stack_gate_heading(app, tip, number);
+    let identity = if tip.is_none() {
         "GitHub did not return every stack member".to_owned()
     } else {
         format!("#{number} {title}")
@@ -55,7 +53,7 @@ pub(super) fn draw_tip_gate(
         &identity,
         usize::from(area.width).saturating_sub(state_width),
     );
-    let revision = if stack.truncated {
+    let revision = if tip.is_none() {
         String::new()
     } else {
         format!(" · head {head} · updated {updated}")
@@ -89,8 +87,10 @@ pub(super) fn draw_tip_gate(
         Line::from(vec![
             Span::styled("▌ ", Style::default().fg(color)),
             Span::styled(
-                if stack.truncated {
+                if tip.is_none() {
                     "[t Final checks unavailable]"
+                } else if stack_error.is_some() {
+                    "[t Inspect last-known checks]"
                 } else {
                     "[t Inspect final checks]"
                 },
@@ -99,8 +99,12 @@ pub(super) fn draw_tip_gate(
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                if stack.truncated {
+                if tip.is_none() {
                     " · refresh stack metadata"
+                } else if stack_error.is_some() {
+                    " · metadata stale"
+                } else if app.stack_inspector.tip_checks_loading {
+                    " · refreshing final checks"
                 } else if app.stack_inspector.tip_checks.from_cache {
                     " · cached"
                 } else {
@@ -117,5 +121,23 @@ pub(super) fn draw_tip_gate(
     StackInspectorHitArea {
         area,
         target: StackInspectorHit::TipChecks,
+    }
+}
+
+fn stack_gate_heading(
+    app: &App,
+    tip: Option<&crate::git::github::PullRequestStackMember>,
+    number: u64,
+) -> String {
+    if tip.is_none() && app.pull_request_stack_error.is_some() {
+        "STACK GATE / TIP UNAVAILABLE / STALE PARTIAL STACK".to_owned()
+    } else if tip.is_none() {
+        "STACK GATE / TIP UNAVAILABLE / PARTIAL STACK".to_owned()
+    } else if app.pull_request_stack_error.is_some() {
+        "STACK GATE / TIP UNVERIFIED / STALE METADATA".to_owned()
+    } else if app.stack_inspector.tip_checks_loading && app.stack_inspector.tip_checks_loaded {
+        format!("FINAL STACK GATE / TIP #{number} / REFRESHING CHECKS")
+    } else {
+        format!("FINAL STACK GATE / TIP #{number} / FULL CHANGE SET")
     }
 }

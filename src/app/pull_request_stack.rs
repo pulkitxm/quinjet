@@ -50,6 +50,8 @@ impl App {
         let previous = self.pull_request_stack.take();
         let changed = previous.as_ref() != stack.as_ref();
         self.pull_request_stack = stack;
+        let workspace_changed = previous.as_ref().map(|stack| &stack.node_id)
+            != self.pull_request_stack.as_ref().map(|stack| &stack.node_id);
         let selection = self.pull_request_stack.as_ref().map(|current| {
             previous_selection
                 .filter(|(anchor, cursor)| {
@@ -65,6 +67,12 @@ impl App {
         self.pull_request_stack_anchor = selection.map(|(anchor, _)| anchor);
         self.pull_request_stack_cursor = selection.map(|(_, cursor)| cursor);
         self.pull_request_stack_error = None;
+        if changed {
+            self.invalidate_stack_inspector_content_rows();
+        }
+        if workspace_changed {
+            self.reset_view_sidebar_scroll(View::PullRequests);
+        }
         if self.pull_request_stack.is_some() {
             self.pull_request_section = PullRequestSection::Stack;
             self.sidebar_hidden = false;
@@ -76,10 +84,12 @@ impl App {
             && self.pull_request_section == PullRequestSection::Stack
         {
             self.pull_request_section = PullRequestSection::Overview;
+            self.invalidate_preview();
             self.reset_pull_request_diff_runtime();
-            self.request_pull_request_checks(false, effects);
-            self.request_pull_request_conversation(false, effects);
-            self.request_pull_request_review(false, effects);
+            self.pull_request_progress = None;
+            self.request_pull_request_checks(true, effects);
+            self.request_pull_request_conversation(true, effects);
+            self.request_pull_request_review(true, effects);
             return;
         }
         self.request_stack_inspector(self.pull_request_lookup_refresh, effects);

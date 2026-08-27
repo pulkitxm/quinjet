@@ -203,6 +203,10 @@ impl super::App {
     }
 
     pub(super) fn reconcile_stack_inspector(&mut self) {
+        if self.pull_request_stack.is_none() {
+            self.stack_inspector.clear();
+            return;
+        }
         let selected = self.pull_request_stack.as_ref().and_then(|stack| {
             let position = self.pull_request_stack_cursor?;
             Some((

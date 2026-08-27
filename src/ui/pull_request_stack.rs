@@ -147,8 +147,17 @@ fn draw_stack_heading(
         || "TIP ?".to_owned(),
         |member| format!("TIP #{}", member.number),
     );
+    let status = if app.pull_request_stack_error.is_some() {
+        " · STALE METADATA".to_owned()
+    } else if app.pull_request_stack_loading {
+        " · REFRESHING".to_owned()
+    } else if app.pull_request_warnings.is_empty() {
+        String::new()
+    } else {
+        format!(" · WARN {}", app.pull_request_warnings.len())
+    };
     let first = format!(
-        " STACK #{} · {} PR{} · {} -> {tip}{partial}",
+        " STACK #{}{status} · {} PR{} · {} -> {tip}{partial}",
         stack.number,
         stack.size,
         if stack.size == 1 { "" } else { "S" },
@@ -206,11 +215,11 @@ fn draw_stack_heading(
 
 pub(super) fn stack_gate_state(app: &App) -> StackGateState {
     let checks = &app.stack_inspector.tip_checks.checks;
-    if app
+    let tip = app
         .pull_request_stack
         .as_ref()
-        .is_some_and(|stack| stack.truncated)
-    {
+        .and_then(crate::git::github::PullRequestStack::tip);
+    if app.pull_request_stack_error.is_some() || tip.is_none() {
         return StackGateState::Blocked;
     }
     if checks
@@ -222,7 +231,7 @@ pub(super) fn stack_gate_state(app: &App) -> StackGateState {
     if checks
         .iter()
         .any(|check| check.status == PullRequestCheckStatus::Pending)
-        || app.stack_inspector.tip_checks_loading
+        || (app.stack_inspector.tip_checks_loading && !app.stack_inspector.tip_checks_loaded)
     {
         return StackGateState::Running;
     }
@@ -232,21 +241,20 @@ pub(super) fn stack_gate_state(app: &App) -> StackGateState {
     }) {
         return StackGateState::Stale;
     }
-    let tip = app
-        .pull_request_stack
-        .as_ref()
-        .and_then(crate::git::github::PullRequestStack::tip);
     if tip.is_some_and(stack_member_blocked) || app.stack_inspector.tip_checks_error.is_some() {
         return StackGateState::Blocked;
     }
     if app.stack_inspector.tip_checks_loaded {
+        if checks
+            .iter()
+            .any(|check| check.status == PullRequestCheckStatus::Unknown)
+        {
+            return StackGateState::Blocked;
+        }
         if checks.is_empty()
-            || checks.iter().all(|check| {
-                matches!(
-                    check.status,
-                    PullRequestCheckStatus::Skipped | PullRequestCheckStatus::Unknown
-                )
-            })
+            || checks
+                .iter()
+                .all(|check| check.status == PullRequestCheckStatus::Skipped)
         {
             return StackGateState::Skip;
         }

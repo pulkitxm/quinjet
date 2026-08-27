@@ -156,6 +156,12 @@ fn narrow_stack_inspector_replaces_the_rail_with_a_member_strip() {
             .count(),
         3
     );
+    app.sidebar_offset = 2;
+    app.sidebar_free_scroll = true;
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+    assert_eq!(app.sidebar_offset, 0);
 }
 
 #[test]
@@ -189,6 +195,69 @@ fn compact_stack_strip_keeps_a_wide_selected_member_visible() {
         "{:?}",
         app.geometry.sidebar_hits
     );
+}
+
+#[test]
+fn compact_stack_strip_preserves_free_scroll_for_mouse_selection() {
+    let mut app = stack_app();
+    let mut stack = stack();
+    let template = stack.members.first().unwrap().clone();
+    stack.members = (1..=9)
+        .map(|position| PullRequestStackMember {
+            position,
+            number: 10_000_000_000_000_000 + u64::try_from(position).unwrap_or_default(),
+            title: format!("Layer {position}"),
+            ..template.clone()
+        })
+        .collect();
+    stack.size = 9;
+    stack.selected_position = 1;
+    app.pull_request_stack_anchor = Some(1);
+    app.pull_request_stack_cursor = Some(1);
+    app.pull_request_stack = Some(stack);
+    let mut terminal = Terminal::new(TestBackend::new(72, 24)).unwrap();
+
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+    let sidebar = app.geometry.sidebar;
+    drop(app.handle_mouse(
+        crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::ScrollDown,
+            column: sidebar.x.saturating_add(1),
+            row: sidebar.y.saturating_add(1),
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        },
+        std::time::Instant::now(),
+    ));
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+
+    assert_eq!(app.sidebar_offset, 2);
+    let revealed = app
+        .geometry
+        .sidebar_hits
+        .iter()
+        .find(|hit| matches!(hit.target, SidebarHit::PullRequestStackMember(3)))
+        .unwrap()
+        .area;
+    assert!(
+        !app.geometry
+            .sidebar_hits
+            .iter()
+            .any(|hit| matches!(hit.target, SidebarHit::PullRequestStackMember(1)))
+    );
+    drop(app.handle_mouse(
+        crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: revealed.x,
+            row: revealed.y,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        },
+        std::time::Instant::now(),
+    ));
+    assert_eq!(app.pull_request_stack_cursor, Some(3));
 }
 
 #[test]
@@ -240,12 +309,21 @@ fn truncated_stack_blocks_the_gate_without_claiming_a_final_tip() {
         .draw(|frame| draw(frame, &mut app, &Theme::default()))
         .unwrap();
 
-    let rendered = rendered(&terminal);
-    assert!(rendered.contains("TIP ? · PARTIAL"));
-    assert!(rendered.contains("STACK GATE / TIP UNAVAILABLE / PARTIAL STACK"));
-    assert!(rendered.contains("BLOCKED"));
-    assert!(!rendered.contains("FINAL STACK GATE"));
-    assert!(!rendered.contains("3 #43 TIP"));
+    let output = rendered(&terminal);
+    assert!(output.contains("TIP ? · PARTIAL"));
+    assert!(output.contains("STACK GATE / TIP UNAVAILABLE / PARTIAL STACK"));
+    assert!(output.contains("BLOCKED"));
+    assert!(!output.contains("FINAL STACK GATE"));
+    assert!(!output.contains("3 #43 TIP"));
+
+    app.pull_request_stack_error = Some("refresh failed".to_owned());
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+    let stale_output = rendered(&terminal);
+    assert!(stale_output.contains("TIP UNAVAILABLE / STALE PARTIAL STACK"));
+    assert!(stale_output.contains("[t Final checks unavailable]"));
+    assert!(!stale_output.contains("Inspect last-known checks"));
 }
 
 #[test]
@@ -280,6 +358,29 @@ fn stack_tip_gate_distinguishes_each_operational_state() {
         state_for(&mut app, PullRequestCheckStatus::Passed),
         pull_request_stack::StackGateState::Pass
     );
+    assert_eq!(
+        state_for(&mut app, PullRequestCheckStatus::Unknown),
+        pull_request_stack::StackGateState::Blocked
+    );
+    assert_eq!(
+        state_for(&mut app, PullRequestCheckStatus::Passed),
+        pull_request_stack::StackGateState::Pass
+    );
+    app.stack_inspector.tip_checks_loading = true;
+    assert_eq!(
+        pull_request_stack::stack_gate_state(&app),
+        pull_request_stack::StackGateState::Pass
+    );
+    let mut terminal = Terminal::new(TestBackend::new(120, 24)).unwrap();
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+    assert!(rendered(&terminal).contains("REFRESHING CHECKS"));
+    app.pull_request_stack_error = Some("stack metadata refresh failed".to_owned());
+    assert_eq!(
+        pull_request_stack::stack_gate_state(&app),
+        pull_request_stack::StackGateState::Blocked
+    );
     app.stack_inspector.tip_checks.checks.clear();
     app.stack_inspector.tip_checks_loaded = false;
     app.pull_request_stack
@@ -293,6 +394,88 @@ fn stack_tip_gate_distinguishes_each_operational_state() {
         pull_request_stack::stack_gate_state(&app),
         pull_request_stack::StackGateState::Blocked
     );
+}
+
+#[test]
+fn unknown_checks_use_muted_rows_and_block_the_gate() {
+    let mut app = stack_app();
+    let mut check = app.stack_inspector.checks.checks.first().unwrap().clone();
+    check.status = PullRequestCheckStatus::Unknown;
+    check.state = "UNKNOWN".to_owned();
+    app.stack_inspector.checks.checks = vec![check];
+    app.stack_inspector.section = StackMemberSection::Checks;
+    let theme = Theme::default();
+
+    let (rows, _) = pull_request_stack_rows::stack_member_rows(&app, 80, &theme);
+    let summary = rows.first().unwrap();
+    assert!(summary.line.to_string().contains("0 SKIP · 1 UNKNOWN"));
+    assert_eq!(summary.line.spans[1].style.fg, Some(theme.muted));
+    let row = rows
+        .iter()
+        .find(|row| row.line.to_string().trim_start().starts_with("UNKNOWN"))
+        .unwrap();
+    let span = row.line.spans.first().unwrap();
+
+    assert_eq!(span.style.fg, Some(theme.muted));
+
+    app.stack_inspector
+        .checks
+        .checks
+        .first_mut()
+        .unwrap()
+        .status = PullRequestCheckStatus::Skipped;
+    let (rows, _) = pull_request_stack_rows::stack_member_rows(&app, 80, &theme);
+    assert_eq!(
+        rows.first().unwrap().line.spans[1].style.fg,
+        Some(theme.muted)
+    );
+}
+
+#[test]
+fn initial_member_error_does_not_claim_the_description_is_empty() {
+    let mut app = stack_app();
+    app.stack_inspector.selected_pull_request = None;
+    app.stack_inspector.selected_error = Some("member metadata unavailable".to_owned());
+
+    let (rows, _) = pull_request_stack_rows::stack_member_rows(&app, 80, &Theme::default());
+    let output = rows
+        .iter()
+        .map(|row| row.line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(output.contains("member metadata unavailable"));
+    assert!(!output.contains("No description provided"));
+}
+
+#[test]
+fn failed_stack_refresh_marks_last_known_topology_as_stale() {
+    let mut app = stack_app();
+    app.pull_request_stack_error = Some("stack metadata refresh failed".to_owned());
+    app.stack_inspector.selected_error = Some("member metadata refresh failed".to_owned());
+    app.pull_request_warnings
+        .push("GitHub is unavailable; showing stale cached stack data".to_owned());
+    let mut terminal = Terminal::new(TestBackend::new(120, 24)).unwrap();
+
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+
+    let output = rendered(&terminal);
+    assert!(output.contains("STACK #19"));
+    assert!(output.contains("STALE METADATA"));
+    assert!(output.contains("STACK GATE / TIP UNVERIFIED / STALE METADATA"));
+    assert!(output.contains("BLOCKED"));
+    assert!(output.contains("stack metadata refresh failed"));
+    assert!(output.contains("member metadata refresh failed"));
+    assert!(output.contains("Keeps permission refresh work bounded"));
+    assert!(!output.contains("FINAL STACK GATE"));
+
+    app.pull_request_stack_error = None;
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+    assert!(rendered(&terminal).contains("WARN 1"));
 }
 
 #[test]
