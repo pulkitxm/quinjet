@@ -241,6 +241,9 @@ impl App {
         section: PullRequestSection,
         effects: &mut Vec<AppEffect>,
     ) {
+        if self.pull_request_stack.is_some() && section != PullRequestSection::Stack {
+            return;
+        }
         match section {
             PullRequestSection::Overview => {
                 if self.pull_request_section == section {
@@ -281,7 +284,8 @@ impl App {
                 self.reset_sidebar_scroll();
                 self.content_scroll = 0;
                 self.horizontal_scroll = 0;
-                self.request_preview(effects);
+                self.reconcile_stack_inspector();
+                self.request_stack_inspector(false, effects);
             }
         }
     }

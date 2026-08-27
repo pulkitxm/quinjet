@@ -149,11 +149,7 @@ pub(super) fn draw_pull_requests_sidebar(
             PullRequestSection::Overview => {
                 hits.extend(draw_pull_request_check_list(frame, list_area, app, theme));
             }
-            PullRequestSection::Stack => {
-                hits.extend(pull_request_stack::draw_pull_request_stack(
-                    frame, list_area, app, theme,
-                ));
-            }
+            PullRequestSection::Stack => {}
         }
     } else if app.pull_request_loading {
         let skeleton_count = body_area.height.min(6);

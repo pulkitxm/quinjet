@@ -79,6 +79,15 @@ impl PullRequestStack {
             .find(|member| member.position == position)
     }
 
+    pub(crate) fn tip(&self) -> Option<&PullRequestStackMember> {
+        if self.truncated {
+            return None;
+        }
+        self.members
+            .last()
+            .filter(|member| member.position == self.size)
+    }
+
     pub(crate) fn member_identity(
         &self,
         position: usize,

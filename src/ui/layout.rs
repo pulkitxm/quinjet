@@ -1,6 +1,10 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the root draw pass keeps geometry assignment in one coordinate space"
+)]
 pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     frame.render_widget(
         Block::default().style(Style::default().bg(theme.background)),
@@ -22,16 +26,6 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     .areas(frame.area());
     let maximum_sidebar = main.width.saturating_sub(32).max(22);
     app.sidebar_width = app.sidebar_width.clamp(22, maximum_sidebar);
-    let [sidebar_area, sidebar_divider, content_area] = if app.sidebar_hidden {
-        [Rect::default(), Rect::default(), main]
-    } else {
-        Layout::horizontal([
-            Constraint::Length(app.sidebar_width),
-            Constraint::Length(1),
-            Constraint::Min(31),
-        ])
-        .areas(main)
-    };
 
     let (repository_tab_hits, repository_tab_open, repository_tab_previous, repository_tab_next) =
         if repository_tabs_height == 0 {
@@ -47,17 +41,55 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     let (changes_tab, history_tab, pull_requests_tab, mut link_hits, projects_hit) =
         draw_tabs(frame, tabs, app, theme);
     let mut project_hits: Vec<Rect> = projects_hit.into_iter().collect();
-    let (sidebar_hits, mut scm_action_hits) = if app.sidebar_hidden {
-        (Vec::new(), Vec::new())
+    let stack_workspace = app.view == View::PullRequests && app.pull_request_stack.is_some();
+    let (workspace, mut scm_action_hits) = if stack_workspace {
+        (
+            pull_request_stack::draw_pull_request_stack_workspace(
+                frame,
+                main,
+                app,
+                theme,
+                &mut link_hits,
+            ),
+            Vec::new(),
+        )
     } else {
-        draw_sidebar(frame, sidebar_area, app, theme, &mut link_hits)
+        let [sidebar, sidebar_divider, content] = if app.sidebar_hidden {
+            [Rect::default(), Rect::default(), main]
+        } else {
+            Layout::horizontal([
+                Constraint::Length(app.sidebar_width),
+                Constraint::Length(1),
+                Constraint::Min(31),
+            ])
+            .areas(main)
+        };
+        let (sidebar_hits, action_hits) = if app.sidebar_hidden {
+            (Vec::new(), Vec::new())
+        } else {
+            draw_sidebar(frame, sidebar, app, theme, &mut link_hits)
+        };
+        if !app.sidebar_hidden {
+            draw_main_divider(frame, sidebar_divider, app.resize_target.is_some(), theme);
+        }
+        let (diff_divider, content_file_hits, content_step_hits, content_review_hits) =
+            draw_content(frame, content, app, theme, &mut link_hits);
+        (
+            pull_request_stack::StackWorkspaceGeometry {
+                sidebar,
+                sidebar_divider,
+                content,
+                diff_divider,
+                sidebar_hits,
+                stack_inspector_hits: Vec::new(),
+                content_file_hits,
+                content_step_hits,
+                content_review_hits,
+            },
+            action_hits,
+        )
     };
-    if !app.sidebar_hidden {
-        draw_main_divider(frame, sidebar_divider, app.resize_target.is_some(), theme);
-    }
-    let (diff_divider, content_file_hits, content_step_hits, content_review_hits) =
-        draw_content(frame, content_area, app, theme, &mut link_hits);
-    scm_action_hits.extend(draw_jump_controls(frame, content_area, app, theme));
+    scm_action_hits.extend(draw_jump_controls(frame, workspace.content, app, theme));
     draw_footer(frame, footer, app, theme, &mut link_hits, &mut project_hits);
 
     app.geometry = UiGeometry {
@@ -70,19 +102,20 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
         history_tab,
         pull_requests_tab,
         main,
-        sidebar: sidebar_area,
-        sidebar_divider,
-        content: content_area,
-        diff_divider,
-        sidebar_hits,
+        sidebar: workspace.sidebar,
+        sidebar_divider: workspace.sidebar_divider,
+        content: workspace.content,
+        diff_divider: workspace.diff_divider,
+        sidebar_hits: workspace.sidebar_hits,
+        stack_inspector_hits: workspace.stack_inspector_hits,
         scm_action_hits,
         modal_action_hits: Vec::new(),
         modal_list_hits: Vec::new(),
         modal_list_len: 0,
         modal_list_max_scroll: 0,
-        content_file_hits,
-        content_step_hits,
-        content_review_hits,
+        content_file_hits: workspace.content_file_hits,
+        content_step_hits: workspace.content_step_hits,
+        content_review_hits: workspace.content_review_hits,
         link_hits,
         help_hits: Vec::new(),
         project_hits,
