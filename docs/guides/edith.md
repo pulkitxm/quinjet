@@ -19,7 +19,7 @@ enabled only when Quinjet is launched by Edith.
 | SSH execution | Quinjet and Edith | Quinjet owns remote command forwarding. Edith supplies its machine target and existing SSH control socket. |
 | Embedded terminal | Edith | Edith starts Quinjet in its terminal view and receives Quinjet host events. |
 | External terminal | Edith and cmux | Edith creates, focuses, replaces, and closes the cmux workspace used by a tab. |
-| Theme and appearance | Edith | Edith stores the selection, passes Quinjet flags, and matches the embedded terminal palette. |
+| Theme and appearance | Edith | Edith stores the selection, passes named Quinjet themes or its own host palette, and matches the embedded terminal palette. |
 
 ## What the user gets
 
@@ -180,6 +180,10 @@ Edith stores the terminal renderer and theme in shared app defaults. Appearance
 follows Edith's current light or dark color scheme. Changing the renderer,
 theme, or appearance relaunches the selected project with the new configuration
 while retaining its machine, worktree list, and Edith tab.
+
+Choosing App theme sends Edith's complete light and dark palettes through
+`--theme-palette`. This keeps Quinjet aligned with Edith when the app theme or
+appearance changes. Choosing a named Quinjet theme continues to pass `--theme`.
 
 For embedded sessions, Edith also changes the terminal background, foreground,
 and caret palette to match the selected Quinjet theme. For cmux sessions, the

@@ -8,6 +8,7 @@ mod review;
 mod session;
 mod stack;
 mod stack_verbs;
+mod tui_args;
 mod update;
 mod watch;
 
@@ -31,6 +32,7 @@ use serde::Serialize;
 pub(crate) use session::Session;
 use stack::stack;
 use stack_verbs::StackVerb;
+use tui_args::TuiArgs;
 
 use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
@@ -44,7 +46,7 @@ use crate::git::github::{
 use crate::git::status::{Change, ChangeArea};
 use crate::git::{ConflictChoice, GitOperation, LocalDiffRequest, Repository};
 use crate::integration::Client;
-use crate::theme::{AppearanceChoice, ThemeName};
+use crate::theme::{AppearanceChoice, ThemeName, ThemeSelection};
 
 pub(crate) const EXIT_FAILURE: u8 = 1;
 pub(crate) const EXIT_NOT_FOUND: u8 = 3;
@@ -98,7 +100,7 @@ pub(crate) struct TerminalOptions {
     pub path: PathBuf,
     pub no_mouse: bool,
     pub webhook_listen: Option<String>,
-    pub theme: ThemeName,
+    pub theme: ThemeSelection,
     pub appearance: AppearanceChoice,
     pub pull_request: Option<u64>,
     pub client: Option<Client>,
@@ -316,28 +318,6 @@ struct UpdateArgs {
     #[doc = " Check for a newer release without installing it"]
     #[arg(long)]
     check: bool,
-}
-
-#[derive(Debug, Args)]
-struct TuiArgs {
-    #[doc = " Git repository to open"]
-    #[arg(default_value = ".", value_hint = ValueHint::DirPath)]
-    path: PathBuf,
-    #[doc = " Disable mouse capture"]
-    #[arg(long)]
-    no_mouse: bool,
-    #[doc = " Listen for forwarded GitHub webhooks on a port or host:port"]
-    #[arg(long, value_name = "ADDRESS")]
-    webhook_listen: Option<String>,
-    #[doc = " Color palette to use throughout the interface"]
-    #[arg(long, value_enum, default_value_t)]
-    theme: ThemeName,
-    #[doc = " Use the system, light, or dark variant of the palette"]
-    #[arg(long, value_enum, default_value_t)]
-    appearance: AppearanceChoice,
-    #[doc = " Open the interface focused on this pull request"]
-    #[arg(long = "pr", value_name = "NUMBER")]
-    pull_request: Option<u64>,
 }
 
 #[derive(Debug, Args)]

@@ -12,7 +12,7 @@ fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
 #[test]
 fn modal_rows_follow_hover_and_activate_on_click() {
     let mut app = App::new("/tmp/repo", "repo");
-    let original = app.theme_name;
+    let original = app.theme_selection;
     app.modal = Some(Modal::Themes {
         selected: 0,
         original,
@@ -26,7 +26,7 @@ fn modal_rows_follow_hover_and_activate_on_click() {
         app.modal.as_ref(),
         Some(Modal::Themes { selected: 1, .. })
     ));
-    assert_eq!(app.theme_name, ThemeName::ALL[1]);
+    assert_eq!(app.theme_selection.built_in(), Some(ThemeName::ALL[1]));
 
     drop(app.handle_mouse(
         mouse(MouseEventKind::Down(MouseButton::Left), 12, 5),
@@ -34,7 +34,7 @@ fn modal_rows_follow_hover_and_activate_on_click() {
     ));
 
     assert!(app.modal.is_none());
-    assert_eq!(app.theme_name, ThemeName::ALL[1]);
+    assert_eq!(app.theme_selection.built_in(), Some(ThemeName::ALL[1]));
 }
 
 #[test]

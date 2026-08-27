@@ -6,7 +6,9 @@ use crate::git::worker::WorkerCommand;
 use crate::ssh::{SshContext, SshSwitch};
 use crate::state::session::ProjectSession;
 use crate::tabs::{RepositoryTabs, TabId};
-use crate::theme::{AppearanceChoice, ThemeName};
+#[cfg(test)]
+use crate::theme::ThemeName;
+use crate::theme::{AppearanceChoice, ThemeSelection};
 
 mod context;
 use context::RepositoryRuntime;
@@ -32,7 +34,7 @@ enum InitialProjectMode {
 impl RepositoryWorkspace {
     pub(crate) fn new(
         repository: &Repository,
-        theme: ThemeName,
+        theme: ThemeSelection,
         appearance: AppearanceChoice,
         mouse: bool,
         webhooks_listening: bool,
@@ -51,7 +53,7 @@ impl RepositoryWorkspace {
 
     pub(crate) fn new_pending_host(
         repository: &Repository,
-        theme: ThemeName,
+        theme: ThemeSelection,
         appearance: AppearanceChoice,
         mouse: bool,
         webhooks_listening: bool,
@@ -70,7 +72,7 @@ impl RepositoryWorkspace {
 
     pub(crate) fn new_resolving_pending(
         repository: &Repository,
-        theme: ThemeName,
+        theme: ThemeSelection,
         appearance: AppearanceChoice,
         mouse: bool,
         webhooks_listening: bool,
@@ -93,7 +95,7 @@ impl RepositoryWorkspace {
     )]
     fn new_with_mode(
         repository: &Repository,
-        theme: ThemeName,
+        theme: ThemeSelection,
         appearance: AppearanceChoice,
         mouse: bool,
         webhooks_listening: bool,
@@ -152,7 +154,7 @@ impl RepositoryWorkspace {
 
     pub(crate) fn restore(
         session: &ProjectSession,
-        theme: ThemeName,
+        theme: ThemeSelection,
         appearance: AppearanceChoice,
         mouse: bool,
         webhooks_listening: bool,
@@ -323,11 +325,11 @@ impl RepositoryWorkspace {
         let Some(source) = self.tabs.get(source) else {
             return;
         };
-        let theme = source.app.theme_name;
+        let theme = source.app.theme_selection;
         let appearance = source.app.appearance_choice;
         let mouse = source.app.mouse_capture_preference;
         for (_, runtime) in self.tabs.iter_mut() {
-            if runtime.app.theme_name != theme || runtime.app.appearance_choice != appearance {
+            if runtime.app.theme_selection != theme || runtime.app.appearance_choice != appearance {
                 runtime.app.set_theme_selection(theme, appearance);
             }
             if runtime.app.mouse_capture_preference != mouse {

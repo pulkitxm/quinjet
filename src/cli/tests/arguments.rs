@@ -95,39 +95,6 @@ fn edith_client_is_available_to_terminal_launches() {
 }
 
 #[test]
-fn terminal_themes_default_to_quinjet_with_system_appearance() {
-    let cli = Cli::try_parse_from(["quinjet", "tui"]).unwrap();
-    assert!(matches!(
-        cli.command,
-        Some(Verb::Tui(TuiArgs {
-            theme: ThemeName::Quinjet,
-            appearance: AppearanceChoice::System,
-            ..
-        }))
-    ));
-
-    let cli = Cli::try_parse_from([
-        "quinjet",
-        "tui",
-        "--theme",
-        "rose-pine",
-        "--appearance",
-        "light",
-    ])
-    .unwrap();
-    assert!(matches!(
-        cli.command,
-        Some(Verb::Tui(TuiArgs {
-            theme: ThemeName::RosePine,
-            appearance: AppearanceChoice::Light,
-            ..
-        }))
-    ));
-    drop(Cli::try_parse_from(["quinjet", "tui", "--theme", "unknown"]).unwrap_err());
-    drop(Cli::try_parse_from(["quinjet", "tui", "--appearance", "unknown"]).unwrap_err());
-}
-
-#[test]
 fn an_unknown_verb_is_a_usage_error() {
     drop(Cli::try_parse_from(["quinjet", "statsu"]).unwrap_err());
 }

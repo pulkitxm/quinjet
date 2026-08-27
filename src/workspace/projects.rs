@@ -70,7 +70,7 @@ impl RepositoryWorkspace {
     ) -> Option<RoutedEffects> {
         let source_runtime = self.tabs.get(source).or_else(|| self.tabs.active())?;
         let repository = Repository::discover(&source_runtime.app.repository_root).ok()?;
-        let theme = source_runtime.app.theme_name;
+        let theme = source_runtime.app.theme_selection;
         let appearance = source_runtime.app.appearance_choice;
         let mouse = source_runtime.app.mouse_capture_preference;
         let webhooks_listening = source_runtime.app.webhooks_listening;
@@ -147,7 +147,7 @@ impl RepositoryWorkspace {
         now: Instant,
     ) -> Option<RoutedEffects> {
         let source_runtime = self.tabs.get(source)?;
-        let theme = source_runtime.app.theme_name;
+        let theme = source_runtime.app.theme_selection;
         let appearance = source_runtime.app.appearance_choice;
         let mouse = source_runtime.app.mouse_capture_preference;
         let webhooks_listening = source_runtime.app.webhooks_listening;
@@ -186,7 +186,7 @@ impl RepositoryWorkspace {
         now: Instant,
     ) -> Option<RoutedEffects> {
         let source = self.tabs.get(source).or_else(|| self.tabs.active())?;
-        let theme = source.app.theme_name;
+        let theme = source.app.theme_selection;
         let appearance = source.app.appearance_choice;
         let mouse = source.app.mouse_capture_preference;
         let webhooks_listening = source.app.webhooks_listening;
@@ -270,7 +270,7 @@ impl RepositoryWorkspace {
         let repository = Repository::discover(&source.app.repository_root).ok()?;
         let runtime = RepositoryRuntime::new(
             &repository,
-            source.app.theme_name,
+            source.app.theme_selection,
             source.app.appearance_choice,
             source.app.mouse_capture_preference,
             source.app.webhooks_listening,

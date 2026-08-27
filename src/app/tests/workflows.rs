@@ -225,13 +225,13 @@ fn command_palette_switches_theme_and_appearance_in_place() {
         app.modal,
         Some(Modal::Themes {
             selected: 1,
-            original: ThemeName::Catppuccin,
+            original: ThemeSelection::BuiltIn(ThemeName::Catppuccin),
         })
     ));
     app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), now);
     app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), now);
 
-    assert_eq!(app.theme_name, ThemeName::Github);
+    assert_eq!(app.theme_selection.built_in(), Some(ThemeName::Github));
     assert_ne!(app.theme.background, original_background);
     assert!(matches!(
         app.modal,
@@ -239,7 +239,7 @@ fn command_palette_switches_theme_and_appearance_in_place() {
     ));
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), now);
 
-    assert_eq!(app.theme_name, ThemeName::Catppuccin);
+    assert_eq!(app.theme_selection.built_in(), Some(ThemeName::Catppuccin));
     assert_eq!(app.theme.background, original_background);
     assert!(app.modal.is_none());
 
@@ -247,7 +247,7 @@ fn command_palette_switches_theme_and_appearance_in_place() {
     app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), now);
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
 
-    assert_eq!(app.theme_name, ThemeName::Dracula);
+    assert_eq!(app.theme_selection.built_in(), Some(ThemeName::Dracula));
     assert_eq!(app.appearance_choice, AppearanceChoice::Dark);
     assert_eq!(app.appearance, Appearance::Dark);
     assert_ne!(app.theme.background, original_background);
@@ -279,7 +279,7 @@ fn command_palette_switches_theme_and_appearance_in_place() {
     app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), now);
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
 
-    assert_eq!(app.theme_name, ThemeName::Dracula);
+    assert_eq!(app.theme_selection.built_in(), Some(ThemeName::Dracula));
     assert_eq!(app.appearance_choice, AppearanceChoice::Light);
     assert_eq!(app.appearance, Appearance::Light);
     assert!(app.modal.is_none());

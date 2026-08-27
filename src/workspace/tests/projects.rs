@@ -98,7 +98,7 @@ fn pending_project_tab_moves_between_machines_without_hiding_existing_tabs() {
     };
     let mut local = RepositoryWorkspace::new(
         &local_repository,
-        ThemeName::Quinjet,
+        ThemeName::Quinjet.into(),
         AppearanceChoice::Dark,
         false,
         false,
@@ -132,7 +132,7 @@ fn pending_project_tab_moves_between_machines_without_hiding_existing_tabs() {
     };
     let mut remote = RepositoryWorkspace::restore(
         &session,
-        ThemeName::Quinjet,
+        ThemeName::Quinjet.into(),
         AppearanceChoice::Dark,
         false,
         false,

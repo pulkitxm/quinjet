@@ -74,3 +74,4 @@ fn check(name: &str, status: PullRequestCheckStatus) -> PullRequestCheck {
 mod arguments;
 mod output;
 mod routes;
+mod themes;

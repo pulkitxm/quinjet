@@ -10,7 +10,7 @@ quinjet
 quinjet [--pr <NUMBER>]
 quinjet --remote <SSH_TARGET> --folder <DIR>
 quinjet [--pr <NUMBER>] [--client <CLIENT>]
-quinjet tui [PATH] [--pr <NUMBER>] [--client <CLIENT>] [--theme <THEME>] [--appearance <APPEARANCE>] [--no-mouse] [--webhook-listen <ADDRESS>]
+quinjet tui [PATH] [--pr <NUMBER>] [--client <CLIENT>] [--theme <THEME> | --theme-palette <JSON>] [--appearance <APPEARANCE>] [--no-mouse] [--webhook-listen <ADDRESS>]
 ```
 
 Arguments:
@@ -24,6 +24,7 @@ Options:
 | Name | Type / values | Default | What it does |
 | --- | --- | --- | --- |
 | `--theme <THEME>` | `quinjet`, `catppuccin`, `dracula`, `everforest`, `gruvbox`, `nord`, `one`, `rose-pine`, `solarized`, `tokyo-night`, `ayu`, `monokai`, `github` | `quinjet` | Selects one unified palette for every surface, state, diff background, status color, and syntax token. |
+| `--theme-palette <JSON>` | host palette object | unset | Accepts complete `light` and `dark` palettes from an embedding client. It conflicts with `--theme`. |
 | `--appearance <APPEARANCE>` | `system`, `light`, `dark` | `system` | Selects the light or dark variant. `system` detects the operating-system preference once during startup. |
 | `--no-mouse` | flag | off | Starts with the mouse released, so the terminal keeps its own selection and copy behavior. Every feature stays reachable from the keyboard. |
 | `--webhook-listen <ADDRESS>` | port, or `host:port` | not listening | Binds a loopback HTTP listener. A forwarded GitHub delivery refreshes the open pull request immediately instead of waiting for the next poll. |
@@ -60,6 +61,12 @@ Every palette has a complete light and dark variant. The selected palette owns
 all colors in the interface, including the root background, panels, borders,
 selection, focus, status and feedback colors, diff rows, intraline emphasis,
 and syntax highlighting. No view keeps a separate fixed color scheme.
+
+Embedding clients can supply the same sixteen semantic colors for both
+appearances through `--theme-palette`. Quinjet validates every value as a
+six-digit RGB color, selects the requested appearance at startup, and keeps
+using the supplied light and dark variants when the appearance changes inside
+the interface. Named themes and host palettes are mutually exclusive.
 
 The palettes are `quinjet`, `catppuccin`, `dracula`, `everforest`, `gruvbox`,
 `nord`, `one`, `rose-pine`, `solarized`, `tokyo-night`, `ayu`, `monokai`, and

@@ -150,7 +150,13 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
             draw_palette(frame, app, &query, selected, &mut list, theme);
         }
         Some(Modal::Themes { selected, .. }) => {
-            draw_theme_picker(frame, *selected, app.theme_name, &mut list, theme);
+            draw_theme_picker(
+                frame,
+                *selected,
+                app.theme_selection.built_in(),
+                &mut list,
+                theme,
+            );
         }
         Some(Modal::Appearances { selected, .. }) => {
             draw_appearance_picker(frame, *selected, app.appearance_choice, &mut list, theme);

@@ -19,7 +19,7 @@ fn test_repository(branch: &str) -> (TestRepository, Repository) {
 fn workspace(repository: &Repository) -> RepositoryWorkspace {
     RepositoryWorkspace::new(
         repository,
-        ThemeName::Quinjet,
+        ThemeName::Quinjet.into(),
         AppearanceChoice::Dark,
         false,
         false,
@@ -42,7 +42,7 @@ fn machine_session_restores_open_tabs_in_order_and_reactivates_the_saved_project
 
     let mut restored = RepositoryWorkspace::restore(
         &session,
-        ThemeName::Quinjet,
+        ThemeName::Quinjet.into(),
         AppearanceChoice::Dark,
         false,
         false,
@@ -89,7 +89,7 @@ fn machine_picker_context_follows_replaced_and_appended_projects() {
     };
     let mut workspace = RepositoryWorkspace::new(
         &first_repository,
-        ThemeName::Quinjet,
+        ThemeName::Quinjet.into(),
         AppearanceChoice::Dark,
         false,
         false,
@@ -144,7 +144,7 @@ fn reachability_results_update_apps_without_replacing_open_tabs() {
     };
     let mut workspace = RepositoryWorkspace::new(
         &repository,
-        ThemeName::Quinjet,
+        ThemeName::Quinjet.into(),
         AppearanceChoice::Dark,
         false,
         false,
@@ -218,7 +218,7 @@ fn mixed_machine_tabs_share_one_order_and_remote_tabs_handoff_directly() {
     let session = ProjectSession::default();
     let mut workspace = RepositoryWorkspace::restore(
         &session,
-        ThemeName::Quinjet,
+        ThemeName::Quinjet.into(),
         AppearanceChoice::Dark,
         false,
         false,
@@ -372,7 +372,7 @@ fn edith_workspace_refuses_to_close_its_managed_session() {
     let (_directory, repository) = test_repository("managed");
     let mut workspace = RepositoryWorkspace::new(
         &repository,
-        ThemeName::Quinjet,
+        ThemeName::Quinjet.into(),
         AppearanceChoice::Dark,
         false,
         false,
