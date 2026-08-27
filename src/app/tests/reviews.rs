@@ -74,6 +74,35 @@ fn pull_request_files_create_pending_line_reviews() {
 }
 
 #[test]
+fn stack_review_operations_target_the_selected_member() {
+    let mut app = App::new("/tmp/repo", "repo");
+    app.view = View::PullRequests;
+    app.pull_request = Some(pull_request(43, "Layer 3", "acme/widget"));
+    app.pull_request_stack = Some(pull_request_stack(2));
+    app.pull_request_stack_cursor = Some(2);
+    app.pull_request_section = PullRequestSection::Stack;
+    app.reconcile_stack_inspector();
+    let mut effects = Vec::new();
+
+    app.queue_pull_request_review_operation(
+        PullRequestReviewOperation::Submit {
+            body: "looks good".to_owned(),
+            decision: PullRequestReviewDecision::Approve,
+        },
+        &mut effects,
+    );
+
+    assert!(matches!(
+        effects.as_slice(),
+        [AppEffect::Git(command)] if matches!(
+            command.as_ref(),
+            WorkerCommand::OperatePullRequestReview { pull_request, .. }
+                if pull_request.number == 42
+        )
+    ));
+}
+
+#[test]
 fn pull_request_review_threads_render_below_their_diff_line() {
     let mut app = App::new("/tmp/repo", "repo");
     app.view = View::PullRequests;

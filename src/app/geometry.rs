@@ -31,6 +31,9 @@ pub(crate) enum StackInspectorHit {
     Section(StackMemberSection),
     TipChecks,
     Diff,
+    Review,
+    Previous,
+    Next,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

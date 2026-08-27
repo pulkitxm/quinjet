@@ -81,6 +81,13 @@ impl App {
             self.pr_menu_open = false;
         }
         self.reconcile_stack_inspector();
+        if changed
+            && self.pull_request_stack.is_some()
+            && self.pull_request_section == PullRequestSection::Stack
+        {
+            self.invalidate_preview();
+            self.reset_pull_request_diff_runtime();
+        }
         if self.pull_request_stack.is_none()
             && self.pull_request_section == PullRequestSection::Stack
         {
@@ -94,13 +101,6 @@ impl App {
             return;
         }
         self.request_stack_inspector(self.pull_request_lookup_refresh, effects);
-        if changed && self.pull_request_section == PullRequestSection::Stack {
-            self.invalidate_preview();
-            self.reset_pull_request_diff_runtime();
-            if self.stack_inspector.diff_open {
-                self.request_preview(effects);
-            }
-        }
     }
 
     fn request_pull_request_stack_prefetch(&self, effects: &mut Vec<AppEffect>) {
@@ -159,8 +159,11 @@ impl App {
         self.pull_request_file_view = PullRequestFileView::AllFiles;
         self.content_scroll = 0;
         self.horizontal_scroll = 0;
+        self.reset_pull_request_review();
         self.reconcile_stack_inspector();
-        if self.stack_inspector.diff_open {
+        if self.stack_inspector.diff_open
+            || self.stack_inspector.section == StackMemberSection::Files
+        {
             self.schedule_preview(now);
         }
         true
@@ -233,14 +236,22 @@ impl App {
         self.request_preview(effects);
     }
 
-    pub(super) const fn close_pull_request_stack_diff(&mut self) -> bool {
+    pub(super) fn close_pull_request_stack_diff(&mut self, effects: &mut Vec<AppEffect>) -> bool {
         if !self.stack_inspector.diff_open {
             return false;
         }
         self.stack_inspector.diff_open = false;
+        self.pull_request_stack_anchor = self.pull_request_stack_cursor;
         self.content_scroll = 0;
         self.horizontal_scroll = 0;
+        if self.stack_inspector.section == StackMemberSection::Files {
+            self.request_preview(effects);
+        }
         true
+    }
+
+    pub(super) fn open_stack_member_review(&mut self, effects: &mut Vec<AppEffect>) {
+        self.handle_pr_menu_item(PrMenuItem::Review, effects);
     }
 
     pub(super) fn inspect_pull_request_stack_tip(

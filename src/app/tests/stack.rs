@@ -9,6 +9,7 @@ fn stack_snapshot_defaults_to_the_selected_member_and_preserves_an_extended_rang
     app.apply_pull_request_stack_snapshot(Some(stack.clone()), &mut Vec::new());
     assert_eq!(app.pull_request_stack_range(), Some((3, 3)));
     assert_eq!(app.pull_request_section, PullRequestSection::Stack);
+    assert_eq!(app.stack_inspector.section, StackMemberSection::Files);
     assert!(!app.sidebar_hidden);
     assert!(app.select_pull_request_stack_member(2, true, now));
     assert_eq!(app.pull_request_stack_range(), Some((2, 3)));
@@ -54,8 +55,9 @@ fn truncated_stack_has_no_final_tip_or_tip_check_request() {
 }
 
 #[test]
-fn changed_stack_metadata_reloads_the_selected_member_from_the_current_revision() {
+fn changed_stack_metadata_reloads_the_selected_files_from_the_current_revision() {
     let mut app = App::new("/tmp/repo", "repo");
+    app.view = View::PullRequests;
     let stack = pull_request_stack(2);
     app.apply_pull_request_stack_snapshot(Some(stack.clone()), &mut Vec::new());
     app.stack_inspector.selected_pull_request = stack.member_pull_request(2);
@@ -75,15 +77,18 @@ fn changed_stack_metadata_reloads_the_selected_member_from_the_current_revision(
 
     assert!(app.stack_inspector.selected_pull_request.is_none());
     assert_ne!(app.stack_inspector.selected_generation, generation);
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        AppEffect::Git(command)
-            if matches!(
-                command.as_ref(),
-                WorkerCommand::LoadPullRequestStackMember { pull_request, .. }
-                    if pull_request.head_oid == expected_head
-            )
-    )));
+    assert!(
+        effects.iter().any(|effect| matches!(
+            effect,
+            AppEffect::Git(command)
+                if matches!(
+                    command.as_ref(),
+                    WorkerCommand::PreparePullRequestStack { stack, .. }
+                        if stack.members.iter().any(|member| member.head_oid == expected_head)
+                )
+        )),
+        "{effects:#?}"
+    );
 }
 
 #[test]
@@ -158,7 +163,7 @@ fn stack_inspector_shortcuts_open_member_sections_tip_diff_and_browser() {
     app.pull_request_section = PullRequestSection::Stack;
     app.reconcile_stack_inspector();
 
-    drop(app.handle_key(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE), now));
+    drop(app.handle_key(KeyEvent::new(KeyCode::Char('5'), KeyModifiers::NONE), now));
     assert_eq!(app.stack_inspector.section, StackMemberSection::Commits);
 
     drop(app.handle_key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE), now));
@@ -286,8 +291,9 @@ fn stack_member_identity_survives_reordering_and_inspector_reset_is_isolated() {
 }
 
 #[test]
-fn stack_snapshot_requests_selected_summary_tip_checks_and_background_warming() {
+fn stack_snapshot_requests_selected_files_tip_checks_review_and_background_warming() {
     let mut app = App::new("/tmp/repo", "repo");
+    app.view = View::PullRequests;
     app.pull_request = Some(pull_request(42, "Root", "acme/widget"));
     app.pull_request_checks = vec![check("root", PullRequestCheckStatus::Passed)];
     let root_checks = app.pull_request_checks.clone();
@@ -295,14 +301,21 @@ fn stack_snapshot_requests_selected_summary_tip_checks_and_background_warming() 
 
     app.apply_pull_request_stack_snapshot(Some(pull_request_stack(2)), &mut effects);
 
-    assert_eq!(effects.len(), 3);
+    assert_eq!(effects.len(), 4);
     assert!(effects.iter().any(|effect| matches!(
         effect,
         AppEffect::Git(command)
-            if matches!(command.as_ref(), WorkerCommand::LoadPullRequestStackMember {
-                identity,
-                ..
-            } if identity.number == 42)
+            if matches!(command.as_ref(), WorkerCommand::PrefetchPullRequestStackMembers { .. })
+    )));
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        AppEffect::Git(command)
+            if matches!(command.as_ref(), WorkerCommand::PreparePullRequestStack { .. })
+    )));
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        AppEffect::Git(command)
+            if matches!(command.as_ref(), WorkerCommand::LoadPullRequestReview { .. })
     )));
     assert!(effects.iter().any(|effect| matches!(
         effect,

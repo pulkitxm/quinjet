@@ -68,13 +68,7 @@ pub(super) fn draw_pull_request_stack_workspace(
         return StackWorkspaceGeometry::default();
     };
     let heading_height = if area.height >= 14 { 2 } else { 1 };
-    let gate_height = if area.height >= 16 {
-        4
-    } else if area.height >= 12 {
-        3
-    } else {
-        2
-    };
+    let gate_height = if area.height >= 12 { 2 } else { 1 };
     let [heading, gate, workspace] = Layout::vertical([
         Constraint::Length(heading_height),
         Constraint::Length(gate_height),
@@ -118,8 +112,7 @@ pub(super) fn draw_pull_request_stack_workspace(
                 theme,
                 &mut stack_inspector_hits,
                 link_hits,
-            );
-            (None, Vec::new(), Vec::new(), Vec::new())
+            )
         };
     StackWorkspaceGeometry {
         sidebar,
@@ -157,7 +150,7 @@ fn draw_stack_heading(
         format!(" · WARN {}", app.pull_request_warnings.len())
     };
     let first = format!(
-        " STACK #{}{status} · {} PR{} · {} -> {tip}{partial}",
+        " STACK #{}{status} · REVIEW FROM BASE TO TIP · {} PR{} · {} -> {tip}{partial}",
         stack.number,
         stack.size,
         if stack.size == 1 { "" } else { "S" },
@@ -175,10 +168,17 @@ fn draw_stack_heading(
     let Some((from, to)) = app.pull_request_stack_range() else {
         return Vec::new();
     };
+    let reviewed = stack
+        .members
+        .iter()
+        .filter(|member| {
+            member.state == "MERGED" || member.review_decision.eq_ignore_ascii_case("APPROVED")
+        })
+        .count();
     let action = if app.stack_inspector.diff_open {
-        " [d Diff open] "
+        " [d Range diff open] "
     } else {
-        " [d Open range diff] "
+        " [d Compare range] "
     };
     let action_width = cells(action.width()).min(area.width);
     let action_area = Rect::new(
@@ -194,8 +194,11 @@ fn draw_stack_heading(
         area.height.saturating_sub(1).min(1),
     );
     frame.render_widget(
-        Paragraph::new(format!(" RANGE {from}..{to} · base({from}) -> head({to})"))
-            .style(Style::default().fg(theme.muted).bg(theme.panel_alt)),
+        Paragraph::new(format!(
+            " REVIEWED {reviewed}/{} · RANGE {from}..{to} · base({from}) -> head({to})",
+            stack.size
+        ))
+        .style(Style::default().fg(theme.muted).bg(theme.panel_alt)),
         range_area,
     );
     frame.render_widget(
@@ -286,7 +289,7 @@ fn draw_stack_rail(
     theme: &Theme,
 ) -> Vec<SidebarHitArea> {
     frame.render_widget(
-        section_separator_block("BASE -> TIP · MEMBER HEALTH", theme),
+        section_separator_block("REVIEW PATH · BASE TO TIP", theme),
         Rect::new(area.x, area.y, area.width, area.height.min(1)),
     );
     let list = Rect::new(
@@ -353,6 +356,8 @@ fn draw_stack_rail_member(
     };
     let marker = if member_state.selected {
         ">"
+    } else if member.state == "MERGED" || member.review_decision.eq_ignore_ascii_case("APPROVED") {
+        "✓"
     } else if member_state.in_range {
         "●"
     } else {
@@ -385,11 +390,10 @@ fn draw_stack_rail_member(
         Rect::new(area.x, area.y, area.width, 1),
     );
     let health = member_health_label(member);
+    let review = member_review_label(member);
     let signal = format!(
-        "   {} · CI {health} · +{} -{}",
-        member.review_decision.replace('_', " "),
-        member.additions,
-        member.deletions,
+        "   {review} · CI {health} · {} files · +{} -{}",
+        member.changed_files, member.additions, member.deletions,
     );
     frame.render_widget(
         Paragraph::new(truncate_end(&signal, usize::from(area.width))).style(
@@ -399,6 +403,20 @@ fn draw_stack_rail_member(
         ),
         Rect::new(area.x, area.y.saturating_add(1), area.width, 1),
     );
+}
+
+fn member_review_label(member: &PullRequestStackMember) -> &'static str {
+    if member.state == "MERGED" {
+        return "REVIEWED";
+    }
+    if member.is_draft {
+        return "DRAFT";
+    }
+    match member.review_decision.as_str() {
+        "APPROVED" => "REVIEWED",
+        "CHANGES_REQUESTED" => "CHANGES REQUESTED",
+        _ => "REVIEW NEEDED",
+    }
 }
 
 fn member_health_label(member: &PullRequestStackMember) -> &'static str {

@@ -10,7 +10,7 @@ pub(super) fn draw_compact_stack_strip(
     theme: &Theme,
 ) -> Vec<SidebarHitArea> {
     frame.render_widget(
-        section_separator_block("MEMBERS · [ / ] select · Shift+↑/↓ range", theme),
+        section_separator_block("REVIEW PATH · p/n select · Shift+↑/↓ range", theme),
         Rect::new(area.x, area.y, area.width, area.height.min(1)),
     );
     let cursor = stack

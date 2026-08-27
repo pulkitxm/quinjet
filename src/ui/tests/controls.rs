@@ -160,6 +160,7 @@ fn help_catalog_covers_sections_and_previously_missing_bindings() {
         "Alt+A",
         "Option/Alt+1..9",
         "Ctrl+Delete",
+        "Shift+P/F/S · Stack p/n, 1..5, r/d",
     ] {
         assert!(
             keys.contains(&expected),

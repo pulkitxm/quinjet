@@ -67,7 +67,7 @@ impl App {
         {
             return;
         }
-        let Some(pull_request) = self.pull_request.clone() else {
+        let Some(pull_request) = self.selected_pull_request().cloned() else {
             return;
         };
         self.pull_request_review_generation = self.pull_request_review_generation.wrapping_add(1);
@@ -89,7 +89,7 @@ impl App {
         if self.pull_request_review_loading {
             return;
         }
-        let Some(pull_request) = self.pull_request.clone() else {
+        let Some(pull_request) = self.selected_pull_request().cloned() else {
             return;
         };
         self.pull_request_review_generation = self.pull_request_review_generation.wrapping_add(1);
@@ -110,7 +110,10 @@ impl App {
 
     fn review_document_active(&self) -> bool {
         self.view == View::PullRequests
-            && self.pull_request_section == PullRequestSection::Files
+            && (self.pull_request_section == PullRequestSection::Files
+                || (self.pull_request_section == PullRequestSection::Stack
+                    && self.stack_inspector.section == StackMemberSection::Files
+                    && !self.stack_inspector.diff_open))
             && self.pull_request_file_view == PullRequestFileView::SingleFile
             && self.pull_request_single_file.is_some()
     }

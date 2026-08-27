@@ -34,17 +34,9 @@ fn wide_stack_regions_have_titled_separators_without_changing_hit_rows() {
     let detail_title = row_text(&terminal, app.geometry.content.y, 104);
     let buffer = terminal.backend().buffer();
 
-    assert!(gate_title.contains("FINAL STACK GATE / TIP #43"));
-    assert!(gate_state.contains("FAIL  #43"));
-    assert_eq!(
-        buffer[(gate.right().saturating_sub(1), gate.y)].symbol(),
-        "─"
-    );
-    assert_eq!(
-        buffer[(gate.right().saturating_sub(1), gate.y)].fg,
-        theme.border
-    );
-    assert!(rail_title.contains("BASE -> TIP · MEMBER HEALTH"));
+    assert!(gate_title.contains("FINAL GATE FAIL"));
+    assert!(gate_state.contains("[t Inspect tip checks]"));
+    assert!(rail_title.contains("REVIEW PATH · BASE TO TIP"));
     assert_eq!(
         buffer[(
             app.geometry.sidebar.right().saturating_sub(1),
@@ -85,12 +77,27 @@ fn compact_stack_regions_keep_their_height_and_gain_separators() {
     let detail_title = row_text(&terminal, app.geometry.content.y, 72);
     let output = rendered(&terminal);
 
-    assert!(gate_title.contains("FINAL STACK GATE / TIP #43"));
-    assert!(member_title.contains("MEMBERS · [ / ] select"));
+    assert!(gate_title.contains("FINAL GATE FAIL"));
+    assert!(member_title.contains("REVIEW PATH · p/n select"));
     assert!(detail_title.contains("Member 3/3"));
     assert_eq!(app.geometry.sidebar.height, 2);
     assert_eq!(app.geometry.sidebar_divider, Rect::default());
-    assert!(output.contains("FAIL  #43"));
+    assert!(output.contains("[t Inspect tip checks]"));
     assert!(!gate_title.contains(['┌', '┐', '│']));
     assert!(!member_title.contains(['┌', '┐', '│']));
+}
+
+#[test]
+fn pull_request_stack_tab_is_hidden_without_stack_metadata() {
+    let mut app = overview_app();
+    let mut terminal = Terminal::new(TestBackend::new(120, 28)).unwrap();
+
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+
+    assert!(!app.geometry.sidebar_hits.iter().any(|hit| matches!(
+        hit.target,
+        SidebarHit::PullRequestStack | SidebarHit::PullRequestStackMember(_)
+    )));
 }
