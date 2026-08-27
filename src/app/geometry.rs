@@ -26,6 +26,19 @@ pub(crate) struct SidebarHitArea {
     pub target: SidebarHit,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StackInspectorHit {
+    Section(StackMemberSection),
+    TipChecks,
+    Diff,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct StackInspectorHitArea {
+    pub area: Rect,
+    pub target: StackInspectorHit,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ContentFileHit {
     pub area: Rect,
@@ -177,6 +190,7 @@ pub(crate) struct UiGeometry {
     pub content: Rect,
     pub diff_divider: Option<Rect>,
     pub sidebar_hits: Vec<SidebarHitArea>,
+    pub stack_inspector_hits: Vec<StackInspectorHitArea>,
     pub scm_action_hits: Vec<ScmActionHit>,
     pub modal_action_hits: Vec<(Rect, ModalAction)>,
     pub modal_list_hits: Vec<(Rect, usize)>,

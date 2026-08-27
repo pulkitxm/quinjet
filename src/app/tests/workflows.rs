@@ -265,10 +265,14 @@ fn command_palette_switches_theme_and_appearance_in_place() {
     app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), now);
     assert_eq!(app.appearance_choice, AppearanceChoice::Light);
     assert_eq!(app.appearance, Appearance::Light);
+    app.pull_request_content_rows_key = Some((false, 80, 1, 1));
+    app.stack_inspector_content_rows_key = Some((StackMemberSection::Summary, 80, 1, 1));
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), now);
 
     assert_eq!(app.appearance_choice, AppearanceChoice::Dark);
     assert_eq!(app.appearance, Appearance::Dark);
+    assert!(app.pull_request_content_rows_key.is_none());
+    assert!(app.stack_inspector_content_rows_key.is_none());
     assert!(app.modal.is_none());
 
     app.execute_palette(PaletteCommand::ChangeAppearance, &mut Vec::new(), now);

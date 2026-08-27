@@ -131,6 +131,7 @@ mod geometry;
 mod initialization;
 mod interaction;
 mod keyboard;
+mod keyboard_stack;
 mod links;
 mod live;
 mod local_diff;
@@ -142,6 +143,7 @@ mod modal_help;
 mod modal_pickers;
 mod modal_review;
 mod mouse;
+mod mouse_sidebar;
 mod operations;
 mod palette;
 mod projects;
@@ -233,6 +235,10 @@ pub(crate) struct App {
     pub pull_request_stack_anchor: Option<usize>,
     pub pull_request_stack_cursor: Option<usize>,
     pub stack_inspector: StackInspector,
+    pub stack_inspector_content_rows: Vec<PullRequestContentRow>,
+    pub stack_inspector_content_rows_key: Option<(StackMemberSection, usize, u64, i64)>,
+    pub stack_inspector_content_width: usize,
+    pub stack_inspector_content_links: Vec<PullRequestContentLink>,
     pub history_branches: Vec<HistoryBranch>,
     pub history_branches_loading: bool,
     pub history_branches_loaded: bool,

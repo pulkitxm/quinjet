@@ -3,10 +3,6 @@ use super::*;
 
 impl App {
     #[expect(
-        clippy::excessive_nesting,
-        reason = "the key handler mirrors the shape of the input it decodes"
-    )]
-    #[expect(
         clippy::too_many_lines,
         reason = "the draw pass reads better as one top-to-bottom pass"
     )]
@@ -253,6 +249,14 @@ impl App {
                         .map(|hit| hit.action.clone())
                     {
                         self.handle_scm_action(action, &mut effects);
+                    } else if let Some(hit) = self
+                        .geometry
+                        .stack_inspector_hits
+                        .iter()
+                        .find(|hit| hit.area.contains(point))
+                        .map(|hit| hit.target)
+                    {
+                        self.handle_stack_inspector_hit(hit, now, &mut effects);
                     } else if self.scm_menu_open || self.pr_menu_open {
                         self.scm_menu_open = false;
                         self.pr_menu_open = false;
@@ -269,92 +273,7 @@ impl App {
                             .find(|hit| hit.area.contains((event.column, event.row).into()))
                             .map(|hit| hit.target.clone())
                         {
-                            match hit {
-                                SidebarHit::ChangeSection(section) => {
-                                    self.auxiliary_preview = None;
-                                    self.toggle_change_section(section);
-                                    self.schedule_preview(now);
-                                }
-                                SidebarHit::Change(index) => {
-                                    if let Some(cursor) = self
-                                        .visible_change_indices()
-                                        .iter()
-                                        .position(|visible| *visible == index)
-                                    {
-                                        self.auxiliary_preview = None;
-                                        self.selected_change_section = None;
-                                        self.change_cursor = cursor;
-                                        self.schedule_preview(now);
-                                    }
-                                }
-                                SidebarHit::Commit(index) => {
-                                    if let Some(cursor) = self
-                                        .visible_commit_indices()
-                                        .iter()
-                                        .position(|visible| *visible == index)
-                                    {
-                                        self.history_cursor = cursor;
-                                        self.schedule_preview(now);
-                                    }
-                                }
-                                SidebarHit::PullRequestFiles => self.select_pull_request_section(
-                                    PullRequestSection::Files,
-                                    &mut effects,
-                                ),
-                                SidebarHit::PullRequestOverview => self
-                                    .select_pull_request_section(
-                                        PullRequestSection::Overview,
-                                        &mut effects,
-                                    ),
-                                SidebarHit::PullRequestStack => self.select_pull_request_section(
-                                    PullRequestSection::Stack,
-                                    &mut effects,
-                                ),
-                                SidebarHit::PullRequestStackMember(position) => {
-                                    let _ =
-                                        self.select_pull_request_stack_member(position, false, now);
-                                }
-                                SidebarHit::PullRequestConversation => {
-                                    self.selected_check_section = None;
-                                    self.select_pull_request_check(None, &mut effects);
-                                }
-                                SidebarHit::PullRequestCheckSection(section) => {
-                                    self.toggle_check_section(section);
-                                    self.schedule_preview(now);
-                                }
-                                SidebarHit::PullRequestChooseRepository => {
-                                    self.open_pull_request_repositories(&mut effects);
-                                }
-                                SidebarHit::PullRequestLookup => {
-                                    self.pull_request_lookup_active = true;
-                                }
-                                SidebarHit::RecentPullRequest(index) => {
-                                    let _ = self.open_recent_pull_request(index, &mut effects);
-                                }
-                                SidebarHit::PullRequestDirectory(path) => {
-                                    self.toggle_pull_request_directory(path);
-                                }
-                                SidebarHit::PullRequestFile(index) => {
-                                    if let Some(cursor) =
-                                        self.pull_request_tree_entries().iter().position(|entry| {
-                                            matches!(
-                                                entry,
-                                                PullRequestTreeEntry::File {
-                                                    index: entry_index,
-                                                    ..
-                                                } if *entry_index == index
-                                            )
-                                        })
-                                    {
-                                        self.select_pull_request_tree_entry(cursor, now);
-                                    }
-                                }
-                                SidebarHit::PullRequestCheck(index) => {
-                                    if index < self.pull_request_checks.len() {
-                                        self.select_pull_request_check(Some(index), &mut effects);
-                                    }
-                                }
-                            }
+                            self.handle_sidebar_hit(hit, now, &mut effects);
                         }
                     } else if self
                         .geometry

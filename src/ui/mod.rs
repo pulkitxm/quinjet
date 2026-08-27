@@ -17,7 +17,8 @@ use crate::app::{
     PrActionItem, PrMenuItem, ProjectOpenMode, ProjectRow, PullRequestContentLink,
     PullRequestContentRow, PullRequestSection, PullRequestTreeEntry, RepositoryTabAction,
     RepositoryTabHit, ScmAction, ScmActionHit, ScmMenuItem, SideBySideRow, SidebarHit,
-    SidebarHitArea, ToastLevel, UiGeometry, View,
+    SidebarHitArea, StackInspectorHit, StackInspectorHitArea, StackMemberSection, ToastLevel,
+    UiGeometry, View,
 };
 use crate::convert::cells;
 use crate::date_time::format_relative_timestamp;
@@ -426,6 +427,10 @@ mod pull_request_files;
 mod pull_request_overview;
 mod pull_request_review;
 mod pull_request_stack;
+mod pull_request_stack_detail;
+mod pull_request_stack_gate;
+mod pull_request_stack_rows;
+mod pull_request_stack_strip;
 mod repository_tabs;
 mod side_by_side;
 mod sidebar_changes;
@@ -438,21 +443,19 @@ mod unified_diff;
 use content::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use diff_render::*;
-#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
-use feedback::*;
+use feedback::{draw_modal_hint, draw_toast, progress_bar};
 pub(crate) use help::{draw_help, help_shortcut_count};
 #[cfg(test)]
 pub(crate) use help::{help_display_index, help_rows, help_shortcut_index_at};
 pub(crate) use layout::draw;
+use layout::draw_main_divider;
 #[cfg(test)]
-#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
-use layout::*;
+use layout::draw_text_selection;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use modal_branches::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use modal_choices::*;
-#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
-use modal_conflict::*;
+use modal_conflict::draw_conflict;
 pub(crate) use modal_list::ModalList;
 use modal_ssh::draw_ssh_project_modal;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]

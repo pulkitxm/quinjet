@@ -29,7 +29,13 @@ impl App {
                                 .url
                                 .eq_ignore_ascii_case(&identity.repository_url)
                             && snapshot.pull_request.action_state.node_id
-                                == identity.pull_request_node_id =>
+                                == identity.pull_request_node_id
+                            && self.stack_inspector.selected_locator.as_ref().is_some_and(
+                                |locator| {
+                                    snapshot.pull_request.base_oid == locator.base_oid
+                                        && snapshot.pull_request.head_oid == locator.head_oid
+                                },
+                            ) =>
                     {
                         self.stack_inspector.selected_pull_request = Some(snapshot.pull_request);
                         self.stack_inspector.selected_from_cache = snapshot.from_cache;
@@ -40,6 +46,11 @@ impl App {
                             Some("GitHub returned a different stack member".to_owned());
                     }
                     Err(error) => self.stack_inspector.selected_error = Some(error),
+                }
+                self.invalidate_stack_inspector_content_rows();
+                if self.stack_inspector.selected_refresh_again {
+                    self.stack_inspector.selected_refresh_again = false;
+                    self.request_stack_member(true, &mut effects);
                 }
             }
             WorkerEvent::PullRequestStackMemberChecks {
@@ -61,6 +72,11 @@ impl App {
                     }
                     Err(error) => self.stack_inspector.checks_error = Some(error),
                 }
+                self.invalidate_stack_inspector_content_rows();
+                if self.stack_inspector.checks_refresh_again {
+                    self.stack_inspector.checks_refresh_again = false;
+                    self.request_stack_member_checks(true, &mut effects);
+                }
             }
             WorkerEvent::PullRequestStackTipChecks {
                 identity,
@@ -80,6 +96,13 @@ impl App {
                         self.stack_inspector.tip_checks_error = None;
                     }
                     Err(error) => self.stack_inspector.tip_checks_error = Some(error),
+                }
+                if self.stack_inspector.selected_identity == self.stack_inspector.tip_identity {
+                    self.invalidate_stack_inspector_content_rows();
+                }
+                if self.stack_inspector.tip_checks_refresh_again {
+                    self.stack_inspector.tip_checks_refresh_again = false;
+                    self.request_stack_tip_checks(true, &mut effects);
                 }
             }
             WorkerEvent::PullRequestStackMemberConversation {
@@ -101,6 +124,7 @@ impl App {
                     }
                     Err(error) => self.stack_inspector.conversation_error = Some(error),
                 }
+                self.invalidate_stack_inspector_content_rows();
                 if self.stack_inspector.conversation_refresh_again {
                     self.stack_inspector.conversation_refresh_again = false;
                     self.request_stack_member_conversation(true, &mut effects);
@@ -125,6 +149,7 @@ impl App {
                     }
                     Err(error) => self.stack_inspector.commits_error = Some(error),
                 }
+                self.invalidate_stack_inspector_content_rows();
             }
             _ => {}
         }

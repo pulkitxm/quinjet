@@ -93,6 +93,7 @@ impl App {
         self.theme_name = name;
         self.theme = Theme::new(name, self.appearance);
         self.invalidate_pull_request_content_rows();
+        self.invalidate_stack_inspector_content_rows();
     }
 
     pub(super) fn apply_live_modal_filter(&mut self) {

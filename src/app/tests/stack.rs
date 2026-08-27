@@ -8,6 +8,8 @@ fn stack_snapshot_defaults_to_the_selected_member_and_preserves_an_extended_rang
 
     app.apply_pull_request_stack_snapshot(Some(stack.clone()), &mut Vec::new());
     assert_eq!(app.pull_request_stack_range(), Some((3, 3)));
+    assert_eq!(app.pull_request_section, PullRequestSection::Stack);
+    assert!(!app.sidebar_hidden);
     assert!(app.select_pull_request_stack_member(2, true, now));
     assert_eq!(app.pull_request_stack_range(), Some((2, 3)));
 
@@ -15,6 +17,73 @@ fn stack_snapshot_defaults_to_the_selected_member_and_preserves_an_extended_rang
     assert_eq!(app.pull_request_stack_range(), Some((2, 3)));
     assert_eq!(app.pull_request_stack_anchor, Some(3));
     assert_eq!(app.pull_request_stack_cursor, Some(2));
+}
+
+#[test]
+fn stack_activation_invalidates_root_diff_and_closes_hidden_root_controls() {
+    let mut app = App::new("/tmp/repo", "repo");
+    app.diff_generation = 7;
+    app.document_loading = true;
+    app.pull_request_lookup_active = true;
+    app.pr_menu_open = true;
+
+    app.apply_pull_request_stack_snapshot(Some(pull_request_stack(2)), &mut Vec::new());
+
+    assert_eq!(app.diff_generation, 8);
+    assert!(!app.document_loading);
+    assert!(!app.pull_request_lookup_active);
+    assert!(!app.pr_menu_open);
+}
+
+#[test]
+fn truncated_stack_has_no_final_tip_or_tip_check_request() {
+    let mut app = App::new("/tmp/repo", "repo");
+    let mut stack = pull_request_stack(2);
+    stack.size = 5;
+    stack.truncated = true;
+    let mut effects = Vec::new();
+
+    app.apply_pull_request_stack_snapshot(Some(stack), &mut effects);
+
+    assert!(app.stack_inspector.tip_identity.is_none());
+    assert!(!effects.iter().any(|effect| matches!(
+        effect,
+        AppEffect::Git(command)
+            if matches!(command.as_ref(), WorkerCommand::LoadPullRequestStackTipChecks { .. })
+    )));
+}
+
+#[test]
+fn changed_stack_metadata_reloads_the_selected_member_from_the_current_revision() {
+    let mut app = App::new("/tmp/repo", "repo");
+    let stack = pull_request_stack(2);
+    app.apply_pull_request_stack_snapshot(Some(stack.clone()), &mut Vec::new());
+    app.stack_inspector.selected_pull_request = stack.member_pull_request(2);
+    let generation = app.stack_inspector.selected_generation;
+    let mut changed = stack;
+    let member = changed
+        .members
+        .iter_mut()
+        .find(|member| member.position == 2)
+        .expect("changed member");
+    member.updated_at = "2026-08-21T10:00:00Z".to_owned();
+    member.head_oid = format!("{:040x}", 99);
+    let expected_head = member.head_oid.clone();
+    let mut effects = Vec::new();
+
+    app.apply_pull_request_stack_snapshot(Some(changed), &mut effects);
+
+    assert!(app.stack_inspector.selected_pull_request.is_none());
+    assert_ne!(app.stack_inspector.selected_generation, generation);
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        AppEffect::Git(command)
+            if matches!(
+                command.as_ref(),
+                WorkerCommand::LoadPullRequestStackMember { pull_request, .. }
+                    if pull_request.head_oid == expected_head
+            )
+    )));
 }
 
 #[test]
@@ -75,6 +144,98 @@ fn stack_range_prepares_its_own_diff_and_member_url() {
         app.github_url_for_selection(),
         Some("https://github.com/acme/widget/pull/43")
     );
+}
+
+#[test]
+fn stack_inspector_shortcuts_open_member_sections_tip_diff_and_browser() {
+    let now = Instant::now();
+    let mut app = App::new("/tmp/repo", "repo");
+    app.view = View::PullRequests;
+    app.pull_request = Some(pull_request(42, "Layer 2", "acme/widget"));
+    app.pull_request_stack = Some(pull_request_stack(2));
+    app.pull_request_stack_anchor = Some(2);
+    app.pull_request_stack_cursor = Some(2);
+    app.pull_request_section = PullRequestSection::Stack;
+    app.reconcile_stack_inspector();
+
+    drop(app.handle_key(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE), now));
+    assert_eq!(app.stack_inspector.section, StackMemberSection::Commits);
+
+    drop(app.handle_key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE), now));
+    assert_eq!(app.pull_request_stack_cursor, Some(1));
+
+    drop(app.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE), now));
+    assert_eq!(app.pull_request_stack_cursor, Some(3));
+    assert_eq!(app.stack_inspector.section, StackMemberSection::Checks);
+    assert_eq!(app.focus, Focus::Content);
+
+    let effects = app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE), now);
+    assert!(app.stack_inspector.diff_open);
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        AppEffect::Git(command)
+            if matches!(command.as_ref(), WorkerCommand::PreparePullRequestStack { .. })
+    )));
+
+    drop(app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), now));
+    assert!(!app.stack_inspector.diff_open);
+    assert!(app.pull_request.is_some());
+
+    let effects = app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE), now);
+    assert!(matches!(
+        effects.as_slice(),
+        [AppEffect::Open(OpenTarget::Browser(url))]
+            if url == "https://github.com/acme/widget/pull/43"
+    ));
+}
+
+#[test]
+fn stack_inspector_mouse_hits_switch_member_sections_and_tip_checks() {
+    let now = Instant::now();
+    let mut app = App::new("/tmp/repo", "repo");
+    app.view = View::PullRequests;
+    app.pull_request_stack = Some(pull_request_stack(1));
+    app.pull_request_stack_anchor = Some(1);
+    app.pull_request_stack_cursor = Some(1);
+    app.pull_request_section = PullRequestSection::Stack;
+    app.reconcile_stack_inspector();
+    app.geometry.stack_inspector_hits = vec![
+        StackInspectorHitArea {
+            area: Rect::new(10, 4, 10, 1),
+            target: StackInspectorHit::Section(StackMemberSection::Conversation),
+        },
+        StackInspectorHitArea {
+            area: Rect::new(10, 6, 10, 1),
+            target: StackInspectorHit::TipChecks,
+        },
+    ];
+
+    drop(app.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 12,
+            row: 4,
+            modifiers: KeyModifiers::NONE,
+        },
+        now,
+    ));
+    assert_eq!(
+        app.stack_inspector.section,
+        StackMemberSection::Conversation
+    );
+    assert_eq!(app.focus, Focus::Content);
+
+    drop(app.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 12,
+            row: 6,
+            modifiers: KeyModifiers::NONE,
+        },
+        now,
+    ));
+    assert_eq!(app.pull_request_stack_cursor, Some(3));
+    assert_eq!(app.stack_inspector.section, StackMemberSection::Checks);
 }
 
 #[test]
@@ -173,6 +334,81 @@ fn stack_section_switch_fetches_only_its_member_stream() {
                 if identity.number == 42
         )
     ));
+}
+
+#[test]
+fn tip_checks_section_reuses_the_pinned_tip_request() {
+    let mut app = App::new("/tmp/repo", "repo");
+    app.pull_request_stack = Some(pull_request_stack(3));
+    app.pull_request_stack_cursor = Some(3);
+    app.reconcile_stack_inspector();
+    app.stack_inspector.section = StackMemberSection::Checks;
+    let mut effects = Vec::new();
+
+    app.request_stack_inspector(false, &mut effects);
+
+    assert!(matches!(
+        effects.as_slice(),
+        [AppEffect::Git(command)]
+            if matches!(command.as_ref(), WorkerCommand::LoadPullRequestStackTipChecks { .. })
+    ));
+}
+
+#[test]
+fn forced_member_check_refresh_is_reissued_after_the_active_read() {
+    let mut app = App::new("/tmp/repo", "repo");
+    let stack = pull_request_stack(2);
+    let identity = stack.member_identity(2).expect("identity");
+    let locator = stack.member_pull_request(2).expect("locator");
+    let _ = app.stack_inspector.select(identity.clone(), locator);
+    app.stack_inspector.checks_loading = true;
+    let generation = app.stack_inspector.checks_generation;
+    let mut queued = Vec::new();
+
+    app.request_stack_member_checks(true, &mut queued);
+    assert!(queued.is_empty());
+    assert!(app.stack_inspector.checks_refresh_again);
+
+    let effects = app.handle_stack_worker_event(WorkerEvent::PullRequestStackMemberChecks {
+        identity,
+        generation,
+        result: Ok(crate::git::github::PullRequestChecks::default()),
+    });
+
+    assert!(matches!(
+        effects.as_slice(),
+        [AppEffect::Git(command)]
+            if matches!(
+                command.as_ref(),
+                WorkerCommand::LoadPullRequestStackMemberChecks { refresh: true, .. }
+            )
+    ));
+}
+
+#[test]
+fn stack_live_refresh_omits_hidden_root_streams() {
+    let now = Instant::now();
+    let mut app = App::new("/tmp/repo", "repo");
+    app.view = View::PullRequests;
+    app.pull_request = Some(pull_request(42, "Root", "acme/widget"));
+    app.pull_request_exact_number = Some(42);
+    app.pull_request_stack = Some(pull_request_stack(2));
+    app.pull_request_stack_cursor = Some(2);
+    app.reconcile_stack_inspector();
+    let mut effects = Vec::new();
+
+    app.refresh_pull_request_live(now, true, &mut effects);
+
+    assert!(!effects.iter().any(|effect| matches!(
+        effect,
+        AppEffect::Git(command)
+            if matches!(
+                command.as_ref(),
+                WorkerCommand::LoadPullRequestChecks { .. }
+                    | WorkerCommand::LoadPullRequestConversation { .. }
+                    | WorkerCommand::LoadPullRequestReview { .. }
+            )
+    )));
 }
 
 #[test]

@@ -254,6 +254,8 @@ impl App {
                         self.appearance_choice = *original_choice;
                         self.appearance = *original_appearance;
                         self.theme = Theme::new(self.theme_name, self.appearance);
+                        self.invalidate_pull_request_content_rows();
+                        self.invalidate_stack_inspector_content_rows();
                         return effects;
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
