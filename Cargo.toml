@@ -1,6 +1,6 @@
 [package]
 name = "quinjet"
-version = "0.0.6"
+version = "0.0.55"
 edition = "2024"
 description = "A fast, live, keyboard-first Git source-control interface for the terminal"
 repository = "https://github.com/pulkitxm/quinjet"
