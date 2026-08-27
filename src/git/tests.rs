@@ -46,6 +46,7 @@ impl TestRepository {
         }
     }
 
+    #[cfg(unix)]
     pub(crate) fn repository_with_github_cli(&self, github_cli: PathBuf) -> Repository {
         Repository {
             root: self.path.clone(),

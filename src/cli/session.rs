@@ -285,13 +285,19 @@ impl<T> LocalDiffWorkspaces<T> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::cell::Cell;
+    #[cfg(unix)]
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
-    use super::{Command, LocalDiffWorkspaceKind, LocalDiffWorkspaces, Outcome, Session};
+    #[cfg(unix)]
+    use super::{Command, Outcome, Session};
+    use super::{LocalDiffWorkspaceKind, LocalDiffWorkspaces};
+    #[cfg(unix)]
     use crate::git::github::{GitHubRepository, PullRequest};
+    #[cfg(unix)]
     use crate::git::tests::TestRepository;
 
     #[test]

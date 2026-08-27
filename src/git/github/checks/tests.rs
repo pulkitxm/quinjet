@@ -355,9 +355,9 @@ fn an_empty_check_list_is_cached() {
         .pull_request_checks(&pull_request, false)
         .unwrap();
 
-    assert!(first.checks.is_empty());
     assert!(!first.from_cache);
-    assert!(second.checks.is_empty());
+    assert_eq!(first.checks, Vec::new());
     assert!(second.from_cache);
+    assert_eq!(second.checks, Vec::new());
     assert_eq!(fs::read_to_string(calls).unwrap(), "call\n");
 }
