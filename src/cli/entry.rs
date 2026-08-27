@@ -26,7 +26,7 @@ pub(crate) fn dispatch() -> Result<Launch> {
                 path: cli.repository,
                 no_mouse: false,
                 webhook_listen: None,
-                theme: ThemeName::default(),
+                theme: ThemeName::default().into(),
                 appearance: AppearanceChoice::default(),
                 pull_request: cli.pull_request,
                 client: cli.client,
@@ -37,7 +37,9 @@ pub(crate) fn dispatch() -> Result<Launch> {
                 path: terminal_path(&args.path, &cli.repository).to_path_buf(),
                 no_mouse: args.no_mouse,
                 webhook_listen: args.webhook_listen,
-                theme: args.theme,
+                theme: args
+                    .theme_palette
+                    .map_or_else(|| args.theme.into(), ThemeSelection::Host),
                 appearance: args.appearance,
                 pull_request: args.pull_request.or(cli.pull_request),
                 client: cli.client,

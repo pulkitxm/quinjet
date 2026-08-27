@@ -4,11 +4,11 @@ use super::*;
 pub(super) fn draw_theme_picker(
     frame: &mut Frame<'_>,
     selected: usize,
-    current: ThemeName,
+    current: Option<ThemeName>,
     list: &mut ModalList<'_>,
     theme: &Theme,
 ) {
-    let choices = ThemeName::ALL.map(|name| (name.label(), name == current));
+    let choices = ThemeName::ALL.map(|name| (name.label(), Some(name) == current));
     draw_choice_picker(frame, " Select Theme ", &choices, selected, list, theme);
 }
 

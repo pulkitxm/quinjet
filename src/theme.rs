@@ -3,12 +3,16 @@
     reason = "six-digit hexadecimal RGB values are clearest without separators"
 )]
 
-use std::time::Duration;
-
 use clap::ValueEnum;
 use ratatui::style::Color;
 
-const SYSTEM_APPEARANCE_TIMEOUT: Duration = Duration::from_millis(250);
+mod appearance;
+mod host;
+
+#[cfg(test)]
+use appearance::system_appearance;
+pub(crate) use appearance::{Appearance, AppearanceChoice};
+pub(crate) use host::HostTheme;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
 pub(crate) enum ThemeName {
@@ -64,30 +68,29 @@ impl ThemeName {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
-pub(crate) enum AppearanceChoice {
-    #[default]
-    System,
-    Light,
-    Dark,
+#[expect(
+    variant_size_differences,
+    reason = "host palettes carry both appearances while built-in themes need only a name"
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ThemeSelection {
+    BuiltIn(ThemeName),
+    Host(HostTheme),
 }
 
-impl AppearanceChoice {
-    pub(crate) const ALL: [Self; 3] = [Self::System, Self::Light, Self::Dark];
-
-    pub(crate) const fn label(self) -> &'static str {
+impl ThemeSelection {
+    pub(crate) const fn built_in(self) -> Option<ThemeName> {
         match self {
-            Self::System => "System",
-            Self::Light => "Light",
-            Self::Dark => "Dark",
+            Self::BuiltIn(name) => Some(name),
+            Self::Host(_) => None,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Appearance {
-    Light,
-    Dark,
+impl From<ThemeName> for ThemeSelection {
+    fn from(value: ThemeName) -> Self {
+        Self::BuiltIn(value)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -130,37 +133,20 @@ pub(crate) enum SyntaxColor {
     Brown,
 }
 
-impl AppearanceChoice {
-    pub(crate) fn resolve(self) -> Appearance {
-        match self {
-            Self::Light => Appearance::Light,
-            Self::Dark => Appearance::Dark,
-            Self::System => system_appearance(detect_system_appearance()),
-        }
-    }
-}
-
-fn detect_system_appearance() -> Option<dark_light::Mode> {
-    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-    drop(
-        std::thread::Builder::new()
-            .name("system-appearance".to_owned())
-            .spawn(move || sender.send(dark_light::detect().ok()).unwrap_or_else(drop))
-            .ok()?,
-    );
-    receiver.recv_timeout(SYSTEM_APPEARANCE_TIMEOUT).ok()?
-}
-
-const fn system_appearance(mode: Option<dark_light::Mode>) -> Appearance {
-    match mode {
-        Some(dark_light::Mode::Light) => Appearance::Light,
-        Some(dark_light::Mode::Dark | dark_light::Mode::Unspecified) | None => Appearance::Dark,
-    }
-}
-
 impl Theme {
     pub(crate) fn new(name: ThemeName, appearance: Appearance) -> Self {
-        let palette = palette(name, appearance);
+        Self::new_selection(name.into(), appearance)
+    }
+
+    pub(crate) fn new_selection(selection: ThemeSelection, appearance: Appearance) -> Self {
+        let host_palette;
+        let palette = match selection {
+            ThemeSelection::BuiltIn(name) => palette(name, appearance),
+            ThemeSelection::Host(theme) => {
+                host_palette = theme.palette(appearance);
+                &host_palette
+            }
+        };
         let background = color(palette[0]);
         let panel = color(palette[1]);
         let panel_alt = color(palette[2]);

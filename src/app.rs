@@ -31,7 +31,7 @@ use crate::git::{
 use crate::integration::{Client, HostAction};
 use crate::ssh::SshContext;
 use crate::tabs::{TabId, TabInfo};
-use crate::theme::{Appearance, AppearanceChoice, Theme, ThemeName};
+use crate::theme::{Appearance, AppearanceChoice, Theme, ThemeName, ThemeSelection};
 
 const PREVIEW_DEBOUNCE: Duration = Duration::from_millis(45);
 const RESIZE_DOUBLE_TAP_INTERVAL: Duration = Duration::from_millis(450);
@@ -207,7 +207,7 @@ pub(crate) struct App {
     pub focus: Focus,
     pub diff_layout: DiffLayout,
     pub theme: Theme,
-    pub theme_name: ThemeName,
+    pub theme_selection: ThemeSelection,
     pub appearance_choice: AppearanceChoice,
     pub appearance: Appearance,
     pub status: RepoStatus,

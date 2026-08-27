@@ -62,9 +62,9 @@ impl App {
                 self.modal = Some(Modal::Themes {
                     selected: ThemeName::ALL
                         .iter()
-                        .position(|name| *name == self.theme_name)
+                        .position(|name| Some(*name) == self.theme_selection.built_in())
                         .unwrap_or_default(),
-                    original: self.theme_name,
+                    original: self.theme_selection,
                 });
             }
             PaletteCommand::ChangeAppearance => {
@@ -90,7 +90,7 @@ impl App {
     }
 
     pub(super) fn apply_theme(&mut self, name: ThemeName) {
-        self.theme_name = name;
+        self.theme_selection = name.into();
         self.theme = Theme::new(name, self.appearance);
         self.invalidate_pull_request_content_rows();
         self.invalidate_stack_inspector_content_rows();
