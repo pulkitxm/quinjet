@@ -123,7 +123,6 @@ fn stack_member_panel_title(app: &App) -> String {
         .as_ref()
         .map_or(0, |stack| stack.size);
     let cache = match app.stack_inspector.section {
-        StackMemberSection::Files => "",
         StackMemberSection::Summary if app.stack_inspector.selected_from_cache => " · cached",
         StackMemberSection::Conversation if app.stack_inspector.conversation.from_cache => {
             " · cached"
@@ -132,7 +131,8 @@ fn stack_member_panel_title(app: &App) -> String {
             " · cached"
         }
         StackMemberSection::Commits if app.stack_inspector.commits.from_cache => " · cached",
-        StackMemberSection::Summary
+        StackMemberSection::Files
+        | StackMemberSection::Summary
         | StackMemberSection::Conversation
         | StackMemberSection::Checks
         | StackMemberSection::Commits => "",

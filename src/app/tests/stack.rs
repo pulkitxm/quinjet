@@ -269,8 +269,8 @@ fn stack_review_and_next_buttons_drive_the_selected_member() {
         now,
     ));
     assert!(matches!(
-        app.modal,
-        Some(Modal::PullRequestActions { ref title, .. }) if title == "Submit Review"
+        &app.modal,
+        Some(Modal::PullRequestActions { title, .. }) if title == "Submit Review"
     ));
 
     app.modal = None;

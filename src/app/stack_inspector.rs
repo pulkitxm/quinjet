@@ -248,7 +248,6 @@ impl super::App {
                 self.request_preview(effects);
                 self.request_pull_request_review(refresh, effects);
             }
-            StackMemberSection::Files => {}
             StackMemberSection::Summary => self.request_stack_member(refresh, effects),
             StackMemberSection::Conversation => {
                 self.request_stack_member_conversation(refresh, effects);
@@ -258,7 +257,7 @@ impl super::App {
             {
                 self.request_stack_member_checks(refresh, effects);
             }
-            StackMemberSection::Checks => {}
+            StackMemberSection::Files | StackMemberSection::Checks => {}
             StackMemberSection::Commits => self.request_stack_member_commits(effects),
         }
     }
@@ -283,7 +282,6 @@ impl super::App {
             }
         }
         match self.stack_inspector.section {
-            StackMemberSection::Files => {}
             StackMemberSection::Summary | StackMemberSection::Conversation
                 if due(
                     self.stack_inspector.detail_read_at,
@@ -292,12 +290,13 @@ impl super::App {
             {
                 let issued = effects.len();
                 match self.stack_inspector.section {
-                    StackMemberSection::Files => {}
                     StackMemberSection::Summary => self.request_stack_member(true, effects),
                     StackMemberSection::Conversation => {
                         self.request_stack_member_conversation(true, effects);
                     }
-                    StackMemberSection::Checks | StackMemberSection::Commits => {}
+                    StackMemberSection::Files
+                    | StackMemberSection::Checks
+                    | StackMemberSection::Commits => {}
                 }
                 if effects.len() > issued {
                     self.stack_inspector.detail_read_at = Some(now);
@@ -316,7 +315,8 @@ impl super::App {
                     self.stack_inspector.checks_read_at = Some(now);
                 }
             }
-            StackMemberSection::Summary
+            StackMemberSection::Files
+            | StackMemberSection::Summary
             | StackMemberSection::Conversation
             | StackMemberSection::Checks
             | StackMemberSection::Commits => {}
