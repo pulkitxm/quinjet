@@ -96,4 +96,5 @@ mod overview;
 mod rendering;
 mod scrolling;
 mod stack;
+mod stack_layout;
 mod tabs;
