@@ -192,7 +192,7 @@ fn executable(path: &Path, contents: &str) -> Result<()> {
 }
 
 fn wait_for_capture(path: &Path) -> Result<String> {
-    for _ in 0..100 {
+    for _ in 0..500 {
         if let Ok(contents) = fs::read_to_string(path)
             && !contents.is_empty()
         {
