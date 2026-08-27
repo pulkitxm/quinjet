@@ -484,18 +484,3 @@ fn failed_stack_refresh_marks_last_known_topology_as_stale() {
         .unwrap();
     assert!(rendered(&terminal).contains("WARN 1"));
 }
-
-#[test]
-fn pull_request_stack_tab_is_hidden_without_stack_metadata() {
-    let mut app = overview_app();
-    let mut terminal = Terminal::new(TestBackend::new(120, 28)).unwrap();
-
-    terminal
-        .draw(|frame| draw(frame, &mut app, &Theme::default()))
-        .unwrap();
-
-    assert!(!app.geometry.sidebar_hits.iter().any(|hit| matches!(
-        hit.target,
-        SidebarHit::PullRequestStack | SidebarHit::PullRequestStackMember(_)
-    )));
-}

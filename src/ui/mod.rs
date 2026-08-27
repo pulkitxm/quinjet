@@ -234,20 +234,8 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
         description: "Discover or choose the base repository",
     },
     HelpRow::Shortcut {
-        keys: "Shift+P / F / S",
-        description: "PR details / changed files / stack range",
-    },
-    HelpRow::Shortcut {
-        keys: "Stack: p / n",
-        description: "Review the previous / next stack member from base to tip",
-    },
-    HelpRow::Shortcut {
-        keys: "Stack: 1..5",
-        description: "Files / summary / conversation / checks / commits",
-    },
-    HelpRow::Shortcut {
-        keys: "Stack: r / d",
-        description: "Submit a member review / compare the selected stack range",
+        keys: "Shift+P/F/S · Stack p/n, 1..5, r/d",
+        description: "PR sections; stack navigation, member tabs, review, and range comparison",
     },
     HelpRow::Shortcut {
         keys: "j / k",

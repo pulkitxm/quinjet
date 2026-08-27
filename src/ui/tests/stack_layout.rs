@@ -86,3 +86,18 @@ fn compact_stack_regions_keep_their_height_and_gain_separators() {
     assert!(!gate_title.contains(['┌', '┐', '│']));
     assert!(!member_title.contains(['┌', '┐', '│']));
 }
+
+#[test]
+fn pull_request_stack_tab_is_hidden_without_stack_metadata() {
+    let mut app = overview_app();
+    let mut terminal = Terminal::new(TestBackend::new(120, 28)).unwrap();
+
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+
+    assert!(!app.geometry.sidebar_hits.iter().any(|hit| matches!(
+        hit.target,
+        SidebarHit::PullRequestStack | SidebarHit::PullRequestStackMember(_)
+    )));
+}
