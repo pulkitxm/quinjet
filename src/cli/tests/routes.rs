@@ -160,6 +160,7 @@ fn the_read_only_views_have_verbs_too() {
         ["repos"].as_slice(),
         ["pr", "view"].as_slice(),
         ["pr", "files"].as_slice(),
+        ["pr", "commits"].as_slice(),
         ["pr", "diff"].as_slice(),
         ["pr", "checks"].as_slice(),
         ["pr", "conversation"].as_slice(),

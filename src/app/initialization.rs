@@ -48,6 +48,7 @@ impl App {
             pull_request_lookup_refresh: false,
             pull_request_stack_anchor: None,
             pull_request_stack_cursor: None,
+            stack_inspector: StackInspector::default(),
             history_branches: Vec::new(),
             history_branches_loading: false,
             history_branches_loaded: false,

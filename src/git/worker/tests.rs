@@ -1,12 +1,16 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::git::github::{PullRequestCheckStatus, PullRequestStack};
+use crate::git::github::PullRequestCheckStatus;
+use crate::git::worker::stack_tests::{
+    stack_lookup, stack_member, stack_member_checks, stack_member_commits,
+    stack_member_conversation, stack_prepare, stack_tip_checks,
+};
 
 #[test]
 fn every_worker_command_has_the_expected_lane() {
     let scenarios = lane_scenarios();
-    assert_eq!(scenarios.len(), 26);
+    assert_eq!(scenarios.len(), 31);
     for (command, expected) in scenarios {
         assert_eq!(worker_lane(&command), expected, "{command:?}");
     }
@@ -86,7 +90,24 @@ fn every_coalesced_slot_keeps_only_its_latest_command() {
     );
     assert_latest(vec![batch(1), batch(2)], ("pr-batch", 2));
     assert_latest(vec![checks(1), checks(2)], ("checks", 2));
+    assert_latest(vec![stack_member(1), stack_member(2)], ("stack-member", 2));
+    assert_latest(
+        vec![stack_member_checks(1), stack_member_checks(2)],
+        ("stack-member-checks", 2),
+    );
+    assert_latest(
+        vec![stack_tip_checks(1), stack_tip_checks(2)],
+        ("stack-tip-checks", 2),
+    );
     assert_latest(vec![conversation(1), conversation(2)], ("conversation", 2));
+    assert_latest(
+        vec![stack_member_conversation(1), stack_member_conversation(2)],
+        ("stack-member-conversation", 2),
+    );
+    assert_latest(
+        vec![stack_member_commits(1), stack_member_commits(2)],
+        ("stack-member-commits", 2),
+    );
     assert_latest(vec![review(1), review(2)], ("review", 2));
     assert_latest(vec![check_log(1), check_log(2)], ("check-log", 2));
     assert_latest(vec![warm(10), warm(20)], ("warm", 20));
@@ -140,14 +161,19 @@ fn mailbox_pop_order_covers_every_priority_level() {
             refresh: false,
         },
         lookup(6),
-        WorkerCommand::Refresh { generation: 7 },
-        check_log(8),
-        checks(9),
-        conversation(10),
-        review(11),
-        history(12),
-        batch(13),
-        warm(14),
+        stack_member(7),
+        WorkerCommand::Refresh { generation: 8 },
+        check_log(9),
+        checks(10),
+        stack_tip_checks(11),
+        stack_member_checks(12),
+        conversation(13),
+        stack_member_conversation(14),
+        stack_member_commits(15),
+        review(16),
+        history(17),
+        batch(18),
+        warm(19),
     ];
     let expected = [
         ("operate", 1),
@@ -156,14 +182,19 @@ fn mailbox_pop_order_covers_every_priority_level() {
         ("local-diff", 4),
         ("repositories", 5),
         ("lookup", 6),
-        ("refresh", 7),
-        ("check-log", 8),
-        ("checks", 9),
-        ("conversation", 10),
-        ("review", 11),
-        ("history", 12),
-        ("pr-batch", 13),
-        ("warm", 14),
+        ("stack-member", 7),
+        ("refresh", 8),
+        ("check-log", 9),
+        ("checks", 10),
+        ("stack-tip-checks", 11),
+        ("stack-member-checks", 12),
+        ("conversation", 13),
+        ("stack-member-conversation", 14),
+        ("stack-member-commits", 15),
+        ("review", 16),
+        ("history", 17),
+        ("pr-batch", 18),
+        ("warm", 19),
     ];
     let mut mailbox = Mailbox::default();
     for command in commands.into_iter().rev() {
@@ -225,6 +256,11 @@ fn lane_scenarios() -> Vec<(WorkerCommand, WorkerLane)> {
         ),
         (lookup(6), WorkerLane::GitHubMetadata),
         (stack_lookup(7), WorkerLane::GitHubMetadata),
+        (stack_member(25), WorkerLane::GitHubMetadata),
+        (stack_member_checks(26), WorkerLane::GitHubMetadata),
+        (stack_tip_checks(27), WorkerLane::GitHubMetadata),
+        (stack_member_conversation(28), WorkerLane::Conversation),
+        (stack_member_commits(29), WorkerLane::Conversation),
         (
             WorkerCommand::PreparePullRequest {
                 generation: 8,
@@ -324,32 +360,6 @@ fn lookup(generation: u64) -> WorkerCommand {
     }
 }
 
-fn stack_lookup(generation: u64) -> WorkerCommand {
-    WorkerCommand::LoadPullRequestStack {
-        generation,
-        pull_request: pull_request(),
-        refresh: false,
-    }
-}
-
-fn stack_prepare(generation: u64) -> WorkerCommand {
-    WorkerCommand::PreparePullRequestStack {
-        generation,
-        stack: Box::new(PullRequestStack {
-            node_id: String::new(),
-            number: 1,
-            base_ref: "main".to_owned(),
-            size: 0,
-            selected_position: 1,
-            members: Vec::new(),
-            truncated: false,
-            repository: crate::git::github::GitHubRepository::default(),
-        }),
-        from: 1,
-        to: 1,
-    }
-}
-
 fn batch(generation: u64) -> WorkerCommand {
     WorkerCommand::LoadPullRequestFileBatch {
         workspace_generation: generation,
@@ -427,6 +437,21 @@ fn identity(command: &WorkerCommand) -> (&'static str, u64) {
         WorkerCommand::LoadLocalGitHubRepository => ("local-repository", 0),
         WorkerCommand::LookupPullRequest { generation, .. } => ("lookup", *generation),
         WorkerCommand::LoadPullRequestStack { generation, .. } => ("stack", *generation),
+        WorkerCommand::LoadPullRequestStackMember { generation, .. } => {
+            ("stack-member", *generation)
+        }
+        WorkerCommand::LoadPullRequestStackMemberChecks { generation, .. } => {
+            ("stack-member-checks", *generation)
+        }
+        WorkerCommand::LoadPullRequestStackTipChecks { generation, .. } => {
+            ("stack-tip-checks", *generation)
+        }
+        WorkerCommand::LoadPullRequestStackMemberConversation { generation, .. } => {
+            ("stack-member-conversation", *generation)
+        }
+        WorkerCommand::LoadPullRequestStackMemberCommits { generation, .. } => {
+            ("stack-member-commits", *generation)
+        }
         WorkerCommand::PreparePullRequest { generation, .. } => ("prepare-pr", *generation),
         WorkerCommand::PreparePullRequestStack { generation, .. } => ("prepare-stack", *generation),
         WorkerCommand::LoadPullRequestFile { generation, .. } => ("pr-file", *generation),

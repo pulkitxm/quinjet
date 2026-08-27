@@ -8,9 +8,10 @@ use crossbeam_channel::{Receiver, Sender, unbounded};
 
 use super::diff::DiffDocument;
 use super::github::{
-    CheckRunLog, PullRequest, PullRequestCheck, PullRequestChecks, PullRequestConversation,
-    PullRequestDiffIndex, PullRequestOperation, PullRequestProgress, PullRequestReviewOperation,
-    PullRequestReviewSnapshot, PullRequestSnapshot, PullRequestStack, PullRequestStackSnapshot,
+    CheckRunLog, PullRequest, PullRequestCheck, PullRequestChecks, PullRequestCommits,
+    PullRequestConversation, PullRequestDiffIndex, PullRequestOperation, PullRequestProgress,
+    PullRequestReviewOperation, PullRequestReviewSnapshot, PullRequestSnapshot, PullRequestStack,
+    PullRequestStackMemberIdentity, PullRequestStackSnapshot,
 };
 use super::history::Commit;
 use super::status::RepoStatus;
@@ -56,6 +57,34 @@ pub(crate) enum WorkerCommand {
         generation: u64,
         pull_request: Box<PullRequest>,
         refresh: bool,
+    },
+    LoadPullRequestStackMember {
+        identity: PullRequestStackMemberIdentity,
+        generation: u64,
+        pull_request: Box<PullRequest>,
+        refresh: bool,
+    },
+    LoadPullRequestStackMemberChecks {
+        identity: PullRequestStackMemberIdentity,
+        generation: u64,
+        pull_request: Box<PullRequest>,
+        refresh: bool,
+    },
+    LoadPullRequestStackTipChecks {
+        identity: PullRequestStackMemberIdentity,
+        generation: u64,
+        pull_request: Box<PullRequest>,
+        refresh: bool,
+    },
+    LoadPullRequestStackMemberConversation {
+        identity: PullRequestStackMemberIdentity,
+        generation: u64,
+        pull_request: Box<PullRequest>,
+    },
+    LoadPullRequestStackMemberCommits {
+        identity: PullRequestStackMemberIdentity,
+        generation: u64,
+        pull_request: Box<PullRequest>,
     },
     PreparePullRequest {
         generation: u64,
@@ -173,6 +202,31 @@ pub(crate) enum WorkerEvent {
         generation: u64,
         result: Result<PullRequestStackSnapshot, String>,
     },
+    PullRequestStackMember {
+        identity: PullRequestStackMemberIdentity,
+        generation: u64,
+        result: Result<PullRequestSnapshot, String>,
+    },
+    PullRequestStackMemberChecks {
+        identity: PullRequestStackMemberIdentity,
+        generation: u64,
+        result: Result<PullRequestChecks, String>,
+    },
+    PullRequestStackTipChecks {
+        identity: PullRequestStackMemberIdentity,
+        generation: u64,
+        result: Result<PullRequestChecks, String>,
+    },
+    PullRequestStackMemberConversation {
+        identity: PullRequestStackMemberIdentity,
+        generation: u64,
+        result: Result<PullRequestConversation, String>,
+    },
+    PullRequestStackMemberCommits {
+        identity: PullRequestStackMemberIdentity,
+        generation: u64,
+        result: Result<PullRequestCommits, String>,
+    },
     PullRequestProgress {
         generation: u64,
         diff: bool,
@@ -248,6 +302,11 @@ struct Mailbox {
     prefetch: Option<WorkerCommand>,
     checks: Option<WorkerCommand>,
     conversation: Option<WorkerCommand>,
+    stack_member: Option<WorkerCommand>,
+    stack_member_checks: Option<WorkerCommand>,
+    stack_tip_checks: Option<WorkerCommand>,
+    stack_member_conversation: Option<WorkerCommand>,
+    stack_member_commits: Option<WorkerCommand>,
     review: Option<WorkerCommand>,
     check_log: Option<WorkerCommand>,
     warm: Option<WorkerCommand>,
@@ -287,9 +346,24 @@ impl Mailbox {
             | WorkerCommand::LoadPullRequestStack { .. }) => {
                 self.pull_request = Some(command);
             }
+            command @ WorkerCommand::LoadPullRequestStackMember { .. } => {
+                self.stack_member = Some(command);
+            }
             command @ WorkerCommand::LoadPullRequestChecks { .. } => self.checks = Some(command),
+            command @ WorkerCommand::LoadPullRequestStackMemberChecks { .. } => {
+                self.stack_member_checks = Some(command);
+            }
+            command @ WorkerCommand::LoadPullRequestStackTipChecks { .. } => {
+                self.stack_tip_checks = Some(command);
+            }
             command @ WorkerCommand::LoadPullRequestConversation { .. } => {
                 self.conversation = Some(command);
+            }
+            command @ WorkerCommand::LoadPullRequestStackMemberConversation { .. } => {
+                self.stack_member_conversation = Some(command);
+            }
+            command @ WorkerCommand::LoadPullRequestStackMemberCommits { .. } => {
+                self.stack_member_commits = Some(command);
             }
             command @ WorkerCommand::LoadPullRequestReview { .. } => self.review = Some(command),
             command @ WorkerCommand::LoadCheckRunLog { .. } => self.check_log = Some(command),
@@ -308,10 +382,15 @@ impl Mailbox {
             .or_else(|| self.preview.take())
             .or_else(|| self.repositories.take())
             .or_else(|| self.pull_request.take())
+            .or_else(|| self.stack_member.take())
             .or_else(|| self.refresh.take())
             .or_else(|| self.check_log.take())
             .or_else(|| self.checks.take())
+            .or_else(|| self.stack_tip_checks.take())
+            .or_else(|| self.stack_member_checks.take())
             .or_else(|| self.conversation.take())
+            .or_else(|| self.stack_member_conversation.take())
+            .or_else(|| self.stack_member_commits.take())
             .or_else(|| self.review.take())
             .or_else(|| self.history.take())
             .or_else(|| self.prefetch.take())
@@ -343,9 +422,14 @@ const fn worker_lane(command: &WorkerCommand) -> WorkerLane {
         WorkerCommand::LoadGitHubRepositories { .. }
         | WorkerCommand::LookupPullRequest { .. }
         | WorkerCommand::LoadPullRequestStack { .. }
+        | WorkerCommand::LoadPullRequestStackMember { .. }
         | WorkerCommand::LoadPullRequestChecks { .. }
+        | WorkerCommand::LoadPullRequestStackMemberChecks { .. }
+        | WorkerCommand::LoadPullRequestStackTipChecks { .. }
         | WorkerCommand::LoadCheckRunLog { .. } => WorkerLane::GitHubMetadata,
-        WorkerCommand::LoadPullRequestConversation { .. } => WorkerLane::Conversation,
+        WorkerCommand::LoadPullRequestConversation { .. }
+        | WorkerCommand::LoadPullRequestStackMemberConversation { .. }
+        | WorkerCommand::LoadPullRequestStackMemberCommits { .. } => WorkerLane::Conversation,
         WorkerCommand::LoadPullRequestReview { .. }
         | WorkerCommand::OperatePullRequestReview { .. } => WorkerLane::Review,
         WorkerCommand::PrefetchCheckRunLogs { .. } => WorkerLane::Warm,
@@ -359,10 +443,15 @@ const fn worker_lane(command: &WorkerCommand) -> WorkerLane {
 
 mod lifecycle;
 mod runtime;
+mod stack_runtime;
 
 pub(crate) use lifecycle::GitWorker;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use runtime::*;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
+use stack_runtime::*;
 
+#[cfg(test)]
+mod stack_tests;
 #[cfg(test)]
 mod tests;

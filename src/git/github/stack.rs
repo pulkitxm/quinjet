@@ -63,11 +63,67 @@ pub(crate) struct PullRequestStackMember {
     pub is_queued: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct PullRequestStackMemberIdentity {
+    pub stack_node_id: String,
+    pub entry_id: String,
+    pub pull_request_node_id: String,
+    pub repository_url: String,
+    pub number: u64,
+}
+
 impl PullRequestStack {
     pub(crate) fn member(&self, position: usize) -> Option<&PullRequestStackMember> {
         self.members
             .iter()
             .find(|member| member.position == position)
+    }
+
+    pub(crate) fn member_identity(
+        &self,
+        position: usize,
+    ) -> Option<PullRequestStackMemberIdentity> {
+        let member = self.member(position)?;
+        Some(PullRequestStackMemberIdentity {
+            stack_node_id: self.node_id.clone(),
+            entry_id: member.entry_id.clone(),
+            pull_request_node_id: member.node_id.clone(),
+            repository_url: self.repository.url.clone(),
+            number: member.number,
+        })
+    }
+
+    pub(crate) fn member_pull_request(&self, position: usize) -> Option<PullRequest> {
+        let member = self.member(position)?;
+        Some(PullRequest {
+            number: member.number,
+            title: member.title.clone(),
+            description: String::new(),
+            author: member.author.clone(),
+            state: member.state.clone(),
+            is_draft: member.is_draft,
+            created_at: String::new(),
+            updated_at: member.updated_at.clone(),
+            url: member.url.clone(),
+            base_ref: member.base_ref.clone(),
+            base_oid: member.base_oid.clone(),
+            head_ref: member.head_ref.clone(),
+            head_oid: member.head_oid.clone(),
+            base_repository: self.repository.clone(),
+            head_repository: member.head_repository.clone(),
+            head_remotes: Vec::new(),
+            is_cross_repository: member.is_cross_repository,
+            additions: member.additions,
+            deletions: member.deletions,
+            changed_files: member.changed_files,
+            action_state: PullRequestActionState {
+                node_id: member.node_id.clone(),
+                merge_state: member.merge_state.clone(),
+                mergeable: member.mergeable.clone(),
+                review_decision: member.review_decision.clone(),
+                ..PullRequestActionState::default()
+            },
+        })
     }
 
     pub(crate) fn comparison(&self, from: usize, to: usize) -> Result<PullRequest> {

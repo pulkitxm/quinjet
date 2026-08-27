@@ -177,6 +177,36 @@ pub(super) fn run_worker(
                         .and_then(Outcome::pull_request_stack),
                 ),
             },
+            WorkerCommand::LoadPullRequestStackMember {
+                identity,
+                generation,
+                pull_request,
+                refresh,
+            } => load_stack_member(&mut session, identity, generation, &pull_request, refresh),
+            WorkerCommand::LoadPullRequestStackMemberChecks {
+                identity,
+                generation,
+                pull_request,
+                refresh,
+            } => {
+                load_stack_member_checks(&mut session, identity, generation, pull_request, refresh)
+            }
+            WorkerCommand::LoadPullRequestStackTipChecks {
+                identity,
+                generation,
+                pull_request,
+                refresh,
+            } => load_stack_tip_checks(&mut session, identity, generation, pull_request, refresh),
+            WorkerCommand::LoadPullRequestStackMemberConversation {
+                identity,
+                generation,
+                pull_request,
+            } => load_stack_member_conversation(&mut session, identity, generation, pull_request),
+            WorkerCommand::LoadPullRequestStackMemberCommits {
+                identity,
+                generation,
+                pull_request,
+            } => load_stack_member_commits(&mut session, identity, generation, pull_request),
             WorkerCommand::PreparePullRequest {
                 generation,
                 pull_request,

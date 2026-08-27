@@ -143,6 +143,9 @@ impl Session {
             Command::PullRequestConversation { pull_request } => Ok(Outcome::Conversation(
                 Box::new(self.repository.pull_request_conversation(&pull_request)?),
             )),
+            Command::PullRequestCommits { pull_request } => Ok(Outcome::Commits(Box::new(
+                self.repository.pull_request_commits(&pull_request)?,
+            ))),
             Command::PullRequestReview { pull_request } => Ok(Outcome::Review(Box::new(
                 self.repository.pull_request_review(&pull_request)?,
             ))),

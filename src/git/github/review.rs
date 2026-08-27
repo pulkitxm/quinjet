@@ -244,7 +244,7 @@ impl Repository {
         Ok(message.to_owned())
     }
 
-    fn graphql<T: for<'de> Deserialize<'de>>(
+    pub(super) fn graphql<T: for<'de> Deserialize<'de>>(
         &self,
         pull_request: &PullRequest,
         query: &str,
@@ -297,7 +297,7 @@ impl Repository {
     }
 }
 
-fn repository_parts(pull_request: &PullRequest) -> Result<(&str, &str)> {
+pub(super) fn repository_parts(pull_request: &PullRequest) -> Result<(&str, &str)> {
     pull_request
         .base_repository
         .name_with_owner

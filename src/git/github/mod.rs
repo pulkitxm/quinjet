@@ -1,4 +1,5 @@
 mod checks;
+mod commits;
 mod conversation;
 
 use std::borrow::Cow;

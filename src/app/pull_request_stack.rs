@@ -65,6 +65,7 @@ impl App {
         self.pull_request_stack_anchor = selection.map(|(anchor, _)| anchor);
         self.pull_request_stack_cursor = selection.map(|(_, cursor)| cursor);
         self.pull_request_stack_error = None;
+        self.reconcile_stack_inspector();
         if self.pull_request_stack.is_none()
             && self.pull_request_section == PullRequestSection::Stack
         {
@@ -72,6 +73,7 @@ impl App {
             self.reset_pull_request_diff_runtime();
             return;
         }
+        self.request_stack_inspector(self.pull_request_lookup_refresh, effects);
         if changed && self.pull_request_section == PullRequestSection::Stack {
             self.reset_pull_request_diff_runtime();
             self.request_preview(effects);
@@ -107,6 +109,7 @@ impl App {
         self.pull_request_file_view = PullRequestFileView::AllFiles;
         self.content_scroll = 0;
         self.horizontal_scroll = 0;
+        self.reconcile_stack_inspector();
         self.schedule_preview(now);
         true
     }

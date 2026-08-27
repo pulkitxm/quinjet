@@ -324,7 +324,7 @@ fetch|pull|push|sync|log|show
 branch list|branch switch main|branch create topic|branch rename old new|branch delete old|branch compare main
 stash list|stash push|stash apply stash@{0}|stash pop|stash drop stash@{0}|stash clear|stash show stash@{0}
 worktree list|cherry-pick HEAD|revert HEAD|resolve file --stage|repos
-pr view 1|pr files 1|pr diff 1|pr conversation 1|pr checks 1|pr logs 1 check|pr open 1
+pr view 1|pr files 1|pr commits 1|pr diff 1|pr conversation 1|pr checks 1|pr logs 1 check|pr open 1
 pr merge 1 --merge|pr admin-merge 1 --squash|pr auto-merge 1 --rebase
 pr disable-auto-merge 1|pr dequeue 1|pr ready 1|pr draft 1
 pr review 1 --approve|pr comment 1 note|pr edit-last-comment 1 note|pr delete-last-comment 1
@@ -353,8 +353,8 @@ pr reviews discard 1|pr reviews resolve 1 thread|pr reviews unresolve 1 thread
         count += 1;
     }
     ensure!(
-        count == 69,
-        "expected 69 repository leaves, exercised {count}"
+        count == 70,
+        "expected 70 repository leaves, exercised {count}"
     );
     Ok(())
 }

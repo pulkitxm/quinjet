@@ -5,7 +5,7 @@ use anyhow::Result;
 use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
     CheckRunLog, GitHubRepository, PullRequest, PullRequestCheck, PullRequestChecks,
-    PullRequestConversation, PullRequestDiffIndex, PullRequestOperation,
+    PullRequestCommits, PullRequestConversation, PullRequestDiffIndex, PullRequestOperation,
     PullRequestReviewOperation, PullRequestReviewSnapshot, PullRequestSnapshot, PullRequestStack,
     PullRequestStackSnapshot,
 };
@@ -75,6 +75,9 @@ pub(crate) enum Command {
     PullRequestConversation {
         pull_request: Box<PullRequest>,
     },
+    PullRequestCommits {
+        pull_request: Box<PullRequest>,
+    },
     PullRequestReview {
         pull_request: Box<PullRequest>,
     },
@@ -119,6 +122,7 @@ impl Command {
             }
             Self::PullRequestChecks { .. } => "Fetching pull-request checks",
             Self::PullRequestConversation { .. } => "Fetching pull-request conversation",
+            Self::PullRequestCommits { .. } => "Fetching pull-request commits",
             Self::PullRequestReview { .. } => "Fetching pull-request review threads",
             Self::CheckRunLog { .. } => "Fetching check-run log",
             Self::WarmCheckRunLogs { .. } => "Caching check-run logs",
@@ -155,6 +159,7 @@ pub(crate) enum Outcome {
     PullRequestDiffBatch(Vec<(PathBuf, DiffDocument)>),
     Checks(Box<PullRequestChecks>),
     Conversation(Box<PullRequestConversation>),
+    Commits(Box<PullRequestCommits>),
     Review(Box<PullRequestReviewSnapshot>),
     CheckLog(Box<CheckRunLog>),
     Warmed,
@@ -199,6 +204,7 @@ answers! {
     checks, Checks -> PullRequestChecks, |value: Box<PullRequestChecks>| *value;
     conversation, Conversation -> PullRequestConversation,
         |value: Box<PullRequestConversation>| *value;
+    commits, Commits -> PullRequestCommits, |value: Box<PullRequestCommits>| *value;
     review, Review -> PullRequestReviewSnapshot,
         |value: Box<PullRequestReviewSnapshot>| *value;
     check_log, CheckLog -> CheckRunLog, |value: Box<CheckRunLog>| *value;
