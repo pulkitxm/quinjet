@@ -139,6 +139,10 @@ pub(crate) enum WorkerCommand {
         pull_request: Box<PullRequest>,
         checks: Vec<PullRequestCheck>,
     },
+    PrefetchPullRequestStackMembers {
+        generation: u64,
+        pull_requests: Vec<PullRequest>,
+    },
     LoadBranches {
         generation: u64,
     },
@@ -310,6 +314,7 @@ struct Mailbox {
     review: Option<WorkerCommand>,
     check_log: Option<WorkerCommand>,
     warm: Option<WorkerCommand>,
+    stack_warm: Option<WorkerCommand>,
     shutdown: bool,
 }
 
@@ -370,6 +375,9 @@ impl Mailbox {
             command @ WorkerCommand::PrefetchCheckRunLogs { .. } => {
                 self.warm = Some(command);
             }
+            command @ WorkerCommand::PrefetchPullRequestStackMembers { .. } => {
+                self.stack_warm = Some(command);
+            }
             WorkerCommand::Shutdown => self.shutdown = true,
         }
     }
@@ -395,6 +403,7 @@ impl Mailbox {
             .or_else(|| self.history.take())
             .or_else(|| self.prefetch.take())
             .or_else(|| self.warm.take())
+            .or_else(|| self.stack_warm.take())
     }
 }
 
@@ -412,6 +421,7 @@ enum WorkerLane {
     PullRequestPreview,
     Review,
     Warm,
+    StackWarm,
 }
 
 const fn worker_lane(command: &WorkerCommand) -> WorkerLane {
@@ -433,6 +443,7 @@ const fn worker_lane(command: &WorkerCommand) -> WorkerLane {
         WorkerCommand::LoadPullRequestReview { .. }
         | WorkerCommand::OperatePullRequestReview { .. } => WorkerLane::Review,
         WorkerCommand::PrefetchCheckRunLogs { .. } => WorkerLane::Warm,
+        WorkerCommand::PrefetchPullRequestStackMembers { .. } => WorkerLane::StackWarm,
         WorkerCommand::PreparePullRequest { .. }
         | WorkerCommand::PreparePullRequestStack { .. }
         | WorkerCommand::LoadPullRequestFile { .. }

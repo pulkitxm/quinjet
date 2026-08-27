@@ -101,3 +101,27 @@ fn load_checks(
             .and_then(Outcome::checks),
     )
 }
+
+pub(super) fn run_stack_warm_worker(
+    repository: &Repository,
+    mailbox: &Arc<SharedMailbox>,
+    generation: &Arc<AtomicU64>,
+) {
+    let mut session = Session::new(repository.clone_for_worker());
+    while let Some(command) = next_command(mailbox) {
+        match command {
+            WorkerCommand::PrefetchPullRequestStackMembers {
+                generation: mine,
+                pull_requests,
+            } => {
+                drop(session.execute_with(
+                    Command::WarmPullRequestStackMembers { pull_requests },
+                    &mut |_| {},
+                    &|| generation.load(Ordering::SeqCst) == mine,
+                ));
+            }
+            WorkerCommand::Shutdown => break,
+            _ => {}
+        }
+    }
+}

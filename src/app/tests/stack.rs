@@ -286,7 +286,7 @@ fn stack_member_identity_survives_reordering_and_inspector_reset_is_isolated() {
 }
 
 #[test]
-fn stack_snapshot_requests_only_the_selected_summary_and_tip_checks() {
+fn stack_snapshot_requests_selected_summary_tip_checks_and_background_warming() {
     let mut app = App::new("/tmp/repo", "repo");
     app.pull_request = Some(pull_request(42, "Root", "acme/widget"));
     app.pull_request_checks = vec![check("root", PullRequestCheckStatus::Passed)];
@@ -295,7 +295,7 @@ fn stack_snapshot_requests_only_the_selected_summary_and_tip_checks() {
 
     app.apply_pull_request_stack_snapshot(Some(pull_request_stack(2)), &mut effects);
 
-    assert_eq!(effects.len(), 2);
+    assert_eq!(effects.len(), 3);
     assert!(effects.iter().any(|effect| matches!(
         effect,
         AppEffect::Git(command)

@@ -360,7 +360,8 @@ pub(super) fn run_worker(
                         .and_then(Outcome::check_log),
                 ),
             },
-            WorkerCommand::PrefetchCheckRunLogs { .. } => continue,
+            WorkerCommand::PrefetchCheckRunLogs { .. }
+            | WorkerCommand::PrefetchPullRequestStackMembers { .. } => continue,
             WorkerCommand::LoadBranches { generation } => WorkerEvent::Branches {
                 generation,
                 result: answer(

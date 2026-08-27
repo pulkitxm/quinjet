@@ -49,7 +49,7 @@ fn stack() -> PullRequestStack {
     }
 }
 
-fn stack_app() -> App {
+pub(super) fn stack_app() -> App {
     let mut app = overview_app();
     let stack = stack();
     let mut selected = stack.member_pull_request(3).unwrap();
@@ -72,7 +72,7 @@ fn stack_app() -> App {
     app
 }
 
-fn rendered(terminal: &Terminal<TestBackend>) -> String {
+pub(super) fn rendered(terminal: &Terminal<TestBackend>) -> String {
     terminal
         .backend()
         .buffer()

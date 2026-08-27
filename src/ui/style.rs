@@ -52,6 +52,20 @@ pub(super) fn panel_block(title: String, focused: bool, theme: &Theme) -> Block<
         .style(Style::default().bg(theme.panel).fg(theme.text))
 }
 
+pub(super) fn section_separator_block(title: &str, theme: &Theme) -> Block<'static> {
+    Block::default()
+        .title(Span::styled(
+            format!(" {title} "),
+            Style::default()
+                .fg(theme.muted)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .borders(Borders::TOP)
+        .border_type(BorderType::Plain)
+        .border_style(Style::default().fg(theme.border))
+        .style(Style::default().bg(theme.panel_alt))
+}
+
 pub(super) fn modal_block(title: &str, theme: &Theme) -> Block<'static> {
     Block::default()
         .title(title.to_owned())

@@ -1,0 +1,96 @@
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
+
+use super::stack::{rendered, stack_app};
+use super::*;
+
+fn row_text(terminal: &Terminal<TestBackend>, row: u16, width: u16) -> String {
+    let buffer = terminal.backend().buffer();
+    (0..width)
+        .map(|column| buffer[(column, row)].symbol())
+        .collect()
+}
+
+#[test]
+fn wide_stack_regions_have_titled_separators_without_changing_hit_rows() {
+    let mut app = stack_app();
+    let theme = Theme::default();
+    let mut terminal = Terminal::new(TestBackend::new(104, 24)).unwrap();
+
+    terminal
+        .draw(|frame| draw(frame, &mut app, &theme))
+        .unwrap();
+
+    let gate = app
+        .geometry
+        .stack_inspector_hits
+        .iter()
+        .find(|hit| hit.target == StackInspectorHit::TipChecks)
+        .unwrap()
+        .area;
+    let gate_title = row_text(&terminal, gate.y, 104);
+    let gate_state = row_text(&terminal, gate.y.saturating_add(1), 104);
+    let rail_title = row_text(&terminal, app.geometry.sidebar.y, 104);
+    let detail_title = row_text(&terminal, app.geometry.content.y, 104);
+    let buffer = terminal.backend().buffer();
+
+    assert!(gate_title.contains("FINAL STACK GATE / TIP #43"));
+    assert!(gate_state.contains("FAIL  #43"));
+    assert_eq!(
+        buffer[(gate.right().saturating_sub(1), gate.y)].symbol(),
+        "─"
+    );
+    assert_eq!(
+        buffer[(gate.right().saturating_sub(1), gate.y)].fg,
+        theme.border
+    );
+    assert!(rail_title.contains("BASE -> TIP · MEMBER HEALTH"));
+    assert_eq!(
+        buffer[(
+            app.geometry.sidebar.right().saturating_sub(1),
+            app.geometry.sidebar.y
+        )]
+            .symbol(),
+        "─"
+    );
+    assert!(detail_title.contains("Member 3/3"));
+    assert_eq!(app.geometry.sidebar_divider.width, 1);
+    assert!(
+        app.geometry
+            .sidebar_hits
+            .iter()
+            .all(|hit| hit.area.y >= app.geometry.sidebar.y.saturating_add(1))
+    );
+}
+
+#[test]
+fn compact_stack_regions_keep_their_height_and_gain_separators() {
+    let mut app = stack_app();
+    let theme = Theme::default();
+    let mut terminal = Terminal::new(TestBackend::new(72, 24)).unwrap();
+
+    terminal
+        .draw(|frame| draw(frame, &mut app, &theme))
+        .unwrap();
+
+    let gate = app
+        .geometry
+        .stack_inspector_hits
+        .iter()
+        .find(|hit| hit.target == StackInspectorHit::TipChecks)
+        .unwrap()
+        .area;
+    let gate_title = row_text(&terminal, gate.y, 72);
+    let member_title = row_text(&terminal, app.geometry.sidebar.y, 72);
+    let detail_title = row_text(&terminal, app.geometry.content.y, 72);
+    let output = rendered(&terminal);
+
+    assert!(gate_title.contains("FINAL STACK GATE / TIP #43"));
+    assert!(member_title.contains("MEMBERS · [ / ] select"));
+    assert!(detail_title.contains("Member 3/3"));
+    assert_eq!(app.geometry.sidebar.height, 2);
+    assert_eq!(app.geometry.sidebar_divider, Rect::default());
+    assert!(output.contains("FAIL  #43"));
+    assert!(!gate_title.contains(['┌', '┐', '│']));
+    assert!(!member_title.contains(['┌', '┐', '│']));
+}

@@ -72,6 +72,7 @@ impl App {
         }
         if workspace_changed {
             self.reset_view_sidebar_scroll(View::PullRequests);
+            self.request_pull_request_stack_prefetch(effects);
         }
         if self.pull_request_stack.is_some() {
             self.pull_request_section = PullRequestSection::Stack;
@@ -100,6 +101,33 @@ impl App {
                 self.request_preview(effects);
             }
         }
+    }
+
+    fn request_pull_request_stack_prefetch(&self, effects: &mut Vec<AppEffect>) {
+        let pull_requests = self
+            .pull_request_stack
+            .as_ref()
+            .map_or_else(Vec::new, |stack| {
+                let selected = self.pull_request_stack_cursor;
+                stack
+                    .members
+                    .iter()
+                    .filter(|member| Some(member.position) == selected)
+                    .chain(
+                        stack
+                            .members
+                            .iter()
+                            .filter(|member| Some(member.position) != selected),
+                    )
+                    .filter_map(|member| stack.member_pull_request(member.position))
+                    .collect()
+            });
+        effects.push(AppEffect::Git(Box::new(
+            WorkerCommand::PrefetchPullRequestStackMembers {
+                generation: 0,
+                pull_requests,
+            },
+        )));
     }
 
     pub(crate) fn selected_pull_request_stack_member(&self) -> Option<&PullRequestStackMember> {
