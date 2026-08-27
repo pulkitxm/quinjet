@@ -4,7 +4,7 @@
 [![crates.io](https://img.shields.io/crates/v/quinjet.svg)](https://crates.io/crates/quinjet)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A fast, live, keyboard-first Git source-control interface for the terminal, written in Rust.
+A fast, live, keyboard-first Git source-control interface for the terminal, written in Rust!
 
 Quinjet discovers the containing Git repository from any nested directory, watches it for changes, and combines a VS Code-inspired changes list with syntax-highlighted diffs and commit history. Navigation and rendering remain independent from Git subprocess latency.
 
