@@ -12,6 +12,23 @@ fn recognizes_exact_ecosystem_files_before_their_extensions() {
 }
 
 #[test]
+fn recognizes_major_ecosystem_conventions() {
+    for (path, icon) in [
+        ("app/page.tsx", REACT),
+        ("next-env.d.ts", TYPESCRIPT),
+        ("biome.json", JAVASCRIPT),
+        ("pyrightconfig.json", PYTHON),
+        ("requirements-dev.txt", PYTHON),
+        ("Package.resolved", SWIFT),
+        (".swiftlint.yml", SWIFT),
+        ("rust-analyzer.json", RUST),
+        ("deny.toml", RUST),
+    ] {
+        assert_eq!(for_path(Path::new(path)), icon, "{path}");
+    }
+}
+
+#[test]
 fn recognizes_extensions_without_allocating_or_requiring_lowercase() {
     assert_eq!(for_path(Path::new("src/main.RS")), RUST);
     assert_eq!(for_path(Path::new("types/index.D.TS")), TYPESCRIPT);
