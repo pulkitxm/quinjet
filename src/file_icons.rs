@@ -147,6 +147,7 @@ fn special_name_icon(name: &str) -> FileIcon {
         "nodemon.json" => NODE,
         "lerna.json" => NODE,
         "rush.json" => NODE,
+        ".nvmrc" => NODE,
         "wrangler.toml" => TYPESCRIPT,
         "angular.json" => ANGULAR,
         "Dockerfile" => DOCKER,

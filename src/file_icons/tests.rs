@@ -67,6 +67,33 @@ fn recognizes_environment_variants_and_falls_back_for_unmapped_files() {
     assert_eq!(for_path(Path::new("LICENSE")), CERTIFICATE);
 }
 
+#[test]
+fn recognizes_audited_repository_conventions() {
+    for (path, icon) in [
+        (".validation", CONFIG),
+        (".npmignore", NPM),
+        (".gitkeep", GIT),
+        (".prettierignore", CONFIG),
+        ("CODEOWNERS", GIT),
+        (".eslintignore", CONFIG),
+        ("_redirects", CONFIG),
+        ("CNAME", CONFIG),
+        (".clang-format", CONFIG),
+        (".clangd", CONFIG),
+        (".pylintrc", PYTHON),
+        (".nvmrc", NODE),
+        (".yarn-integrity", YARN),
+        ("gradlew", JAVA),
+        ("NOTICE", CERTIFICATE),
+        ("Dockerfile.mysql-plain", DOCKER),
+        ("binding.gyp", CONFIG),
+        ("interface.idl", CODE),
+        ("Info.plist", APPLE),
+    ] {
+        assert_eq!(for_path(Path::new(path)), icon, "{path}");
+    }
+}
+
 const AUDITED_EXTENSIONS: &[&str] = &[
     "acl",
     "applescript",
