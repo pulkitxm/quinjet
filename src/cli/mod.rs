@@ -44,7 +44,7 @@ use crate::git::github::{
 use crate::git::status::{Change, ChangeArea};
 use crate::git::{ConflictChoice, GitOperation, LocalDiffRequest, Repository};
 use crate::integration::Client;
-use crate::theme::{AppearanceChoice, ThemeName};
+use crate::theme::{AppearanceChoice, HostTheme, ThemeName, ThemeSelection};
 
 pub(crate) const EXIT_FAILURE: u8 = 1;
 pub(crate) const EXIT_NOT_FOUND: u8 = 3;
@@ -98,7 +98,7 @@ pub(crate) struct TerminalOptions {
     pub path: PathBuf,
     pub no_mouse: bool,
     pub webhook_listen: Option<String>,
-    pub theme: ThemeName,
+    pub theme: ThemeSelection,
     pub appearance: AppearanceChoice,
     pub pull_request: Option<u64>,
     pub client: Option<Client>,
@@ -330,8 +330,11 @@ struct TuiArgs {
     #[arg(long, value_name = "ADDRESS")]
     webhook_listen: Option<String>,
     #[doc = " Color palette to use throughout the interface"]
-    #[arg(long, value_enum, default_value_t)]
+    #[arg(long, value_enum, default_value_t, conflicts_with = "theme_palette")]
     theme: ThemeName,
+    #[doc = " Host-provided light and dark color palettes as JSON"]
+    #[arg(long, value_name = "JSON")]
+    theme_palette: Option<HostTheme>,
     #[doc = " Use the system, light, or dark variant of the palette"]
     #[arg(long, value_enum, default_value_t)]
     appearance: AppearanceChoice,

@@ -15,7 +15,7 @@ impl App {
             focus: Focus::Sidebar,
             diff_layout: DiffLayout::SideBySide,
             theme: Theme::default(),
-            theme_name: ThemeName::default(),
+            theme_selection: ThemeName::default().into(),
             appearance_choice: AppearanceChoice::default(),
             appearance: Appearance::Dark,
             status: RepoStatus::default(),
@@ -216,10 +216,15 @@ impl App {
         matches!(self.host_client, Some(Client::Edith))
     }
 
-    pub(crate) fn set_theme_selection(&mut self, name: ThemeName, choice: AppearanceChoice) {
+    pub(crate) fn set_theme_selection(
+        &mut self,
+        selection: impl Into<ThemeSelection>,
+        choice: AppearanceChoice,
+    ) {
+        let selection = selection.into();
         let appearance = choice.resolve();
-        self.theme = Theme::new(name, appearance);
-        self.theme_name = name;
+        self.theme = Theme::new_selection(selection, appearance);
+        self.theme_selection = selection;
         self.appearance_choice = choice;
         self.appearance = appearance;
         self.invalidate_pull_request_content_rows();

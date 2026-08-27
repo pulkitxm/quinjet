@@ -3,7 +3,7 @@ use crate::git::Repository;
 use crate::git::worker::GitWorker;
 use crate::integration::Client;
 use crate::ssh::SshContext;
-use crate::theme::{AppearanceChoice, ThemeName};
+use crate::theme::{AppearanceChoice, ThemeSelection};
 use crate::watch::RepoWatcher;
 
 #[derive(Clone)]
@@ -27,7 +27,7 @@ pub(super) struct RepositoryRuntime {
 impl RepositoryRuntime {
     pub(super) fn new(
         repository: &Repository,
-        theme: ThemeName,
+        theme: ThemeSelection,
         appearance: AppearanceChoice,
         mouse: bool,
         webhooks_listening: bool,
