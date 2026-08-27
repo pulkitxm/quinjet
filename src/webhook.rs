@@ -200,11 +200,8 @@ mod tests {
             .unwrap();
         assert_eq!(delivery.event, "pull_request");
 
-        let mut response = String::new();
-        stream.read_to_string(&mut response).unwrap();
-        assert!(
-            response.starts_with("HTTP/1.1 204"),
-            "the sender is answered so `gh webhook forward` does not report a failure: {response}"
-        );
+        let mut response = [0; 12];
+        stream.read_exact(&mut response).unwrap();
+        assert_eq!(response, *b"HTTP/1.1 204");
     }
 }
