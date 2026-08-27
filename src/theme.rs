@@ -3,14 +3,16 @@
     reason = "six-digit hexadecimal RGB values are clearest without separators"
 )]
 
-use std::time::Duration;
-use std::{fmt, str::FromStr};
-
 use clap::ValueEnum;
 use ratatui::style::Color;
-use serde::Deserialize;
 
-const SYSTEM_APPEARANCE_TIMEOUT: Duration = Duration::from_millis(250);
+mod appearance;
+mod host;
+
+#[cfg(test)]
+use appearance::system_appearance;
+pub(crate) use appearance::{Appearance, AppearanceChoice};
+pub(crate) use host::HostTheme;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
 pub(crate) enum ThemeName {
@@ -91,132 +93,6 @@ impl From<ThemeName> for ThemeSelection {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct HostTheme {
-    light: HostPalette,
-    dark: HostPalette,
-}
-
-impl HostTheme {
-    const fn palette(self, appearance: Appearance) -> [u32; 16] {
-        match appearance {
-            Appearance::Light => self.light.values,
-            Appearance::Dark => self.dark.values,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct HostPalette {
-    values: [u32; 16],
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct HostThemeInput {
-    light: HostPaletteInput,
-    dark: HostPaletteInput,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct HostPaletteInput {
-    background: String,
-    panel: String,
-    panel_alt: String,
-    border: String,
-    muted: String,
-    text: String,
-    text_strong: String,
-    contrast: String,
-    removed: String,
-    orange: String,
-    modified: String,
-    added: String,
-    cyan: String,
-    accent: String,
-    purple: String,
-    brown: String,
-}
-
-impl HostPaletteInput {
-    fn parse(self) -> Result<HostPalette, String> {
-        Ok(HostPalette {
-            values: [
-                parse_hex(&self.background)?,
-                parse_hex(&self.panel)?,
-                parse_hex(&self.panel_alt)?,
-                parse_hex(&self.border)?,
-                parse_hex(&self.muted)?,
-                parse_hex(&self.text)?,
-                parse_hex(&self.text_strong)?,
-                parse_hex(&self.contrast)?,
-                parse_hex(&self.removed)?,
-                parse_hex(&self.orange)?,
-                parse_hex(&self.modified)?,
-                parse_hex(&self.added)?,
-                parse_hex(&self.cyan)?,
-                parse_hex(&self.accent)?,
-                parse_hex(&self.purple)?,
-                parse_hex(&self.brown)?,
-            ],
-        })
-    }
-}
-
-impl FromStr for HostTheme {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let input: HostThemeInput =
-            serde_json::from_str(value).map_err(|error| format!("invalid theme JSON: {error}"))?;
-        Ok(Self {
-            light: input.light.parse()?,
-            dark: input.dark.parse()?,
-        })
-    }
-}
-
-impl fmt::Display for HostTheme {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("host theme")
-    }
-}
-
-fn parse_hex(value: &str) -> Result<u32, String> {
-    let value = value.strip_prefix('#').unwrap_or(value);
-    if value.len() != 6 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(format!("{value} is not a six-digit RGB color"));
-    }
-    u32::from_str_radix(value, 16).map_err(|error| format!("invalid RGB color {value}: {error}"))
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
-pub(crate) enum AppearanceChoice {
-    #[default]
-    System,
-    Light,
-    Dark,
-}
-
-impl AppearanceChoice {
-    pub(crate) const ALL: [Self; 3] = [Self::System, Self::Light, Self::Dark];
-
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::System => "System",
-            Self::Light => "Light",
-            Self::Dark => "Dark",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Appearance {
-    Light,
-    Dark,
-}
-
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Theme {
     pub background: Color,
@@ -255,34 +131,6 @@ pub(crate) enum SyntaxColor {
     Blue,
     Purple,
     Brown,
-}
-
-impl AppearanceChoice {
-    pub(crate) fn resolve(self) -> Appearance {
-        match self {
-            Self::Light => Appearance::Light,
-            Self::Dark => Appearance::Dark,
-            Self::System => system_appearance(detect_system_appearance()),
-        }
-    }
-}
-
-fn detect_system_appearance() -> Option<dark_light::Mode> {
-    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-    drop(
-        std::thread::Builder::new()
-            .name("system-appearance".to_owned())
-            .spawn(move || sender.send(dark_light::detect().ok()).unwrap_or_else(drop))
-            .ok()?,
-    );
-    receiver.recv_timeout(SYSTEM_APPEARANCE_TIMEOUT).ok()?
-}
-
-const fn system_appearance(mode: Option<dark_light::Mode>) -> Appearance {
-    match mode {
-        Some(dark_light::Mode::Light) => Appearance::Light,
-        Some(dark_light::Mode::Dark | dark_light::Mode::Unspecified) | None => Appearance::Dark,
-    }
 }
 
 impl Theme {
