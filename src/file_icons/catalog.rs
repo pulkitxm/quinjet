@@ -77,6 +77,10 @@ pub(super) const SWIFT: FileIcon = FileIcon {
     glyph: "\u{efbe}",
     color: SyntaxColor::Orange,
 };
+pub(super) const APPLE: FileIcon = FileIcon {
+    glyph: "\u{e711}",
+    color: SyntaxColor::Blue,
+};
 pub(super) const GO: FileIcon = FileIcon {
     glyph: "\u{e724}",
     color: SyntaxColor::Cyan,

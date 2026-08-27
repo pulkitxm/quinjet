@@ -29,6 +29,20 @@ fn uses_language_brand_glyphs_instead_of_generic_symbols() {
 }
 
 #[test]
+fn recognizes_apple_project_files() {
+    for path in [
+        "Resources/Info.plist",
+        "Edith.entitlements",
+        "project.pbxproj",
+        "Main.storyboard",
+        "PrivacyInfo.xcprivacy",
+    ] {
+        assert_eq!(for_path(Path::new(path)), APPLE, "{path}");
+    }
+    assert_eq!(for_path(Path::new("Edith.swiftmodule")), SWIFT);
+}
+
+#[test]
 fn recognizes_environment_variants_and_falls_back_for_unknown_files() {
     assert_eq!(for_path(Path::new(".env.local")), KEY);
     assert_eq!(for_path(Path::new(".ENV")), KEY);
@@ -58,6 +72,7 @@ fn every_icon_occupies_one_terminal_cell() {
         JAVA,
         PHP,
         SWIFT,
+        APPLE,
         GO,
         HASKELL,
         DART,
