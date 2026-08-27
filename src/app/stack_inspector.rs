@@ -8,6 +8,7 @@ use crate::git::github::{
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum StackMemberSection {
     #[default]
+    Files,
     Summary,
     Conversation,
     Checks,
@@ -146,7 +147,7 @@ impl StackInspector {
     pub(crate) fn clear(&mut self) {
         self.clear_selected();
         self.clear_tip();
-        self.section = StackMemberSection::Summary;
+        self.section = StackMemberSection::Files;
         self.diff_open = false;
         self.sync_due = false;
     }
@@ -243,6 +244,11 @@ impl super::App {
         self.stack_inspector.sync_due = false;
         self.request_stack_tip_checks(refresh, effects);
         match self.stack_inspector.section {
+            StackMemberSection::Files if self.view == super::View::PullRequests => {
+                self.request_preview(effects);
+                self.request_pull_request_review(refresh, effects);
+            }
+            StackMemberSection::Files => {}
             StackMemberSection::Summary => self.request_stack_member(refresh, effects),
             StackMemberSection::Conversation => {
                 self.request_stack_member_conversation(refresh, effects);
@@ -277,6 +283,7 @@ impl super::App {
             }
         }
         match self.stack_inspector.section {
+            StackMemberSection::Files => {}
             StackMemberSection::Summary | StackMemberSection::Conversation
                 if due(
                     self.stack_inspector.detail_read_at,
@@ -285,6 +292,7 @@ impl super::App {
             {
                 let issued = effects.len();
                 match self.stack_inspector.section {
+                    StackMemberSection::Files => {}
                     StackMemberSection::Summary => self.request_stack_member(true, effects),
                     StackMemberSection::Conversation => {
                         self.request_stack_member_conversation(true, effects);
@@ -326,6 +334,9 @@ impl super::App {
             self.reset_view_content_position(super::View::PullRequests);
         }
         self.stack_inspector.diff_open = false;
+        if section == StackMemberSection::Files {
+            self.pull_request_stack_anchor = self.pull_request_stack_cursor;
+        }
         self.request_stack_inspector(false, effects);
     }
 

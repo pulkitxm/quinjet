@@ -7,6 +7,7 @@ pub(super) fn stack_member_rows(
     theme: &Theme,
 ) -> (Vec<ContentRow>, Vec<ContentLink>) {
     match app.stack_inspector.section {
+        StackMemberSection::Files => (Vec::new(), Vec::new()),
         StackMemberSection::Summary => stack_summary_rows(app, width, theme),
         StackMemberSection::Conversation => stack_conversation_rows(app, width, theme),
         StackMemberSection::Checks => stack_check_rows(app, theme),

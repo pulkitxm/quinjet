@@ -93,13 +93,13 @@ fn wide_stack_inspector_renders_the_gate_rail_detail_and_hits() {
 
     let rendered = rendered(&terminal);
     assert!(rendered.contains("STACK #19"));
-    assert!(rendered.contains("FINAL STACK GATE / TIP #43"));
+    assert!(rendered.contains("FINAL GATE FAIL"));
     assert!(rendered.contains("FAIL"));
     assert!(rendered.contains("RANGE 2..3"));
-    assert!(rendered.contains("BASE -> TIP · MEMBER HEALTH"));
-    assert!(rendered.contains("1 Summary"));
-    assert!(rendered.contains("Keeps permission refresh work bounded"));
-    assert!(!rendered.contains("Files 3"));
+    assert!(rendered.contains("REVIEW PATH · BASE TO TIP"));
+    assert!(rendered.contains("1 Files 3"));
+    assert!(rendered.contains("2 Summary"));
+    assert!(rendered.contains("[r Submit review]"));
     assert!(app.geometry.sidebar.right() < app.geometry.content.right());
     assert_eq!(app.geometry.sidebar_divider.width, 1);
     assert_eq!(
@@ -116,7 +116,7 @@ fn wide_stack_inspector_renders_the_gate_rail_detail_and_hits() {
             .iter()
             .filter(|hit| matches!(hit.target, StackInspectorHit::Section(_)))
             .count(),
-        4
+        5
     );
     assert!(
         app.geometry
@@ -130,6 +130,12 @@ fn wide_stack_inspector_renders_the_gate_rail_detail_and_hits() {
             .iter()
             .any(|hit| hit.target == StackInspectorHit::Diff)
     );
+    assert!(
+        app.geometry
+            .stack_inspector_hits
+            .iter()
+            .any(|hit| hit.target == StackInspectorHit::Review)
+    );
 }
 
 #[test]
@@ -142,10 +148,9 @@ fn narrow_stack_inspector_replaces_the_rail_with_a_member_strip() {
         .unwrap();
 
     let rendered = rendered(&terminal);
-    assert!(rendered.contains("MEMBERS · [ / ] select"));
+    assert!(rendered.contains("REVIEW PATH · p/n select"));
     assert!(rendered.contains("3 #43 TIP"));
-    assert!(rendered.contains("1 Summary"));
-    assert!(!rendered.contains("MEMBER HEALTH"));
+    assert!(rendered.contains("1 Files 3"));
     assert!(app.geometry.sidebar.bottom() <= app.geometry.content.y);
     assert_eq!(app.geometry.sidebar_divider, Rect::default());
     assert_eq!(
@@ -273,7 +278,7 @@ fn minimum_terminal_height_keeps_stack_member_sections_visible() {
         .draw(|frame| draw(frame, &mut app, &Theme::default()))
         .unwrap();
 
-    assert!(rendered(&terminal).contains("1 Summary"));
+    assert!(rendered(&terminal).contains("1 Files"));
     assert!(app.geometry.content.height >= 6);
 }
 
@@ -294,7 +299,7 @@ fn narrow_gate_keeps_status_visible_with_a_long_tip_title() {
         .draw(|frame| draw(frame, &mut app, &Theme::default()))
         .unwrap();
 
-    assert!(rendered(&terminal).contains("FAIL  #43"));
+    assert!(rendered(&terminal).contains("FINAL GATE FAIL"));
 }
 
 #[test]
@@ -311,9 +316,9 @@ fn truncated_stack_blocks_the_gate_without_claiming_a_final_tip() {
 
     let output = rendered(&terminal);
     assert!(output.contains("TIP ? · PARTIAL"));
-    assert!(output.contains("STACK GATE / TIP UNAVAILABLE / PARTIAL STACK"));
+    assert!(output.contains("GATE UNAVAILABLE BLOCKED"));
     assert!(output.contains("BLOCKED"));
-    assert!(!output.contains("FINAL STACK GATE"));
+    assert!(!output.contains("FINAL GATE"));
     assert!(!output.contains("3 #43 TIP"));
 
     app.pull_request_stack_error = Some("refresh failed".to_owned());
@@ -321,8 +326,8 @@ fn truncated_stack_blocks_the_gate_without_claiming_a_final_tip() {
         .draw(|frame| draw(frame, &mut app, &Theme::default()))
         .unwrap();
     let stale_output = rendered(&terminal);
-    assert!(stale_output.contains("TIP UNAVAILABLE / STALE PARTIAL STACK"));
-    assert!(stale_output.contains("[t Final checks unavailable]"));
+    assert!(stale_output.contains("STALE METADATA"));
+    assert!(stale_output.contains("[t Checks unavailable]"));
     assert!(!stale_output.contains("Inspect last-known checks"));
 }
 
@@ -434,6 +439,7 @@ fn unknown_checks_use_muted_rows_and_block_the_gate() {
 #[test]
 fn initial_member_error_does_not_claim_the_description_is_empty() {
     let mut app = stack_app();
+    app.stack_inspector.section = StackMemberSection::Summary;
     app.stack_inspector.selected_pull_request = None;
     app.stack_inspector.selected_error = Some("member metadata unavailable".to_owned());
 
@@ -451,6 +457,7 @@ fn initial_member_error_does_not_claim_the_description_is_empty() {
 #[test]
 fn failed_stack_refresh_marks_last_known_topology_as_stale() {
     let mut app = stack_app();
+    app.stack_inspector.section = StackMemberSection::Summary;
     app.pull_request_stack_error = Some("stack metadata refresh failed".to_owned());
     app.stack_inspector.selected_error = Some("member metadata refresh failed".to_owned());
     app.pull_request_warnings
@@ -464,12 +471,12 @@ fn failed_stack_refresh_marks_last_known_topology_as_stale() {
     let output = rendered(&terminal);
     assert!(output.contains("STACK #19"));
     assert!(output.contains("STALE METADATA"));
-    assert!(output.contains("STACK GATE / TIP UNVERIFIED / STALE METADATA"));
+    assert!(output.contains("GATE UNVERIFIED BLOCKED"));
     assert!(output.contains("BLOCKED"));
     assert!(output.contains("stack metadata refresh failed"));
     assert!(output.contains("member metadata refresh failed"));
     assert!(output.contains("Keeps permission refresh work bounded"));
-    assert!(!output.contains("FINAL STACK GATE"));
+    assert!(!output.contains("FINAL GATE"));
 
     app.pull_request_stack_error = None;
     terminal
