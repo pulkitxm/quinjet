@@ -5,6 +5,10 @@ pub(super) const FILE: FileIcon = FileIcon {
     glyph: "\u{f15b}",
     color: SyntaxColor::Text,
 };
+pub(super) const TEXT: FileIcon = FileIcon {
+    glyph: "\u{f15c}",
+    color: SyntaxColor::Text,
+};
 pub(super) const CODE: FileIcon = FileIcon {
     glyph: "\u{f1c9}",
     color: SyntaxColor::Blue,

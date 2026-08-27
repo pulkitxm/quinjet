@@ -68,9 +68,22 @@ fn recognizes_environment_variants_and_falls_back_for_unknown_files() {
 }
 
 #[test]
+fn every_curated_extension_has_a_non_generic_icon() {
+    let mut extensions = CURATED_EXTENSIONS.to_vec();
+    extensions.sort_unstable();
+    extensions.dedup();
+    assert_eq!(extensions.len(), CURATED_EXTENSIONS.len());
+    for extension in CURATED_EXTENSIONS {
+        let path = format!("file.{extension}");
+        assert_ne!(for_path(Path::new(&path)), FILE, "{extension}");
+    }
+}
+
+#[test]
 fn every_icon_occupies_one_terminal_cell() {
     let icons = [
         FILE,
+        TEXT,
         CODE,
         RUST,
         PYTHON,
