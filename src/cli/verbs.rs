@@ -447,9 +447,14 @@ pub(super) struct PrLogsArgs {
     pub(super) interval: u64,
 }
 
+mod actions;
 mod annotations;
 mod edit;
 mod since;
+pub(super) use actions::{
+    PrArtifactDownloadArgs, PrArtifactVerb, PrArtifactsCommand, PrCancelArgs, PrDeploymentVerb,
+    PrDeploymentsCommand, PrRerunArgs,
+};
 pub(super) use annotations::PrAnnotationsArgs;
 pub(super) use edit::PrEditArgs;
 #[cfg(test)]

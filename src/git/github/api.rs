@@ -9,7 +9,7 @@ pub(super) struct ApiPage {
 }
 
 impl Repository {
-    fn github_command(&self) -> Command {
+    pub(super) fn github_command(&self) -> Command {
         if let Some(path) = &self.github_cli {
             return Command::new(path);
         }
@@ -211,6 +211,35 @@ impl Repository {
             .env("EDITOR", "true")
             .env("VISUAL", "true");
         run_bounded_command(&mut command, stdout_limit, MAX_GH_ERROR_BYTES).with_context(|| {
+            format!(
+                "failed to execute GitHub CLI (`gh`) in {}; install it and run `gh auth login`",
+                self.root.display()
+            )
+        })
+    }
+
+    #[doc = " Send a response straight to a file. An artifact archive is far larger"]
+    #[doc = " than the bounded stdout buffer every other GitHub read uses, and it"]
+    #[doc = " is never inspected, only saved."]
+    pub(super) fn run_gh_to_file<I, S>(&self, args: I, file: File) -> Result<ExitStatus>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let mut command = self.github_command();
+        let _ = command
+            .current_dir(&self.root)
+            .args(args)
+            .env_remove("GH_FORCE_TTY")
+            .env("GH_PROMPT_DISABLED", "1")
+            .env("GH_PAGER", "cat")
+            .env("GH_NO_UPDATE_NOTIFIER", "1")
+            .env("NO_COLOR", "1")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .stdin(Stdio::null())
+            .stdout(file)
+            .stderr(Stdio::null());
+        command.status().with_context(|| {
             format!(
                 "failed to execute GitHub CLI (`gh`) in {}; install it and run `gh auth login`",
                 self.root.display()

@@ -1,5 +1,8 @@
 use anyhow::Result;
 
+mod progress;
+use progress::{forget_review_progress, mark_review_files, record_review_visit};
+
 use super::command::{Command, Outcome};
 use crate::git::github::{
     PreparedPullRequest, PullRequest, PullRequestCommits, PullRequestProgress, ReviewSince,
@@ -131,6 +134,44 @@ impl Session {
                 self.repository
                     .pull_request_annotations(&pull_request, refresh)?,
             ))),
+            Command::PullRequestWorkflowRuns {
+                pull_request,
+                refresh,
+            } => Ok(Outcome::WorkflowRuns(Box::new(
+                self.repository
+                    .pull_request_workflow_runs(&pull_request, refresh)?,
+            ))),
+            Command::PullRequestArtifacts { pull_request, runs } => Ok(Outcome::Artifacts(
+                Box::new(self.repository.pull_request_artifacts(&pull_request, &runs)),
+            )),
+            Command::DownloadArtifact {
+                pull_request,
+                artifact,
+                directory,
+            } => Ok(Outcome::DownloadedArtifact(
+                self.repository
+                    .download_artifact(&pull_request, &artifact, &directory)?,
+            )),
+            Command::PullRequestDeployments { pull_request, runs } => {
+                Ok(Outcome::Deployments(Box::new(
+                    self.repository
+                        .pull_request_deployments(&pull_request, &runs),
+                )))
+            }
+            Command::OperateWorkflow {
+                pull_request,
+                operation,
+            } => {
+                let label = operation.label().to_owned();
+                let message = self
+                    .repository
+                    .perform_workflow_operation(&pull_request, &operation)?;
+                Ok(Outcome::Operation {
+                    label,
+                    changes_history: false,
+                    message,
+                })
+            }
             Command::PullRequestStackGate { stack, refresh } => Ok(Outcome::StackGate(Box::new(
                 self.repository.pull_request_stack_gate(&stack, refresh),
             ))),
@@ -167,62 +208,14 @@ impl Session {
                 self.repository
                     .pull_request_review_progress(&pull_request, &index, &since)?,
             ))),
-            Command::RecordReviewVisit { pull_request } => {
-                let mut record = crate::state::load_review_progress(
-                    &pull_request.base_repository.url,
-                    pull_request.number,
-                );
-                record.record_visit(&pull_request.head_oid, crate::date_time::now_timestamp());
-                crate::state::record_review_progress(record);
-                Ok(Outcome::Operation {
-                    label: "Recording review visit".to_owned(),
-                    changes_history: false,
-                    message: format!(
-                        "Recorded a visit to #{} at {}",
-                        pull_request.number,
-                        short_oid(&pull_request.head_oid)
-                    ),
-                })
-            }
+            Command::RecordReviewVisit { pull_request } => Ok(record_review_visit(&pull_request)),
             Command::MarkReviewFiles {
                 pull_request,
                 paths,
                 viewed,
-            } => {
-                let mut record = crate::state::load_review_progress(
-                    &pull_request.base_repository.url,
-                    pull_request.number,
-                );
-                let mut changed = 0;
-                for path in &paths {
-                    if viewed {
-                        record.mark_viewed(path, &pull_request.head_oid);
-                        changed += 1;
-                    } else if record.mark_unviewed(path) {
-                        changed += 1;
-                    }
-                }
-                crate::state::record_review_progress(record);
-                let verb = if viewed { "read" } else { "unread" };
-                Ok(Outcome::Operation {
-                    label: "Marking reviewed files".to_owned(),
-                    changes_history: false,
-                    message: format!(
-                        "Marked {changed} file(s) as {verb} in #{}",
-                        pull_request.number
-                    ),
-                })
-            }
+            } => Ok(mark_review_files(&pull_request, &paths, viewed)),
             Command::ForgetReviewProgress { pull_request } => {
-                crate::state::forget_review_progress(
-                    &pull_request.base_repository.url,
-                    pull_request.number,
-                );
-                Ok(Outcome::Operation {
-                    label: "Clearing review progress".to_owned(),
-                    changes_history: false,
-                    message: format!("Cleared local review progress for #{}", pull_request.number),
-                })
+                Ok(forget_review_progress(&pull_request))
             }
             Command::PreparePullRequestStack {
                 workspace,
@@ -346,10 +339,6 @@ impl Session {
             .map(|(_, prepared)| prepared)
             .ok_or_else(|| anyhow::anyhow!("Pull-request diff workspace is no longer available"))
     }
-}
-
-fn short_oid(oid: &str) -> String {
-    oid.chars().take(12).collect()
 }
 
 #[derive(Clone, Copy)]

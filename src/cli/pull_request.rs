@@ -1,10 +1,12 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
+mod actions;
 mod annotations;
 mod commits;
 mod delta;
 mod monitor;
+use actions::{artifacts, cancel, deployments, rerun, runs};
 use annotations::annotations;
 use delta::pull_request_delta;
 pub(super) use monitor::select_check;
@@ -64,8 +66,13 @@ pub(super) fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb
         PrVerb::Checks(command) => match command.command {
             None => checks(session, out, &command.list),
             Some(PrChecksVerb::Annotations(args)) => annotations(session, out, &args),
+            Some(PrChecksVerb::Runs(args)) => runs(session, out, &args),
+            Some(PrChecksVerb::Rerun(args)) => rerun(session, out, &args),
+            Some(PrChecksVerb::Cancel(args)) => cancel(session, out, &args),
         },
         PrVerb::Gate(args) => gate(session, out, &args),
+        PrVerb::Artifacts(command) => artifacts(session, out, command),
+        PrVerb::Deployments(command) => deployments(session, out, command),
         PrVerb::Logs(args) => logs(session, out, &args),
         PrVerb::Open(args) => {
             let request = lookup(session, out, &args.pull_request)?;

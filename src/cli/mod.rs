@@ -37,13 +37,14 @@ use tui_args::TuiArgs;
 use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
     AnnotationFilter, AnnotationGrouping, AnnotationSeverity, CheckRunLog, GitHubRepository,
-    MergeGate, PullRequest, PullRequestAnnotations, PullRequestCheck, PullRequestCheckStatus,
-    PullRequestCommentMode, PullRequestDiffIndex, PullRequestEdit, PullRequestLockReason,
-    PullRequestMergeMethod, PullRequestMergeMode, PullRequestOperation, PullRequestReviewDecision,
-    PullRequestReviewKind, PullRequestReviewOperation, PullRequestReviewSide,
-    PullRequestReviewThreadSubject, PullRequestSnapshot, PullRequestStack,
-    PullRequestStackSnapshot, PullRequestUpdateMethod, ReviewNextStep, ReviewProgress,
-    ReviewSinceRequest, annotated_paths, mark_diff_coverage, visible_lines,
+    MergeGate, PullRequest, PullRequestAnnotations, PullRequestArtifacts, PullRequestCheck,
+    PullRequestCheckStatus, PullRequestCommentMode, PullRequestDeployments, PullRequestDiffIndex,
+    PullRequestEdit, PullRequestLockReason, PullRequestMergeMethod, PullRequestMergeMode,
+    PullRequestOperation, PullRequestReviewDecision, PullRequestReviewKind,
+    PullRequestReviewOperation, PullRequestReviewSide, PullRequestReviewThreadSubject,
+    PullRequestSnapshot, PullRequestStack, PullRequestStackSnapshot, PullRequestUpdateMethod,
+    PullRequestWorkflowRuns, ReviewNextStep, ReviewProgress, ReviewSinceRequest, WorkflowOperation,
+    annotated_paths, mark_diff_coverage, visible_lines,
 };
 use crate::git::status::{Change, ChangeArea};
 use crate::git::{ConflictChoice, GitOperation, LocalDiffRequest, Repository};

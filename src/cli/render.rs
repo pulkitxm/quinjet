@@ -3,11 +3,11 @@ use crate::git::diff::{DiffDocument, DiffLineKind};
 use crate::git::github::{
     AnnotationCounts, AnnotationGrouping, CheckAnnotation, CheckRunLog, CheckStep,
     ConversationKind, GitHubRepository, MergeGate, MergeGateBranch, MergeGateChecks,
-    MergeGateReview, PullRequest, PullRequestAnnotations, PullRequestCheck, PullRequestCheckStatus,
-    PullRequestCommits, PullRequestConversation, PullRequestDiffIndex, PullRequestFileStatus,
-    PullRequestReviewSide, PullRequestReviewSnapshot, PullRequestReviewThreadSubject,
-    PullRequestStackSnapshot, ReviewFileProgress, ReviewNextStep, ReviewProgress, StackGate,
-    unix_now,
+    MergeGateReview, PullRequest, PullRequestAnnotations, PullRequestArtifacts, PullRequestCheck,
+    PullRequestCheckStatus, PullRequestCommits, PullRequestConversation, PullRequestDeployments,
+    PullRequestDiffIndex, PullRequestFileStatus, PullRequestReviewSide, PullRequestReviewSnapshot,
+    PullRequestReviewThreadSubject, PullRequestStackSnapshot, PullRequestWorkflowRuns,
+    ReviewFileProgress, ReviewNextStep, ReviewProgress, StackGate, unix_now,
 };
 use crate::git::history::Commit;
 use crate::git::status::{ChangeArea, RepoStatus};
@@ -43,12 +43,14 @@ fn truncate(text: &str, width: usize) -> String {
     format!("{kept}…")
 }
 
+mod actions;
 mod annotations;
 mod gate;
 mod github;
 mod progress;
 mod repository;
 
+pub(crate) use actions::*;
 pub(crate) use annotations::*;
 pub(crate) use gate::*;
 pub(crate) use github::*;

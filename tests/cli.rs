@@ -235,6 +235,9 @@ mod annotations;
 #[path = "cli/capabilities.rs"]
 mod capabilities;
 #[cfg(unix)]
+#[path = "cli/ci_operations.rs"]
+mod ci_operations;
+#[cfg(unix)]
 #[path = "cli/fake_gh.rs"]
 mod fake_gh;
 #[cfg(unix)]
