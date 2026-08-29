@@ -2,11 +2,13 @@ use crate::date_time::{format_local_timestamp, format_relative_timestamp};
 use crate::git::diff::{DiffDocument, DiffLineKind};
 use crate::git::github::{
     AnnotationCounts, AnnotationGrouping, CheckAnnotation, CheckRunLog, CheckStep,
-    ConversationKind, FeedbackItem, GitHubRepository, MergeGate, MergeGateBranch, MergeGateChecks,
-    MergeGateReview, PullRequest, PullRequestAnnotations, PullRequestArtifacts, PullRequestCheck,
-    PullRequestCheckStatus, PullRequestCommits, PullRequestConversation, PullRequestDeployments,
-    PullRequestDiffIndex, PullRequestFeedback, PullRequestFileStatus, PullRequestReviewSide,
-    PullRequestReviewSnapshot, PullRequestReviewThreadSubject, PullRequestStackSnapshot,
+    CodeScanningAlert, ContextSection, ConversationKind, DependencyDelta, DependencyVulnerability,
+    FeedbackItem, GitHubRepository, MergeGate, MergeGateBranch, MergeGateChecks, MergeGateReview,
+    PullRequest, PullRequestAnnotations, PullRequestArtifacts, PullRequestCheck,
+    PullRequestCheckStatus, PullRequestCommits, PullRequestContext, PullRequestConversation,
+    PullRequestDependencies, PullRequestDeployments, PullRequestDiffIndex, PullRequestFeedback,
+    PullRequestFileStatus, PullRequestReviewSide, PullRequestReviewSnapshot,
+    PullRequestReviewThreadSubject, PullRequestSecurity, PullRequestStackSnapshot,
     PullRequestSuggestions, PullRequestWorkflowRuns, ReviewFileProgress, ReviewNextStep,
     ReviewProgress, StackGate, SuggestionBlocker, unix_now,
 };
@@ -46,6 +48,7 @@ fn truncate(text: &str, width: usize) -> String {
 
 mod actions;
 mod annotations;
+mod context;
 mod feedback;
 mod gate;
 mod github;
@@ -54,6 +57,7 @@ mod repository;
 
 pub(crate) use actions::*;
 pub(crate) use annotations::*;
+pub(crate) use context::*;
 pub(crate) use feedback::*;
 pub(crate) use gate::*;
 pub(crate) use github::*;

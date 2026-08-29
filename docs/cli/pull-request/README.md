@@ -96,6 +96,9 @@ when their check state settles.
 | `quinjet pr lock` / `unlock` | Changes whether the conversation accepts new comments. |
 | `quinjet pr subscribe` / `unsubscribe` | Changes notification subscription state. |
 | `quinjet pr allow-maintainer-edits` / `disallow-maintainer-edits` | Changes whether maintainers can edit a fork's head branch. |
+| `quinjet pr dependencies` | Lists the dependencies the pull request adds, removes or upgrades. |
+| `quinjet pr security` | Lists the code-scanning alerts and vulnerable dependencies the pull request raises. |
+| `quinjet pr context` | Assembles one bundle of context for a coding or review tool, with the trusted and untrusted parts kept apart. |
 | `quinjet pr revert` | Creates a pull request that reverts a merged pull request. |
 | `quinjet pr close` | Closes the pull request without merging, after `--yes`. |
 | `quinjet pr reopen` | Reopens a closed pull request that has not been merged, after `--yes`. |
@@ -116,6 +119,9 @@ when their check state settles.
 - [`quinjet pr deployments`](./deployments.md)
 - [`quinjet pr feedback`](./feedback.md)
 - [`quinjet pr suggestions`](./suggestions.md)
+- [`quinjet pr dependencies`](./dependencies.md)
+- [`quinjet pr security`](./security.md)
+- [`quinjet pr context`](./context.md)
 - [`quinjet pr gate`](./gate.md)
 - [`quinjet pr logs`](./logs.md)
 - [`quinjet pr open`](./open.md)

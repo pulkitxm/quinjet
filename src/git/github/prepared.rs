@@ -28,6 +28,11 @@ impl PreparedPullRequest {
         self.index.clone()
     }
 
+    #[doc = " The commit the patch is measured from."]
+    pub(crate) fn merge_base_oid(&self) -> &str {
+        &self.merge_base
+    }
+
     #[expect(
         clippy::similar_names,
         reason = "the names follow the Git vocabulary they model"
@@ -64,6 +69,18 @@ impl PreparedPullRequest {
             file,
             truncated,
         ))
+    }
+
+    #[doc = " The unified patch itself, unparsed. A context bundle hands this to"]
+    #[doc = " a coding tool, which wants the diff Git would have printed rather"]
+    #[doc = " than Quinjet's parsed view of it."]
+    pub(crate) fn patch_text(&self, paths: &[PathBuf]) -> Result<(String, bool)> {
+        if paths.is_empty() {
+            return Ok((String::new(), false));
+        }
+        let (patch, truncated) =
+            diff_selected_paths(self.repository.path(), &self.merge_base, &self.head, paths)?;
+        Ok((String::from_utf8_lossy(&patch).into_owned(), truncated))
     }
 
     #[doc = " Produce many file documents from a single `git diff`. Spawning one Git"]

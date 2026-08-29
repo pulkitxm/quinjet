@@ -4,11 +4,13 @@ use super::*;
 mod actions;
 mod annotations;
 mod commits;
+mod context;
 mod delta;
 mod feedback;
 mod monitor;
 use actions::{artifacts, cancel, deployments, rerun, runs};
 use annotations::annotations;
+use context::{context, dependencies, security};
 use delta::pull_request_delta;
 use feedback::{feedback, suggestions};
 pub(super) use monitor::select_check;
@@ -38,6 +40,9 @@ pub(super) fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb
             Ok(0)
         }
         PrVerb::Commits(args) => commits::commits(session, out, &args),
+        PrVerb::Dependencies(args) => dependencies(session, out, &args),
+        PrVerb::Security(args) => security(session, out, &args),
+        PrVerb::Context(args) => context(session, out, &args),
         PrVerb::Diff(args) => {
             let request = lookup(session, out, &args.pull_request)?;
             let document = match args.since.request() {

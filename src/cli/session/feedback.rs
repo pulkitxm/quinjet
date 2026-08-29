@@ -45,7 +45,7 @@ pub(super) fn apply(
     plan: &SuggestionPlan,
     message: Option<&str>,
 ) -> Result<Outcome> {
-    let paths: Vec<std::path::PathBuf> = plan.files.iter().map(|file| file.path.clone()).collect();
+    let paths: Vec<PathBuf> = plan.files.iter().map(|file| file.path.clone()).collect();
     repository.ensure_suggestions_apply_cleanly(pull_request, &paths)?;
     repository.write_suggestion_plan(plan)?;
     let committed = match message {

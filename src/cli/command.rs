@@ -4,13 +4,13 @@ use anyhow::Result;
 
 use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
-    CheckRunLog, GitHubRepository, MergeGate, PullRequest, PullRequestAnnotations,
+    CheckRunLog, ContextPurpose, GitHubRepository, MergeGate, PullRequest, PullRequestAnnotations,
     PullRequestArtifacts, PullRequestCheck, PullRequestChecks, PullRequestCommits,
-    PullRequestConversation, PullRequestDeployments, PullRequestDiffIndex, PullRequestFeedback,
-    PullRequestOperation, PullRequestReviewOperation, PullRequestReviewSnapshot,
-    PullRequestSnapshot, PullRequestStack, PullRequestStackSnapshot, PullRequestSuggestions,
-    PullRequestWorkflowRuns, ReviewProgress, ReviewSinceRequest, StackGate, Suggestion,
-    SuggestionPlan, WorkflowArtifact, WorkflowOperation,
+    PullRequestContext, PullRequestConversation, PullRequestDependencies, PullRequestDeployments,
+    PullRequestDiffIndex, PullRequestFeedback, PullRequestOperation, PullRequestReviewOperation,
+    PullRequestReviewSnapshot, PullRequestSecurity, PullRequestSnapshot, PullRequestStack,
+    PullRequestStackSnapshot, PullRequestSuggestions, PullRequestWorkflowRuns, ReviewProgress,
+    ReviewSinceRequest, StackGate, Suggestion, SuggestionPlan, WorkflowArtifact, WorkflowOperation,
 };
 use crate::git::history::Commit;
 use crate::git::status::RepoStatus;
@@ -75,6 +75,16 @@ pub(crate) enum Command {
     PullRequestSuggestions {
         pull_request: Box<PullRequest>,
         review: Box<PullRequestReviewSnapshot>,
+    },
+    PullRequestDependencies {
+        pull_request: Box<PullRequest>,
+    },
+    PullRequestSecurity {
+        pull_request: Box<PullRequest>,
+    },
+    PullRequestContext {
+        pull_request: Box<PullRequest>,
+        request: Box<ContextRequest>,
     },
     PlanSuggestions {
         suggestions: Vec<Suggestion>,
@@ -198,6 +208,9 @@ impl Command {
             Self::PullRequestWorkflowRuns { .. } => "Fetching workflow runs",
             Self::PullRequestFeedback { .. } => "Collecting outstanding feedback",
             Self::PullRequestSuggestions { .. } => "Reading suggested changes",
+            Self::PullRequestDependencies { .. } => "Comparing dependencies",
+            Self::PullRequestSecurity { .. } => "Reading security findings",
+            Self::PullRequestContext { .. } => "Assembling the context bundle",
             Self::PlanSuggestions { .. } => "Planning suggested changes",
             Self::ApplySuggestions { .. } => "Applying suggested changes",
             Self::PullRequestArtifacts { .. } => "Fetching workflow artifacts",
@@ -255,6 +268,9 @@ pub(crate) enum Outcome {
     WorkflowRuns(Box<PullRequestWorkflowRuns>),
     Feedback(Box<PullRequestFeedback>),
     Suggestions(Box<PullRequestSuggestions>),
+    Dependencies(Box<PullRequestDependencies>),
+    Security(Box<PullRequestSecurity>),
+    Context(Box<PullRequestContext>),
     SuggestionPlan(Box<SuggestionPlan>),
     Artifacts(Box<PullRequestArtifacts>),
     DownloadedArtifact(PathBuf),
@@ -313,6 +329,10 @@ answers! {
     suggestions, Suggestions -> PullRequestSuggestions,
         |value: Box<PullRequestSuggestions>| *value;
     suggestion_plan, SuggestionPlan -> SuggestionPlan, |value: Box<SuggestionPlan>| *value;
+    dependencies, Dependencies -> PullRequestDependencies,
+        |value: Box<PullRequestDependencies>| *value;
+    security, Security -> PullRequestSecurity, |value: Box<PullRequestSecurity>| *value;
+    context, Context -> PullRequestContext, |value: Box<PullRequestContext>| *value;
     artifacts, Artifacts -> PullRequestArtifacts, |value: Box<PullRequestArtifacts>| *value;
     downloaded_artifact, DownloadedArtifact -> PathBuf, |value| value;
     deployments, Deployments -> PullRequestDeployments,
@@ -366,4 +386,13 @@ impl Outcome {
 
 fn unexpected(outcome: &Outcome, wanted: &str) -> anyhow::Error {
     anyhow::anyhow!("Expected a {wanted} answer but the command layer returned {outcome:?}")
+}
+
+#[doc = " What a context bundle should contain, gathered from the command line so"]
+#[doc = " the session can do the fetching it implies."]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ContextRequest {
+    pub purpose: ContextPurpose,
+    pub budget: usize,
+    pub path: Option<PathBuf>,
 }

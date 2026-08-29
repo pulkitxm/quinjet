@@ -24,7 +24,7 @@ use anyhow::{Context, Result};
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
 use clap_mangen::Man;
-pub(crate) use command::{Command, Outcome};
+pub(crate) use command::{Command, ContextRequest, Outcome};
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use pr_verbs::*;
@@ -36,11 +36,12 @@ use tui_args::TuiArgs;
 
 use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
-    AnnotationFilter, AnnotationGrouping, AnnotationSeverity, CheckRunLog, FeedbackFilter,
-    GitHubRepository, MergeGate, PullRequest, PullRequestAnnotations, PullRequestArtifacts,
-    PullRequestCheck, PullRequestCheckStatus, PullRequestCommentMode, PullRequestDeployments,
-    PullRequestDiffIndex, PullRequestEdit, PullRequestLockReason, PullRequestMergeMethod,
-    PullRequestMergeMode, PullRequestOperation, PullRequestReviewDecision, PullRequestReviewKind,
+    AnnotationFilter, AnnotationGrouping, AnnotationSeverity, CheckRunLog, ContextPurpose,
+    DEFAULT_CONTEXT_BUDGET, FeedbackFilter, GitHubRepository, MergeGate, PullRequest,
+    PullRequestAnnotations, PullRequestArtifacts, PullRequestCheck, PullRequestCheckStatus,
+    PullRequestCommentMode, PullRequestContext, PullRequestDeployments, PullRequestDiffIndex,
+    PullRequestEdit, PullRequestLockReason, PullRequestMergeMethod, PullRequestMergeMode,
+    PullRequestOperation, PullRequestReviewDecision, PullRequestReviewKind,
     PullRequestReviewOperation, PullRequestReviewSide, PullRequestReviewThreadSubject,
     PullRequestSnapshot, PullRequestStack, PullRequestStackSnapshot, PullRequestSuggestions,
     PullRequestUpdateMethod, PullRequestWorkflowRuns, ReviewNextStep, ReviewProgress,

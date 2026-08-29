@@ -238,6 +238,9 @@ mod capabilities;
 #[path = "cli/ci_operations.rs"]
 mod ci_operations;
 #[cfg(unix)]
+#[path = "cli/context.rs"]
+mod context;
+#[cfg(unix)]
 #[path = "cli/fake_gh.rs"]
 mod fake_gh;
 #[cfg(unix)]

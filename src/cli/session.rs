@@ -1,6 +1,9 @@
-use anyhow::Result;
+use std::path::PathBuf;
+
+use anyhow::{Result, bail};
 
 mod actions;
+mod context;
 mod feedback;
 mod progress;
 mod workspaces;
@@ -8,11 +11,12 @@ use actions::operate_workflow;
 use progress::{forget_review_progress, mark_review_files, record_review_visit};
 use workspaces::{LocalDiffWorkspaceKind, LocalDiffWorkspaces};
 
-use super::command::{Command, Outcome};
+use super::command::{Command, ContextRequest, Outcome};
 use crate::git::github::{
-    FeedbackInputs, MergeGate, PreparedPullRequest, PullRequest, PullRequestAnnotations,
-    PullRequestCommits, PullRequestProgress, PullRequestReviewSnapshot, PullRequestSuggestions,
-    ReviewSince, ReviewSinceRequest, SuggestionPlan, WorkflowOperation, build_feedback,
+    ContextInputs, ContextPurpose, FeedbackInputs, MergeGate, PreparedPullRequest, PullRequest,
+    PullRequestAnnotations, PullRequestCommits, PullRequestContext, PullRequestDiffIndex,
+    PullRequestProgress, PullRequestReviewSnapshot, PullRequestSuggestions, ReviewSince,
+    ReviewSinceRequest, SuggestionPlan, WorkflowOperation, build_context, build_feedback,
     collect_suggestions,
 };
 use crate::git::{LocalDiffRequest, PreparedLocalDiff, Repository};
@@ -212,6 +216,42 @@ impl Session {
                 plan,
                 message,
             } => feedback::apply(&self.repository, &pull_request, &plan, message.as_deref()),
+            Command::PullRequestDependencies { pull_request } => Ok(Outcome::Dependencies(
+                Box::new(self.repository.pull_request_dependencies(&pull_request)?),
+            )),
+            Command::PullRequestSecurity { pull_request } => Ok(Outcome::Security(Box::new(
+                self.repository.pull_request_security(&pull_request),
+            ))),
+            Command::PullRequestContext {
+                pull_request,
+                request,
+            } => {
+                let prepared = self
+                    .repository
+                    .prepare_pull_request_diff(&pull_request, progress)?;
+                let index = prepared.index();
+                let paths: Vec<PathBuf> =
+                    index.files.iter().map(|file| file.path.clone()).collect();
+                let selected = match request.path.as_ref() {
+                    Some(path) => {
+                        if !paths.iter().any(|candidate| candidate == path) {
+                            bail!("{} is not part of this pull request", path.display());
+                        }
+                        vec![path.clone()]
+                    }
+                    None => paths,
+                };
+                let (patch, truncated) = prepared.patch_text(&selected)?;
+                let merge_base = prepared.merge_base_oid().to_owned();
+                let mut bundle =
+                    self.pull_request_context(&pull_request, &request, &index, &patch, &merge_base);
+                if truncated {
+                    bundle.warnings.push(
+                        "The patch was larger than Quinjet reads and was cut short".to_owned(),
+                    );
+                }
+                Ok(Outcome::Context(Box::new(bundle)))
+            }
             Command::PullRequestStackGate { stack, refresh } => Ok(Outcome::StackGate(Box::new(
                 self.repository.pull_request_stack_gate(&stack, refresh),
             ))),
