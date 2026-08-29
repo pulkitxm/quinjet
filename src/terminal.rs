@@ -11,7 +11,7 @@ use crossterm::event::{
     KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
-use crossterm::style::Print;
+use crossterm::style::{Print, force_color_output};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
@@ -24,6 +24,10 @@ static TERMINAL_ENTERED: AtomicBool = AtomicBool::new(false);
 static HANDOFF_RAW_MODE: AtomicBool = AtomicBool::new(false);
 static KEYBOARD_ENHANCED: AtomicBool = AtomicBool::new(false);
 static TERMINAL_THREAD: OnceLock<thread::ThreadId> = OnceLock::new();
+
+fn enable_tui_color_output() {
+    force_color_output(true);
+}
 
 fn restore_terminal() {
     if HANDOFF_RAW_MODE.swap(false, Ordering::SeqCst) {
@@ -132,6 +136,7 @@ impl TerminalGuard {
     }
 
     pub(crate) fn enter(mouse: bool) -> Result<Self> {
+        enable_tui_color_output();
         if std::env::var_os(INHERITED_TERMINAL_ENV).is_some() {
             enable_raw_mode().context("failed to inherit terminal raw mode")?;
             TERMINAL_ENTERED.store(true, Ordering::SeqCst);
@@ -209,5 +214,30 @@ impl Drop for TerminalGuard {
         if self.restore {
             restore_terminal();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::Command;
+    use crossterm::style::{Color, SetForegroundColor};
+
+    use super::*;
+
+    #[test]
+    fn terminal_guard_restores_tui_colors_after_process_level_suppression() {
+        force_color_output(false);
+        enable_tui_color_output();
+
+        let mut output = String::new();
+        SetForegroundColor(Color::Rgb {
+            r: 112,
+            g: 197,
+            b: 206,
+        })
+        .write_ansi(&mut output)
+        .unwrap();
+
+        assert_eq!(output, "\u{1b}[38;2;112;197;206m");
     }
 }
