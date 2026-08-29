@@ -110,7 +110,7 @@ pub(super) fn decide(
         }
     }
     push_policy_blockers(context, &mut blockers, &mut notes);
-    blockers.sort_by(|left, right| left.kind.cmp(&right.kind));
+    blockers.sort_by_key(|blocker| blocker.kind);
     if !blockers.is_empty() {
         return (MergeGateVerdict::Blocked, blockers, notes);
     }

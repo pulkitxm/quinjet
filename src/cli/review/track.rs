@@ -53,17 +53,12 @@ fn progress(session: &mut Session, out: &Emitter, args: &PrReviewProgressArgs) -
 fn next(session: &mut Session, out: &Emitter, args: &PrReviewNextArgs) -> Result<u8> {
     let progress = read_progress(session, out, &args.pull_request, &PrSinceArgs::default())?;
     match args.wanted.select(&progress) {
-        None => {
-            out.emit(&NoNextStep { next: None }, || {
-                "Nothing left to review\n".to_owned()
-            })?;
-            Ok(0)
-        }
-        Some(step) => {
-            out.emit(&step, || render::review_next(&step))?;
-            Ok(0)
-        }
+        None => out.emit(&NoNextStep { next: None }, || {
+            "Nothing left to review\n".to_owned()
+        })?,
+        Some(step) => out.emit(&step, || render::review_next(&step))?,
     }
+    Ok(0)
 }
 
 #[derive(Serialize)]

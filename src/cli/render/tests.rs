@@ -5,7 +5,6 @@ use crate::git::diff::{DiffLine, HighlightSpan};
 use crate::git::github::{
     CheckLogLine, CheckLogSeverity, ConversationEntry, PullRequestCommit, PullRequestFile,
 };
-
 use crate::git::status::{BranchState, Change, ChangeStatus};
 
 fn span(text: &str) -> Vec<HighlightSpan> {

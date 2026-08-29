@@ -37,8 +37,8 @@ fn an_untracked_pull_request_reads_as_an_empty_record() {
 
     assert_eq!(record.number, 42);
     assert_eq!(record.repository, REPOSITORY);
-    assert!(record.viewed.is_empty());
-    assert!(record.visited_oid.is_empty());
+    assert_eq!(record.viewed, Vec::new());
+    assert_eq!(record.visited_oid, "");
 }
 
 #[test]
@@ -76,7 +76,7 @@ fn unmarking_reports_whether_it_changed_anything() {
 
     assert!(record.mark_unviewed(Path::new("src/lib.rs")));
     assert!(!record.mark_unviewed(Path::new("src/lib.rs")));
-    assert!(record.viewed.is_empty());
+    assert_eq!(record.viewed, Vec::new());
 }
 
 #[test]
@@ -121,7 +121,7 @@ fn forgetting_removes_only_the_named_pull_request() {
 
     forget_review_progress(REPOSITORY, 42);
 
-    assert!(load_review_progress(REPOSITORY, 42).viewed.is_empty());
+    assert_eq!(load_review_progress(REPOSITORY, 42).viewed, Vec::new());
     assert_eq!(load_review_progress(REPOSITORY, 43).viewed.len(), 1);
 }
 
@@ -135,7 +135,7 @@ fn the_record_list_is_capped_and_drops_the_least_recently_touched() {
     }
 
     assert_eq!(read_records().len(), MAX_TRACKED_PULL_REQUESTS);
-    assert!(load_review_progress(REPOSITORY, 1).viewed.is_empty());
+    assert_eq!(load_review_progress(REPOSITORY, 1).viewed, Vec::new());
     assert_eq!(
         load_review_progress(
             REPOSITORY,
@@ -154,7 +154,7 @@ fn an_unreadable_document_is_treated_as_empty_rather_than_failing() {
     fs::create_dir_all(path.parent().expect("a parent")).expect("the state directory");
     fs::write(&path, b"{not json").expect("a corrupt document");
 
-    assert!(load_review_progress(REPOSITORY, 42).viewed.is_empty());
+    assert_eq!(load_review_progress(REPOSITORY, 42).viewed, Vec::new());
 
     let mut record = ReviewProgressRecord::new(REPOSITORY, 42);
     record.mark_viewed(Path::new("src/lib.rs"), "aaaa");

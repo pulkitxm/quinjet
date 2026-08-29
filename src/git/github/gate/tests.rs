@@ -313,7 +313,7 @@ fn a_merged_pull_request_reports_merged_and_exits_zero() {
         value["state"] = json!("MERGED");
     });
     assert_eq!(gate.verdict, MergeGateVerdict::Merged);
-    assert!(gate.blockers.is_empty());
+    assert_eq!(gate.blockers, Vec::new());
     assert_eq!(gate.verdict.exit_code(), 0);
 }
 
