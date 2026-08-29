@@ -15,6 +15,8 @@ pub(super) enum PrVerb {
     Conversation(PrWatchArgs),
     #[doc = " List a pull request's checks"]
     Checks(PrChecksArgs),
+    #[doc = " Explain whether a pull request can merge"]
+    Gate(PrGateArgs),
     #[doc = " Print one check run's steps and log"]
     Logs(PrLogsArgs),
     #[doc = " Open a pull request in a browser"]
