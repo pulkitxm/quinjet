@@ -14,6 +14,7 @@ use crate::git::github::{
 };
 use crate::git::history::Commit;
 use crate::git::status::{ChangeArea, RepoStatus};
+use crate::git::work::{WorkDiff, WorkPublishPlan, WorkSession, WorkSessions};
 use crate::git::{Branch, HistoryBranch, ProjectGroup, Stash, Worktree};
 
 #[derive(Default)]
@@ -46,6 +47,12 @@ fn truncate(text: &str, width: usize) -> String {
     format!("{kept}…")
 }
 
+#[doc = " Enough of an object name to recognize, which is what a person reads"]
+#[doc = " out of a listing. The whole name is always in the JSON."]
+fn short_oid(oid: &str) -> String {
+    oid.chars().take(12).collect()
+}
+
 mod actions;
 mod annotations;
 mod context;
@@ -54,6 +61,7 @@ mod gate;
 mod github;
 mod progress;
 mod repository;
+mod work;
 
 pub(crate) use actions::*;
 pub(crate) use annotations::*;
@@ -63,6 +71,7 @@ pub(crate) use gate::*;
 pub(crate) use github::*;
 pub(crate) use progress::*;
 pub(crate) use repository::*;
+pub(crate) use work::*;
 
 #[cfg(test)]
 mod tests;

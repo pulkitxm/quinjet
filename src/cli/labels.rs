@@ -93,6 +93,7 @@ impl Verb {
             } => Some("Updating pull-request review"),
             Self::Pr { .. } => Some("Loading pull request"),
             Self::Stack { .. } => Some("Loading pull-request stack"),
+            Self::Work { .. } => Some("Reading work sessions"),
             Self::Update(_) => Some("Checking for updates"),
         }
     }

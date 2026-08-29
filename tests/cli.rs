@@ -134,6 +134,18 @@ impl Scratch {
         Ok(run.stdout.trim().to_owned())
     }
 
+    #[doc = " Run Git somewhere other than the fixture's own checkout, which is"]
+    #[doc = " how a test looks inside a work session's linked worktree. Only the"]
+    #[doc = " work-session tests use it, and those are Unix-only."]
+    #[cfg(unix)]
+    pub(crate) fn git_in(directory: &Path, args: &[&str]) -> Result<String> {
+        let mut command = ProcessCommand::new("git");
+        command.arg("-C").arg(directory).args(args);
+        isolate_git(&mut command);
+        let run = Run::from(command.output().context("failed to run git")?)?.success()?;
+        Ok(run.stdout.trim().to_owned())
+    }
+
     fn quinjet_command(&self, args: &[&str]) -> ProcessCommand {
         command_in(Some(&self.path), args, &self.environment)
     }
@@ -271,3 +283,9 @@ mod ssh;
 #[cfg(unix)]
 #[path = "cli/stack_lifecycle.rs"]
 mod stack_lifecycle;
+#[cfg(unix)]
+#[path = "cli/work.rs"]
+mod work;
+#[cfg(unix)]
+#[path = "cli/work_publish.rs"]
+mod work_publish;

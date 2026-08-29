@@ -159,7 +159,3 @@ fn section_banner(section: &ContextSection) -> String {
     };
     format!("=== {} ({trust}) ===", section.heading)
 }
-
-fn short_oid(oid: &str) -> String {
-    oid.chars().take(12).collect()
-}

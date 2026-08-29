@@ -6,21 +6,30 @@ mod actions;
 mod context;
 mod feedback;
 mod progress;
+mod work;
 mod workspaces;
 use actions::operate_workflow;
 use progress::{forget_review_progress, mark_review_files, record_review_visit};
 use workspaces::{LocalDiffWorkspaceKind, LocalDiffWorkspaces};
 
-use super::command::{Command, ContextRequest, Outcome};
+use super::command::{Command, ContextRequest, Outcome, WorkRequest};
 use crate::git::github::{
     ContextInputs, ContextPurpose, FeedbackInputs, MergeGate, PreparedPullRequest, PullRequest,
     PullRequestAnnotations, PullRequestCommits, PullRequestContext, PullRequestDiffIndex,
-    PullRequestProgress, PullRequestReviewSnapshot, PullRequestSuggestions, ReviewSince,
-    ReviewSinceRequest, SuggestionPlan, WorkflowOperation, build_context, build_feedback,
-    collect_suggestions,
+    PullRequestFeedback, PullRequestProgress, PullRequestReviewSnapshot, PullRequestSuggestions,
+    ReviewSince, ReviewSinceRequest, SuggestionPlan, WorkflowOperation, build_context,
+    build_feedback, collect_suggestions,
+};
+use crate::git::work::{
+    WorkDiff, WorkPublishPlan, WorkSession, WorkSessionState, WorkSessions, WorkSource,
+    WorkStartRequest, build_work_session, plan_work_publish, publish_work, run_work_verification,
+    work_diff,
 };
 use crate::git::{LocalDiffRequest, PreparedLocalDiff, Repository};
-use crate::state::ReviewProgressRecord;
+use crate::state::{
+    ReviewProgressRecord, forget_work_session, load_work_session, load_work_sessions,
+    next_work_session_id, record_work_session,
+};
 
 pub(crate) struct Session {
     repository: Repository,
@@ -39,6 +48,10 @@ impl Session {
 
     pub(crate) fn execute(&mut self, command: Command) -> Result<Outcome> {
         self.execute_with(command, &mut |_| {}, &|| true)
+    }
+
+    pub(crate) fn repository_root(&self) -> &std::path::Path {
+        self.repository.root()
     }
 
     pub(crate) fn repository_revision(&self, revision: &str) -> Result<String> {
@@ -252,6 +265,27 @@ impl Session {
                 }
                 Ok(Outcome::Context(Box::new(bundle)))
             }
+            Command::StartWork {
+                pull_request,
+                request,
+            } => Ok(Outcome::Work(Box::new(
+                self.start_work(&pull_request, &request)?,
+            ))),
+            Command::ListWork => Ok(Outcome::WorkSessions(Box::new(WorkSessions::new(
+                load_work_sessions(),
+            )))),
+            Command::InspectWork { id } => Ok(Outcome::Work(Box::new(Self::work_session(&id)?))),
+            Command::WorkDiff { id } => Ok(Outcome::WorkDiff(Box::new(Self::work_diff(&id)?))),
+            Command::VerifyWork { id, command } => {
+                Ok(Outcome::Work(Box::new(Self::verify_work(&id, &command)?)))
+            }
+            Command::PlanWorkPublish { id, message } => Ok(Outcome::WorkPublishPlan(Box::new(
+                Self::plan_work_publish(&id, message.as_deref())?.1,
+            ))),
+            Command::PublishWork { session, plan } => Ok(Outcome::Work(Box::new(
+                Self::publish_work(&session, &plan)?,
+            ))),
+            Command::AbortWork { id } => Ok(Outcome::Work(Box::new(self.abort_work(&id)?))),
             Command::PullRequestStackGate { stack, refresh } => Ok(Outcome::StackGate(Box::new(
                 self.repository.pull_request_stack_gate(&stack, refresh),
             ))),
