@@ -10,7 +10,8 @@ use crate::git::github::{
     PullRequestFileStatus, PullRequestReviewSide, PullRequestReviewSnapshot,
     PullRequestReviewThreadSubject, PullRequestSecurity, PullRequestStackSnapshot,
     PullRequestSuggestions, PullRequestWorkflowRuns, ReviewFileProgress, ReviewNextStep,
-    ReviewProgress, StackGate, SuggestionBlocker, unix_now,
+    ReviewProgress, StackFeedback, StackGate, StackReview, StackReviewMember, SuggestionBlocker,
+    unix_now,
 };
 use crate::git::history::Commit;
 use crate::git::status::{ChangeArea, RepoStatus};
@@ -61,6 +62,7 @@ mod gate;
 mod github;
 mod progress;
 mod repository;
+mod stack_review;
 mod work;
 
 pub(crate) use actions::*;
@@ -71,6 +73,7 @@ pub(crate) use gate::*;
 pub(crate) use github::*;
 pub(crate) use progress::*;
 pub(crate) use repository::*;
+pub(crate) use stack_review::*;
 pub(crate) use work::*;
 
 #[cfg(test)]

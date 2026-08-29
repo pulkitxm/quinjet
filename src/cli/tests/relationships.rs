@@ -54,8 +54,10 @@ work start --pr 7 --from failed-checks --into /tmp/work --repo acme/project --re
 work start --pr 7 --from whole|work inspect w7-1|work diff w7-1
 work verify w7-1|work verify w7-1 --exit-code -- cargo test
 work publish w7-1|work publish w7-1 -m message --yes|work abort w7-1 --yes
+stack review 7|stack review 7 --incremental --exit-code --json
+stack feedback 7|stack feedback 7 --unresolved --mine --exit-code --json
 ";
-    assert_eq!(assert_argument_cases(cases, true), 126);
+    assert_eq!(assert_argument_cases(cases, true), 130);
 }
 
 #[test]
@@ -101,6 +103,7 @@ pr dependencies|pr security|pr context|pr context 7 --purpose nothing
 pr context 7 --budget|pr context 7 --file
 work|work start|work start --pr|work start --pr 7 --from nothing
 work inspect|work diff|work verify|work publish|work abort
+stack review|stack feedback|stack review 7 --unresolved|stack feedback 7 --incremental
 ";
-    assert_eq!(assert_argument_cases(cases, false), 103);
+    assert_eq!(assert_argument_cases(cases, false), 107);
 }

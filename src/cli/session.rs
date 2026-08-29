@@ -6,6 +6,7 @@ mod actions;
 mod context;
 mod feedback;
 mod progress;
+mod stack_review;
 mod work;
 mod workspaces;
 use actions::operate_workflow;
@@ -14,11 +15,13 @@ use workspaces::{LocalDiffWorkspaceKind, LocalDiffWorkspaces};
 
 use super::command::{Command, ContextRequest, Outcome, WorkRequest};
 use crate::git::github::{
-    ContextInputs, ContextPurpose, FeedbackInputs, MergeGate, PreparedPullRequest, PullRequest,
-    PullRequestAnnotations, PullRequestCommits, PullRequestContext, PullRequestDiffIndex,
-    PullRequestFeedback, PullRequestProgress, PullRequestReviewSnapshot, PullRequestSuggestions,
-    ReviewSince, ReviewSinceRequest, SuggestionPlan, WorkflowOperation, build_context,
-    build_feedback, collect_suggestions,
+    ContextInputs, ContextPurpose, FeedbackInputs, MAX_REVIEWED_STACK_MEMBERS, MergeGate,
+    PreparedPullRequest, PullRequest, PullRequestAnnotations, PullRequestCommits,
+    PullRequestContext, PullRequestDiffIndex, PullRequestFeedback, PullRequestProgress,
+    PullRequestReviewSnapshot, PullRequestStack, PullRequestSuggestions, ReviewSince,
+    ReviewSinceRequest, StackFeedback, StackFeedbackInputs, StackReview, StackReviewInputs,
+    StackReviewMemberInputs, SuggestionPlan, WorkflowOperation, build_context, build_feedback,
+    build_stack_feedback, build_stack_review, collect_suggestions,
 };
 use crate::git::work::{
     WorkDiff, WorkPublishPlan, WorkSession, WorkSessionState, WorkSessions, WorkSource,
@@ -265,6 +268,18 @@ impl Session {
                 }
                 Ok(Outcome::Context(Box::new(bundle)))
             }
+            Command::PullRequestStackReview {
+                stack,
+                incremental,
+                refresh,
+            } => Ok(Outcome::StackReview(Box::new(self.stack_review(
+                &stack,
+                incremental,
+                refresh,
+            )))),
+            Command::PullRequestStackFeedback { stack, refresh } => Ok(Outcome::StackFeedback(
+                Box::new(self.stack_feedback(&stack, refresh)),
+            )),
             Command::StartWork {
                 pull_request,
                 request,

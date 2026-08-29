@@ -57,7 +57,7 @@ quinjet update --check           check the latest stable release
 | Page | What it covers |
 | --- | --- |
 | [`quinjet pr`](./pull-request/README.md) | Metadata, commits, files, conversation, checks, the merge gate, reviews, lifecycle, merge, metadata editing, and notifications |
-| [`quinjet stack`](./stack/README.md) | Ordered stacked pull requests and exact composed range comparisons |
+| [`quinjet stack`](./stack/README.md) | Ordered stacked pull requests, exact composed range comparisons, safe merge order and the critical path |
 | [`quinjet work`](./work/README.md) | Bounded coding sessions against a pull request: an isolated checkout, a task list, recorded verification, one local commit |
 
 ## About Quinjet itself
@@ -91,6 +91,7 @@ quinjet pr view 12 --watch            refresh the metadata until stopped
 quinjet pr conversation 12 --watch    follow the conversation until stopped
 quinjet pr checks 12 --watch          block until CI settles, exit non-zero if it did not go green
 quinjet pr gate 12                    say whether it can merge, and what blocks it
+quinjet stack review 7                what can merge now, and which member holds up the rest
 quinjet pr context 12 --purpose fix-ci   one bundle of context for a coding tool
 quinjet work start --pr 12 --from feedback --worktree   an isolated checkout to answer reviewers in
 quinjet pr logs 12 clippy --watch     tail a running job's log

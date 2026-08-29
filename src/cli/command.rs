@@ -10,7 +10,8 @@ use crate::git::github::{
     PullRequestDiffIndex, PullRequestFeedback, PullRequestOperation, PullRequestReviewOperation,
     PullRequestReviewSnapshot, PullRequestSecurity, PullRequestSnapshot, PullRequestStack,
     PullRequestStackSnapshot, PullRequestSuggestions, PullRequestWorkflowRuns, ReviewProgress,
-    ReviewSinceRequest, StackGate, Suggestion, SuggestionPlan, WorkflowArtifact, WorkflowOperation,
+    ReviewSinceRequest, StackFeedback, StackGate, StackReview, Suggestion, SuggestionPlan,
+    WorkflowArtifact, WorkflowOperation,
 };
 use crate::git::history::Commit;
 use crate::git::status::RepoStatus;
@@ -86,6 +87,15 @@ pub(crate) enum Command {
     PullRequestContext {
         pull_request: Box<PullRequest>,
         request: Box<ContextRequest>,
+    },
+    PullRequestStackReview {
+        stack: Box<PullRequestStack>,
+        incremental: bool,
+        refresh: bool,
+    },
+    PullRequestStackFeedback {
+        stack: Box<PullRequestStack>,
+        refresh: bool,
     },
     StartWork {
         pull_request: Box<PullRequest>,
@@ -238,6 +248,8 @@ impl Command {
             Self::PullRequestDependencies { .. } => "Comparing dependencies",
             Self::PullRequestSecurity { .. } => "Reading security findings",
             Self::PullRequestContext { .. } => "Assembling the context bundle",
+            Self::PullRequestStackReview { .. } => "Reviewing the stack",
+            Self::PullRequestStackFeedback { .. } => "Collecting the stack's feedback",
             Self::StartWork { .. } => "Starting a work session",
             Self::ListWork | Self::InspectWork { .. } => "Reading work sessions",
             Self::WorkDiff { .. } => "Reading the session's changes",
@@ -305,6 +317,8 @@ pub(crate) enum Outcome {
     Dependencies(Box<PullRequestDependencies>),
     Security(Box<PullRequestSecurity>),
     Context(Box<PullRequestContext>),
+    StackReview(Box<StackReview>),
+    StackFeedback(Box<StackFeedback>),
     Work(Box<WorkSession>),
     WorkSessions(Box<WorkSessions>),
     WorkDiff(Box<WorkDiff>),
@@ -371,6 +385,8 @@ answers! {
         |value: Box<PullRequestDependencies>| *value;
     security, Security -> PullRequestSecurity, |value: Box<PullRequestSecurity>| *value;
     context, Context -> PullRequestContext, |value: Box<PullRequestContext>| *value;
+    stack_review, StackReview -> StackReview, |value: Box<StackReview>| *value;
+    stack_feedback, StackFeedback -> StackFeedback, |value: Box<StackFeedback>| *value;
     work, Work -> WorkSession, |value: Box<WorkSession>| *value;
     work_sessions, WorkSessions -> WorkSessions, |value: Box<WorkSessions>| *value;
     work_diff, WorkDiff -> WorkDiff, |value: Box<WorkDiff>| *value;
