@@ -75,6 +75,7 @@ mod operation;
 mod parsing;
 mod prepared;
 mod process;
+mod progress;
 mod pull_request;
 mod review;
 mod stack;
@@ -92,6 +93,7 @@ pub(crate) use operation::*;
 use parsing::*;
 pub(crate) use prepared::*;
 pub(crate) use process::{BoundedOutput, bounded_command_error, run_bounded_command};
+pub(crate) use progress::*;
 #[cfg(test)]
 pub(crate) use review::PullRequestReviewComment;
 pub(crate) use review::{

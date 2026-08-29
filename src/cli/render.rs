@@ -5,7 +5,8 @@ use crate::git::github::{
     MergeGateChecks, MergeGateReview, PullRequest, PullRequestCheck, PullRequestCheckStatus,
     PullRequestCommits, PullRequestConversation, PullRequestDiffIndex, PullRequestFileStatus,
     PullRequestReviewSide, PullRequestReviewSnapshot, PullRequestReviewThreadSubject,
-    PullRequestStackSnapshot, StackGate, unix_now,
+    PullRequestStackSnapshot, ReviewFileProgress, ReviewNextStep, ReviewProgress, StackGate,
+    unix_now,
 };
 use crate::git::history::Commit;
 use crate::git::status::{ChangeArea, RepoStatus};
@@ -43,10 +44,12 @@ fn truncate(text: &str, width: usize) -> String {
 
 mod gate;
 mod github;
+mod progress;
 mod repository;
 
 pub(crate) use gate::*;
 pub(crate) use github::*;
+pub(crate) use progress::*;
 pub(crate) use repository::*;
 
 #[cfg(test)]

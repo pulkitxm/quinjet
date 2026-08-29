@@ -59,6 +59,26 @@ impl Repository {
         self.prepare_pull_request_comparison(pull_request, false, progress)
     }
 
+    #[doc = " The patch a pull request gained after one of its own commits. The"]
+    #[doc = " base is that commit exactly rather than a merge base, so the answer"]
+    #[doc = " is the review delta and not the whole pull request again."]
+    pub(crate) fn prepare_pull_request_since_diff<F>(
+        &self,
+        pull_request: &PullRequest,
+        since: &str,
+        progress: F,
+    ) -> Result<PreparedPullRequest>
+    where
+        F: FnMut(PullRequestProgress),
+    {
+        if !is_commit_oid(since) {
+            bail!("A review delta needs a full commit ID to measure from");
+        }
+        let mut comparison = pull_request.clone();
+        since.clone_into(&mut comparison.base_oid);
+        self.prepare_pull_request_comparison(&comparison, true, progress)
+    }
+
     pub(crate) fn prepare_pull_request_stack_diff<F>(
         &self,
         stack: &PullRequestStack,

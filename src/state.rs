@@ -11,6 +11,7 @@ use crate::git::Repository;
 mod project_picker;
 mod projects;
 mod remote;
+mod review_progress;
 pub(crate) mod session;
 
 pub(crate) use project_picker::load_collapsed_project_groups;
@@ -25,13 +26,18 @@ pub(crate) use remote::{
     forget_recent_remote, load_recent_remotes, load_recent_ssh_machines,
     load_recent_ssh_machines_with_current, record_recent_remote,
 };
+#[cfg(test)]
+pub(crate) use review_progress::ViewedFile;
+pub(crate) use review_progress::{
+    ReviewProgressRecord, forget_review_progress, load_review_progress, record_review_progress,
+};
 
 const MAX_RECENT_PROJECTS: usize = 20;
 const RECENT_PROJECTS_FILE: &str = "recent-projects.json";
 
 #[cfg(test)]
 thread_local! {
-    static STATE_ROOT_OVERRIDE: std::cell::RefCell<Option<PathBuf>> =
+    pub(crate) static STATE_ROOT_OVERRIDE: std::cell::RefCell<Option<PathBuf>> =
         const { std::cell::RefCell::new(None) };
 }
 

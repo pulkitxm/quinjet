@@ -412,6 +412,8 @@ pub(super) struct PrDiffArgs {
     #[doc = " Limit the patch to one path"]
     #[arg(value_name = "PATH", value_hint = ValueHint::AnyPath)]
     pub(super) path: Option<PathBuf>,
+    #[command(flatten)]
+    pub(super) since: PrSinceArgs,
 }
 
 #[derive(Debug, Args)]
@@ -479,3 +481,6 @@ pub(super) struct PrLogsArgs {
     )]
     pub(super) interval: u64,
 }
+
+mod since;
+pub(super) use since::PrSinceArgs;

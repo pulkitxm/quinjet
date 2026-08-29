@@ -1,6 +1,7 @@
 use std::os::unix::fs::PermissionsExt;
 
 use super::gate::GH_CASES;
+use super::review_progress::GH_CASES as REVIEW_CASES;
 use super::*;
 
 const GH_SCRIPT_HEAD: &str = r#"#!/bin/sh
@@ -59,6 +60,7 @@ printf '%s\n' "$*" >> "$FAKE_OPEN_CAPTURE"
 pub(super) fn gh_script() -> String {
     let mut script = String::from(GH_SCRIPT_HEAD);
     script.push_str(GH_CASES);
+    script.push_str(REVIEW_CASES);
     script.push_str(GH_SCRIPT_TAIL);
     script
 }

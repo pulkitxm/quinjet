@@ -41,7 +41,8 @@ use crate::git::github::{
     PullRequestLockReason, PullRequestMergeMethod, PullRequestMergeMode, PullRequestOperation,
     PullRequestReviewDecision, PullRequestReviewKind, PullRequestReviewOperation,
     PullRequestReviewSide, PullRequestReviewThreadSubject, PullRequestSnapshot, PullRequestStack,
-    PullRequestStackSnapshot, PullRequestUpdateMethod,
+    PullRequestStackSnapshot, PullRequestUpdateMethod, ReviewNextStep, ReviewProgress,
+    ReviewSinceRequest,
 };
 use crate::git::status::{Change, ChangeArea};
 use crate::git::{ConflictChoice, GitOperation, LocalDiffRequest, Repository};

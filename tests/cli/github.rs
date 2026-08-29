@@ -13,9 +13,9 @@ struct RepositoryState {
 }
 
 pub(super) struct GitHubFixture {
-    repository: Scratch,
-    base_oid: String,
-    head_oid: String,
+    pub(super) repository: Scratch,
+    pub(super) base_oid: String,
+    pub(super) head_oid: String,
     bin: PathBuf,
     pub(super) gh_capture: PathBuf,
     open_capture: PathBuf,
@@ -76,6 +76,19 @@ impl GitHubFixture {
     pub(super) fn run(&self, args: &[&str]) -> Result<Run> {
         Run::from(
             self.command(args)?
+                .output()
+                .context("failed to run Quinjet with fake GitHub")?,
+        )
+    }
+
+    #[doc = " Run with the fake GitHub reporting a different head commit, which is"]
+    #[doc = " how a test moves a pull request under a reviewer without touching the"]
+    #[doc = " worktree."]
+    pub(super) fn run_at_head(&self, args: &[&str], head: &str) -> Result<Run> {
+        let mut command = self.command(args)?;
+        command.env("FAKE_HEAD_OID", head);
+        Run::from(
+            command
                 .output()
                 .context("failed to run Quinjet with fake GitHub")?,
         )

@@ -113,7 +113,7 @@ impl Scratch {
         Ok(Self { path, environment })
     }
 
-    fn write(&self, name: &str, content: &str) -> Result<()> {
+    pub(crate) fn write(&self, name: &str, content: &str) -> Result<()> {
         let path = self.path.join(name);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
@@ -129,7 +129,7 @@ impl Scratch {
         Run::from(command.output().context("failed to run git")?)
     }
 
-    fn git(&self, args: &[&str]) -> Result<String> {
+    pub(crate) fn git(&self, args: &[&str]) -> Result<String> {
         let run = self.git_run(args)?.success()?;
         Ok(run.stdout.trim().to_owned())
     }
@@ -248,6 +248,9 @@ mod output;
 mod remotes;
 #[path = "cli/repository.rs"]
 mod repository;
+#[cfg(unix)]
+#[path = "cli/review_progress.rs"]
+mod review_progress;
 #[path = "cli/shell.rs"]
 mod shell;
 #[cfg(unix)]
