@@ -4,10 +4,10 @@ use anyhow::Result;
 
 use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
-    CheckRunLog, GitHubRepository, PullRequest, PullRequestCheck, PullRequestChecks,
+    CheckRunLog, GitHubRepository, MergeGate, PullRequest, PullRequestCheck, PullRequestChecks,
     PullRequestCommits, PullRequestConversation, PullRequestDiffIndex, PullRequestOperation,
     PullRequestReviewOperation, PullRequestReviewSnapshot, PullRequestSnapshot, PullRequestStack,
-    PullRequestStackSnapshot,
+    PullRequestStackSnapshot, StackGate,
 };
 use crate::git::history::Commit;
 use crate::git::status::RepoStatus;
@@ -48,6 +48,14 @@ pub(crate) enum Command {
     },
     PullRequestStack {
         pull_request: Box<PullRequest>,
+        refresh: bool,
+    },
+    PullRequestGate {
+        pull_request: Box<PullRequest>,
+        refresh: bool,
+    },
+    PullRequestStackGate {
+        stack: Box<PullRequestStack>,
         refresh: bool,
     },
     PreparePullRequest {
@@ -117,6 +125,8 @@ impl Command {
             Self::LocalGitHubRepository => "Reading repository link",
             Self::PullRequestLookup { .. } => "Fetching pull-request metadata",
             Self::PullRequestStack { .. } => "Fetching pull-request stack",
+            Self::PullRequestGate { .. } => "Evaluating the merge gate",
+            Self::PullRequestStackGate { .. } => "Evaluating the stack merge gate",
             Self::PreparePullRequest { .. } | Self::PreparePullRequestStack { .. } => {
                 "Preparing pull-request diff"
             }
@@ -158,6 +168,8 @@ pub(crate) enum Outcome {
     LocalGitHubRepository(Option<Box<GitHubRepository>>),
     PullRequest(Box<PullRequestSnapshot>),
     PullRequestStack(Box<PullRequestStackSnapshot>),
+    Gate(Box<MergeGate>),
+    StackGate(Box<StackGate>),
     PullRequestIndex(Box<PullRequestDiffIndex>),
     PullRequestDiff(Box<DiffDocument>),
     PullRequestDiffBatch(Vec<(PathBuf, DiffDocument)>),
@@ -201,6 +213,8 @@ answers! {
     pull_request, PullRequest -> PullRequestSnapshot, |value: Box<PullRequestSnapshot>| *value;
     pull_request_stack, PullRequestStack -> PullRequestStackSnapshot,
         |value: Box<PullRequestStackSnapshot>| *value;
+    gate, Gate -> MergeGate, |value: Box<MergeGate>| *value;
+    stack_gate, StackGate -> StackGate, |value: Box<StackGate>| *value;
     pull_request_index, PullRequestIndex -> PullRequestDiffIndex,
         |value: Box<PullRequestDiffIndex>| *value;
     pull_request_diff, PullRequestDiff -> DiffDocument, |value: Box<DiffDocument>| *value;

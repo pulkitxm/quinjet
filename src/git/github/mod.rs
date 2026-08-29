@@ -68,6 +68,7 @@ mod api;
 mod cache;
 mod change_index;
 mod discovery;
+mod gate;
 mod http;
 mod model;
 mod operation;
@@ -82,6 +83,7 @@ mod temporary;
 pub(crate) use cache::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use change_index::*;
+pub(crate) use gate::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use http::*;
 pub(crate) use model::*;

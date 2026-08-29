@@ -189,3 +189,43 @@ pub(in crate::cli) fn exit_for(checks: &[PullRequestCheck]) -> u8 {
     });
     u8::from(unhappy)
 }
+
+pub(super) fn gate(session: &mut Session, out: &Emitter, args: &PrGateArgs) -> Result<u8> {
+    if args.watch {
+        let request = lookup(session, out, &args.pull_request)?;
+        return watch::run(interval(args.interval, CHECK_WATCH_FLOOR), out.json, || {
+            let gate = session
+                .execute(Command::PullRequestGate {
+                    pull_request: Box::new(request.clone()),
+                    refresh: true,
+                })?
+                .gate()?;
+            Ok(watch::Frame {
+                text: render::merge_gate(&gate),
+                finished: gate.verdict.is_settled(),
+                code: gate_exit(&gate, args.no_exit_code),
+                value: gate,
+            })
+        });
+    }
+    let request = lookup(session, out, &args.pull_request)?;
+    let gate = out
+        .execute(
+            session,
+            Command::PullRequestGate {
+                pull_request: Box::new(request),
+                refresh: args.pull_request.refresh,
+            },
+        )?
+        .gate()?;
+    out.emit(&gate, || render::merge_gate(&gate))?;
+    Ok(gate_exit(&gate, args.no_exit_code))
+}
+
+const fn gate_exit(gate: &MergeGate, suppressed: bool) -> u8 {
+    if suppressed {
+        0
+    } else {
+        gate.verdict.exit_code()
+    }
+}

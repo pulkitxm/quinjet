@@ -13,6 +13,8 @@ pub(super) enum StackVerb {
     Files(StackRangeArgs),
     #[doc = "Print the patch across a contiguous stack range"]
     Diff(StackDiffArgs),
+    #[doc = "Say which stack members can merge, and what blocks the rest"]
+    Gate(StackGateArgs),
     #[doc = "Initialize a local branch stack"]
     Init(StackInitArgs),
     #[doc = "Add a branch to the active stack"]
@@ -50,7 +52,7 @@ pub(super) enum StackVerb {
 impl StackVerb {
     pub(super) fn into_operation(self) -> Option<(StackOperation, bool)> {
         match self {
-            Self::View(_) | Self::Files(_) | Self::Diff(_) => None,
+            Self::View(_) | Self::Files(_) | Self::Diff(_) | Self::Gate(_) => None,
             Self::Init(args) => Some((
                 StackOperation::Init {
                     branches: args.branches,
@@ -377,4 +379,13 @@ fn non_empty(value: &str) -> Result<String, String> {
     } else {
         Ok(value.to_owned())
     }
+}
+
+#[derive(Debug, Args)]
+pub(super) struct StackGateArgs {
+    #[command(flatten)]
+    pub(super) pull_request: PrArgs,
+    #[doc = "Exit 0 whatever the verdict is"]
+    #[arg(long)]
+    pub(super) no_exit_code: bool,
 }

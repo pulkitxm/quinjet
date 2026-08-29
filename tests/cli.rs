@@ -232,6 +232,12 @@ fn command_in(directory: Option<&Path>, args: &[&str], environment: &Path) -> Pr
 #[path = "cli/capabilities.rs"]
 mod capabilities;
 #[cfg(unix)]
+#[path = "cli/fake_gh.rs"]
+mod fake_gh;
+#[cfg(unix)]
+#[path = "cli/gate.rs"]
+mod gate;
+#[cfg(unix)]
 #[path = "cli/github.rs"]
 mod github;
 #[path = "cli/metadata.rs"]

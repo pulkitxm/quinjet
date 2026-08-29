@@ -4,7 +4,7 @@ use super::*;
 mod commits;
 mod monitor;
 pub(super) use monitor::select_check;
-use monitor::{checks, logs, watch_conversation, watch_pull_request};
+use monitor::{checks, gate, logs, watch_conversation, watch_pull_request};
 #[cfg(test)]
 pub(super) use monitor::{ensure_log_available, exit_for};
 
@@ -53,6 +53,7 @@ pub(super) fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb
             Ok(0)
         }
         PrVerb::Checks(args) => checks(session, out, &args),
+        PrVerb::Gate(args) => gate(session, out, &args),
         PrVerb::Logs(args) => logs(session, out, &args),
         PrVerb::Open(args) => {
             let request = lookup(session, out, &args.pull_request)?;

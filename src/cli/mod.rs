@@ -36,11 +36,11 @@ use tui_args::TuiArgs;
 
 use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
-    CheckRunLog, GitHubRepository, PullRequest, PullRequestCheck, PullRequestCheckStatus,
-    PullRequestCommentMode, PullRequestDiffIndex, PullRequestEdit, PullRequestLockReason,
-    PullRequestMergeMethod, PullRequestMergeMode, PullRequestOperation, PullRequestReviewDecision,
-    PullRequestReviewKind, PullRequestReviewOperation, PullRequestReviewSide,
-    PullRequestReviewThreadSubject, PullRequestSnapshot, PullRequestStack,
+    CheckRunLog, GitHubRepository, MergeGate, PullRequest, PullRequestCheck,
+    PullRequestCheckStatus, PullRequestCommentMode, PullRequestDiffIndex, PullRequestEdit,
+    PullRequestLockReason, PullRequestMergeMethod, PullRequestMergeMode, PullRequestOperation,
+    PullRequestReviewDecision, PullRequestReviewKind, PullRequestReviewOperation,
+    PullRequestReviewSide, PullRequestReviewThreadSubject, PullRequestSnapshot, PullRequestStack,
     PullRequestStackSnapshot, PullRequestUpdateMethod,
 };
 use crate::git::status::{Change, ChangeArea};
@@ -281,6 +281,12 @@ impl Verb {
             Self::Pr {
                 command: PrVerb::Logs(args),
             } if args.watch => None,
+            Self::Pr {
+                command: PrVerb::Gate(args),
+            } if args.watch => None,
+            Self::Pr {
+                command: PrVerb::Gate(_),
+            } => Some("Evaluating the merge gate"),
             Self::Pr {
                 command: PrVerb::Merge(_) | PrVerb::Close(_) | PrVerb::Reopen(_),
             } => Some("Updating pull request"),

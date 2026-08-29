@@ -101,6 +101,15 @@ impl Session {
             } => Ok(Outcome::PullRequestStack(Box::new(
                 self.repository.pull_request_stack(&pull_request, refresh)?,
             ))),
+            Command::PullRequestGate {
+                pull_request,
+                refresh,
+            } => Ok(Outcome::Gate(Box::new(
+                self.repository.pull_request_gate(&pull_request, refresh)?,
+            ))),
+            Command::PullRequestStackGate { stack, refresh } => Ok(Outcome::StackGate(Box::new(
+                self.repository.pull_request_stack_gate(&stack, refresh),
+            ))),
             Command::PreparePullRequest {
                 workspace,
                 pull_request,
