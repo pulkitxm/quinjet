@@ -229,6 +229,9 @@ fn command_in(directory: Option<&Path>, args: &[&str], environment: &Path) -> Pr
     command
 }
 
+#[cfg(unix)]
+#[path = "cli/annotations.rs"]
+mod annotations;
 #[path = "cli/capabilities.rs"]
 mod capabilities;
 #[cfg(unix)]

@@ -43,7 +43,8 @@ pub(super) fn watch_conversation(
 }
 
 pub(super) fn checks(session: &mut Session, out: &Emitter, args: &PrChecksArgs) -> Result<u8> {
-    let request = lookup(session, out, &args.pull_request)?;
+    let listing_args = args.pull_request()?;
+    let request = lookup(session, out, &listing_args)?;
     if args.watch {
         return watch::run(interval(args.interval, CHECK_WATCH_FLOOR), out.json, || {
             let checks = session
@@ -66,7 +67,7 @@ pub(super) fn checks(session: &mut Session, out: &Emitter, args: &PrChecksArgs) 
             session,
             Command::PullRequestChecks {
                 pull_request: Box::new(request),
-                refresh: args.pull_request.refresh,
+                refresh: listing_args.refresh,
             },
         )?
         .checks()?;

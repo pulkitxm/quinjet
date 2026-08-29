@@ -1,9 +1,11 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
+mod annotations;
 mod commits;
 mod delta;
 mod monitor;
+use annotations::annotations;
 use delta::pull_request_delta;
 pub(super) use monitor::select_check;
 use monitor::{checks, gate, logs, watch_conversation, watch_pull_request};
@@ -59,7 +61,10 @@ pub(super) fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb
             out.emit(&conversation, || render::conversation(&conversation))?;
             Ok(0)
         }
-        PrVerb::Checks(args) => checks(session, out, &args),
+        PrVerb::Checks(command) => match command.command {
+            None => checks(session, out, &command.list),
+            Some(PrChecksVerb::Annotations(args)) => annotations(session, out, &args),
+        },
         PrVerb::Gate(args) => gate(session, out, &args),
         PrVerb::Logs(args) => logs(session, out, &args),
         PrVerb::Open(args) => {

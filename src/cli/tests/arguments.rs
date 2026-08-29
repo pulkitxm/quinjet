@@ -376,8 +376,11 @@ pr reviews progress 7|pr reviews progress 7 --all --since-review|pr reviews prog
 pr reviews next 7|pr reviews next 7 --files|pr reviews next 7 --threads
 pr reviews viewed 7 src/lib.rs|pr reviews viewed 7 --all|pr reviews viewed 7 src/lib.rs --unviewed
 pr reviews viewed 7 --reset|pr reviews visit 7
+pr checks annotations 7|pr checks annotations 7 --severity failure|pr checks annotations 7 --json
+pr checks annotations 7 --check clippy --file src --in-diff --group check --full --exit-code
+pr checks annotations 7 --group severity|pr checks annotations 7 --group file
 ";
-    assert_eq!(assert_argument_cases(cases, true), 80);
+    assert_eq!(assert_argument_cases(cases, true), 86);
 }
 
 #[test]
@@ -411,8 +414,10 @@ pr gate|pr gate 7 --interval 2|pr gate 7 --watch --interval 1|stack gate
 pr diff 7 --since abc --since-review|pr reviews progress 7 --since abc --since-review
 pr reviews next 7 --files --threads|pr reviews viewed 7 src/lib.rs --all
 pr reviews viewed 7 --reset --all|pr reviews viewed 7 src/lib.rs --reset|pr reviews visit
+pr checks annotations|pr checks annotations 7 --severity nothing|pr checks annotations 7 --group nothing
+pr checks 7 annotations
 ";
-    assert_eq!(assert_argument_cases(cases, false), 69);
+    assert_eq!(assert_argument_cases(cases, false), 73);
 }
 
 #[test]
