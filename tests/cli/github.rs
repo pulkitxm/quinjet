@@ -23,6 +23,9 @@ case "$* $input" in
   *"commits(last:100,before:"*)
     printf '{"data":{"repository":{"pullRequest":{"baseRefOid":"%s","headRefOid":"%s","commits":{"totalCount":2,"nodes":[{"commit":{"oid":"%s","abbreviatedOid":"feature0","messageHeadline":"add the feature","authoredDate":"2026-08-21T02:00:00Z","committedDate":"2026-08-21T02:00:00Z","url":"https://github.com/acme/project/commit/feature","author":{"name":"Octo Cat","user":{"login":"octocat"}},"committer":{"name":"Octo Cat","user":{"login":"octocat"}}}}],"pageInfo":{"hasPreviousPage":true,"startCursor":"older"}}}}}}' "$FAKE_BASE_OID" "$FAKE_HEAD_OID" "$FAKE_HEAD_OID"
     ;;
+  *"reviewThreads"*)
+    printf '{"data":{"repository":{"pullRequest":{"id":"PR_node","headRefOid":"%s","reviewDecision":"APPROVED","reviews":{"nodes":[]},"reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}' "$FAKE_HEAD_OID"
+    ;;
   *"number=42"*)
     printf 'PR_node\t42\tAdd feature\tBody from fixture\toctocat\tOPEN\tfalse\t2026-08-21T02:00:00Z\thttps://github.com/acme/project/pull/42\tmain\tfeature\tacme/project\tfalse\t1\t0\t1\t%s\t%s\t2026-08-20T01:00:00Z\tfalse\ttrue\tfalse\ttrue\ttrue\ttrue\ttrue\ttrue\tSUBSCRIBED\tCLEAN\tMERGEABLE\ttrue\ttrue\t\t\t0\t\t\tAPPROVED\n' "$FAKE_BASE_OID" "$FAKE_HEAD_OID"
     ;;
@@ -305,6 +308,26 @@ fn pull_request_diff_renders_the_real_patch_in_plain_and_json() -> Result<()> {
         .json()?;
     ensure!(json["title"] == "PR #42");
     ensure!(json.to_string().contains("from pull request"));
+    Ok(())
+}
+
+#[test]
+fn pull_request_gate_combines_checks_reviews_and_merge_state() -> Result<()> {
+    let fixture = GitHubFixture::new()?;
+
+    let plain = fixture.read(&["pr", "gate", "42"])?;
+    ensure!(plain.code == 2, "{}", plain.stderr);
+    ensure!(plain.stdout.starts_with("pending\n"), "{}", plain.stdout);
+    ensure!(plain.stdout.contains("ci: Lint is in_progress"));
+
+    let json_run = fixture.read(&["pr", "gate", "42", "--json"])?;
+    ensure!(json_run.code == 2, "{}", json_run.stderr);
+    let json = json_run.json()?;
+    ensure!(json["verdict"] == "pending");
+    ensure!(json["number"] == 42);
+    ensure!(json["headOid"] == fixture.head_oid);
+    ensure!(json["blockers"].as_array().is_some_and(Vec::is_empty));
+    ensure!(json["pending"][0]["category"] == "ci");
     Ok(())
 }
 
