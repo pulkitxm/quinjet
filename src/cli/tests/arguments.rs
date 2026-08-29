@@ -385,8 +385,13 @@ pr artifacts 7|pr artifacts 7 --json|pr artifacts download 7 snapshots
 pr artifacts download 7 snapshots --into /tmp/out
 pr deployments 7|pr deployments approve 7 staging --yes
 pr deployments reject 7 staging --comment no --yes
+pr feedback 7|pr feedback 7 --unresolved --mine --no-checks --full --exit-code --json
+pr suggestions 7|pr suggestions apply 7 COMMENT_1 --yes
+pr suggestions apply 7 --all --message fix --yes
+pr reviews suggest 7 src/lib.rs --line 8 -b text
+pr reviews suggest 7 src/lib.rs --line 8 --start-line 6 --note why --body-file f.txt
 ";
-    assert_eq!(assert_argument_cases(cases, true), 99);
+    assert_eq!(assert_argument_cases(cases, true), 106);
 }
 
 #[test]
@@ -425,8 +430,11 @@ pr checks 7 annotations
 pr checks rerun 7|pr checks rerun 7 --failed --all|pr checks rerun 7 --failed --check windows
 pr checks runs|pr checks cancel|pr artifacts download 7|pr deployments approve 7
 pr deployments approve|pr artifacts download
+pr feedback|pr suggestions apply 7|pr suggestions apply 7 COMMENT_1 --all
+pr reviews suggest 7 src/lib.rs -b text|pr reviews suggest 7 --line 8 -b text
+pr reviews suggest 7 src/lib.rs --line 8
 ";
-    assert_eq!(assert_argument_cases(cases, false), 82);
+    assert_eq!(assert_argument_cases(cases, false), 88);
 }
 
 #[test]

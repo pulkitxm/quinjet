@@ -70,6 +70,7 @@ mod api;
 mod cache;
 mod change_index;
 mod discovery;
+mod feedback;
 mod gate;
 mod http;
 mod model;
@@ -81,6 +82,7 @@ mod progress;
 mod pull_request;
 mod review;
 mod stack;
+mod suggestions;
 mod temporary;
 
 pub(crate) use actions::*;
@@ -88,6 +90,7 @@ pub(crate) use annotations::*;
 pub(crate) use cache::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use change_index::*;
+pub(crate) use feedback::*;
 pub(crate) use gate::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use http::*;
@@ -105,6 +108,7 @@ pub(crate) use review::{
     PullRequestReviewSnapshot, PullRequestReviewThread, PullRequestReviewThreadSubject,
 };
 pub(crate) use stack::*;
+pub(crate) use suggestions::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use temporary::*;
 

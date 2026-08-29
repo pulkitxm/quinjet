@@ -74,7 +74,7 @@ impl Repository {
             .ok_or_else(|| anyhow!("`{revision}` does not name a commit in this repository"))
     }
 
-    pub(super) fn rev_parse<const N: usize>(&self, args: [&str; N]) -> Option<String> {
+    pub(crate) fn rev_parse<const N: usize>(&self, args: [&str; N]) -> Option<String> {
         let mut command = vec![OsString::from("rev-parse")];
         command.extend(args.iter().map(OsString::from));
         let output = self.run(command).ok()?;

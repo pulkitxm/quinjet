@@ -285,6 +285,12 @@ pub(crate) struct MergeGate {
 impl MergeGate {
     pub(crate) const SCHEMA_VERSION: u8 = 1;
 
+    #[doc = " The first blocker of a kind, for a caller that wants one requirement"]
+    #[doc = " rather than the whole verdict."]
+    pub(crate) fn blocker(&self, kind: MergeGateBlockerKind) -> Option<&MergeGateBlocker> {
+        self.blockers.iter().find(|blocker| blocker.kind == kind)
+    }
+
     #[doc = " A one-line reason, for a stack row or a status bar that has no space"]
     #[doc = " for the full list."]
     pub(crate) fn headline(&self) -> String {

@@ -6,10 +6,11 @@ use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
     CheckRunLog, GitHubRepository, MergeGate, PullRequest, PullRequestAnnotations,
     PullRequestArtifacts, PullRequestCheck, PullRequestChecks, PullRequestCommits,
-    PullRequestConversation, PullRequestDeployments, PullRequestDiffIndex, PullRequestOperation,
-    PullRequestReviewOperation, PullRequestReviewSnapshot, PullRequestSnapshot, PullRequestStack,
-    PullRequestStackSnapshot, PullRequestWorkflowRuns, ReviewProgress, ReviewSinceRequest,
-    StackGate, WorkflowArtifact, WorkflowOperation,
+    PullRequestConversation, PullRequestDeployments, PullRequestDiffIndex, PullRequestFeedback,
+    PullRequestOperation, PullRequestReviewOperation, PullRequestReviewSnapshot,
+    PullRequestSnapshot, PullRequestStack, PullRequestStackSnapshot, PullRequestSuggestions,
+    PullRequestWorkflowRuns, ReviewProgress, ReviewSinceRequest, StackGate, Suggestion,
+    SuggestionPlan, WorkflowArtifact, WorkflowOperation,
 };
 use crate::git::history::Commit;
 use crate::git::status::RepoStatus;
@@ -63,6 +64,25 @@ pub(crate) enum Command {
     PullRequestWorkflowRuns {
         pull_request: Box<PullRequest>,
         refresh: bool,
+    },
+    PullRequestFeedback {
+        pull_request: Box<PullRequest>,
+        gate: Option<Box<MergeGate>>,
+        review: Box<PullRequestReviewSnapshot>,
+        annotations: Option<Box<PullRequestAnnotations>>,
+        viewer: String,
+    },
+    PullRequestSuggestions {
+        pull_request: Box<PullRequest>,
+        review: Box<PullRequestReviewSnapshot>,
+    },
+    PlanSuggestions {
+        suggestions: Vec<Suggestion>,
+    },
+    ApplySuggestions {
+        pull_request: Box<PullRequest>,
+        plan: Box<SuggestionPlan>,
+        message: Option<String>,
     },
     PullRequestArtifacts {
         pull_request: Box<PullRequest>,
@@ -176,6 +196,10 @@ impl Command {
             Self::PullRequestGate { .. } => "Evaluating the merge gate",
             Self::PullRequestAnnotations { .. } => "Fetching check annotations",
             Self::PullRequestWorkflowRuns { .. } => "Fetching workflow runs",
+            Self::PullRequestFeedback { .. } => "Collecting outstanding feedback",
+            Self::PullRequestSuggestions { .. } => "Reading suggested changes",
+            Self::PlanSuggestions { .. } => "Planning suggested changes",
+            Self::ApplySuggestions { .. } => "Applying suggested changes",
             Self::PullRequestArtifacts { .. } => "Fetching workflow artifacts",
             Self::DownloadArtifact { .. } => "Downloading a workflow artifact",
             Self::PullRequestDeployments { .. } => "Fetching deployments",
@@ -229,6 +253,9 @@ pub(crate) enum Outcome {
     Gate(Box<MergeGate>),
     Annotations(Box<PullRequestAnnotations>),
     WorkflowRuns(Box<PullRequestWorkflowRuns>),
+    Feedback(Box<PullRequestFeedback>),
+    Suggestions(Box<PullRequestSuggestions>),
+    SuggestionPlan(Box<SuggestionPlan>),
     Artifacts(Box<PullRequestArtifacts>),
     DownloadedArtifact(PathBuf),
     Deployments(Box<PullRequestDeployments>),
@@ -282,6 +309,10 @@ answers! {
         |value: Box<PullRequestAnnotations>| *value;
     workflow_runs, WorkflowRuns -> PullRequestWorkflowRuns,
         |value: Box<PullRequestWorkflowRuns>| *value;
+    feedback, Feedback -> PullRequestFeedback, |value: Box<PullRequestFeedback>| *value;
+    suggestions, Suggestions -> PullRequestSuggestions,
+        |value: Box<PullRequestSuggestions>| *value;
+    suggestion_plan, SuggestionPlan -> SuggestionPlan, |value: Box<SuggestionPlan>| *value;
     artifacts, Artifacts -> PullRequestArtifacts, |value: Box<PullRequestArtifacts>| *value;
     downloaded_artifact, DownloadedArtifact -> PathBuf, |value| value;
     deployments, Deployments -> PullRequestDeployments,

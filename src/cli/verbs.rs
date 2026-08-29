@@ -450,6 +450,7 @@ pub(super) struct PrLogsArgs {
 mod actions;
 mod annotations;
 mod edit;
+mod feedback;
 mod since;
 pub(super) use actions::{
     PrArtifactDownloadArgs, PrArtifactVerb, PrArtifactsCommand, PrCancelArgs, PrDeploymentVerb,
@@ -459,4 +460,7 @@ pub(super) use annotations::PrAnnotationsArgs;
 pub(super) use edit::PrEditArgs;
 #[cfg(test)]
 pub(super) use edit::PrEditFieldArg;
+pub(super) use feedback::{
+    PrFeedbackArgs, PrSuggestArgs, PrSuggestionApplyArgs, PrSuggestionVerb, PrSuggestionsCommand,
+};
 pub(super) use since::PrSinceArgs;

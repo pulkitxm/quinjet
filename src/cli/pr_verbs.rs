@@ -24,6 +24,11 @@ pub(super) enum PrVerb {
     #[doc = " List this pull request's deployments and pending approvals"]
     #[command(args_conflicts_with_subcommands = true)]
     Deployments(PrDeploymentsCommand),
+    #[doc = " List everything outstanding on a pull request in one queue"]
+    Feedback(PrFeedbackArgs),
+    #[doc = " List and apply the suggested changes reviewers left"]
+    #[command(args_conflicts_with_subcommands = true)]
+    Suggestions(PrSuggestionsCommand),
     #[doc = " Print one check run's steps and log"]
     Logs(PrLogsArgs),
     #[doc = " Open a pull request in a browser"]

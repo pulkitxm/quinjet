@@ -19,6 +19,7 @@ pub(super) fn track(session: &mut Session, out: &Emitter, command: PrReviewVerb)
             out.message(&message)?;
             Ok(0)
         }
+        PrReviewVerb::Suggest(args) => suggest(session, out, args),
         other => Err(anyhow::anyhow!(
             "the review verb {other:?} is not a progress command"
         )),
@@ -109,4 +110,31 @@ fn viewed(session: &mut Session, out: &Emitter, args: PrReviewViewedArgs) -> Res
         .2;
     out.message(&message)?;
     Ok(0)
+}
+
+#[doc = " Propose an exact replacement for a range of lines. The body is the"]
+#[doc = " suggestion fence GitHub renders as an apply-able block, so this is the"]
+#[doc = " same thing a reviewer writes by hand, without the fence."]
+fn suggest(session: &mut Session, out: &Emitter, args: PrSuggestArgs) -> Result<u8> {
+    let replacement = review_body(&args.text)?;
+    let body = suggestion_body(&replacement, &args.note)
+        .map_err(|error| Failure::new(EXIT_FAILURE, format!("{error:#}")))?;
+    let start_line = args.start_line.filter(|start| *start != args.line);
+    if start_line.is_some_and(|start| start > args.line) {
+        return Err(Failure::new(EXIT_FAILURE, "--start-line must not be after --line").into());
+    }
+    mutate(
+        session,
+        out,
+        &args.pull_request,
+        PullRequestReviewOperation::AddThread {
+            body,
+            path: args.path,
+            line: Some(args.line),
+            side: Some(PullRequestReviewSide::Right),
+            start_line,
+            start_side: start_line.map(|_| PullRequestReviewSide::Right),
+            subject: PullRequestReviewThreadSubject::Line,
+        },
+    )
 }
