@@ -198,16 +198,7 @@ fn open_terminal(
                 dirty = true;
             }
 
-            let watcher_effects = current.poll_watchers();
-            if !watcher_effects.is_empty() {
-                running &= dispatch_effects(
-                    current,
-                    &mut terminal,
-                    watcher_effects,
-                    &mut switch_ssh_machine,
-                );
-                dirty = true;
-            }
+            current.poll_watchers(Instant::now());
 
             if webhook_delivered(webhooks.as_ref()) {
                 let effects = current.webhook_delivered(Instant::now());
@@ -229,7 +220,7 @@ fn open_terminal(
                 dirty = true;
             }
         }
-        if relative_time_tick.try_recv().is_ok() {
+        if workspace.is_none() && relative_time_tick.try_recv().is_ok() {
             dirty = true;
         }
 

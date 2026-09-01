@@ -208,8 +208,8 @@ fn a_superseded_index_cannot_change_the_rendered_selection_or_folds() {
     assert_eq!(app.selected_preview_file, Some(readme_path.clone()));
     assert!(!app.expanded_preview_files.contains(&readme_path));
     assert!(app.preview_file_collapsed(&readme_path.to_string_lossy()));
-    let mut refresh_effects = Vec::new();
-    app.filesystem_changed(&mut refresh_effects);
+    app.filesystem_changed(now);
+    let (refresh_effects, _) = app.tick(now + FILESYSTEM_REFRESH_DEBOUNCE);
     assert!(refresh_effects.iter().any(|effect| matches!(
         effect,
         AppEffect::Git(command) if matches!(command.as_ref(), WorkerCommand::Refresh { .. })

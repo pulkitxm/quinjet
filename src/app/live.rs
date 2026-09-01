@@ -19,6 +19,17 @@ impl App {
         }
 
         let mut effects = Vec::new();
+        if self.filesystem_refresh_due.is_some_and(|due| now >= due) {
+            self.filesystem_refresh_due = None;
+            self.changes_diff_version = self.changes_diff_version.wrapping_add(1);
+            if self.view == View::Changes && self.auxiliary_preview.is_none() {
+                self.invalidate_preview();
+                self.local_diff_loading_path = None;
+                self.local_diff_pending_paths.clear();
+            }
+            self.request_refresh(&mut effects);
+            changed = true;
+        }
         if self.stack_inspector.sync_due {
             self.request_stack_inspector(false, &mut effects);
             changed = true;
@@ -203,14 +214,8 @@ impl App {
         }
     }
 
-    pub(crate) fn filesystem_changed(&mut self, effects: &mut Vec<AppEffect>) {
-        self.changes_diff_version = self.changes_diff_version.wrapping_add(1);
-        if self.view == View::Changes && self.auxiliary_preview.is_none() {
-            self.invalidate_preview();
-            self.local_diff_loading_path = None;
-            self.local_diff_pending_paths.clear();
-        }
-        self.request_refresh(effects);
+    pub(crate) fn filesystem_changed(&mut self, now: Instant) {
+        self.filesystem_refresh_due = Some(now + FILESYSTEM_REFRESH_DEBOUNCE);
     }
 
     #[doc = " The repository heartbeat. Pull-request liveness is separate because it"]

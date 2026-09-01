@@ -5,19 +5,30 @@ use super::PROGRAM;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct Manager {
+    pub kind: ManagerKind,
     pub name: &'static str,
     pub upgrade: &'static str,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ManagerKind {
+    Apt,
+    Homebrew,
+    Winget,
+}
+
 const APT: Manager = Manager {
+    kind: ManagerKind::Apt,
     name: "apt",
     upgrade: "sudo apt update && sudo apt install --only-upgrade quinjet",
 };
 const HOMEBREW: Manager = Manager {
+    kind: ManagerKind::Homebrew,
     name: "Homebrew",
     upgrade: "brew upgrade quinjet",
 };
 const WINGET: Manager = Manager {
+    kind: ManagerKind::Winget,
     name: "Winget",
     upgrade: "winget upgrade Pulkitxm.Quinjet",
 };

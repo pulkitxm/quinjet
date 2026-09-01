@@ -80,9 +80,9 @@ brew install pulkitxm/tap/quinjet
 The formula downloads the release binary for your platform, verifies its
 published checksum, and installs the `quinjet` executable, the `q` shortcut,
 shell completions, and the manual page under `brew --prefix`. Homebrew owns that
-installation, so upgrade it with `brew upgrade quinjet` rather than
-`quinjet update`. See [the Homebrew guide](docs/guides/homebrew.md) for the rest
-of the commands.
+installation, so upgrades run through `brew upgrade quinjet`. You can invoke it
+directly or let `quinjet update` delegate to it. See the
+[Homebrew guide](docs/guides/homebrew.md) for the rest of the commands.
 
 ### Install script
 
@@ -125,9 +125,9 @@ executable. It leaves a completion or `q` shortcut alone when you removed it
 after the first installation.
 
 Homebrew, apt, and Winget installations stay under their package manager.
-`quinjet update` refuses to replace those executables and prints the matching
-package-manager upgrade command instead. `quinjet update --check` remains
-available everywhere.
+`quinjet update` runs `brew upgrade quinjet` for a Homebrew installation. Apt
+and Winget installations keep printing their matching package-manager command.
+`quinjet update --check` remains available everywhere.
 
 ### Cargo
 

@@ -198,6 +198,7 @@ impl App {
             operation_id: 0,
             refresh_again: false,
             history_refresh_again: false,
+            filesystem_refresh_due: None,
             preview_due: None,
             pull_request_poll_due: None,
             pull_request_checks_read_at: None,
