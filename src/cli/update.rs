@@ -11,6 +11,8 @@ use sha2::{Digest, Sha256};
 use super::{EXIT_UNAVAILABLE, Emitter, Failure, completion, package_manager};
 use package_manager::ManagerKind;
 
+mod homebrew;
+
 const API_URL: &str = "https://api.github.com/repos/pulkitxm/quinjet/releases/latest";
 const RELEASES_URL: &str = "https://github.com/pulkitxm/quinjet/releases";
 const API_LIMIT: usize = 1024 * 1024;
@@ -27,7 +29,7 @@ pub(super) fn run(out: &Emitter, check_only: bool) -> Result<u8> {
         .flatten()
     {
         if manager.kind == ManagerKind::Homebrew {
-            return run_homebrew_upgrade(out);
+            return homebrew::run(out);
         }
         return Err(Failure::new(
             EXIT_UNAVAILABLE,
@@ -72,51 +74,6 @@ pub(super) fn run(out: &Emitter, check_only: bool) -> Result<u8> {
     }
     out.emit(&result, || result.text())?;
     Ok(0)
-}
-
-fn run_homebrew_upgrade(out: &Emitter) -> Result<u8> {
-    out.finish_progress();
-    out.note(
-        "warning: Homebrew owns this installation; running `brew upgrade quinjet` for you. You can run that command directly next time.",
-    );
-    let mut command = homebrew_upgrade_command();
-    if out.json {
-        let output = command
-            .stdin(Stdio::null())
-            .output()
-            .context("failed to start `brew upgrade quinjet`")?;
-        ensure!(
-            output.status.success(),
-            "`brew upgrade quinjet` failed: {}",
-            homebrew_failure(&output.stdout, &output.stderr)
-        );
-        out.message("Homebrew upgraded Quinjet")?;
-    } else {
-        let status = command
-            .status()
-            .context("failed to start `brew upgrade quinjet`")?;
-        ensure!(status.success(), "`brew upgrade quinjet` failed");
-    }
-    Ok(0)
-}
-
-#[expect(
-    unused_results,
-    reason = "building a process command mutates and returns the command"
-)]
-fn homebrew_upgrade_command() -> Command {
-    let mut command = Command::new("brew");
-    command.args(["upgrade", "quinjet"]);
-    command
-}
-
-fn homebrew_failure<'a>(stdout: &'a [u8], stderr: &'a [u8]) -> std::borrow::Cow<'a, str> {
-    let stderr = String::from_utf8_lossy(stderr);
-    if stderr.trim().is_empty() {
-        String::from_utf8_lossy(stdout)
-    } else {
-        stderr
-    }
 }
 
 fn running_executable() -> Result<PathBuf> {

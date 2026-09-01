@@ -7,19 +7,6 @@ use anyhow::{Result, ensure};
 use super::*;
 
 #[test]
-fn homebrew_upgrade_uses_the_formula_command() {
-    let command = homebrew_upgrade_command();
-    assert_eq!(command.get_program(), "brew");
-    assert!(command.get_args().eq(["upgrade", "quinjet"]));
-}
-
-#[test]
-fn homebrew_failure_prefers_stderr() {
-    assert_eq!(homebrew_failure(b"stdout", b"stderr"), "stderr");
-    assert_eq!(homebrew_failure(b"stdout", b"\n"), "stdout");
-}
-
-#[test]
 fn assets_match_the_release_matrix() -> Result<()> {
     for (os, arch, translated, expected) in [
         ("linux", "x86_64", false, "quinjet-linux-x86_64"),
