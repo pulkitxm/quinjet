@@ -314,23 +314,22 @@ fn a_two_file_refresh_replaces_the_preserved_diff_atomically() {
 #[test]
 fn coalesced_refresh_waits_for_the_latest_status_before_reloading_the_diff() {
     let (mut app, _, _, loaded) = loaded_changes_preview();
-    let mut initial_effects = Vec::new();
-    app.filesystem_changed(&mut initial_effects);
-    app.filesystem_changed(&mut initial_effects);
     let now = Instant::now();
+    app.filesystem_changed(now);
+    app.filesystem_changed(now + Duration::from_millis(100));
 
-    assert_eq!(
-        initial_effects
-            .iter()
-            .filter(|effect| matches!(
-                effect,
-                AppEffect::Git(command)
-                    if matches!(command.as_ref(), WorkerCommand::Refresh { .. })
-            ))
-            .count(),
-        1
-    );
-    assert!(app.refresh_again);
+    let (effects, changed) = app.tick(now + Duration::from_millis(349));
+    assert!(effects.is_empty());
+    assert!(!changed);
+    assert!(!app.refreshing);
+
+    let (effects, changed) = app.tick(now + Duration::from_millis(350));
+    assert!(changed);
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        AppEffect::Git(command) if matches!(command.as_ref(), WorkerCommand::Refresh { .. })
+    )));
+    assert!(!app.refresh_again);
 
     let effects = app.handle_worker_event(
         WorkerEvent::Status {
@@ -342,20 +341,19 @@ fn coalesced_refresh_waits_for_the_latest_status_before_reloading_the_diff() {
 
     assert!(effects.iter().any(|effect| matches!(
         effect,
-        AppEffect::Git(command) if matches!(command.as_ref(), WorkerCommand::Refresh { .. })
-    )));
-    assert!(effects.iter().all(|effect| !matches!(
-        effect,
         AppEffect::Git(command)
             if matches!(command.as_ref(), WorkerCommand::PrepareLocalDiff { .. })
     )));
     assert_eq!(app.document, loaded);
-    assert!(app.refreshing);
+    assert!(!app.refreshing);
 
-    let mut during_follow_up = Vec::new();
-    app.filesystem_changed(&mut during_follow_up);
-    assert!(during_follow_up.is_empty());
-    assert!(app.refresh_again);
+    app.filesystem_changed(now + Duration::from_millis(400));
+    let (effects, changed) = app.tick(now + Duration::from_millis(650));
+    assert!(changed);
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        AppEffect::Git(command) if matches!(command.as_ref(), WorkerCommand::Refresh { .. })
+    )));
 
     let effects = app.handle_worker_event(
         WorkerEvent::Status {
@@ -365,35 +363,7 @@ fn coalesced_refresh_waits_for_the_latest_status_before_reloading_the_diff() {
         now,
     );
 
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        AppEffect::Git(command) if matches!(command.as_ref(), WorkerCommand::Refresh { .. })
-    )));
-    assert!(effects.iter().all(|effect| !matches!(
-        effect,
-        AppEffect::Git(command)
-            if matches!(command.as_ref(), WorkerCommand::PrepareLocalDiff { .. })
-    )));
-    assert_eq!(app.document, loaded);
-    assert!(app.refreshing);
-
-    let effects = app.handle_worker_event(
-        WorkerEvent::Status {
-            generation: app.status_generation,
-            result: Ok(app.status.clone()),
-        },
-        now,
-    );
-
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        AppEffect::Git(command)
-            if matches!(command.as_ref(), WorkerCommand::PrepareLocalDiff { .. })
-    )));
-    assert!(effects.iter().all(|effect| !matches!(
-        effect,
-        AppEffect::Git(command) if matches!(command.as_ref(), WorkerCommand::Refresh { .. })
-    )));
+    assert!(effects.is_empty());
     assert_eq!(app.document, loaded);
     assert!(!app.refreshing);
 }

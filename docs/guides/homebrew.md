@@ -42,10 +42,12 @@ brew update
 brew upgrade quinjet
 ```
 
-`quinjet update` refuses to run when Homebrew owns the executable, because
-replacing a file inside the Cellar would leave Homebrew's records describing a
-version that is no longer installed. It prints the `brew upgrade` command
-instead. `quinjet update --check` still reports whether a newer release exists.
+`quinjet update` recognizes that Homebrew owns the executable and runs
+`brew upgrade quinjet` for you. It warns before delegating and reminds you that
+the Homebrew command can also be run directly. Quinjet never replaces a file
+inside the Cellar itself, which keeps Homebrew's installed-version records
+authoritative. `quinjet update --check` still reports whether a newer release
+exists without invoking Homebrew.
 
 For the same reason Quinjet skips its first-run bootstrap under Homebrew: the
 formula already installed the completions and the `q` shortcut, so nothing is

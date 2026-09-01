@@ -15,9 +15,8 @@ impl RepositoryWorkspace {
         routed
     }
 
-    pub(crate) fn poll_watchers(&mut self) -> Vec<RoutedEffects> {
-        let mut routed = Vec::new();
-        for (id, runtime) in self.tabs.iter_mut() {
+    pub(crate) fn poll_watchers(&mut self, now: Instant) {
+        for (_, runtime) in self.tabs.iter_mut() {
             let Some(receiver) = runtime
                 .watcher
                 .as_ref()
@@ -28,11 +27,8 @@ impl RepositoryWorkspace {
             if receiver.try_iter().next().is_none() {
                 continue;
             }
-            let mut effects = Vec::new();
-            runtime.app.filesystem_changed(&mut effects);
-            routed.push(RoutedEffects { id, effects });
+            runtime.app.filesystem_changed(now);
         }
-        routed
     }
 
     pub(crate) fn tick(&mut self, now: Instant) -> (Vec<RoutedEffects>, bool) {

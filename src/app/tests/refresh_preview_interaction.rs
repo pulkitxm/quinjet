@@ -147,8 +147,12 @@ fn superseding_a_refresh_clears_its_queue_and_rejects_old_workspace_loads() {
     ));
     assert!(app.local_diff_pending_paths.contains(&new_path));
 
-    let mut refresh_effects = Vec::new();
-    app.filesystem_changed(&mut refresh_effects);
+    app.filesystem_changed(now);
+    let (refresh_effects, _) = app.tick(now + FILESYSTEM_REFRESH_DEBOUNCE);
+    assert!(refresh_effects.iter().any(|effect| matches!(
+        effect,
+        AppEffect::Git(command) if matches!(command.as_ref(), WorkerCommand::Refresh { .. })
+    )));
 
     assert!(app.local_diff_loading_path.is_none());
     assert!(app.local_diff_pending_paths.is_empty());

@@ -13,6 +13,7 @@ impl App {
     }
 
     pub(super) fn request_active_refresh(&mut self, effects: &mut Vec<AppEffect>) {
+        self.filesystem_refresh_due = None;
         if self.view == View::Changes && self.auxiliary_preview.is_none() {
             self.changes_diff_version = self.changes_diff_version.wrapping_add(1);
             self.invalidate_preview();

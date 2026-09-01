@@ -307,11 +307,6 @@ pub(super) fn draw_footer(
                 Style::default().fg(theme.muted),
             ),
         ])
-    } else if app.refreshing {
-        Line::from(Span::styled(
-            " Refreshing repository…",
-            Style::default().fg(theme.muted),
-        ))
     } else {
         let branch = if app.status.branch.head.is_empty() {
             "—".to_owned()
@@ -363,6 +358,10 @@ pub(super) fn draw_footer(
                 Style::default()
                     .fg(theme.accent)
                     .add_modifier(Modifier::UNDERLINED),
+            ),
+            Span::styled(
+                if app.refreshing { "   refreshing" } else { "" },
+                Style::default().fg(theme.muted),
             ),
         ])
     };

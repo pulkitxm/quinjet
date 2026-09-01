@@ -4,11 +4,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail, ensure};
+use package_manager::ManagerKind;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{EXIT_UNAVAILABLE, Emitter, Failure, completion, package_manager};
+
+mod homebrew;
 
 const API_URL: &str = "https://api.github.com/repos/pulkitxm/quinjet/releases/latest";
 const RELEASES_URL: &str = "https://github.com/pulkitxm/quinjet/releases";
@@ -25,6 +28,9 @@ pub(super) fn run(out: &Emitter, check_only: bool) -> Result<u8> {
         .then(|| package_manager::manager(&executable))
         .flatten()
     {
+        if manager.kind == ManagerKind::Homebrew {
+            return homebrew::run(out);
+        }
         return Err(Failure::new(
             EXIT_UNAVAILABLE,
             format!(

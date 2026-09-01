@@ -34,6 +34,7 @@ use crate::tabs::{TabId, TabInfo};
 use crate::theme::{Appearance, AppearanceChoice, Theme, ThemeName, ThemeSelection};
 
 const PREVIEW_DEBOUNCE: Duration = Duration::from_millis(45);
+const FILESYSTEM_REFRESH_DEBOUNCE: Duration = Duration::from_millis(250);
 const RESIZE_DOUBLE_TAP_INTERVAL: Duration = Duration::from_millis(450);
 const TOAST_DURATION: Duration = Duration::from_secs(4);
 const HISTORY_PAGE_SIZE: usize = 300;
@@ -405,6 +406,7 @@ pub(crate) struct App {
     pub operation_id: u64,
     pub refresh_again: bool,
     pub history_refresh_again: bool,
+    pub filesystem_refresh_due: Option<Instant>,
     pub preview_due: Option<Instant>,
     pub pull_request_poll_due: Option<Instant>,
     pub pull_request_checks_read_at: Option<Instant>,
