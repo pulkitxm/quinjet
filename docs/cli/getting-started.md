@@ -73,7 +73,7 @@ brew install pulkitxm/tap/quinjet
 ```
 
 Homebrew owns what it installs, so a Homebrew installation is upgraded with
-`brew upgrade quinjet` and not with `quinjet update`; see
+`brew upgrade quinjet`. `quinjet update` delegates to that command; see
 [the Homebrew guide](../guides/homebrew.md).
 
 The installers download a prebuilt binary from GitHub Releases, verify its
@@ -175,9 +175,10 @@ roots, and custom installer directories. A later
 update Cargo's own bookkeeping.
 
 Homebrew, apt, and Winget own their installed executables and must also own
-their upgrades. `quinjet update` detects those installations, exits 4 without
-a network request, and prints the matching `brew upgrade`, `apt install
---only-upgrade`, or `winget upgrade` command. `quinjet update --check` still
+their upgrades. `quinjet update` delegates a Homebrew installation to
+`brew upgrade quinjet`. Apt and Winget installations exit 4 without a network
+request and print the matching `apt install --only-upgrade` or `winget upgrade`
+command. `quinjet update --check` still
 works because it does not replace anything.
 
 The updater reads GitHub's latest stable release, compares semantic versions,

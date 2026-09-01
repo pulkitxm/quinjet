@@ -18,13 +18,14 @@ Options:
 | `-C, --path <DIR>` | path | `.` | Accepted as a global option but unused because updating is not a repository operation. |
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |
 
-Package-manager installations are the cases `update` refuses to touch. It
-recognizes a resolved executable inside a Homebrew Cellar, an apt-owned
-`/usr/bin/quinjet`, or a Winget package directory. It prints which manager owns
-the executable, gives the matching upgrade command, and exits 4 without a
-network request. Replacing the file directly would leave that manager's records
-describing a version that is no longer installed. `update --check` is
-unaffected and still reports whether a newer release exists. See the
+Package-manager installations stay under their manager. A resolved executable
+inside a Homebrew Cellar makes `quinjet update` run `brew upgrade quinjet` and
+print a warning that the same command can be run directly. An apt-owned
+`/usr/bin/quinjet` or a Winget package directory still prints the matching
+upgrade command and exits 4 without a network request. Replacing those files
+directly would leave the manager's records describing a version that is no
+longer installed. `update --check` is unaffected and still reports whether a
+newer release exists. See the
 [Homebrew](../guides/homebrew.md), [apt](../guides/apt.md), and
 [Winget](../guides/winget.md) guides.
 
@@ -93,6 +94,14 @@ $ quinjet update
 Updated Quinjet from 1.2.3 to 1.3.0
 ```
 
+A Homebrew installation delegates to the package manager:
+
+```console
+$ quinjet update
+warning: Homebrew owns this installation; running `brew upgrade quinjet` for you. You can run that command directly next time.
+==> Upgrading quinjet
+```
+
 The shell-integration refresh is silent. On the first installation it writes
 the generated script, any marked completion integration, and a `q` launcher on
 `PATH`. On an update it rewrites only completion scripts that
@@ -114,7 +123,7 @@ exists; `status` is `up_to_date`, `available`, or `updated`:
 
 ## Failures and safety
 
-Success exits 0. A network timeout or HTTP failure, invalid release metadata,
+Success exits 0. A failed Homebrew upgrade, network timeout or HTTP failure, invalid release metadata,
 unsupported target, oversized response, missing or duplicate checksum,
 checksum mismatch, unwritable installation directory, replacement failure, or
 completion refresh failure prints an error on stderr and exits 1. A completion
