@@ -319,10 +319,11 @@ Four clocks run, and they are independent.
 
 The filesystem watcher reports every change under the worktree root, ignoring
 pure access events, everything under `.git/objects`, `index.lock`, and
-`.watchman-cookie-*` files. Event storms coalesce into one signal, because a
-refresh reads the complete Git state rather than applying an event. If the
-watcher cannot be created, the interface starts anyway and simply relies on the
-next clock.
+`.watchman-cookie-*` files. Events settle for 250 milliseconds before one
+refresh reads the complete Git state, so editors and automated tools can finish
+a write burst without starting a chain of redundant Git reads or terminal
+repaints. If the watcher cannot be created, the interface starts anyway and
+simply relies on the next clock.
 
 A 1 second display tick repaints relative timestamps without reading Git or
 GitHub. Directly rendered lists advance on that tick, while cached pull-request
