@@ -4,12 +4,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail, ensure};
+use package_manager::ManagerKind;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{EXIT_UNAVAILABLE, Emitter, Failure, completion, package_manager};
-use package_manager::ManagerKind;
 
 mod homebrew;
 
