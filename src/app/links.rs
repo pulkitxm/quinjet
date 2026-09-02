@@ -102,6 +102,20 @@ impl App {
         })
     }
 
+    pub(crate) fn open_link(&mut self, url: String, effects: &mut Vec<AppEffect>, now: Instant) {
+        if self.local_browser {
+            self.show_toast(format!("Opening {url}"), ToastLevel::Info, now);
+            effects.push(AppEffect::Open(OpenTarget::Browser(url)));
+            return;
+        }
+        effects.push(AppEffect::Copy(url.clone()));
+        self.show_toast(
+            format!("Copied {url}. Cmd-click or Ctrl-click the link to open it in your browser"),
+            ToastLevel::Info,
+            now,
+        );
+    }
+
     pub(crate) fn show_toast(&mut self, message: String, level: ToastLevel, now: Instant) {
         self.toast = Some(Toast {
             message,

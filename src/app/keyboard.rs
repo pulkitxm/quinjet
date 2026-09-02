@@ -132,7 +132,7 @@ impl App {
                 let items = self.pr_menu_items();
                 if let Some(item) = items.get(self.pr_menu_selected).copied() {
                     self.pr_menu_open = false;
-                    self.handle_pr_menu_item(item, &mut effects);
+                    self.handle_pr_menu_item(item, &mut effects, now);
                 }
             }
             KeyCode::Esc if self.scm_menu_open || self.pr_menu_open => {

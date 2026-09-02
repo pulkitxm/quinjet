@@ -10,7 +10,12 @@ impl App {
         clippy::needless_pass_by_value,
         reason = "the caller has no use for the value afterwards"
     )]
-    pub(super) fn handle_scm_action(&mut self, action: ScmAction, effects: &mut Vec<AppEffect>) {
+    pub(super) fn handle_scm_action(
+        &mut self,
+        action: ScmAction,
+        effects: &mut Vec<AppEffect>,
+        now: Instant,
+    ) {
         match action {
             ScmAction::Stage(index) | ScmAction::Unstage(index) | ScmAction::Resolve(index) => {
                 let Some(change) = self.status.changes.get(index).cloned() else {
@@ -97,7 +102,7 @@ impl App {
             ScmAction::PrPrimary => {
                 self.pr_menu_open = false;
                 if let Some(action) = self.pr_primary_action() {
-                    self.handle_pr_primary(action, effects);
+                    self.handle_pr_primary(action, effects, now);
                 }
             }
             ScmAction::PrToggleMenu => {
@@ -113,7 +118,7 @@ impl App {
             }
             ScmAction::PrMenu(item) => {
                 self.pr_menu_open = false;
-                self.handle_pr_menu_item(item, effects);
+                self.handle_pr_menu_item(item, effects, now);
             }
             ScmAction::JumpToTop => {
                 self.set_focus(Focus::Content, effects);

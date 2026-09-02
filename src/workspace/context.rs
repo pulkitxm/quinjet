@@ -39,6 +39,7 @@ impl RepositoryRuntime {
         let mut app = App::new(repository.root(), repository.name());
         app.set_theme_selection(theme, appearance);
         app.configure_mouse_capture(mouse);
+        app.local_browser = crate::cli::browser_is_local();
         app.webhooks_listening = webhooks_listening;
         app.ssh_context = context.ssh;
         app.set_host_client(context.client);

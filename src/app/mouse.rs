@@ -163,7 +163,7 @@ impl App {
                 .find(|(area, _)| area.contains((event.column, event.row).into()))
                 .map(|(_, action)| *action)
             {
-                self.handle_modal_action(action, &mut effects);
+                self.handle_modal_action(action, &mut effects, now);
             }
             return effects;
         }
@@ -201,14 +201,14 @@ impl App {
                     .any(|area| area.contains(point))
                 {
                     self.open_projects(ProjectOpenMode::CurrentTab, &mut effects);
-                } else if let Some(target) = self
+                } else if let Some(OpenTarget::Browser(url)) = self
                     .geometry
                     .link_hits
                     .iter()
                     .find(|hit| hit.area.contains(point))
                     .map(|hit| hit.target.clone())
                 {
-                    effects.push(AppEffect::Open(target));
+                    self.open_link(url, &mut effects, now);
                 } else if self
                     .geometry
                     .sidebar_divider
@@ -248,7 +248,7 @@ impl App {
                         .find(|hit| hit.area.contains((event.column, event.row).into()))
                         .map(|hit| hit.action.clone())
                     {
-                        self.handle_scm_action(action, &mut effects);
+                        self.handle_scm_action(action, &mut effects, now);
                     } else if let Some(hit) = self
                         .geometry
                         .stack_inspector_hits
