@@ -36,13 +36,14 @@ use tui_args::TuiArgs;
 
 use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
-    CheckRunLog, GitHubRepository, MergeGate, PullRequest, PullRequestCheck,
-    PullRequestCheckStatus, PullRequestCommentMode, PullRequestDiffIndex, PullRequestEdit,
-    PullRequestLockReason, PullRequestMergeMethod, PullRequestMergeMode, PullRequestOperation,
-    PullRequestReviewDecision, PullRequestReviewKind, PullRequestReviewOperation,
-    PullRequestReviewSide, PullRequestReviewThreadSubject, PullRequestSnapshot, PullRequestStack,
+    AnnotationFilter, AnnotationGrouping, AnnotationSeverity, CheckRunLog, GitHubRepository,
+    MergeGate, PullRequest, PullRequestAnnotations, PullRequestCheck, PullRequestCheckStatus,
+    PullRequestCommentMode, PullRequestDiffIndex, PullRequestEdit, PullRequestLockReason,
+    PullRequestMergeMethod, PullRequestMergeMode, PullRequestOperation, PullRequestReviewDecision,
+    PullRequestReviewKind, PullRequestReviewOperation, PullRequestReviewSide,
+    PullRequestReviewThreadSubject, PullRequestSnapshot, PullRequestStack,
     PullRequestStackSnapshot, PullRequestUpdateMethod, ReviewNextStep, ReviewProgress,
-    ReviewSinceRequest,
+    ReviewSinceRequest, annotated_paths, mark_diff_coverage, visible_lines,
 };
 use crate::git::status::{Change, ChangeArea};
 use crate::git::{ConflictChoice, GitOperation, LocalDiffRequest, Repository};
@@ -50,6 +51,7 @@ use crate::integration::Client;
 use crate::theme::{AppearanceChoice, ThemeName, ThemeSelection};
 
 pub(crate) const EXIT_FAILURE: u8 = 1;
+pub(crate) const EXIT_USAGE: u8 = 2;
 pub(crate) const EXIT_NOT_FOUND: u8 = 3;
 pub(crate) const EXIT_UNAVAILABLE: u8 = 4;
 
@@ -243,64 +245,6 @@ enum Verb {
     Update(UpdateArgs),
 }
 
-impl Verb {
-    const fn progress_label(&self) -> Option<&'static str> {
-        match self {
-            Self::Tui(_)
-            | Self::Remote { .. }
-            | Self::Project { .. }
-            | Self::Completions(_)
-            | Self::Man(_)
-            | Self::Capabilities => None,
-            Self::Status(args) if args.watch => None,
-            Self::Status(_) => Some("Reading repository status"),
-            Self::Diff(_) => Some("Loading the working-tree diff"),
-            Self::Stage(_) => Some("Staging changes"),
-            Self::Unstage(_) => Some("Unstaging changes"),
-            Self::Discard(_) => Some("Reading changes to discard"),
-            Self::Remove(_) => Some("Reading files to remove"),
-            Self::Commit(_) => Some("Creating commit"),
-            Self::Fetch => Some("Fetching remotes"),
-            Self::Pull => Some("Pulling changes"),
-            Self::Push => Some("Pushing changes"),
-            Self::Sync => Some("Synchronizing changes"),
-            Self::Log(_) => Some("Reading commit history"),
-            Self::Show(_) => Some("Loading commit patch"),
-            Self::Branch { .. } => Some("Reading branch state"),
-            Self::Stash { .. } => Some("Reading stash state"),
-            Self::Worktree { .. } => Some("Reading worktrees"),
-            Self::CherryPick(_) => Some("Resolving commit to cherry-pick"),
-            Self::Revert(_) => Some("Resolving commit to revert"),
-            Self::Resolve(_) => Some("Resolving conflict"),
-            Self::Repos(_) => Some("Discovering GitHub repositories"),
-            Self::Pr {
-                command: PrVerb::View(args) | PrVerb::Conversation(args),
-            } if args.watch => None,
-            Self::Pr {
-                command: PrVerb::Checks(args),
-            } if args.watch => None,
-            Self::Pr {
-                command: PrVerb::Logs(args),
-            } if args.watch => None,
-            Self::Pr {
-                command: PrVerb::Gate(args),
-            } if args.watch => None,
-            Self::Pr {
-                command: PrVerb::Gate(_),
-            } => Some("Evaluating the merge gate"),
-            Self::Pr {
-                command: PrVerb::Merge(_) | PrVerb::Close(_) | PrVerb::Reopen(_),
-            } => Some("Updating pull request"),
-            Self::Pr {
-                command: PrVerb::Reviews { .. },
-            } => Some("Updating pull-request review"),
-            Self::Pr { .. } => Some("Loading pull request"),
-            Self::Stack { .. } => Some("Loading pull-request stack"),
-            Self::Update(_) => Some("Checking for updates"),
-        }
-    }
-}
-
 #[derive(Debug, Args)]
 struct CompletionsArgs {
     #[doc = " Shell to write or install a completion script for"]
@@ -456,6 +400,7 @@ struct ConflictSide {
 }
 
 mod entry;
+mod labels;
 mod output;
 mod pull_request;
 mod repository;

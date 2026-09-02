@@ -108,6 +108,7 @@ when their check state settles.
 - [`quinjet pr diff`](./diff.md)
 - [`quinjet pr conversation`](./conversation.md)
 - [`quinjet pr checks`](./checks.md)
+- [`quinjet pr checks annotations`](./checks-annotations.md)
 - [`quinjet pr gate`](./gate.md)
 - [`quinjet pr logs`](./logs.md)
 - [`quinjet pr open`](./open.md)

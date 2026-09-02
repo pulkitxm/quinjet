@@ -4,10 +4,11 @@ use anyhow::Result;
 
 use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
-    CheckRunLog, GitHubRepository, MergeGate, PullRequest, PullRequestCheck, PullRequestChecks,
-    PullRequestCommits, PullRequestConversation, PullRequestDiffIndex, PullRequestOperation,
-    PullRequestReviewOperation, PullRequestReviewSnapshot, PullRequestSnapshot, PullRequestStack,
-    PullRequestStackSnapshot, ReviewProgress, ReviewSinceRequest, StackGate,
+    CheckRunLog, GitHubRepository, MergeGate, PullRequest, PullRequestAnnotations,
+    PullRequestCheck, PullRequestChecks, PullRequestCommits, PullRequestConversation,
+    PullRequestDiffIndex, PullRequestOperation, PullRequestReviewOperation,
+    PullRequestReviewSnapshot, PullRequestSnapshot, PullRequestStack, PullRequestStackSnapshot,
+    ReviewProgress, ReviewSinceRequest, StackGate,
 };
 use crate::git::history::Commit;
 use crate::git::status::RepoStatus;
@@ -51,6 +52,10 @@ pub(crate) enum Command {
         refresh: bool,
     },
     PullRequestGate {
+        pull_request: Box<PullRequest>,
+        refresh: bool,
+    },
+    PullRequestAnnotations {
         pull_request: Box<PullRequest>,
         refresh: bool,
     },
@@ -147,6 +152,7 @@ impl Command {
             Self::PullRequestLookup { .. } => "Fetching pull-request metadata",
             Self::PullRequestStack { .. } => "Fetching pull-request stack",
             Self::PullRequestGate { .. } => "Evaluating the merge gate",
+            Self::PullRequestAnnotations { .. } => "Fetching check annotations",
             Self::PullRequestStackGate { .. } => "Evaluating the stack merge gate",
             Self::PreparePullRequest { .. }
             | Self::PreparePullRequestSince { .. }
@@ -194,6 +200,7 @@ pub(crate) enum Outcome {
     PullRequest(Box<PullRequestSnapshot>),
     PullRequestStack(Box<PullRequestStackSnapshot>),
     Gate(Box<MergeGate>),
+    Annotations(Box<PullRequestAnnotations>),
     ReviewProgress(Box<ReviewProgress>),
     StackGate(Box<StackGate>),
     PullRequestIndex(Box<PullRequestDiffIndex>),
@@ -240,6 +247,8 @@ answers! {
     pull_request_stack, PullRequestStack -> PullRequestStackSnapshot,
         |value: Box<PullRequestStackSnapshot>| *value;
     gate, Gate -> MergeGate, |value: Box<MergeGate>| *value;
+    annotations, Annotations -> PullRequestAnnotations,
+        |value: Box<PullRequestAnnotations>| *value;
     review_progress, ReviewProgress -> ReviewProgress, |value: Box<ReviewProgress>| *value;
     stack_gate, StackGate -> StackGate, |value: Box<StackGate>| *value;
     pull_request_index, PullRequestIndex -> PullRequestDiffIndex,

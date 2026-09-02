@@ -71,6 +71,7 @@ pub(crate) fn dispatch() -> Result<Launch> {
         )
         .into());
     }
+    verb.validate()?;
     if let Some(label) = verb.progress_label() {
         out.start_progress(label)?;
     }

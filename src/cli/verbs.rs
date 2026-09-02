@@ -282,68 +282,6 @@ pub(super) struct PrReviewArgs {
     pub(super) yes: bool,
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
-pub(super) enum PrEditFieldArg {
-    Title,
-    Body,
-    Base,
-    AddAssignee,
-    RemoveAssignee,
-    AddLabel,
-    RemoveLabel,
-    AddProject,
-    RemoveProject,
-    AddReviewer,
-    RemoveReviewer,
-    Milestone,
-    RemoveMilestone,
-}
-
-#[derive(Debug, Args)]
-pub(super) struct PrEditArgs {
-    #[command(flatten)]
-    pub(super) pull_request: PrArgs,
-    #[doc = " Metadata field or relationship to change"]
-    #[arg(value_enum, value_name = "FIELD")]
-    pub(super) field: PrEditFieldArg,
-    #[doc = " New value, or a comma-separated list for relationship fields"]
-    #[arg(value_name = "VALUE", value_hint = ValueHint::Other)]
-    pub(super) value: Option<String>,
-    #[doc = " Confirm; without it the command reports what it would do"]
-    #[arg(long)]
-    pub(super) yes: bool,
-}
-
-impl PrEditArgs {
-    pub(super) fn edit(&self) -> Result<PullRequestEdit> {
-        if matches!(self.field, PrEditFieldArg::RemoveMilestone) {
-            if self.value.is_some() {
-                return Err(anyhow::anyhow!("remove-milestone does not take a value"));
-            }
-            return Ok(PullRequestEdit::RemoveMilestone);
-        }
-        let value = self
-            .value
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("the selected edit field needs a value"))?;
-        Ok(match self.field {
-            PrEditFieldArg::Title => PullRequestEdit::Title(value),
-            PrEditFieldArg::Body => PullRequestEdit::Body(value),
-            PrEditFieldArg::Base => PullRequestEdit::Base(value),
-            PrEditFieldArg::AddAssignee => PullRequestEdit::AddAssignee(value),
-            PrEditFieldArg::RemoveAssignee => PullRequestEdit::RemoveAssignee(value),
-            PrEditFieldArg::AddLabel => PullRequestEdit::AddLabel(value),
-            PrEditFieldArg::RemoveLabel => PullRequestEdit::RemoveLabel(value),
-            PrEditFieldArg::AddProject => PullRequestEdit::AddProject(value),
-            PrEditFieldArg::RemoveProject => PullRequestEdit::RemoveProject(value),
-            PrEditFieldArg::AddReviewer => PullRequestEdit::AddReviewer(value),
-            PrEditFieldArg::RemoveReviewer => PullRequestEdit::RemoveReviewer(value),
-            PrEditFieldArg::Milestone => PullRequestEdit::SetMilestone(value),
-            PrEditFieldArg::RemoveMilestone => return Ok(PullRequestEdit::RemoveMilestone),
-        })
-    }
-}
-
 #[derive(Debug, Args)]
 pub(super) struct PrUpdateBranchArgs {
     #[command(flatten)]
@@ -418,8 +356,15 @@ pub(super) struct PrDiffArgs {
 
 #[derive(Debug, Args)]
 pub(super) struct PrChecksArgs {
-    #[command(flatten)]
-    pub(super) pull_request: PrArgs,
+    #[doc = " Pull-request number"]
+    #[arg(value_name = "NUMBER", required = false, value_hint = ValueHint::Other)]
+    pub(super) number: Option<u64>,
+    #[doc = " Repository the number belongs to, as owner/name"]
+    #[arg(long, value_name = "OWNER/NAME", value_hint = ValueHint::Other)]
+    pub(super) repo: Option<String>,
+    #[doc = " Ask GitHub again instead of answering from the cache"]
+    #[arg(long)]
+    pub(super) refresh: bool,
     #[doc = " Keep reading until every check has settled"]
     #[arg(long)]
     pub(super) watch: bool,
@@ -436,6 +381,26 @@ pub(super) struct PrChecksArgs {
     #[doc = " Exit 1 when a check has not passed"]
     #[arg(long, conflicts_with = "watch")]
     pub(super) exit_code: bool,
+}
+
+impl PrChecksArgs {
+    #[doc = " The pull request this listing is about. Clap cannot require the"]
+    #[doc = " number here without also requiring it of every `pr checks`"]
+    #[doc = " subcommand, so the routing requires it instead."]
+    pub(super) fn pull_request(&self) -> Result<PrArgs> {
+        let number = self.number.ok_or_else(|| {
+            Failure::new(
+                EXIT_USAGE,
+                "the following required arguments were not provided:\n  <NUMBER>",
+            )
+            .hint("run `quinjet pr checks --help` for this verb's usage")
+        })?;
+        Ok(PrArgs {
+            number,
+            repo: self.repo.clone(),
+            refresh: self.refresh,
+        })
+    }
 }
 
 #[derive(Debug, Args)]
@@ -482,5 +447,11 @@ pub(super) struct PrLogsArgs {
     pub(super) interval: u64,
 }
 
+mod annotations;
+mod edit;
 mod since;
+pub(super) use annotations::PrAnnotationsArgs;
+pub(super) use edit::PrEditArgs;
+#[cfg(test)]
+pub(super) use edit::PrEditFieldArg;
 pub(super) use since::PrSinceArgs;

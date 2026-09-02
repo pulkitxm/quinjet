@@ -1,8 +1,9 @@
 use crate::date_time::{format_local_timestamp, format_relative_timestamp};
 use crate::git::diff::{DiffDocument, DiffLineKind};
 use crate::git::github::{
-    CheckRunLog, CheckStep, ConversationKind, GitHubRepository, MergeGate, MergeGateBranch,
-    MergeGateChecks, MergeGateReview, PullRequest, PullRequestCheck, PullRequestCheckStatus,
+    AnnotationCounts, AnnotationGrouping, CheckAnnotation, CheckRunLog, CheckStep,
+    ConversationKind, GitHubRepository, MergeGate, MergeGateBranch, MergeGateChecks,
+    MergeGateReview, PullRequest, PullRequestAnnotations, PullRequestCheck, PullRequestCheckStatus,
     PullRequestCommits, PullRequestConversation, PullRequestDiffIndex, PullRequestFileStatus,
     PullRequestReviewSide, PullRequestReviewSnapshot, PullRequestReviewThreadSubject,
     PullRequestStackSnapshot, ReviewFileProgress, ReviewNextStep, ReviewProgress, StackGate,
@@ -42,11 +43,13 @@ fn truncate(text: &str, width: usize) -> String {
     format!("{kept}…")
 }
 
+mod annotations;
 mod gate;
 mod github;
 mod progress;
 mod repository;
 
+pub(crate) use annotations::*;
 pub(crate) use gate::*;
 pub(crate) use github::*;
 pub(crate) use progress::*;

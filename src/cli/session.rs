@@ -124,6 +124,13 @@ impl Session {
             } => Ok(Outcome::Gate(Box::new(
                 self.repository.pull_request_gate(&pull_request, refresh)?,
             ))),
+            Command::PullRequestAnnotations {
+                pull_request,
+                refresh,
+            } => Ok(Outcome::Annotations(Box::new(
+                self.repository
+                    .pull_request_annotations(&pull_request, refresh)?,
+            ))),
             Command::PullRequestStackGate { stack, refresh } => Ok(Outcome::StackGate(Box::new(
                 self.repository.pull_request_stack_gate(&stack, refresh),
             ))),

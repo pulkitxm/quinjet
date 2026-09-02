@@ -64,6 +64,7 @@ const MAX_RECENT_CACHE_ENTRY_BYTES: u64 = 384 * 1024;
 static TEMPORARY_REPOSITORY_ID: AtomicU64 = AtomicU64::new(0);
 static CACHE_WRITE_ID: AtomicU64 = AtomicU64::new(0);
 
+mod annotations;
 mod api;
 mod cache;
 mod change_index;
@@ -81,6 +82,7 @@ mod review;
 mod stack;
 mod temporary;
 
+pub(crate) use annotations::*;
 pub(crate) use cache::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use change_index::*;

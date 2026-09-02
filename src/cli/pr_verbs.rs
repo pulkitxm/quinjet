@@ -13,8 +13,9 @@ pub(super) enum PrVerb {
     Diff(PrDiffArgs),
     #[doc = " Print a pull request's timeline and review comments"]
     Conversation(PrWatchArgs),
-    #[doc = " List a pull request's checks"]
-    Checks(PrChecksArgs),
+    #[doc = " Read a pull request's checks"]
+    #[command(args_conflicts_with_subcommands = true)]
+    Checks(PrChecksCommand),
     #[doc = " Say whether the pull request can merge, and what blocks it"]
     Gate(PrGateArgs),
     #[doc = " Print one check run's steps and log"]
@@ -70,4 +71,22 @@ pub(super) enum PrVerb {
         #[command(subcommand)]
         command: PrReviewVerb,
     },
+}
+
+#[doc = " `pr checks <number>` still lists the checks; the subcommands read what"]
+#[doc = " those checks reported about particular lines. The number is optional to"]
+#[doc = " clap because a subcommand carries its own, and required by the routing"]
+#[doc = " when no subcommand is given."]
+#[derive(Debug, Args)]
+pub(super) struct PrChecksCommand {
+    #[command(subcommand)]
+    pub(super) command: Option<PrChecksVerb>,
+    #[command(flatten)]
+    pub(super) list: PrChecksArgs,
+}
+
+#[derive(Debug, Subcommand)]
+pub(super) enum PrChecksVerb {
+    #[doc = " List the annotations a pull request's checks placed on its lines"]
+    Annotations(PrAnnotationsArgs),
 }
