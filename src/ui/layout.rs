@@ -127,14 +127,8 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     if let Some(selection) = app.text_selection {
         draw_text_selection(frame, selection, theme);
     }
+    draw_terminal_links(frame, &app.geometry.link_hits);
     if app.modal.is_none() {
-        if !app.mouse_capture || app.link_hover.is_some() {
-            draw_terminal_links(
-                frame,
-                &app.geometry.link_hits,
-                app.mouse_capture.then_some(app.link_hover).flatten(),
-            );
-        }
         draw_link_hover(frame, &app.geometry.link_hits, app.link_hover);
     }
 
@@ -183,15 +177,8 @@ pub(super) fn draw_text_selection(
     }
 }
 
-pub(super) fn draw_terminal_links(
-    frame: &mut Frame<'_>,
-    hits: &[LinkHit],
-    hover: Option<(u16, u16)>,
-) {
+pub(super) fn draw_terminal_links(frame: &mut Frame<'_>, hits: &[LinkHit]) {
     for hit in hits {
-        if hover.is_some_and(|point| !hit.area.contains(point.into())) {
-            continue;
-        }
         let OpenTarget::Browser(url) = &hit.target;
         if url.chars().any(char::is_control) {
             continue;
@@ -202,8 +189,10 @@ pub(super) fn draw_terminal_links(
                     continue;
                 };
                 let symbol = cell.symbol().to_owned();
+                let width = NonZeroU16::new(u16::try_from(symbol.width()).unwrap_or(1))
+                    .unwrap_or(NonZeroU16::MIN);
                 cell.set_symbol(&format!("\x1b]8;;{url}\x1b\\{symbol}\x1b]8;;\x1b\\"))
-                    .diff_option = CellDiffOption::ForcedWidth(NonZeroU16::MIN);
+                    .diff_option = CellDiffOption::ForcedWidth(width);
             }
         }
     }

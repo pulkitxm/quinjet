@@ -6,9 +6,10 @@ impl App {
         &mut self,
         mut modal: Modal,
         key: KeyEvent,
+        now: Instant,
     ) -> Vec<AppEffect> {
         if matches!(modal, Modal::PullRequestReviewThreadActions { .. }) {
-            return self.handle_review_thread_modal_key(modal, key);
+            return self.handle_review_thread_modal_key(modal, key, now);
         }
         let mut effects = Vec::new();
         match &mut modal {
@@ -130,6 +131,7 @@ impl App {
         &mut self,
         mut modal: Modal,
         key: KeyEvent,
+        now: Instant,
     ) -> Vec<AppEffect> {
         let mut effects = Vec::new();
         let Modal::PullRequestReviewThreadActions { items, selected } = &mut modal else {
@@ -147,7 +149,7 @@ impl App {
             }
             KeyCode::Enter => {
                 if let Some(item) = items.get(*selected).cloned() {
-                    self.handle_review_thread_action(item, &mut effects);
+                    self.handle_review_thread_action(item, &mut effects, now);
                 }
             }
             _ => self.modal = Some(modal),

@@ -290,6 +290,7 @@ impl App {
         &mut self,
         action: PullRequestReviewThreadAction,
         effects: &mut Vec<AppEffect>,
+        now: Instant,
     ) {
         match action {
             PullRequestReviewThreadAction::Reply { thread_id } => {
@@ -302,7 +303,7 @@ impl App {
                 effects.push(AppEffect::Copy(body));
             }
             PullRequestReviewThreadAction::OpenComment { url } => {
-                effects.push(AppEffect::Open(OpenTarget::Browser(url)));
+                self.open_link(url, effects, now);
             }
             PullRequestReviewThreadAction::EditComment { comment_id, body } => {
                 self.modal = Some(Modal::PullRequestReviewComment {

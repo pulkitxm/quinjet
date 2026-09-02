@@ -155,9 +155,12 @@ impl App {
         &mut self,
         action: PrPrimaryAction,
         effects: &mut Vec<AppEffect>,
+        now: Instant,
     ) {
         match action {
-            PrPrimaryAction::OpenInBrowser => self.open_selected_pull_request_in_browser(effects),
+            PrPrimaryAction::OpenInBrowser => {
+                self.open_selected_pull_request_in_browser(effects, now);
+            }
             PrPrimaryAction::Merge(method) => {
                 self.confirm_pull_request_operation(PullRequestOperation::Merge {
                     method,
@@ -180,9 +183,16 @@ impl App {
         }
     }
 
-    pub(super) fn handle_pr_menu_item(&mut self, item: PrMenuItem, effects: &mut Vec<AppEffect>) {
+    pub(super) fn handle_pr_menu_item(
+        &mut self,
+        item: PrMenuItem,
+        effects: &mut Vec<AppEffect>,
+        now: Instant,
+    ) {
         match item {
-            PrMenuItem::OpenInBrowser => self.open_selected_pull_request_in_browser(effects),
+            PrMenuItem::OpenInBrowser => {
+                self.open_selected_pull_request_in_browser(effects, now);
+            }
             PrMenuItem::Merge(method) => {
                 self.preferred_merge_method = method;
                 self.confirm_pull_request_operation(PullRequestOperation::Merge {

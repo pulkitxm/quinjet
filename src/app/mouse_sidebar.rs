@@ -15,7 +15,7 @@ impl App {
             }
             StackInspectorHit::TipChecks => self.inspect_pull_request_stack_tip(now, effects),
             StackInspectorHit::Diff => self.open_pull_request_stack_diff(effects),
-            StackInspectorHit::Review => self.open_stack_member_review(effects),
+            StackInspectorHit::Review => self.open_stack_member_review(effects, now),
             StackInspectorHit::Previous => {
                 let _ = self.move_pull_request_stack_cursor(-1, false, now);
             }

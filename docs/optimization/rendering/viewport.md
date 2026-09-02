@@ -115,8 +115,8 @@ The version Quinjet builds against (ratatui 0.30, per `Cargo.toml`) also exposes
 `CellDiffOption`, which lets a renderer mark a cell as needing special diff treatment. Quinjet uses
 it in exactly one place, terminal hyperlinks, covered in
 [the never-spawn-Git section](#a-render-path-that-never-spawns-git) below: a cell whose symbol has
-OSC 8 escape sequences embedded in it declares a forced width of one column so the diff does not
-misjudge the display width of the escape-laden symbol.
+OSC 8 escape sequences embedded in it declares a forced width equal to the width of the glyph it
+wraps so the diff does not misjudge the display width of the escape-laden symbol.
 
 ### What buffer diffing does not protect
 
@@ -256,22 +256,26 @@ src/ui/mod.rs:7106).
 
 ### Terminal hyperlinks without layout cost
 
-When no modal is open, `draw_terminal_links` embeds OSC 8 hyperlink escapes directly into the
-symbols of cells inside link hit areas, so terminals that support hyperlinks make the rendered text
-clickable. The mechanism, from src/ui/mod.rs:
+On every frame, `draw_terminal_links` embeds OSC 8 hyperlink escapes directly into the symbols of
+cells inside link hit areas, so terminals that support hyperlinks make the rendered text clickable.
+The mechanism, from src/ui/mod.rs:
 
 ```rust
 let symbol = cell.symbol().to_owned();
+let width = NonZeroU16::new(u16::try_from(symbol.width()).unwrap_or(1)).unwrap_or(NonZeroU16::MIN);
 cell.set_symbol(&format!("\x1b]8;;{url}\x1b\\{symbol}\x1b]8;;\x1b\\"))
-    .diff_option = CellDiffOption::ForcedWidth(NonZeroU16::MIN);
+    .diff_option = CellDiffOption::ForcedWidth(width);
 ```
 
 The escape sequences are zero-width in the terminal but not zero-length in the cell's symbol
-string, so the cell declares `ForcedWidth` of one column and the buffer diff treats it as a normal
-single cell. URLs containing control characters are skipped entirely (a URL is attacker-influenced
-data from PR metadata, and letting a control character into an escape sequence would corrupt the
-stream). The links are only embedded when mouse capture is off or a link is hovered, and
-`draw_link_hover` adds `Modifier::UNDERLINED` to the hovered hit's cells so hovering gives visual
+string, so the cell declares a `ForcedWidth` equal to the width its own glyph already had, at least
+one column, and the buffer diff treats it as the cell it was before. A wide glyph inside a link
+therefore keeps its two columns. URLs containing control characters are skipped entirely (a URL is
+attacker-influenced data from PR metadata, and letting a control character into an escape sequence
+would corrupt the stream). The pass runs whatever the mouse-capture state and whether or not a
+modal is open, so the terminal owns hover underlining and Cmd-click or Ctrl-click opening on the
+machine that owns the terminal, over SSH included. `draw_link_hover` still adds
+`Modifier::UNDERLINED` to the hovered hit's cells when no modal is open, so hovering gives visual
 feedback without re-rendering anything. All of this happens after the frame is composed, as pure
 cell rewrites: link decoration costs nothing during layout.
 
@@ -1749,8 +1753,8 @@ layer handles explicitly, grouped by the kind of hazard, each with the mechanism
   so the range endpoints always fall on UTF-8 boundaries and the span-splitting in
   `highlight_spans` can slice safely.
 - **Escape-laden hyperlink cells** would confuse width accounting, since their symbol strings are
-  dozens of bytes for one visual column; the `CellDiffOption::ForcedWidth` declaration pins them
-  to one column in the buffer diff.
+  dozens of bytes for one or two visual columns; the `CellDiffOption::ForcedWidth` declaration pins
+  them to the width the wrapped glyph already had in the buffer diff.
 
 ### Staleness and races
 
@@ -1994,7 +1998,3 @@ Use this matrix during performance reviews. Each row combines a cost lens, repos
 | 30 | Check latency for Viewport rendering and terminal frame economics in a deeply diverged branch | Record cache disposition and complete key |
 | 31 | Check latency for Viewport rendering and terminal frame economics in a deeply diverged branch | Record stale reply rejection |
 | 32 | Check latency for Viewport rendering and terminal frame economics in a deeply diverged branch | Record visible state after failure |
-| 33 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record time to first useful rows |
-| 34 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record steady frame cost |
-| 35 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record bytes accepted from child output |
-| 36 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record Git and gh process count |

@@ -79,6 +79,10 @@ pub(super) fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb
                     check.link
                 }
             };
+            if !browser_is_local() {
+                out.message(&url)?;
+                return Ok(0);
+            }
             open_url(&url)?;
             out.message(&format!("Opened {url}"))?;
             Ok(0)

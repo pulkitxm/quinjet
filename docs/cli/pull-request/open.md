@@ -1,6 +1,8 @@
 # `quinjet pr open`
 
 Hands a pull request's URL, or one selected check URL, to the desktop browser.
+Inside an SSH session it prints the URL instead, because the desktop browser is
+not on the machine running the command.
 
 Usage:
 
@@ -22,13 +24,17 @@ Options:
 | `--refresh` | flag | off | Asks GitHub again for the metadata rather than using the five-minute cache. |
 | `--check <NAME>` | string | unset | Opens a matching check run instead of the pull request. Exact name wins; otherwise a unique case-insensitive substring is accepted. |
 | `-C, --path <DIR>` | path | `.` | The repository to run against. Global. |
-| `--json` | flag | off | Prints `{"message": "Opened <url>"}` instead of the sentence. Global. |
+| `--json` | flag | off | Prints `{"message": "Opened <url>"}` instead of the sentence, or `{"message": "<url>"}` inside an SSH session. Global. |
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |
 
 This is the one verb in the group with an effect outside the process, and it is
 deliberately thin. It performs the same lookup every other `pr` verb performs,
 takes the `url` field out of the result, and spawns the platform's opener with
-that one argument:
+that one argument. It spawns nothing when any of `SSH_CONNECTION`, `SSH_CLIENT`
+or `SSH_TTY` is set: the browser then belongs to the machine at the other end of
+the connection, so the verb writes the bare URL to stdout and exits 0. Most
+terminals turn that URL into a clickable link, and the rest leave a line you can
+copy.
 
 | Platform | Opener |
 | --- | --- |
@@ -92,8 +98,15 @@ $ quinjet pr open 8
 Opened https://github.com/pulkitxm/quinjet/pull/8
 ```
 
-On a headless machine, over SSH, or inside a container there is usually no
-opener at all, so prefer reading the URL and doing what you like with it:
+Over SSH the same call prints the URL and starts nothing:
+
+```console
+$ quinjet pr open 8
+https://github.com/pulkitxm/quinjet/pull/8
+```
+
+On a headless machine or inside a container there may be no opener at all and no
+SSH variables either, so prefer reading the URL and doing what you like with it:
 
 ```bash
 quinjet pr view 8 --json | jq -r .url

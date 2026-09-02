@@ -51,6 +51,12 @@ pub(super) const fn interval(seconds: u64, floor: u64) -> Duration {
     Duration::from_secs(if seconds < floor { floor } else { seconds })
 }
 
+pub(crate) fn browser_is_local() -> bool {
+    !["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"]
+        .iter()
+        .any(|name| std::env::var_os(name).is_some())
+}
+
 pub(crate) fn open_url(url: &str) -> Result<()> {
     if std::env::var_os("CMUX_SOCKET_PATH").is_some()
         && let Ok(child) = std::process::Command::new("cmux")

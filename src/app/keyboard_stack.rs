@@ -28,7 +28,7 @@ impl App {
                 self.select_stack_member_section(StackMemberSection::Commits, &mut effects);
             }
             KeyCode::Char('d') => self.open_pull_request_stack_diff(&mut effects),
-            KeyCode::Char('r') => self.open_stack_member_review(&mut effects),
+            KeyCode::Char('r') => self.open_stack_member_review(&mut effects, now),
             KeyCode::Char('p' | '[') => {
                 let _ = self.move_pull_request_stack_cursor(-1, false, now);
             }

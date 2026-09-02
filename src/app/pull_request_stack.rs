@@ -250,8 +250,8 @@ impl App {
         true
     }
 
-    pub(super) fn open_stack_member_review(&mut self, effects: &mut Vec<AppEffect>) {
-        self.handle_pr_menu_item(PrMenuItem::Review, effects);
+    pub(super) fn open_stack_member_review(&mut self, effects: &mut Vec<AppEffect>, now: Instant) {
+        self.handle_pr_menu_item(PrMenuItem::Review, effects, now);
     }
 
     pub(super) fn inspect_pull_request_stack_tip(

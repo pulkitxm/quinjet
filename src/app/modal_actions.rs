@@ -10,6 +10,7 @@ impl App {
         &mut self,
         action: ModalAction,
         effects: &mut Vec<AppEffect>,
+        now: Instant,
     ) {
         match action {
             ModalAction::CommitSubmit => {
@@ -109,7 +110,7 @@ impl App {
                     return;
                 };
                 if let Some(item) = items.get(index).cloned() {
-                    self.handle_review_thread_action(item, effects);
+                    self.handle_review_thread_action(item, effects, now);
                 }
             }
             ModalAction::PullRequestReviewDecision(index) => {

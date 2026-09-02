@@ -198,13 +198,7 @@ fn pull_request_overview_reads_as_a_conversation_beside_its_checks() {
     terminal
         .draw(|frame| draw(frame, &mut app, &Theme::default()))
         .unwrap();
-    let rendered: String = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(ratatui::buffer::Cell::symbol)
-        .collect();
+    let rendered = rendered_text(terminal.backend().buffer());
 
     assert!(rendered.contains("Conversation"));
     assert!(rendered.contains("Format, lint, and test"));
@@ -376,13 +370,7 @@ fn empty_pull_request_view_renders_recent_numbers_and_titles_as_rows() {
     terminal
         .draw(|frame| draw(frame, &mut app, &Theme::default()))
         .unwrap();
-    let rendered = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(ratatui::buffer::Cell::symbol)
-        .collect::<String>();
+    let rendered = rendered_text(terminal.backend().buffer());
 
     assert!(rendered.contains("Recent Pull Requests"));
     assert!(rendered.contains("Restore selectable previews"));

@@ -163,10 +163,7 @@ impl App {
                 .map(|url| OpenTarget::Browser(url.to_owned())),
         };
         match target {
-            Some(OpenTarget::Browser(url)) => {
-                self.show_toast(format!("Opening {url}"), ToastLevel::Info, now);
-                effects.push(AppEffect::Open(OpenTarget::Browser(url)));
-            }
+            Some(OpenTarget::Browser(url)) => self.open_link(url, effects, now),
             None => self.show_toast(
                 "Nothing to open on GitHub for this selection".to_owned(),
                 ToastLevel::Error,

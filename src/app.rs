@@ -343,6 +343,7 @@ pub(crate) struct App {
     pub toast: Option<Toast>,
     pub mouse_capture: bool,
     pub mouse_capture_preference: bool,
+    pub local_browser: bool,
     pub link_hover: Option<(u16, u16)>,
     pub text_selection: Option<TextSelection>,
     pub rendered_cells: Vec<Vec<char>>,
