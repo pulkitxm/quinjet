@@ -175,17 +175,19 @@ divider dragging are the only things that stop working, and every one of them
 has a key.
 
 Repository names, branches, commit IDs, pull-request numbers, check names and
-visible URL fields share one link treatment. Links are not underlined by
-default. Holding Command or Control while hovering underlines the target. With
-mouse capture on, Quinjet owns those cells and a normal single click opens the
-target, including the pull-request and check URL fields. With mouse capture
-off, Cmd-click or Ctrl-click uses a terminal hyperlink instead. Holding that
-modifier while hovering also exposes the terminal hyperlink when capture is
-on, which lets a local terminal open the target even when Quinjet runs over
-SSH. A cmux SSH relay is used for ordinary browser clicks when its socket is
-available. Clicking the worktree path opens Recent projects. The rest of a
-commit row keeps selecting that commit, so opening and selecting remain
-distinct targets.
+visible URL fields share one link treatment. Every one of them is a real
+terminal hyperlink on every frame, whatever the mouse-capture state, so the
+terminal underlines it on hover and Cmd-click or Ctrl-click opens it on the
+machine that owns the terminal, over SSH included. Quinjet itself does not
+underline links by default; holding Command or Control while hovering
+underlines the target inside the frame as well. With mouse capture on, a normal
+single click opens the target when the browser is on this machine, including
+the pull-request and check URL fields. Inside an SSH session that click copies
+the URL to the clipboard instead and says to Cmd-click or Ctrl-click the link,
+so nothing is ever spawned on the remote host. A cmux SSH relay is used for
+ordinary browser clicks when its socket is available. Clicking the worktree
+path opens Recent projects. The rest of a commit row keeps selecting that
+commit, so opening and selecting remain distinct targets.
 
 ## Project tabs
 
