@@ -87,6 +87,22 @@ fn test_line(kind: DiffLineKind, text: &str) -> DiffLine {
     }
 }
 
+fn unlinked_symbol(symbol: &str) -> &str {
+    symbol
+        .strip_prefix("\x1b]8;;")
+        .and_then(|rest| rest.split_once("\x1b\\"))
+        .and_then(|(_, rest)| rest.strip_suffix("\x1b]8;;\x1b\\"))
+        .unwrap_or(symbol)
+}
+
+fn rendered_text(buffer: &Buffer) -> String {
+    buffer
+        .content()
+        .iter()
+        .map(|cell| unlinked_symbol(cell.symbol()))
+        .collect()
+}
+
 mod controls;
 mod diff;
 mod layout;

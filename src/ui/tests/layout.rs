@@ -51,19 +51,7 @@ fn header_opens_the_project_menu_from_the_name_and_links_the_branch() {
         .map(ratatui::buffer::Cell::symbol)
         .collect::<String>();
     assert!(!rendered.contains("/tmp/repo"));
-    assert!(!rendered.contains("\x1b]8;;"));
-
-    app.configure_mouse_capture(false);
-    terminal
-        .draw(|frame| draw(frame, &mut app, &Theme::default()))
-        .unwrap();
-    let rendered = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(ratatui::buffer::Cell::symbol)
-        .collect::<String>();
+    assert!(app.mouse_capture);
     assert!(rendered.contains("\x1b]8;;https://github.com/acme/repo/tree/feature/link\x1b\\"));
 
     app.view = View::History;
