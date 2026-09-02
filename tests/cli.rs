@@ -53,6 +53,9 @@ fn isolate_git(command: &mut ProcessCommand) {
 }
 
 fn isolate_quinjet(command: &mut ProcessCommand, root: &Path) {
+    for variable in ["SSH_CLIENT", "SSH_CONNECTION", "SSH_TTY"] {
+        command.env_remove(variable);
+    }
     command
         .env("HOME", root)
         .env("USERPROFILE", root)

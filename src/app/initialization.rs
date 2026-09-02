@@ -141,6 +141,7 @@ impl App {
             toast: None,
             mouse_capture: true,
             mouse_capture_preference: true,
+            local_browser: true,
             link_hover: None,
             text_selection: None,
             rendered_cells: Vec::new(),

@@ -11,7 +11,9 @@ impl App {
         match modal {
             modal @ (Modal::PullRequestReviewComment { .. }
             | Modal::PullRequestReviewThreadActions { .. }
-            | Modal::PullRequestReviewSubmit { .. }) => self.handle_review_modal_key(modal, key),
+            | Modal::PullRequestReviewSubmit { .. }) => {
+                self.handle_review_modal_key(modal, key, now)
+            }
             modal @ (Modal::Help { .. }
             | Modal::Commit { .. }
             | Modal::Prompt { .. }

@@ -2,6 +2,9 @@ use std::os::unix::fs::PermissionsExt;
 
 use super::*;
 
+#[path = "github/open.rs"]
+mod open;
+
 const GH_SCRIPT: &str = r#"#!/bin/sh
 input=$(cat)
 {
@@ -401,22 +404,6 @@ fn pull_request_logs_render_fake_steps_and_runner_output() -> Result<()> {
             .is_some_and(|steps| steps.len() == 2)
     );
     ensure!(json.to_string().contains("tests passed"));
-    Ok(())
-}
-
-#[test]
-fn pull_request_open_uses_the_selected_check_url() -> Result<()> {
-    let fixture = GitHubFixture::new()?;
-
-    let opened = fixture
-        .read(&["pr", "open", "42", "--check", "Unit tests"])?
-        .success()?;
-
-    let expected = "https://github.com/acme/project/actions/runs/77/job/123";
-    ensure!(opened.stderr.is_empty(), "{}", opened.stderr);
-    ensure!(opened.stdout == format!("Opened {expected}\n"));
-    ensure!(wait_for_capture(&fixture.open_capture)?.trim() == expected);
-    ensure!(fixture.gh_calls()?.contains("argv\tpr\tchecks\t42"));
     Ok(())
 }
 

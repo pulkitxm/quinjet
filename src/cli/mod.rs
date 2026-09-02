@@ -467,7 +467,7 @@ use repository::*;
 use review::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use support::*;
-pub(crate) use support::{open_url, report, stdout_is_terminal};
+pub(crate) use support::{browser_is_local, open_url, report, stdout_is_terminal};
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use verbs::*;
 

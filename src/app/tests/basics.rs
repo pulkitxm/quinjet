@@ -123,6 +123,7 @@ fn a_section_checkbox_checks_and_clears_its_whole_group() {
     app.handle_scm_action(
         ScmAction::ToggleCheckSection(ChangeSection::Unstaged),
         &mut effects,
+        Instant::now(),
     );
     assert_eq!(app.checked_change_count(), 1);
     assert_eq!(app.section_check_label(ChangeSection::Unstaged), "[x]");
@@ -131,6 +132,7 @@ fn a_section_checkbox_checks_and_clears_its_whole_group() {
     app.handle_scm_action(
         ScmAction::ToggleCheckSection(ChangeSection::Staged),
         &mut effects,
+        Instant::now(),
     );
     app.status.changes.push(Change {
         path: PathBuf::from("docs/notes.md"),
@@ -143,6 +145,7 @@ fn a_section_checkbox_checks_and_clears_its_whole_group() {
     app.handle_scm_action(
         ScmAction::ToggleCheckSection(ChangeSection::Staged),
         &mut effects,
+        Instant::now(),
     );
     assert_eq!(app.section_check_label(ChangeSection::Staged), "[x]");
     assert_eq!(app.checked_change_count(), 3);
@@ -150,6 +153,7 @@ fn a_section_checkbox_checks_and_clears_its_whole_group() {
     app.handle_scm_action(
         ScmAction::ToggleCheckSection(ChangeSection::Staged),
         &mut effects,
+        Instant::now(),
     );
     assert_eq!(app.section_check_label(ChangeSection::Staged), "[ ]");
     assert_eq!(app.checked_change_count(), 1);
@@ -163,9 +167,10 @@ fn the_revert_button_asks_about_the_checked_files() {
     app.handle_scm_action(
         ScmAction::ToggleCheckSection(ChangeSection::Unstaged),
         &mut effects,
+        Instant::now(),
     );
 
-    app.handle_scm_action(ScmAction::RevertChecked, &mut effects);
+    app.handle_scm_action(ScmAction::RevertChecked, &mut effects, Instant::now());
 
     let Some(Modal::Confirm { title, action, .. }) = app.modal else {
         panic!("the revert button must ask first");

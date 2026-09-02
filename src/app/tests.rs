@@ -199,7 +199,7 @@ fn pull_request_action_pickers_route_review_and_edit_flows() {
     app.pull_request = Some(pull_request(12, "Ship it", "acme/widget"));
     let mut effects = Vec::new();
 
-    app.handle_pr_menu_item(PrMenuItem::Review, &mut effects);
+    app.handle_pr_menu_item(PrMenuItem::Review, &mut effects, now);
     assert!(matches!(
         &app.modal,
         Some(Modal::PullRequestActions { items, .. })
@@ -241,7 +241,7 @@ fn pull_request_action_pickers_route_review_and_edit_flows() {
     }));
 
     app.busy = None;
-    app.handle_pr_menu_item(PrMenuItem::Edit, &mut Vec::new());
+    app.handle_pr_menu_item(PrMenuItem::Edit, &mut Vec::new(), now);
     drop(app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), now));
     drop(app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now));
     assert!(matches!(
@@ -303,6 +303,7 @@ mod checks;
 mod diffs;
 mod discovery;
 mod interaction;
+mod links;
 mod modal_mouse;
 mod prefetch;
 mod projects;

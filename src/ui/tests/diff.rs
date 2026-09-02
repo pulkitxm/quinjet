@@ -346,13 +346,7 @@ fn pull_request_preview_renders_cross_remote_metadata_and_diff() {
     terminal
         .draw(|frame| draw(frame, &mut app, &Theme::default()))
         .unwrap();
-    let rendered: String = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(ratatui::buffer::Cell::symbol)
-        .collect();
+    let rendered = rendered_text(terminal.backend().buffer());
     assert!(rendered.contains("Conversation"));
     assert!(!rendered.contains(['⟳', '↻', '↺']));
     assert!(rendered.contains("CI / ubuntu"));
