@@ -34,6 +34,8 @@ pub(super) enum PrReviewVerb {
     Viewed(PrReviewViewedArgs),
     #[doc = " Record the current head as the commit you last looked at"]
     Visit(PrArgs),
+    #[doc = " Add a pending comment proposing an exact replacement"]
+    Suggest(PrSuggestArgs),
 }
 
 #[derive(Debug, Args)]
@@ -328,7 +330,7 @@ pub(super) fn review(session: &mut Session, out: &Emitter, command: PrReviewVerb
     }
 }
 
-fn mutate(
+pub(super) fn mutate(
     session: &mut Session,
     out: &Emitter,
     args: &PrArgs,
@@ -349,7 +351,7 @@ fn mutate(
     Ok(0)
 }
 
-fn review_body(args: &PrReviewBodyArgs) -> Result<String> {
+pub(super) fn review_body(args: &PrReviewBodyArgs) -> Result<String> {
     let body = match (&args.body, &args.body_file) {
         (Some(body), None) => body.clone(),
         (None, Some(path)) if path == Path::new("-") => {

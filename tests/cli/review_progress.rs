@@ -4,7 +4,13 @@ use super::*;
 #[doc = " Fake GitHub CLI cases for review progress: one unresolved thread waiting"]
 #[doc = " on the reader, and one earlier review of theirs to measure the delta from."]
 pub(super) const GH_CASES: &str = r#"  *"reviewThreads(first: 50"*)
-    printf '{"data":{"repository":{"pullRequest":{"id":"PR_42","headRefOid":"%s","reviewDecision":"REVIEW_REQUIRED","reviews":{"nodes":[]},"reviewThreads":{"nodes":[{"id":"THREAD_1","path":"feature.txt","diffSide":"RIGHT","line":1,"originalLine":1,"startDiffSide":null,"startLine":null,"originalStartLine":null,"subjectType":"LINE","isResolved":false,"isOutdated":false,"resolvedBy":null,"viewerCanReply":true,"viewerCanResolve":true,"viewerCanUnresolve":false,"comments":{"totalCount":1,"nodes":[{"id":"COMMENT_1","author":{"login":"hubot"},"body":"Please rename this file","createdAt":"2026-08-21T03:00:00Z","updatedAt":"2026-08-21T03:00:00Z","url":"https://github.com/acme/project/pull/42","state":"SUBMITTED","viewerDidAuthor":false,"viewerCanUpdate":false,"viewerCanDelete":false}]}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}' "$FAKE_HEAD_OID"
+    printf '{"data":{"repository":{"pullRequest":{"id":"PR_42","headRefOid":"%s","reviewDecision":"REVIEW_REQUIRED","reviews":{"nodes":[]},"reviewThreads":{"nodes":[{"id":"THREAD_1","path":"feature.txt","diffSide":"RIGHT","line":1,"originalLine":1,"startDiffSide":null,"startLine":null,"originalStartLine":null,"subjectType":"LINE","isResolved":false,"isOutdated":false,"resolvedBy":null,"viewerCanReply":true,"viewerCanResolve":true,"viewerCanUnresolve":false,"comments":{"totalCount":1,"nodes":[{"id":"COMMENT_1","author":{"login":"hubot"},"body":"Please rename this file\\n\\n```suggestion\\nfrom pull request, renamed\\n```\\n","createdAt":"2026-08-21T03:00:00Z","updatedAt":"2026-08-21T03:00:00Z","url":"https://github.com/acme/project/pull/42","state":"SUBMITTED","viewerDidAuthor":false,"viewerCanUpdate":false,"viewerCanDelete":false}]}},{"id":"THREAD_2","path":"feature.txt","diffSide":"RIGHT","line":1,"originalLine":1,"startDiffSide":null,"startLine":null,"originalStartLine":null,"subjectType":"LINE","isResolved":false,"isOutdated":true,"resolvedBy":null,"viewerCanReply":true,"viewerCanResolve":true,"viewerCanUnresolve":false,"comments":{"totalCount":1,"nodes":[{"id":"COMMENT_2","author":{"login":"octocat"},"body":"Left over from an older push","createdAt":"2026-08-21T03:00:00Z","updatedAt":"2026-08-21T03:00:00Z","url":"https://github.com/acme/project/pull/42","state":"SUBMITTED","viewerDidAuthor":true,"viewerCanUpdate":true,"viewerCanDelete":true}]}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}' "$FAKE_HEAD_OID"
+    ;;
+  *"addPullRequestReview("*)
+    printf '{"data":{"addPullRequestReview":{"pullRequestReview":{"id":"REVIEW_1","body":"","commit":{"oid":"%s"}}}}}' "$FAKE_HEAD_OID"
+    ;;
+  *"addPullRequestReviewThread("*)
+    printf '{"data":{"addPullRequestReviewThread":{"thread":{"id":"THREAD_9"}}}}'
     ;;
   *"latestReviews(last: 50)"*)
     printf '{"data":{"viewer":{"login":"octocat"},"repository":{"pullRequest":{"latestReviews":{"nodes":[{"state":"COMMENTED","submittedAt":"2026-08-20T05:00:00Z","author":{"login":"octocat"},"commit":{"oid":"%s"}}]}}}}}' "$FAKE_BASE_OID"
@@ -22,7 +28,7 @@ fn review_progress_measures_what_is_left_against_your_last_review() -> Result<()
     ensure!(
         plain
             .stdout
-            .starts_with("#42  0 of 1 files read  ·  1 unresolved"),
+            .starts_with("#42  0 of 1 files read  ·  2 unresolved"),
         "{}",
         plain.stdout
     );
@@ -39,7 +45,7 @@ fn review_progress_measures_what_is_left_against_your_last_review() -> Result<()
     ensure!(
         plain
             .stdout
-            .contains("threads  1 awaiting your reply, 0 awaiting others, 0 outdated"),
+            .contains("threads  1 awaiting your reply, 1 awaiting others, 1 outdated"),
         "{}",
         plain.stdout
     );
@@ -78,8 +84,9 @@ fn review_progress_json_carries_the_files_threads_and_next_step() -> Result<()> 
     ensure!(value["files"][0]["path"] == "feature.txt");
     ensure!(value["files"][0]["state"] == "unviewed");
     ensure!(value["files"][0]["changedSince"] == true);
-    ensure!(value["threads"]["unresolved"] == 1);
+    ensure!(value["threads"]["unresolved"] == 2);
     ensure!(value["threads"]["awaitingYourReply"] == 1);
+    ensure!(value["threads"]["outdatedUnresolved"] == 1);
     ensure!(
         value["newCommits"]
             .as_array()

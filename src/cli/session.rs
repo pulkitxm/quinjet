@@ -1,12 +1,19 @@
 use anyhow::Result;
 
+mod actions;
+mod feedback;
 mod progress;
+mod workspaces;
+use actions::operate_workflow;
 use progress::{forget_review_progress, mark_review_files, record_review_visit};
+use workspaces::{LocalDiffWorkspaceKind, LocalDiffWorkspaces};
 
 use super::command::{Command, Outcome};
 use crate::git::github::{
-    PreparedPullRequest, PullRequest, PullRequestCommits, PullRequestProgress, ReviewSince,
-    ReviewSinceRequest,
+    FeedbackInputs, MergeGate, PreparedPullRequest, PullRequest, PullRequestAnnotations,
+    PullRequestCommits, PullRequestProgress, PullRequestReviewSnapshot, PullRequestSuggestions,
+    ReviewSince, ReviewSinceRequest, SuggestionPlan, WorkflowOperation, build_feedback,
+    collect_suggestions,
 };
 use crate::git::{LocalDiffRequest, PreparedLocalDiff, Repository};
 use crate::state::ReviewProgressRecord;
@@ -32,6 +39,23 @@ impl Session {
 
     pub(crate) fn repository_revision(&self, revision: &str) -> Result<String> {
         self.repository.resolve_revision(revision)
+    }
+
+    #[doc = " Refuse to plan an application against the wrong commit. The check"]
+    #[doc = " happens before the plan so a caller on another branch is told which"]
+    #[doc = " branch to check out rather than that there is nothing to apply."]
+    pub(crate) fn ensure_suggestion_checkout(&self, pull_request: &PullRequest) -> Result<()> {
+        self.repository
+            .ensure_suggestions_apply_cleanly(pull_request, &[])
+    }
+
+    #[doc = " Who is reading. The feedback queue reports every row relative to"]
+    #[doc = " this login, so an author and a reviewer see different owners."]
+    pub(crate) fn viewer_login(&self, pull_request: &PullRequest) -> Result<String> {
+        Ok(self
+            .repository
+            .pull_request_viewer_review(pull_request)?
+            .login)
     }
 
     #[doc = " Resolve which commit a review delta is measured from. This is a read"]
@@ -161,17 +185,33 @@ impl Session {
             Command::OperateWorkflow {
                 pull_request,
                 operation,
-            } => {
-                let label = operation.label().to_owned();
-                let message = self
-                    .repository
-                    .perform_workflow_operation(&pull_request, &operation)?;
-                Ok(Outcome::Operation {
-                    label,
-                    changes_history: false,
-                    message,
-                })
-            }
+            } => operate_workflow(&self.repository, &pull_request, &operation),
+            Command::PullRequestFeedback {
+                pull_request,
+                gate,
+                review,
+                annotations,
+                viewer,
+            } => Ok(feedback::feedback(
+                &pull_request,
+                gate.as_deref(),
+                &review,
+                annotations.as_deref(),
+                &viewer,
+            )),
+            Command::PullRequestSuggestions {
+                pull_request,
+                review,
+            } => Ok(feedback::suggestions(&pull_request, &review)),
+            Command::PlanSuggestions { suggestions } => Ok(Outcome::SuggestionPlan(Box::new(
+                self.repository
+                    .plan_suggestions(&suggestions.iter().collect::<Vec<_>>()),
+            ))),
+            Command::ApplySuggestions {
+                pull_request,
+                plan,
+                message,
+            } => feedback::apply(&self.repository, &pull_request, &plan, message.as_deref()),
             Command::PullRequestStackGate { stack, refresh } => Ok(Outcome::StackGate(Box::new(
                 self.repository.pull_request_stack_gate(&stack, refresh),
             ))),
@@ -338,146 +378,5 @@ impl Session {
             .filter(|(prepared, _)| *prepared == workspace)
             .map(|(_, prepared)| prepared)
             .ok_or_else(|| anyhow::anyhow!("Pull-request diff workspace is no longer available"))
-    }
-}
-
-#[derive(Clone, Copy)]
-enum LocalDiffWorkspaceKind {
-    Changes,
-    History,
-}
-
-impl LocalDiffWorkspaceKind {
-    const fn from_request(request: &LocalDiffRequest) -> Self {
-        match request {
-            LocalDiffRequest::Commit { .. } => Self::History,
-            LocalDiffRequest::Changes { .. }
-            | LocalDiffRequest::Branch { .. }
-            | LocalDiffRequest::Stash { .. } => Self::Changes,
-        }
-    }
-}
-
-struct LocalDiffWorkspaces<T> {
-    changes: Option<(u64, T)>,
-    history: Option<(u64, T)>,
-}
-
-impl<T> LocalDiffWorkspaces<T> {
-    const fn new() -> Self {
-        Self {
-            changes: None,
-            history: None,
-        }
-    }
-
-    fn store(&mut self, kind: LocalDiffWorkspaceKind, workspace: u64, prepared: T) {
-        let slot = match kind {
-            LocalDiffWorkspaceKind::Changes => &mut self.changes,
-            LocalDiffWorkspaceKind::History => &mut self.history,
-        };
-        *slot = Some((workspace, prepared));
-    }
-
-    fn get(&self, workspace: u64) -> Option<&T> {
-        [&self.changes, &self.history]
-            .into_iter()
-            .flatten()
-            .find(|(candidate, _)| *candidate == workspace)
-            .map(|(_, prepared)| prepared)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[cfg(unix)]
-    use std::cell::Cell;
-    #[cfg(unix)]
-    use std::fs;
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
-
-    #[cfg(unix)]
-    use super::{Command, Outcome, Session};
-    use super::{LocalDiffWorkspaceKind, LocalDiffWorkspaces};
-    #[cfg(unix)]
-    use crate::git::github::{GitHubRepository, PullRequest};
-    #[cfg(unix)]
-    use crate::git::tests::TestRepository;
-
-    #[test]
-    fn paused_changes_workspace_survives_history_browsing() {
-        let mut workspaces = LocalDiffWorkspaces::new();
-        workspaces.store(LocalDiffWorkspaceKind::Changes, 11, 110);
-
-        for generation in 12..100 {
-            workspaces.store(LocalDiffWorkspaceKind::History, generation, generation * 10);
-        }
-
-        assert_eq!(workspaces.get(11), Some(&110));
-        assert_eq!(workspaces.get(98), None);
-        assert_eq!(workspaces.get(99), Some(&990));
-    }
-
-    #[test]
-    fn each_view_replaces_only_its_own_workspace() {
-        let mut workspaces = LocalDiffWorkspaces::new();
-        workspaces.store(LocalDiffWorkspaceKind::Changes, 21, 210);
-        workspaces.store(LocalDiffWorkspaceKind::History, 22, 220);
-        workspaces.store(LocalDiffWorkspaceKind::Changes, 23, 230);
-
-        assert_eq!(workspaces.get(21), None);
-        assert_eq!(workspaces.get(22), Some(&220));
-        assert_eq!(workspaces.get(23), Some(&230));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn stack_warming_continues_after_a_member_read_fails() {
-        let fixture = TestRepository::with_branch("main");
-        let repository = fixture.repository();
-        let executable = repository.root().join("gh");
-        let calls = repository.root().join("calls");
-        fs::write(
-            &executable,
-            format!(
-                "#!/bin/sh\nprintf 'call\\n' >> '{}'\nprintf 'failed\\n' >&2\nexit 1\n",
-                calls.display()
-            ),
-        )
-        .unwrap();
-        let mut permissions = fs::metadata(&executable).unwrap().permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&executable, permissions).unwrap();
-        let mut session = Session::new(fixture.repository_with_github_cli(executable));
-        let pull_requests = [41, 42]
-            .map(|number| PullRequest {
-                number,
-                head_oid: format!("head-{number}"),
-                base_repository: GitHubRepository {
-                    name_with_owner: "acme/widget".to_owned(),
-                    url: format!("https://example.test/warm/{number}"),
-                    remotes: Vec::new(),
-                },
-                ..PullRequest::default()
-            })
-            .into_iter()
-            .collect();
-        let wanted_calls = Cell::new(0);
-
-        let outcome = session
-            .execute_with(
-                Command::WarmPullRequestStackMembers { pull_requests },
-                &mut |_| {},
-                &|| {
-                    let current = wanted_calls.get();
-                    wanted_calls.set(current + 1);
-                    current < 2
-                },
-            )
-            .unwrap();
-
-        assert!(matches!(outcome, Outcome::Warmed));
-        assert_eq!(fs::read_to_string(calls).unwrap(), "call\ncall\n");
     }
 }

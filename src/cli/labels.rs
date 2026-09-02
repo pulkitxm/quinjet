@@ -19,6 +19,11 @@ impl Verb {
             } if command.command.is_none() => {
                 drop(command.list.pull_request("pr deployments")?);
             }
+            Self::Pr {
+                command: PrVerb::Suggestions(command),
+            } if command.command.is_none() => {
+                drop(command.list.pull_request("pr suggestions")?);
+            }
             _ => {}
         }
         Ok(())
@@ -74,6 +79,12 @@ impl Verb {
             Self::Pr {
                 command: PrVerb::Artifacts(_) | PrVerb::Deployments(_),
             } => Some("Reading GitHub Actions state"),
+            Self::Pr {
+                command: PrVerb::Feedback(_),
+            } => Some("Collecting outstanding feedback"),
+            Self::Pr {
+                command: PrVerb::Suggestions(_),
+            } => Some("Reading suggested changes"),
             Self::Pr {
                 command: PrVerb::Merge(_) | PrVerb::Close(_) | PrVerb::Reopen(_),
             } => Some("Updating pull request"),

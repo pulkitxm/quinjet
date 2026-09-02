@@ -20,6 +20,7 @@ quinjet pr reviews progress <number> [--since <oid> | --since-review] [--all]
 quinjet pr reviews next <number> [--files | --threads]
 quinjet pr reviews viewed <number> [<path>...] [--all] [--unviewed] [--reset]
 quinjet pr reviews visit <number>
+quinjet pr reviews suggest <number> <path> --line <line> --body <text>
 ```
 
 Every verb accepts `--repo <owner/name>`, `--refresh`, `-C <DIR>`, and `--json`.
@@ -93,6 +94,7 @@ on a pull request that has moved. They are documented separately:
 - [`quinjet pr reviews next`](./review-next.md)
 - [`quinjet pr reviews viewed`](./review-viewed.md)
 - [`quinjet pr reviews visit`](./review-visit.md)
+- [`quinjet pr reviews suggest`](./review-suggest.md)
 
 ## Where to go next
 

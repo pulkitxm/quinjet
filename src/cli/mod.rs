@@ -36,15 +36,16 @@ use tui_args::TuiArgs;
 
 use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
-    AnnotationFilter, AnnotationGrouping, AnnotationSeverity, CheckRunLog, GitHubRepository,
-    MergeGate, PullRequest, PullRequestAnnotations, PullRequestArtifacts, PullRequestCheck,
-    PullRequestCheckStatus, PullRequestCommentMode, PullRequestDeployments, PullRequestDiffIndex,
-    PullRequestEdit, PullRequestLockReason, PullRequestMergeMethod, PullRequestMergeMode,
-    PullRequestOperation, PullRequestReviewDecision, PullRequestReviewKind,
+    AnnotationFilter, AnnotationGrouping, AnnotationSeverity, CheckRunLog, FeedbackFilter,
+    GitHubRepository, MergeGate, PullRequest, PullRequestAnnotations, PullRequestArtifacts,
+    PullRequestCheck, PullRequestCheckStatus, PullRequestCommentMode, PullRequestDeployments,
+    PullRequestDiffIndex, PullRequestEdit, PullRequestLockReason, PullRequestMergeMethod,
+    PullRequestMergeMode, PullRequestOperation, PullRequestReviewDecision, PullRequestReviewKind,
     PullRequestReviewOperation, PullRequestReviewSide, PullRequestReviewThreadSubject,
-    PullRequestSnapshot, PullRequestStack, PullRequestStackSnapshot, PullRequestUpdateMethod,
-    PullRequestWorkflowRuns, ReviewNextStep, ReviewProgress, ReviewSinceRequest, WorkflowOperation,
-    annotated_paths, mark_diff_coverage, visible_lines,
+    PullRequestSnapshot, PullRequestStack, PullRequestStackSnapshot, PullRequestSuggestions,
+    PullRequestUpdateMethod, PullRequestWorkflowRuns, ReviewNextStep, ReviewProgress,
+    ReviewSinceRequest, Suggestion, SuggestionPlan, WorkflowOperation, annotated_paths,
+    mark_diff_coverage, suggestion_body, visible_lines,
 };
 use crate::git::status::{Change, ChangeArea};
 use crate::git::{ConflictChoice, GitOperation, LocalDiffRequest, Repository};

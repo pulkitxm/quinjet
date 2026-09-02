@@ -155,7 +155,7 @@ pub(crate) struct PullRequestAnnotations {
 impl PullRequestAnnotations {
     pub(crate) const SCHEMA_VERSION: u8 = 1;
 
-    pub(super) fn finish(&mut self) {
+    pub(crate) fn finish(&mut self) {
         self.annotations
             .sort_by(|left, right| left.order().cmp(&right.order()));
         self.annotations.truncate(MAX_ANNOTATIONS);

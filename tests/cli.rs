@@ -241,6 +241,9 @@ mod ci_operations;
 #[path = "cli/fake_gh.rs"]
 mod fake_gh;
 #[cfg(unix)]
+#[path = "cli/feedback.rs"]
+mod feedback;
+#[cfg(unix)]
 #[path = "cli/gate.rs"]
 mod gate;
 #[cfg(unix)]
