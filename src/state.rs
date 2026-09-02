@@ -13,6 +13,7 @@ mod projects;
 mod remote;
 mod review_progress;
 pub(crate) mod session;
+mod work_session;
 
 pub(crate) use project_picker::load_collapsed_project_groups;
 #[cfg(not(test))]
@@ -30,6 +31,10 @@ pub(crate) use remote::{
 pub(crate) use review_progress::ViewedFile;
 pub(crate) use review_progress::{
     ReviewProgressRecord, forget_review_progress, load_review_progress, record_review_progress,
+};
+pub(crate) use work_session::{
+    forget_work_session, load_work_session, load_work_sessions, next_work_session_id,
+    record_work_session,
 };
 
 const MAX_RECENT_PROJECTS: usize = 20;

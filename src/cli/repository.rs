@@ -72,6 +72,7 @@ pub(super) fn run(session: &mut Session, out: &Emitter, verb: Verb) -> Result<u8
         Verb::Repos(args) => repositories(session, out, &args),
         Verb::Pr { command } => pull_request(session, out, command),
         Verb::Stack { command } => stack(session, out, command),
+        Verb::Work { command } => work(session, out, command),
     }
 }
 

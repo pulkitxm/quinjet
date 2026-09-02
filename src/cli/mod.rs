@@ -11,6 +11,8 @@ mod stack_verbs;
 mod tui_args;
 mod update;
 mod watch;
+mod work;
+mod work_verbs;
 
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -33,6 +35,9 @@ pub(crate) use session::Session;
 use stack::stack;
 use stack_verbs::StackVerb;
 use tui_args::TuiArgs;
+use work::work;
+#[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
+use work_verbs::*;
 
 use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
@@ -49,6 +54,7 @@ use crate::git::github::{
     mark_diff_coverage, suggestion_body, visible_lines,
 };
 use crate::git::status::{Change, ChangeArea};
+use crate::git::work::{WorkSession, WorkSource};
 use crate::git::{ConflictChoice, GitOperation, LocalDiffRequest, Repository};
 use crate::integration::Client;
 use crate::theme::{AppearanceChoice, ThemeName, ThemeSelection};
@@ -236,6 +242,11 @@ enum Verb {
     Stack {
         #[command(subcommand)]
         command: StackVerb,
+    },
+    #[doc = " Run a bounded coding session against a pull request"]
+    Work {
+        #[command(subcommand)]
+        command: WorkVerb,
     },
     #[doc = " Print or install shell completions"]
     #[command(visible_alias = "completion")]

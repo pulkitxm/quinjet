@@ -14,6 +14,7 @@ use crate::git::github::{
 };
 use crate::git::history::Commit;
 use crate::git::status::RepoStatus;
+use crate::git::work::{WorkDiff, WorkPublishPlan, WorkSession, WorkSessions, WorkSource};
 use crate::git::{
     Branch, GitOperation, HistoryBranch, LocalDiffRequest, ProjectGroup, Stash, Worktree,
 };
@@ -85,6 +86,32 @@ pub(crate) enum Command {
     PullRequestContext {
         pull_request: Box<PullRequest>,
         request: Box<ContextRequest>,
+    },
+    StartWork {
+        pull_request: Box<PullRequest>,
+        request: Box<WorkRequest>,
+    },
+    ListWork,
+    InspectWork {
+        id: String,
+    },
+    WorkDiff {
+        id: String,
+    },
+    VerifyWork {
+        id: String,
+        command: Vec<String>,
+    },
+    PlanWorkPublish {
+        id: String,
+        message: Option<String>,
+    },
+    PublishWork {
+        session: Box<WorkSession>,
+        plan: Box<WorkPublishPlan>,
+    },
+    AbortWork {
+        id: String,
     },
     PlanSuggestions {
         suggestions: Vec<Suggestion>,
@@ -211,6 +238,13 @@ impl Command {
             Self::PullRequestDependencies { .. } => "Comparing dependencies",
             Self::PullRequestSecurity { .. } => "Reading security findings",
             Self::PullRequestContext { .. } => "Assembling the context bundle",
+            Self::StartWork { .. } => "Starting a work session",
+            Self::ListWork | Self::InspectWork { .. } => "Reading work sessions",
+            Self::WorkDiff { .. } => "Reading the session's changes",
+            Self::VerifyWork { .. } => "Running verification",
+            Self::PlanWorkPublish { .. } => "Planning the session commit",
+            Self::PublishWork { .. } => "Recording the session commit",
+            Self::AbortWork { .. } => "Abandoning the work session",
             Self::PlanSuggestions { .. } => "Planning suggested changes",
             Self::ApplySuggestions { .. } => "Applying suggested changes",
             Self::PullRequestArtifacts { .. } => "Fetching workflow artifacts",
@@ -271,6 +305,10 @@ pub(crate) enum Outcome {
     Dependencies(Box<PullRequestDependencies>),
     Security(Box<PullRequestSecurity>),
     Context(Box<PullRequestContext>),
+    Work(Box<WorkSession>),
+    WorkSessions(Box<WorkSessions>),
+    WorkDiff(Box<WorkDiff>),
+    WorkPublishPlan(Box<WorkPublishPlan>),
     SuggestionPlan(Box<SuggestionPlan>),
     Artifacts(Box<PullRequestArtifacts>),
     DownloadedArtifact(PathBuf),
@@ -333,6 +371,10 @@ answers! {
         |value: Box<PullRequestDependencies>| *value;
     security, Security -> PullRequestSecurity, |value: Box<PullRequestSecurity>| *value;
     context, Context -> PullRequestContext, |value: Box<PullRequestContext>| *value;
+    work, Work -> WorkSession, |value: Box<WorkSession>| *value;
+    work_sessions, WorkSessions -> WorkSessions, |value: Box<WorkSessions>| *value;
+    work_diff, WorkDiff -> WorkDiff, |value: Box<WorkDiff>| *value;
+    work_publish_plan, WorkPublishPlan -> WorkPublishPlan, |value: Box<WorkPublishPlan>| *value;
     artifacts, Artifacts -> PullRequestArtifacts, |value: Box<PullRequestArtifacts>| *value;
     downloaded_artifact, DownloadedArtifact -> PathBuf, |value| value;
     deployments, Deployments -> PullRequestDeployments,
@@ -395,4 +437,14 @@ pub(crate) struct ContextRequest {
     pub purpose: ContextPurpose,
     pub budget: usize,
     pub path: Option<PathBuf>,
+}
+
+#[doc = " What starting a work session needs, gathered from the command line so"]
+#[doc = " the session layer can do the fetching it implies."]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WorkRequest {
+    pub source: WorkSource,
+    #[doc = " Where the isolated checkout goes, or none for a session that only"]
+    #[doc = " records what to do."]
+    pub worktree: Option<PathBuf>,
 }
