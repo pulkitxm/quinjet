@@ -303,6 +303,7 @@ mod checks;
 mod diffs;
 mod discovery;
 mod interaction;
+mod links;
 mod modal_mouse;
 mod prefetch;
 mod projects;

@@ -2,20 +2,6 @@
 use super::*;
 
 impl App {
-    pub(super) fn open_selected_pull_request_in_browser(
-        &mut self,
-        effects: &mut Vec<AppEffect>,
-        now: Instant,
-    ) {
-        let Some(url) = self
-            .selected_pull_request()
-            .map(|pull_request| pull_request.url.clone())
-        else {
-            return;
-        };
-        self.open_link(url, effects, now);
-    }
-
     pub(super) fn request_active_refresh(&mut self, effects: &mut Vec<AppEffect>) {
         self.filesystem_refresh_due = None;
         if self.view == View::Changes && self.auxiliary_preview.is_none() {

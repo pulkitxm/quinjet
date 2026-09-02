@@ -102,6 +102,20 @@ impl App {
         })
     }
 
+    pub(super) fn open_selected_pull_request_in_browser(
+        &mut self,
+        effects: &mut Vec<AppEffect>,
+        now: Instant,
+    ) {
+        let Some(url) = self
+            .selected_pull_request()
+            .map(|pull_request| pull_request.url.clone())
+        else {
+            return;
+        };
+        self.open_link(url, effects, now);
+    }
+
     pub(crate) fn open_link(&mut self, url: String, effects: &mut Vec<AppEffect>, now: Instant) {
         if self.local_browser {
             self.show_toast(format!("Opening {url}"), ToastLevel::Info, now);
