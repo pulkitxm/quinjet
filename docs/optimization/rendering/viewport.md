@@ -1998,7 +1998,3 @@ Use this matrix during performance reviews. Each row combines a cost lens, repos
 | 30 | Check latency for Viewport rendering and terminal frame economics in a deeply diverged branch | Record cache disposition and complete key |
 | 31 | Check latency for Viewport rendering and terminal frame economics in a deeply diverged branch | Record stale reply rejection |
 | 32 | Check latency for Viewport rendering and terminal frame economics in a deeply diverged branch | Record visible state after failure |
-| 33 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record time to first useful rows |
-| 34 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record steady frame cost |
-| 35 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record bytes accepted from child output |
-| 36 | Check latency for Viewport rendering and terminal frame economics in an unavailable network | Record Git and gh process count |
