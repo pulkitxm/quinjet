@@ -56,7 +56,7 @@ quinjet update --check           check the latest stable release
 
 | Page | What it covers |
 | --- | --- |
-| [`quinjet pr`](./pull-request/README.md) | Metadata, commits, files, conversation, checks, reviews, lifecycle, merge, metadata editing, and notifications |
+| [`quinjet pr`](./pull-request/README.md) | Metadata, commits, files, conversation, checks, the merge gate, reviews, lifecycle, merge, metadata editing, and notifications |
 | [`quinjet stack`](./stack/README.md) | Ordered stacked pull requests and exact composed range comparisons |
 
 ## About Quinjet itself
@@ -89,6 +89,7 @@ quinjet pr view 12                    a pull request's metadata
 quinjet pr view 12 --watch            refresh the metadata until stopped
 quinjet pr conversation 12 --watch    follow the conversation until stopped
 quinjet pr checks 12 --watch          block until CI settles, exit non-zero if it did not go green
+quinjet pr gate 12                    say whether it can merge, and what blocks it
 quinjet pr logs 12 clippy --watch     tail a running job's log
 quinjet update --check                check whether a newer stable release exists
 ```

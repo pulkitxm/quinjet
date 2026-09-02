@@ -412,6 +412,8 @@ pub(super) struct PrDiffArgs {
     #[doc = " Limit the patch to one path"]
     #[arg(value_name = "PATH", value_hint = ValueHint::AnyPath)]
     pub(super) path: Option<PathBuf>,
+    #[command(flatten)]
+    pub(super) since: PrSinceArgs,
 }
 
 #[derive(Debug, Args)]
@@ -437,6 +439,28 @@ pub(super) struct PrChecksArgs {
 }
 
 #[derive(Debug, Args)]
+pub(super) struct PrGateArgs {
+    #[command(flatten)]
+    pub(super) pull_request: PrArgs,
+    #[doc = " Keep reading until the verdict settles"]
+    #[arg(long)]
+    pub(super) watch: bool,
+    #[doc = " Seconds between reads while watching"]
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        default_value_t = CHECK_WATCH_INTERVAL,
+        requires = "watch",
+        value_parser = clap::value_parser!(u64).range(CHECK_WATCH_FLOOR..),
+        value_hint = ValueHint::Other
+    )]
+    pub(super) interval: u64,
+    #[doc = " Exit 0 whatever the verdict is"]
+    #[arg(long)]
+    pub(super) no_exit_code: bool,
+}
+
+#[derive(Debug, Args)]
 pub(super) struct PrLogsArgs {
     #[command(flatten)]
     pub(super) pull_request: PrArgs,
@@ -457,3 +481,6 @@ pub(super) struct PrLogsArgs {
     )]
     pub(super) interval: u64,
 }
+
+mod since;
+pub(super) use since::PrSinceArgs;

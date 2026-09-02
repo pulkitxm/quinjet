@@ -4,10 +4,10 @@ use anyhow::Result;
 
 use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
-    CheckRunLog, GitHubRepository, PullRequest, PullRequestCheck, PullRequestChecks,
+    CheckRunLog, GitHubRepository, MergeGate, PullRequest, PullRequestCheck, PullRequestChecks,
     PullRequestCommits, PullRequestConversation, PullRequestDiffIndex, PullRequestOperation,
     PullRequestReviewOperation, PullRequestReviewSnapshot, PullRequestSnapshot, PullRequestStack,
-    PullRequestStackSnapshot,
+    PullRequestStackSnapshot, ReviewProgress, ReviewSinceRequest, StackGate,
 };
 use crate::git::history::Commit;
 use crate::git::status::RepoStatus;
@@ -50,8 +50,37 @@ pub(crate) enum Command {
         pull_request: Box<PullRequest>,
         refresh: bool,
     },
+    PullRequestGate {
+        pull_request: Box<PullRequest>,
+        refresh: bool,
+    },
+    PullRequestStackGate {
+        stack: Box<PullRequestStack>,
+        refresh: bool,
+    },
     PreparePullRequest {
         workspace: u64,
+        pull_request: Box<PullRequest>,
+    },
+    PreparePullRequestSince {
+        workspace: u64,
+        pull_request: Box<PullRequest>,
+        since: String,
+    },
+    PullRequestReviewProgress {
+        pull_request: Box<PullRequest>,
+        index: Box<PullRequestDiffIndex>,
+        since: ReviewSinceRequest,
+    },
+    RecordReviewVisit {
+        pull_request: Box<PullRequest>,
+    },
+    MarkReviewFiles {
+        pull_request: Box<PullRequest>,
+        paths: Vec<PathBuf>,
+        viewed: bool,
+    },
+    ForgetReviewProgress {
         pull_request: Box<PullRequest>,
     },
     PreparePullRequestStack {
@@ -117,9 +146,15 @@ impl Command {
             Self::LocalGitHubRepository => "Reading repository link",
             Self::PullRequestLookup { .. } => "Fetching pull-request metadata",
             Self::PullRequestStack { .. } => "Fetching pull-request stack",
-            Self::PreparePullRequest { .. } | Self::PreparePullRequestStack { .. } => {
-                "Preparing pull-request diff"
-            }
+            Self::PullRequestGate { .. } => "Evaluating the merge gate",
+            Self::PullRequestStackGate { .. } => "Evaluating the stack merge gate",
+            Self::PreparePullRequest { .. }
+            | Self::PreparePullRequestSince { .. }
+            | Self::PreparePullRequestStack { .. } => "Preparing pull-request diff",
+            Self::PullRequestReviewProgress { .. } => "Measuring review progress",
+            Self::RecordReviewVisit { .. }
+            | Self::MarkReviewFiles { .. }
+            | Self::ForgetReviewProgress { .. } => "Recording review progress",
             Self::PullRequestFile { .. } | Self::PullRequestFileBatch { .. } => {
                 "Loading pull-request patches"
             }
@@ -158,6 +193,9 @@ pub(crate) enum Outcome {
     LocalGitHubRepository(Option<Box<GitHubRepository>>),
     PullRequest(Box<PullRequestSnapshot>),
     PullRequestStack(Box<PullRequestStackSnapshot>),
+    Gate(Box<MergeGate>),
+    ReviewProgress(Box<ReviewProgress>),
+    StackGate(Box<StackGate>),
     PullRequestIndex(Box<PullRequestDiffIndex>),
     PullRequestDiff(Box<DiffDocument>),
     PullRequestDiffBatch(Vec<(PathBuf, DiffDocument)>),
@@ -201,6 +239,9 @@ answers! {
     pull_request, PullRequest -> PullRequestSnapshot, |value: Box<PullRequestSnapshot>| *value;
     pull_request_stack, PullRequestStack -> PullRequestStackSnapshot,
         |value: Box<PullRequestStackSnapshot>| *value;
+    gate, Gate -> MergeGate, |value: Box<MergeGate>| *value;
+    review_progress, ReviewProgress -> ReviewProgress, |value: Box<ReviewProgress>| *value;
+    stack_gate, StackGate -> StackGate, |value: Box<StackGate>| *value;
     pull_request_index, PullRequestIndex -> PullRequestDiffIndex,
         |value: Box<PullRequestDiffIndex>| *value;
     pull_request_diff, PullRequestDiff -> DiffDocument, |value: Box<DiffDocument>| *value;

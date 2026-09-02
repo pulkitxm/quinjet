@@ -27,6 +27,7 @@ refs without changing the caller's worktree, index, branches, or refs.
 - [`quinjet stack view`](./view.md)
 - [`quinjet stack files`](./files.md)
 - [`quinjet stack diff`](./diff.md)
+- [`quinjet stack gate`](./gate.md)
 
 ### Build
 

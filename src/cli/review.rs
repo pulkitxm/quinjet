@@ -1,5 +1,8 @@
 use std::io::{self, Read};
 
+mod track;
+use track::track;
+
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
@@ -23,6 +26,62 @@ pub(super) enum PrReviewVerb {
     Resolve(PrReviewThreadArgs),
     #[doc = " Reopen a resolved review thread"]
     Unresolve(PrReviewThreadArgs),
+    #[doc = " Report what is left to review, measured against a commit"]
+    Progress(PrReviewProgressArgs),
+    #[doc = " Print the one thing to look at next"]
+    Next(PrReviewNextArgs),
+    #[doc = " Mark changed files as read or unread"]
+    Viewed(PrReviewViewedArgs),
+    #[doc = " Record the current head as the commit you last looked at"]
+    Visit(PrArgs),
+}
+
+#[derive(Debug, Args)]
+pub(super) struct PrReviewProgressArgs {
+    #[command(flatten)]
+    pub(super) pull_request: PrArgs,
+    #[command(flatten)]
+    pub(super) since: PrSinceArgs,
+    #[doc = " List every changed file, not only what is left"]
+    #[arg(long)]
+    pub(super) all: bool,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct PrReviewNextArgs {
+    #[command(flatten)]
+    pub(super) pull_request: PrArgs,
+    #[command(flatten)]
+    pub(super) wanted: PrReviewNextChoiceArgs,
+}
+
+#[derive(Debug, Args)]
+#[group(multiple = false)]
+pub(super) struct PrReviewNextChoiceArgs {
+    #[doc = " Only consider changed files"]
+    #[arg(long)]
+    pub(super) files: bool,
+    #[doc = " Only consider unresolved threads"]
+    #[arg(long)]
+    pub(super) threads: bool,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct PrReviewViewedArgs {
+    #[command(flatten)]
+    pub(super) pull_request: PrArgs,
+    #[doc = " Repository-relative paths to mark"]
+    #[arg(value_name = "PATH", value_hint = ValueHint::AnyPath)]
+    pub(super) paths: Vec<PathBuf>,
+    #[doc = " Mark every changed file instead of named paths"]
+    #[arg(long, conflicts_with = "paths")]
+    pub(super) all: bool,
+    #[doc = " Mark as unread rather than read"]
+    #[arg(long)]
+    pub(super) unviewed: bool,
+    #[doc = " Forget this pull request's local review progress entirely"]
+    #[arg(long, conflicts_with_all = ["paths", "all", "unviewed"])]
+    pub(super) reset: bool,
 }
 
 #[derive(Debug, Args)]
@@ -265,6 +324,7 @@ pub(super) fn review(session: &mut Session, out: &Emitter, command: PrReviewVerb
                 thread_id: args.thread_id,
             },
         ),
+        other => track(session, out, other),
     }
 }
 

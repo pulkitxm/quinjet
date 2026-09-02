@@ -68,12 +68,14 @@ mod api;
 mod cache;
 mod change_index;
 mod discovery;
+mod gate;
 mod http;
 mod model;
 mod operation;
 mod parsing;
 mod prepared;
 mod process;
+mod progress;
 mod pull_request;
 mod review;
 mod stack;
@@ -82,6 +84,7 @@ mod temporary;
 pub(crate) use cache::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use change_index::*;
+pub(crate) use gate::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use http::*;
 pub(crate) use model::*;
@@ -90,6 +93,7 @@ pub(crate) use operation::*;
 use parsing::*;
 pub(crate) use prepared::*;
 pub(crate) use process::{BoundedOutput, bounded_command_error, run_bounded_command};
+pub(crate) use progress::*;
 #[cfg(test)]
 pub(crate) use review::PullRequestReviewComment;
 pub(crate) use review::{

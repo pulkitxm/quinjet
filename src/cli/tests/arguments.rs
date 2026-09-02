@@ -369,8 +369,15 @@ pr reviews reply 7 thread --body-file -|pr reviews edit 7 comment --body-file no
 pr reviews delete 7 comment --yes|pr reviews submit 7 --comment -b note
 pr reviews submit 7 --request-changes --body-file note.txt|pr reviews discard 7 --yes
 pr reviews resolve 7 thread|pr reviews unresolve 7 thread
+pr gate 7|pr gate 7 --json|pr gate 7 --watch --interval 2|pr gate 7 --no-exit-code
+pr gate 7 --refresh --repo acme/project|stack gate 7|stack gate 7 --no-exit-code --json
+pr diff 7 --since abc123|pr diff 7 --since-review|pr diff 7 src/lib.rs --since-review
+pr reviews progress 7|pr reviews progress 7 --all --since-review|pr reviews progress 7 --since abc
+pr reviews next 7|pr reviews next 7 --files|pr reviews next 7 --threads
+pr reviews viewed 7 src/lib.rs|pr reviews viewed 7 --all|pr reviews viewed 7 src/lib.rs --unviewed
+pr reviews viewed 7 --reset|pr reviews visit 7
 ";
-    assert_eq!(assert_argument_cases(cases, true), 59);
+    assert_eq!(assert_argument_cases(cases, true), 80);
 }
 
 #[test]
@@ -400,8 +407,12 @@ pr reviews edit 7 comment|pr reviews edit 7 comment -b note --body-file note.txt
 pr reviews submit 7 -b note|pr reviews submit 7 --approve --comment -b note
 pr reviews submit 7 --approve|pr reviews submit 7 --approve -b note --body-file note.txt
 pr reviews delete 7|pr reviews resolve 7|pr reviews unresolve 7
+pr gate|pr gate 7 --interval 2|pr gate 7 --watch --interval 1|stack gate
+pr diff 7 --since abc --since-review|pr reviews progress 7 --since abc --since-review
+pr reviews next 7 --files --threads|pr reviews viewed 7 src/lib.rs --all
+pr reviews viewed 7 --reset --all|pr reviews viewed 7 src/lib.rs --reset|pr reviews visit
 ";
-    assert_eq!(assert_argument_cases(cases, false), 58);
+    assert_eq!(assert_argument_cases(cases, false), 69);
 }
 
 #[test]

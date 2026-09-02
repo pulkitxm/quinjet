@@ -25,6 +25,14 @@ pub(crate) fn format_relative_timestamp(value: &str) -> String {
     format_relative_timestamp_at(value, OffsetDateTime::now_utc())
 }
 
+#[doc = " The current instant as an RFC 3339 stamp, so a recorded timestamp reads"]
+#[doc = " back through the same formatter as a GitHub one."]
+pub(crate) fn now_timestamp() -> String {
+    OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_default()
+}
+
 pub(crate) fn relative_time_generation() -> i64 {
     OffsetDateTime::now_utc()
         .unix_timestamp()

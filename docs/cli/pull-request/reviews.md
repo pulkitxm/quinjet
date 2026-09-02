@@ -16,6 +16,10 @@ quinjet pr reviews submit <number> <--comment|--approve|--request-changes> --bod
 quinjet pr reviews discard <number> [--yes]
 quinjet pr reviews resolve <number> <thread-id>
 quinjet pr reviews unresolve <number> <thread-id>
+quinjet pr reviews progress <number> [--since <oid> | --since-review] [--all]
+quinjet pr reviews next <number> [--files | --threads]
+quinjet pr reviews viewed <number> [<path>...] [--all] [--unviewed] [--reset]
+quinjet pr reviews visit <number>
 ```
 
 Every verb accepts `--repo <owner/name>`, `--refresh`, `-C <DIR>`, and `--json`.
@@ -79,6 +83,16 @@ highlighted and existing threads render immediately below their anchors.
 
 Review reads and writes use a dedicated worker lane, so a slow GitHub review
 request cannot block diff loading, check logs, or the rest of the interface.
+
+The last four verbs read and record review progress rather than writing to
+GitHub. They keep a local note of which files you have read and which head you
+last looked at, which is what makes "show me only what changed since" answerable
+on a pull request that has moved. They are documented separately:
+
+- [`quinjet pr reviews progress`](./review-progress.md)
+- [`quinjet pr reviews next`](./review-next.md)
+- [`quinjet pr reviews viewed`](./review-viewed.md)
+- [`quinjet pr reviews visit`](./review-visit.md)
 
 ## Where to go next
 

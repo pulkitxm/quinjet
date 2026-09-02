@@ -2,9 +2,11 @@
 use super::*;
 
 mod commits;
+mod delta;
 mod monitor;
+use delta::pull_request_delta;
 pub(super) use monitor::select_check;
-use monitor::{checks, logs, watch_conversation, watch_pull_request};
+use monitor::{checks, gate, logs, watch_conversation, watch_pull_request};
 #[cfg(test)]
 pub(super) use monitor::{ensure_log_available, exit_for};
 
@@ -32,7 +34,12 @@ pub(super) fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb
         PrVerb::Commits(args) => commits::commits(session, out, &args),
         PrVerb::Diff(args) => {
             let request = lookup(session, out, &args.pull_request)?;
-            let document = pull_request_diff(session, out, &request, args.path.as_deref())?;
+            let document = match args.since.request() {
+                None => pull_request_diff(session, out, &request, args.path.as_deref())?,
+                Some(since) => {
+                    pull_request_delta(session, out, &request, &since, args.path.as_deref())?
+                }
+            };
             out.emit(&document, || render::diff(&document))?;
             Ok(0)
         }
@@ -53,6 +60,7 @@ pub(super) fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb
             Ok(0)
         }
         PrVerb::Checks(args) => checks(session, out, &args),
+        PrVerb::Gate(args) => gate(session, out, &args),
         PrVerb::Logs(args) => logs(session, out, &args),
         PrVerb::Open(args) => {
             let request = lookup(session, out, &args.pull_request)?;
@@ -476,18 +484,5 @@ pub(super) fn prepared_pull_request_diff(
     Ok(index.document_with_visibility(&loaded, |_| true))
 }
 
-pub(super) fn whole_document(
-    session: &mut Session,
-    prepare: Command,
-    file: impl Fn(u64, PathBuf) -> Command,
-) -> Result<DiffDocument> {
-    let index = session.execute(prepare)?.local_diff_index()?;
-    let mut loaded = HashMap::new();
-    for entry in &index.files {
-        let (path, document) = session
-            .execute(file(0, entry.path.clone()))?
-            .local_diff_file()?;
-        drop(loaded.insert(path, document));
-    }
-    Ok(index.document_with_visibility(&loaded, |_| true))
-}
+mod local;
+pub(super) use local::whole_document;

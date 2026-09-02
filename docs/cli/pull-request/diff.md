@@ -5,7 +5,7 @@ Prints a pull request's patch, or one path's patch out of it.
 Usage:
 
 ```bash
-quinjet pr diff <number> [<path>] [--repo <owner/name>] [--refresh] [-C <DIR>] [--json]
+quinjet pr diff <number> [<path>] [--since <oid> | --since-review] [--repo <owner/name>] [--refresh] [-C <DIR>] [--json]
 ```
 
 Arguments:
@@ -19,6 +19,8 @@ Options:
 
 | Name | Type / values | Default | What it does |
 | --- | --- | --- | --- |
+| `--since <OID>` | commit id | unset | Prints only what changed after this commit of the pull request. Conflicts with `--since-review`. |
+| `--since-review` | flag | off | Prints only what changed since your last visit or review. |
 | `--repo <OWNER/NAME>` | string | unset | Chooses which discovered repository the number belongs to. |
 | `--refresh` | flag | off | Asks GitHub again for the metadata. Patches are keyed by commits and are never stale, so this only matters when the head has moved. |
 | `-C, --path <DIR>` | path | `.` | The repository to run against. Global. |
@@ -173,8 +175,41 @@ Quinjet's own summary line rather than `diff --git`, and the `index` and
 `--- / +++` lines are folded away. Use `git diff` against the two commits if you
 need a patch to apply.
 
+## The review delta
+
+`--since` and `--since-review` change one thing: the base of the comparison. The
+default base is the merge base, which is what makes the patch "everything this
+pull request does". With either flag the base is a commit of the pull request
+itself, exactly, so the patch is what the pull request gained after that commit
+and nothing else.
+
+```bash
+quinjet pr diff 42 --since-review
+```
+
+That is the answer to "what changed since I last looked", which is otherwise a
+matter of reading the whole thing again and remembering.
+
+`--since-review` resolves its commit the same way
+[`quinjet pr reviews progress`](./review-progress.md) does: your recorded visit
+first, then your last review on GitHub, then the merge base. `--since <oid>`
+takes a full object name or a unique abbreviation, resolved against the pull
+request's own commit list, so a commit the pull request does not contain exits 3
+rather than silently widening the patch.
+
+The title line names what it measured from, in both faces:
+
+```console
+$ quinjet pr diff 42 --since-review --json | jq -r .title
+PR #42 since 0be25df89d3a (your last review)
+```
+
+When nothing has changed since, the patch is empty and a note on stderr says so;
+stdout still carries a complete, empty document.
+
 ## Where to go next
 
+- [`quinjet pr reviews progress`](./review-progress.md) for what is left to read
 - [`quinjet pr`](./README.md), the rest of this group and the workspace this
   verb prepares
 - [`quinjet pr files`](./files.md) for the paths this verb accepts
