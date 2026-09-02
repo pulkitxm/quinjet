@@ -2,6 +2,7 @@ mod checks;
 mod commits;
 mod context;
 mod conversation;
+mod stack_review;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -112,6 +113,7 @@ pub(crate) use review::{
     PullRequestReviewSnapshot, PullRequestReviewThread, PullRequestReviewThreadSubject,
 };
 pub(crate) use stack::*;
+pub(crate) use stack_review::*;
 pub(crate) use suggestions::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use temporary::*;

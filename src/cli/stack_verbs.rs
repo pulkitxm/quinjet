@@ -15,6 +15,10 @@ pub(super) enum StackVerb {
     Diff(StackDiffArgs),
     #[doc = "Say which stack members can merge, and what blocks the rest"]
     Gate(StackGateArgs),
+    #[doc = "Read the whole stack: merge order, the critical path, and where members overlap"]
+    Review(StackReviewArgs),
+    #[doc = "List everything outstanding across the stack, bottom to top"]
+    Feedback(StackFeedbackArgs),
     #[doc = "Initialize a local branch stack"]
     Init(StackInitArgs),
     #[doc = "Add a branch to the active stack"]
@@ -52,7 +56,12 @@ pub(super) enum StackVerb {
 impl StackVerb {
     pub(super) fn into_operation(self) -> Option<(StackOperation, bool)> {
         match self {
-            Self::View(_) | Self::Files(_) | Self::Diff(_) | Self::Gate(_) => None,
+            Self::View(_)
+            | Self::Files(_)
+            | Self::Diff(_)
+            | Self::Gate(_)
+            | Self::Review(_)
+            | Self::Feedback(_) => None,
             Self::Init(args) => Some((
                 StackOperation::Init {
                     branches: args.branches,
@@ -388,4 +397,31 @@ pub(super) struct StackGateArgs {
     #[doc = "Exit 0 whatever the verdict is"]
     #[arg(long)]
     pub(super) no_exit_code: bool,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct StackReviewArgs {
+    #[command(flatten)]
+    pub(super) pull_request: PrArgs,
+    #[doc = "Measure each member against its parent rather than trusting GitHub's totals"]
+    #[arg(long)]
+    pub(super) incremental: bool,
+    #[doc = "Exit 1 when anything blocks the stack"]
+    #[arg(long)]
+    pub(super) exit_code: bool,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct StackFeedbackArgs {
+    #[command(flatten)]
+    pub(super) pull_request: PrArgs,
+    #[doc = "Only what the merge is actually waiting on"]
+    #[arg(long)]
+    pub(super) unresolved: bool,
+    #[doc = "Only what is waiting on a reply from you"]
+    #[arg(long)]
+    pub(super) mine: bool,
+    #[doc = "Exit 1 when anything the merge is waiting on remains"]
+    #[arg(long)]
+    pub(super) exit_code: bool,
 }

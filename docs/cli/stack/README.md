@@ -28,6 +28,8 @@ refs without changing the caller's worktree, index, branches, or refs.
 - [`quinjet stack files`](./files.md)
 - [`quinjet stack diff`](./diff.md)
 - [`quinjet stack gate`](./gate.md)
+- [`quinjet stack review`](./review.md)
+- [`quinjet stack feedback`](./feedback.md)
 
 ### Build
 

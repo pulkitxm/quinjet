@@ -1,4 +1,4 @@
-use super::stack_verbs::{StackGateArgs, StackRangeArgs};
+use super::stack_verbs::{StackFeedbackArgs, StackGateArgs, StackRangeArgs, StackReviewArgs};
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
@@ -14,6 +14,8 @@ pub(super) fn stack(session: &mut Session, out: &Emitter, command: StackVerb) ->
             out.emit(&index, || render::pull_request_files(&index))?;
         }
         StackVerb::Gate(args) => return stack_gate(session, out, &args),
+        StackVerb::Review(args) => return stack_review(session, out, &args),
+        StackVerb::Feedback(args) => return stack_feedback(session, out, &args),
         StackVerb::Diff(args) => {
             let (stack, from, to) = stack_range(session, out, &args.range)?;
             let title = format!("Stack #{} positions {from} through {to}", stack.number);
@@ -51,6 +53,55 @@ fn stack_gate(session: &mut Session, out: &Emitter, args: &StackGateArgs) -> Res
         0
     } else {
         gate.verdict.exit_code()
+    })
+}
+
+#[doc = " The whole stack read at once. A single pull request cannot say what"]
+#[doc = " can merge now, which one member everything else is waiting on, or"]
+#[doc = " where two members touch the same file."]
+fn stack_review(session: &mut Session, out: &Emitter, args: &StackReviewArgs) -> Result<u8> {
+    let stack = require_stack(session, out, &args.pull_request)?;
+    let review = out
+        .execute(
+            session,
+            Command::PullRequestStackReview {
+                stack: Box::new(stack),
+                incremental: args.incremental,
+                refresh: args.pull_request.refresh,
+            },
+        )?
+        .stack_review()?;
+    out.emit(&review, || render::stack_review(&review))?;
+    Ok(if args.exit_code && !review.is_clear() {
+        EXIT_FAILURE
+    } else {
+        0
+    })
+}
+
+#[doc = " One queue across the stack, bottom to top. Answering a thread on the"]
+#[doc = " bottom member is what lets anything above it move."]
+fn stack_feedback(session: &mut Session, out: &Emitter, args: &StackFeedbackArgs) -> Result<u8> {
+    let stack = require_stack(session, out, &args.pull_request)?;
+    let queue = out
+        .execute(
+            session,
+            Command::PullRequestStackFeedback {
+                stack: Box::new(stack),
+                refresh: args.pull_request.refresh,
+            },
+        )?
+        .stack_feedback()?;
+    let filter = FeedbackFilter {
+        blocking_only: args.unresolved,
+        mine_only: args.mine,
+    };
+    let queue = filter.apply_stack(queue);
+    out.emit(&queue, || render::stack_feedback(&queue))?;
+    Ok(if args.exit_code && queue.counts.blocking > 0 {
+        EXIT_FAILURE
+    } else {
+        0
     })
 }
 

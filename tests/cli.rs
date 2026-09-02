@@ -284,6 +284,9 @@ mod ssh;
 #[path = "cli/stack_lifecycle.rs"]
 mod stack_lifecycle;
 #[cfg(unix)]
+#[path = "cli/stack_review.rs"]
+mod stack_review;
+#[cfg(unix)]
 #[path = "cli/work.rs"]
 mod work;
 #[cfg(unix)]

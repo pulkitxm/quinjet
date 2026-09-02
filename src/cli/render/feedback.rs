@@ -48,7 +48,7 @@ pub(crate) fn feedback(queue: &PullRequestFeedback, full: bool) -> String {
     out.finish()
 }
 
-fn feedback_row(item: &FeedbackItem) -> String {
+pub(super) fn feedback_row(item: &FeedbackItem) -> String {
     let location = item.location();
     let location = if location.is_empty() {
         format!("@{}", item.author)
