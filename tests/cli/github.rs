@@ -421,6 +421,25 @@ fn pull_request_open_uses_the_selected_check_url() -> Result<()> {
 }
 
 #[test]
+fn pull_request_open_inside_an_ssh_session_prints_the_url_without_an_opener() -> Result<()> {
+    let fixture = GitHubFixture::new()?;
+    let mut command = fixture.command(&["pr", "open", "42", "--json"])?;
+    command.env("SSH_CONNECTION", "203.0.113.7 51000 198.51.100.4 22");
+
+    let opened = Run::from(
+        command
+            .output()
+            .context("failed to run Quinjet inside a fake SSH session")?,
+    )?
+    .success()?;
+
+    ensure!(opened.stderr.is_empty(), "{}", opened.stderr);
+    ensure!(opened.json()?["message"] == "https://github.com/acme/project/pull/42");
+    ensure!(!fixture.open_capture.exists());
+    Ok(())
+}
+
+#[test]
 fn close_preview_does_not_dispatch_but_yes_uses_direct_transport() -> Result<()> {
     let fixture = GitHubFixture::new()?;
 
