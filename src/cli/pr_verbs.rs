@@ -26,6 +26,12 @@ pub(super) enum PrVerb {
     Deployments(PrDeploymentsCommand),
     #[doc = " List everything outstanding on a pull request in one queue"]
     Feedback(PrFeedbackArgs),
+    #[doc = " List the dependencies a pull request adds, removes or upgrades"]
+    Dependencies(PrArgs),
+    #[doc = " List the security findings a pull request raises"]
+    Security(PrArgs),
+    #[doc = " Assemble a bundle of context for a coding or review tool"]
+    Context(PrContextArgs),
     #[doc = " List and apply the suggested changes reviewers left"]
     #[command(args_conflicts_with_subcommands = true)]
     Suggestions(PrSuggestionsCommand),

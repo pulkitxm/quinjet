@@ -90,6 +90,7 @@ quinjet pr view 12 --watch            refresh the metadata until stopped
 quinjet pr conversation 12 --watch    follow the conversation until stopped
 quinjet pr checks 12 --watch          block until CI settles, exit non-zero if it did not go green
 quinjet pr gate 12                    say whether it can merge, and what blocks it
+quinjet pr context 12 --purpose fix-ci   one bundle of context for a coding tool
 quinjet pr logs 12 clippy --watch     tail a running job's log
 quinjet update --check                check whether a newer stable release exists
 ```

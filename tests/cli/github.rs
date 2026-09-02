@@ -125,6 +125,12 @@ impl GitHubFixture {
         fs::read_to_string(&self.gh_capture).context("fake gh did not record a call")
     }
 
+    #[doc = " What the fake recorded, treating no file at all as no calls. Used"]
+    #[doc = " where the point of the assertion is that nothing was read."]
+    pub(super) fn gh_calls_or_none(&self) -> String {
+        fs::read_to_string(&self.gh_capture).unwrap_or_default()
+    }
+
     pub(super) fn clear_gh_calls(&self) {
         drop(fs::remove_file(&self.gh_capture));
     }

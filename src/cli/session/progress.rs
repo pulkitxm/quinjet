@@ -22,7 +22,7 @@ pub(super) fn record_review_visit(pull_request: &PullRequest) -> Outcome {
 
 pub(super) fn mark_review_files(
     pull_request: &PullRequest,
-    paths: &[std::path::PathBuf],
+    paths: &[PathBuf],
     viewed: bool,
 ) -> Outcome {
     let mut record =

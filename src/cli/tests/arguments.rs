@@ -390,8 +390,11 @@ pr suggestions 7|pr suggestions apply 7 COMMENT_1 --yes
 pr suggestions apply 7 --all --message fix --yes
 pr reviews suggest 7 src/lib.rs --line 8 -b text
 pr reviews suggest 7 src/lib.rs --line 8 --start-line 6 --note why --body-file f.txt
+pr dependencies 7|pr dependencies 7 --json|pr security 7|pr security 7 --refresh
+pr context 7|pr context 7 --purpose review|pr context 7 --purpose address-feedback
+pr context 7 --purpose fix-ci --budget 1000 --file src/lib.rs --json
 ";
-    assert_eq!(assert_argument_cases(cases, true), 106);
+    assert_eq!(assert_argument_cases(cases, true), 114);
 }
 
 #[test]
@@ -433,8 +436,10 @@ pr deployments approve|pr artifacts download
 pr feedback|pr suggestions apply 7|pr suggestions apply 7 COMMENT_1 --all
 pr reviews suggest 7 src/lib.rs -b text|pr reviews suggest 7 --line 8 -b text
 pr reviews suggest 7 src/lib.rs --line 8
+pr dependencies|pr security|pr context|pr context 7 --purpose nothing
+pr context 7 --budget|pr context 7 --file
 ";
-    assert_eq!(assert_argument_cases(cases, false), 88);
+    assert_eq!(assert_argument_cases(cases, false), 94);
 }
 
 #[test]

@@ -449,6 +449,7 @@ pub(super) struct PrLogsArgs {
 
 mod actions;
 mod annotations;
+mod context;
 mod edit;
 mod feedback;
 mod since;
@@ -457,6 +458,7 @@ pub(super) use actions::{
     PrDeploymentsCommand, PrRerunArgs,
 };
 pub(super) use annotations::PrAnnotationsArgs;
+pub(super) use context::PrContextArgs;
 pub(super) use edit::PrEditArgs;
 #[cfg(test)]
 pub(super) use edit::PrEditFieldArg;

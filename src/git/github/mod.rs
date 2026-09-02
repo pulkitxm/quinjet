@@ -1,5 +1,6 @@
 mod checks;
 mod commits;
+mod context;
 mod conversation;
 
 use std::borrow::Cow;
@@ -69,6 +70,7 @@ mod annotations;
 mod api;
 mod cache;
 mod change_index;
+mod dependencies;
 mod discovery;
 mod feedback;
 mod gate;
@@ -90,6 +92,8 @@ pub(crate) use annotations::*;
 pub(crate) use cache::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use change_index::*;
+pub(crate) use context::*;
+pub(crate) use dependencies::*;
 pub(crate) use feedback::*;
 pub(crate) use gate::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
