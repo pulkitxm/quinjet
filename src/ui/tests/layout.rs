@@ -84,6 +84,54 @@ fn header_opens_the_project_menu_from_the_name_and_links_the_branch() {
 }
 
 #[test]
+fn a_link_hit_wraps_exactly_its_own_cells_in_one_hyperlink() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    let mut app = App::new("/tmp/repo", "repo");
+    app.status.branch.head = "feature/link".to_owned();
+    app.local_github_repository = Some(GitHubRepository {
+        name_with_owner: "acme/repo".to_owned(),
+        url: "https://github.com/acme/repo".to_owned(),
+        remotes: vec!["origin".to_owned()],
+    });
+    let mut terminal = Terminal::new(TestBackend::new(160, 24)).unwrap();
+
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+
+    let hit = app
+        .geometry
+        .link_hits
+        .iter()
+        .find(|hit| {
+            matches!(&hit.target, OpenTarget::Browser(url)
+                if url == "https://github.com/acme/repo/tree/feature/link")
+        })
+        .expect("the branch registers a link hit");
+    let OpenTarget::Browser(url) = &hit.target;
+    let opening = format!("\x1b]8;;{url}\x1b\\");
+    let closing = "\x1b]8;;\x1b\\";
+    let buffer = terminal.backend().buffer();
+    let mut text = String::new();
+    for row in hit.area.y..hit.area.bottom() {
+        for column in hit.area.x..hit.area.right() {
+            let symbol = buffer[(column, row)].symbol();
+            let inner = symbol
+                .strip_prefix(opening.as_str())
+                .and_then(|rest| rest.strip_suffix(closing))
+                .expect("every cell of a link hit carries the whole hyperlink");
+            text.push_str(inner);
+        }
+    }
+
+    assert_eq!(text, "feature/link");
+    let after = buffer[(hit.area.right(), hit.area.y)].symbol();
+    assert!(!after.contains("\x1b]8;;"));
+}
+
+#[test]
 fn history_rows_give_the_subject_hash_and_live_age_their_own_space() {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
