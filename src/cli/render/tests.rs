@@ -488,6 +488,7 @@ fn a_long_name_is_shortened_rather_than_wrapped() {
     );
 }
 
+mod actions;
 mod annotations;
 mod commits;
 mod gate;

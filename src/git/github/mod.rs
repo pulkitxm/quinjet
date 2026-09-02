@@ -5,7 +5,7 @@ mod conversation;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ffi::{OsStr, OsString};
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
@@ -64,6 +64,7 @@ const MAX_RECENT_CACHE_ENTRY_BYTES: u64 = 384 * 1024;
 static TEMPORARY_REPOSITORY_ID: AtomicU64 = AtomicU64::new(0);
 static CACHE_WRITE_ID: AtomicU64 = AtomicU64::new(0);
 
+mod actions;
 mod annotations;
 mod api;
 mod cache;
@@ -82,6 +83,7 @@ mod review;
 mod stack;
 mod temporary;
 
+pub(crate) use actions::*;
 pub(crate) use annotations::*;
 pub(crate) use cache::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]

@@ -192,14 +192,16 @@ fi
 a forced `gh pr checks` call, so a long watch at the default rate is twelve
 requests a minute against your rate limit for the whole life of the job.
 
-`quinjet pr checks` also carries one subcommand:
-[`quinjet pr checks annotations`](./checks-annotations.md), which reads the
-structured findings the runs placed on particular lines rather than the runs
-themselves.
+`quinjet pr checks` also carries four subcommands:
+[`annotations`](./checks-annotations.md) reads the structured findings the runs
+placed on particular lines, [`runs`](./checks-runs.md) lists the workflow runs
+behind the checks, and [`rerun`](./checks-rerun.md) and
+[`cancel`](./checks-cancel.md) act on them.
 
 ## Where to go next
 
 - [`quinjet pr checks annotations`](./checks-annotations.md) for line-level findings
+- [`quinjet pr checks runs`](./checks-runs.md), [`rerun`](./checks-rerun.md) and [`cancel`](./checks-cancel.md)
 - [`quinjet pr logs`](./logs.md) for the log behind a red row
 - [`quinjet pr`](./README.md), the rest of this group and its caching rules
 - [Conventions and contracts](../conventions.md) for the shared exit-code table

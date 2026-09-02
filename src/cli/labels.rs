@@ -5,12 +5,21 @@ impl Verb {
     #[doc = " Argument relationships clap cannot express, checked before repository"]
     #[doc = " discovery so a usage mistake never reads a repository first."]
     pub(super) fn validate(&self) -> Result<()> {
-        if let Self::Pr {
-            command: PrVerb::Checks(command),
-        } = self
-            && command.command.is_none()
-        {
-            drop(command.list.pull_request()?);
+        match self {
+            Self::Pr {
+                command: PrVerb::Checks(command),
+            } if command.command.is_none() => drop(command.list.pull_request()?),
+            Self::Pr {
+                command: PrVerb::Artifacts(command),
+            } if command.command.is_none() => {
+                drop(command.list.pull_request("pr artifacts")?);
+            }
+            Self::Pr {
+                command: PrVerb::Deployments(command),
+            } if command.command.is_none() => {
+                drop(command.list.pull_request("pr deployments")?);
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -61,7 +70,10 @@ impl Verb {
             } => Some("Evaluating the merge gate"),
             Self::Pr {
                 command: PrVerb::Checks(command),
-            } if command.command.is_some() => Some("Fetching check annotations"),
+            } if command.command.is_some() => Some("Reading GitHub Actions state"),
+            Self::Pr {
+                command: PrVerb::Artifacts(_) | PrVerb::Deployments(_),
+            } => Some("Reading GitHub Actions state"),
             Self::Pr {
                 command: PrVerb::Merge(_) | PrVerb::Close(_) | PrVerb::Reopen(_),
             } => Some("Updating pull request"),

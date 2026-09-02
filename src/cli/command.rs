@@ -5,10 +5,11 @@ use anyhow::Result;
 use crate::git::diff::{DiffDocument, DiffIndex};
 use crate::git::github::{
     CheckRunLog, GitHubRepository, MergeGate, PullRequest, PullRequestAnnotations,
-    PullRequestCheck, PullRequestChecks, PullRequestCommits, PullRequestConversation,
-    PullRequestDiffIndex, PullRequestOperation, PullRequestReviewOperation,
-    PullRequestReviewSnapshot, PullRequestSnapshot, PullRequestStack, PullRequestStackSnapshot,
-    ReviewProgress, ReviewSinceRequest, StackGate,
+    PullRequestArtifacts, PullRequestCheck, PullRequestChecks, PullRequestCommits,
+    PullRequestConversation, PullRequestDeployments, PullRequestDiffIndex, PullRequestOperation,
+    PullRequestReviewOperation, PullRequestReviewSnapshot, PullRequestSnapshot, PullRequestStack,
+    PullRequestStackSnapshot, PullRequestWorkflowRuns, ReviewProgress, ReviewSinceRequest,
+    StackGate, WorkflowArtifact, WorkflowOperation,
 };
 use crate::git::history::Commit;
 use crate::git::status::RepoStatus;
@@ -58,6 +59,27 @@ pub(crate) enum Command {
     PullRequestAnnotations {
         pull_request: Box<PullRequest>,
         refresh: bool,
+    },
+    PullRequestWorkflowRuns {
+        pull_request: Box<PullRequest>,
+        refresh: bool,
+    },
+    PullRequestArtifacts {
+        pull_request: Box<PullRequest>,
+        runs: Box<PullRequestWorkflowRuns>,
+    },
+    DownloadArtifact {
+        pull_request: Box<PullRequest>,
+        artifact: Box<WorkflowArtifact>,
+        directory: PathBuf,
+    },
+    PullRequestDeployments {
+        pull_request: Box<PullRequest>,
+        runs: Box<PullRequestWorkflowRuns>,
+    },
+    OperateWorkflow {
+        pull_request: Box<PullRequest>,
+        operation: Box<WorkflowOperation>,
     },
     PullRequestStackGate {
         stack: Box<PullRequestStack>,
@@ -153,6 +175,11 @@ impl Command {
             Self::PullRequestStack { .. } => "Fetching pull-request stack",
             Self::PullRequestGate { .. } => "Evaluating the merge gate",
             Self::PullRequestAnnotations { .. } => "Fetching check annotations",
+            Self::PullRequestWorkflowRuns { .. } => "Fetching workflow runs",
+            Self::PullRequestArtifacts { .. } => "Fetching workflow artifacts",
+            Self::DownloadArtifact { .. } => "Downloading a workflow artifact",
+            Self::PullRequestDeployments { .. } => "Fetching deployments",
+            Self::OperateWorkflow { operation, .. } => operation.label(),
             Self::PullRequestStackGate { .. } => "Evaluating the stack merge gate",
             Self::PreparePullRequest { .. }
             | Self::PreparePullRequestSince { .. }
@@ -201,6 +228,10 @@ pub(crate) enum Outcome {
     PullRequestStack(Box<PullRequestStackSnapshot>),
     Gate(Box<MergeGate>),
     Annotations(Box<PullRequestAnnotations>),
+    WorkflowRuns(Box<PullRequestWorkflowRuns>),
+    Artifacts(Box<PullRequestArtifacts>),
+    DownloadedArtifact(PathBuf),
+    Deployments(Box<PullRequestDeployments>),
     ReviewProgress(Box<ReviewProgress>),
     StackGate(Box<StackGate>),
     PullRequestIndex(Box<PullRequestDiffIndex>),
@@ -249,6 +280,12 @@ answers! {
     gate, Gate -> MergeGate, |value: Box<MergeGate>| *value;
     annotations, Annotations -> PullRequestAnnotations,
         |value: Box<PullRequestAnnotations>| *value;
+    workflow_runs, WorkflowRuns -> PullRequestWorkflowRuns,
+        |value: Box<PullRequestWorkflowRuns>| *value;
+    artifacts, Artifacts -> PullRequestArtifacts, |value: Box<PullRequestArtifacts>| *value;
+    downloaded_artifact, DownloadedArtifact -> PathBuf, |value| value;
+    deployments, Deployments -> PullRequestDeployments,
+        |value: Box<PullRequestDeployments>| *value;
     review_progress, ReviewProgress -> ReviewProgress, |value: Box<ReviewProgress>| *value;
     stack_gate, StackGate -> StackGate, |value: Box<StackGate>| *value;
     pull_request_index, PullRequestIndex -> PullRequestDiffIndex,

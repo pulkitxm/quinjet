@@ -18,6 +18,12 @@ pub(super) enum PrVerb {
     Checks(PrChecksCommand),
     #[doc = " Say whether the pull request can merge, and what blocks it"]
     Gate(PrGateArgs),
+    #[doc = " List the artifacts this pull request's runs uploaded"]
+    #[command(args_conflicts_with_subcommands = true)]
+    Artifacts(PrArtifactsCommand),
+    #[doc = " List this pull request's deployments and pending approvals"]
+    #[command(args_conflicts_with_subcommands = true)]
+    Deployments(PrDeploymentsCommand),
     #[doc = " Print one check run's steps and log"]
     Logs(PrLogsArgs),
     #[doc = " Open a pull request in a browser"]
@@ -89,4 +95,10 @@ pub(super) struct PrChecksCommand {
 pub(super) enum PrChecksVerb {
     #[doc = " List the annotations a pull request's checks placed on its lines"]
     Annotations(PrAnnotationsArgs),
+    #[doc = " List the workflow runs behind a pull request's checks"]
+    Runs(PrArgs),
+    #[doc = " Rerun failed jobs, whole runs, or one named check"]
+    Rerun(PrRerunArgs),
+    #[doc = " Cancel every workflow run still going"]
+    Cancel(PrCancelArgs),
 }

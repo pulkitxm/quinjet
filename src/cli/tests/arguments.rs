@@ -379,8 +379,14 @@ pr reviews viewed 7 --reset|pr reviews visit 7
 pr checks annotations 7|pr checks annotations 7 --severity failure|pr checks annotations 7 --json
 pr checks annotations 7 --check clippy --file src --in-diff --group check --full --exit-code
 pr checks annotations 7 --group severity|pr checks annotations 7 --group file
+pr checks runs 7|pr checks rerun 7 --failed|pr checks rerun 7 --all --yes
+pr checks rerun 7 --check windows --yes|pr checks cancel 7|pr checks cancel 7 --yes
+pr artifacts 7|pr artifacts 7 --json|pr artifacts download 7 snapshots
+pr artifacts download 7 snapshots --into /tmp/out
+pr deployments 7|pr deployments approve 7 staging --yes
+pr deployments reject 7 staging --comment no --yes
 ";
-    assert_eq!(assert_argument_cases(cases, true), 86);
+    assert_eq!(assert_argument_cases(cases, true), 99);
 }
 
 #[test]
@@ -416,8 +422,11 @@ pr reviews next 7 --files --threads|pr reviews viewed 7 src/lib.rs --all
 pr reviews viewed 7 --reset --all|pr reviews viewed 7 src/lib.rs --reset|pr reviews visit
 pr checks annotations|pr checks annotations 7 --severity nothing|pr checks annotations 7 --group nothing
 pr checks 7 annotations
+pr checks rerun 7|pr checks rerun 7 --failed --all|pr checks rerun 7 --failed --check windows
+pr checks runs|pr checks cancel|pr artifacts download 7|pr deployments approve 7
+pr deployments approve|pr artifacts download
 ";
-    assert_eq!(assert_argument_cases(cases, false), 73);
+    assert_eq!(assert_argument_cases(cases, false), 82);
 }
 
 #[test]
