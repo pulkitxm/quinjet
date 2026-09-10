@@ -60,13 +60,13 @@ assets = [
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive", "string"] }
-clap_complete = "4.6.9"
-clap_mangen = "0.3.3"
+clap_complete = "4.6"
+clap_mangen = "0.3"
 crossbeam-channel = "0.5"
 crossterm = { version = "0.29", features = ["osc52"] }
 dark-light = { version = "3.0", default-features = false }
 hex = "0.4"
-indicatif = { version = "0.18.3", features = ["in_memory"] }
+indicatif = { version = ">=0.17, <0.19", features = ["in_memory"] }
 notify = "8.0"
 ratatui = "0.30"
 semver = "1.0"
