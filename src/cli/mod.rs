@@ -1,5 +1,6 @@
 pub(crate) mod command;
 mod completion;
+mod gate;
 mod package_manager;
 mod pr_verbs;
 mod remote;
@@ -65,6 +66,7 @@ const CHECK_WATCH_INTERVAL: u64 = 5;
 const CHECK_WATCH_FLOOR: u64 = 2;
 const LOG_WATCH_INTERVAL: u64 = 8;
 const LOG_WATCH_FLOOR: u64 = 3;
+const GATE_EXIT_PENDING: u8 = 2;
 
 #[derive(Debug)]
 pub(crate) struct Failure {
@@ -277,6 +279,9 @@ impl Verb {
             } if args.watch => None,
             Self::Pr {
                 command: PrVerb::Checks(args),
+            } if args.watch => None,
+            Self::Pr {
+                command: PrVerb::Gate(args),
             } if args.watch => None,
             Self::Pr {
                 command: PrVerb::Logs(args),

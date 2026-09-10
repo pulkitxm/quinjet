@@ -58,7 +58,10 @@ invocation pays that fetch every time while the terminal interface pays it once
 and keeps the workspace open, which is why `pr diff` from a script is worth
 caching yourself if you call it in a loop.
 
-`checks` and `logs` are the two verbs built for CI rather than for reading.
+`gate`, `checks`, and `logs` are the verbs built for CI rather than for reading.
+`gate` combines check results, review state, unresolved threads, branch freshness,
+merge conflicts, merge-queue state, and GitHub's aggregate ruleset state into one
+stable verdict. It exits 0 for `pass`, 1 for `blocked`, and 2 for `pending`.
 `checks` shells out to `gh pr checks`, whose exit status is 1 when a run failed
 and 8 when one is still pending, so Quinjet judges the response by its content
 and accepts either code as long as something came back on stdout. `logs` takes
@@ -79,6 +82,7 @@ when their check state settles.
 | `quinjet pr diff` | Prints the whole patch, or one path's patch. |
 | `quinjet pr conversation` | Prints the timeline and the inline review comments as one thread, optionally refreshing until stopped. |
 | `quinjet pr checks` | Lists the checks, optionally blocking until they settle. |
+| `quinjet pr gate` | Explains whether checks, reviews, and merge requirements permit a merge. |
 | `quinjet pr logs` | Prints one check run's steps and its GitHub Actions log. |
 | `quinjet pr open` | Hands the pull request URL, or one selected check URL, to the desktop browser. |
 | `quinjet pr merge` | Merges the pull request with `--merge`, `--squash`, or `--rebase` after `--yes`. |
@@ -108,6 +112,7 @@ when their check state settles.
 - [`quinjet pr diff`](./diff.md)
 - [`quinjet pr conversation`](./conversation.md)
 - [`quinjet pr checks`](./checks.md)
+- [`quinjet pr gate`](./gate.md)
 - [`quinjet pr logs`](./logs.md)
 - [`quinjet pr open`](./open.md)
 - [`quinjet pr merge`](./merge.md)
