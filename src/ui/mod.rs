@@ -37,8 +37,6 @@ use crate::git::{Branch, HistoryBranch, ProjectGroup, Stash};
 use crate::ssh::SshContext;
 use crate::theme::{AppearanceChoice, Theme, ThemeName};
 
-const DETAIL_LABEL_WIDTH: usize = 12;
-const MAX_INTRALINE_SOURCE_BYTES: usize = 32 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HelpRow {
     Section(&'static str),
