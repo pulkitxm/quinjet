@@ -2,6 +2,8 @@
 use super::*;
 use crate::git::diff::ImageSide;
 
+pub(super) const MAX_INTRALINE_SOURCE_BYTES: usize = 32 * 1024;
+
 #[expect(clippy::integer_division, reason = "layout maths works in whole cells")]
 #[expect(
     clippy::too_many_arguments,

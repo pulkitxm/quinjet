@@ -71,12 +71,9 @@ fn staged_contents_search_reads_the_index_version() {
         repository.search(&request("staged-token")).unwrap().paths,
         vec!["notes.txt".to_owned()]
     );
-    assert!(
-        repository
-            .search(&request("worktree-token"))
-            .unwrap()
-            .paths
-            .is_empty()
+    assert_eq!(
+        repository.search(&request("worktree-token")).unwrap().paths,
+        Vec::<String>::new()
     );
 }
 

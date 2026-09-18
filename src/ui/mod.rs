@@ -1,3 +1,16 @@
+use std::collections::{HashMap, HashSet};
+use std::num::NonZeroU16;
+use std::ops::Range;
+use std::path::Path;
+
+use ratatui::Frame;
+use ratatui::buffer::{Buffer, CellDiffOption};
+use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget, Wrap};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
 use crate::app::{
     App, ChangeRow, ChangeSection, CheckListRow, ContentFileHit, ContentReviewHit, ContentStepHit,
     DiffLayout, Focus, HelpHit, LinkHit, Modal, ModalAction, OpenTarget, PaletteCommand,
@@ -23,20 +36,7 @@ use crate::git::status::{Change, ChangeArea, ChangeStatus};
 use crate::git::{Branch, HistoryBranch, ProjectGroup, Stash};
 use crate::ssh::SshContext;
 use crate::theme::{AppearanceChoice, Theme, ThemeName};
-use ratatui::Frame;
-use ratatui::buffer::{Buffer, CellDiffOption};
-use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget, Wrap};
-use std::collections::{HashMap, HashSet};
-use std::num::NonZeroU16;
-use std::ops::Range;
-use std::path::Path;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-const DETAIL_LABEL_WIDTH: usize = 12;
-const MAX_INTRALINE_SOURCE_BYTES: usize = 32 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HelpRow {
     Section(&'static str),

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use ratatui_image::picker::ProtocolType;
 
 use super::{
     ENCODED_IMAGES, ImageDrawState, Rect, choose_protocol, draw_image_line, draw_native,
@@ -12,7 +13,6 @@ use crate::git::diff::{
     ImageProtocol, ImageRaster, ImageSide,
 };
 use crate::theme::{Appearance, Theme, ThemeName};
-use ratatui_image::picker::ProtocolType;
 
 #[test]
 fn protocol_selection_respects_override_and_query() {

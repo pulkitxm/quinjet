@@ -1,6 +1,8 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
+pub(super) const DETAIL_LABEL_WIDTH: usize = 12;
+
 #[expect(
     clippy::too_many_lines,
     reason = "the draw pass reads better as one top-to-bottom pass"
