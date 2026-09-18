@@ -141,7 +141,7 @@ fn non_images_remain_binary_and_large_images_show_a_reason() {
         vec![0; super::decode::MAX_IMAGE_BYTES + 1],
     ));
     let binary = "diff --git a/binary.dat b/binary.dat\nnew file mode 100644\nBinary files /dev/null and b/binary.dat differ\n";
-    assert!(preview_sides(binary, &source).is_empty());
+    assert_eq!(preview_sides(binary, &source), []);
     let large = "diff --git a/big.png b/big.png\nnew file mode 100644\nBinary files /dev/null and b/big.png differ\n";
     let mut document = parse_diff(large.as_bytes(), "images", None, false);
     attach_image_previews(&mut document, &source);
