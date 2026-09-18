@@ -2,7 +2,8 @@ use std::io::Cursor;
 use std::path::Path;
 use std::sync::Arc;
 
-use image::{DynamicImage, ImageReader, Limits, RgbaImage, imageops::FilterType};
+use image::imageops::FilterType;
+use image::{DynamicImage, ImageReader, Limits, RgbaImage};
 
 use super::detect::{is_svg_path, looks_like_svg, sniff_image};
 use super::{ImageCell, ImagePreview, ImagePreviewKind, ImageRaster, ImageSide, SniffedImage};

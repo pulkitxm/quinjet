@@ -128,20 +128,18 @@ pub(super) fn draw_image_line(
         draw_caption(frame, area, &line.text(), theme);
         return;
     };
-    if protocol.is_native() {
-        if let Some(raster) = preview.raster.as_ref() {
-            if state.contains(raster) {
-                return;
-            }
-            if (protocol == ImageProtocol::Kitty
-                || (state.allow_other_native
-                    && preview.row == 0
-                    && remaining_height >= preview.rows))
-                && draw_native(frame, area, preview, protocol, remaining_height)
-            {
-                state.remember(raster);
-                return;
-            }
+    if protocol.is_native()
+        && let Some(raster) = preview.raster.as_ref()
+    {
+        if state.contains(raster) {
+            return;
+        }
+        if (protocol == ImageProtocol::Kitty
+            || (state.allow_other_native && preview.row == 0 && remaining_height >= preview.rows))
+            && draw_native(frame, area, preview, protocol, remaining_height)
+        {
+            state.remember(raster);
+            return;
         }
     }
     if preview.cells.is_empty() {

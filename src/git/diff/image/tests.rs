@@ -3,11 +3,10 @@ use std::path::PathBuf;
 
 use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 
-use super::attach_image_previews;
 use super::decode::decode_image;
 use super::detect::{detect_protocol_from_vars, sniff_image};
 use super::source::MapImageSource;
-use super::{ImageProtocol, ImageSide, SniffedImage};
+use super::{ImageProtocol, ImageSide, SniffedImage, attach_image_previews};
 use crate::git::diff::{DiffLineKind, parse_diff};
 
 fn png(color: [u8; 4]) -> Vec<u8> {
