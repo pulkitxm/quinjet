@@ -68,7 +68,18 @@ dark-light = { version = "3.0", default-features = false }
 grep-regex = "0.1.14"
 grep-searcher = "0.1.17"
 hex = "0.4"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico", "tiff", "tga", "pnm", "qoi"] }
+image = { version = "0.25", default-features = false, features = [
+  "png",
+  "jpeg",
+  "gif",
+  "webp",
+  "bmp",
+  "ico",
+  "tiff",
+  "tga",
+  "pnm",
+  "qoi",
+] }
 indicatif = { version = "0.18.3", features = ["in_memory"] }
 notify = "8.0"
 ratatui = "0.30"

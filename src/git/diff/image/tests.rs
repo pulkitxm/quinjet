@@ -3,11 +3,10 @@ use std::path::PathBuf;
 
 use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 
-use super::attach_image_previews;
 use super::decode::decode_image;
 use super::detect::{detect_protocol_from_vars, sniff_image};
 use super::source::MapImageSource;
-use super::{ImageProtocol, ImageSide, SniffedImage};
+use super::{ImageProtocol, ImageSide, SniffedImage, attach_image_previews};
 use crate::git::diff::{DiffLineKind, parse_diff};
 
 fn png(color: [u8; 4]) -> Vec<u8> {
@@ -142,7 +141,7 @@ fn non_images_remain_binary_and_large_images_show_a_reason() {
         vec![0; super::decode::MAX_IMAGE_BYTES + 1],
     ));
     let binary = "diff --git a/binary.dat b/binary.dat\nnew file mode 100644\nBinary files /dev/null and b/binary.dat differ\n";
-    assert!(preview_sides(binary, &source).is_empty());
+    assert_eq!(preview_sides(binary, &source), []);
     let large = "diff --git a/big.png b/big.png\nnew file mode 100644\nBinary files /dev/null and b/big.png differ\n";
     let mut document = parse_diff(large.as_bytes(), "images", None, false);
     attach_image_previews(&mut document, &source);
