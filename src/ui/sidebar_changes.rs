@@ -32,7 +32,7 @@ pub(super) fn draw_changes_sidebar(
         if app.filter.is_empty() {
             format!(" Changes  {} ", app.status.changes.len())
         } else {
-            format!(" Changes  /{} ", app.filter)
+            format!(" Changes{}", app.search_title_suffix())
         },
         app.focus == Focus::Sidebar && app.modal.is_none(),
         theme,

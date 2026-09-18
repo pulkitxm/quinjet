@@ -313,6 +313,7 @@ mod refresh_preview_interaction;
 mod refresh_preview_state;
 mod repository_tabs;
 mod reviews;
+mod search;
 mod stack;
 mod stack_refresh;
 mod stack_review;

@@ -151,6 +151,7 @@ fn the_read_only_views_have_verbs_too() {
         ["diff"].as_slice(),
         ["log"].as_slice(),
         ["show"].as_slice(),
+        ["search"].as_slice(),
         ["branch", "list"].as_slice(),
         ["branch", "compare"].as_slice(),
         ["stash", "list"].as_slice(),

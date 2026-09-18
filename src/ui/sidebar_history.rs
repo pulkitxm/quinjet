@@ -21,9 +21,9 @@ pub(super) fn draw_history_sidebar(
         )
     } else {
         format!(
-            " History · {}  /{} ",
+            " History · {}{} ",
             app.history_branch_label(),
-            app.filter
+            app.search_title_suffix()
         )
     };
     let block = panel_block(

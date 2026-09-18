@@ -32,6 +32,12 @@ macro_rules! hashed_icon {
     }};
 }
 
+pub(crate) fn is_image_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension_icon(extension) == IMAGE)
+}
+
 pub(crate) fn for_path(path: &Path) -> FileIcon {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return FILE;

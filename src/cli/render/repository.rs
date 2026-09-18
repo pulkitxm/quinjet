@@ -63,6 +63,14 @@ pub(crate) fn status(status: &RepoStatus) -> String {
 }
 
 pub(crate) fn diff(document: &DiffDocument) -> String {
+    render_diff(document, false)
+}
+
+pub(crate) fn diff_terminal(document: &DiffDocument) -> String {
+    render_diff(document, true)
+}
+
+fn render_diff(document: &DiffDocument, color: bool) -> String {
     let mut out = Report::default();
     for line in &document.lines {
         let text = line.text();
@@ -77,6 +85,7 @@ pub(crate) fn diff(document: &DiffDocument) -> String {
             DiffLineKind::HunkHeader | DiffLineKind::Meta | DiffLineKind::Review => {
                 out.line(&text);
             }
+            DiffLineKind::Image => out.line(&image_line(line, color)),
             DiffLineKind::Added => {
                 out.line(&format!("+{text}"));
             }
@@ -92,6 +101,58 @@ pub(crate) fn diff(document: &DiffDocument) -> String {
         out.line("\n[output reached Quinjet's size cap and was truncated]");
     }
     out.finish()
+}
+
+fn image_line(line: &crate::git::diff::DiffLine, color: bool) -> String {
+    let Some(preview) = line.image.as_ref() else {
+        return line.text();
+    };
+    let mut output = String::new();
+    if preview.row == 0 {
+        output.push_str(&preview.caption());
+        if !preview.cells.is_empty() {
+            output.push('\n');
+        }
+    }
+    if preview.cells.is_empty() {
+        return output;
+    }
+    if color {
+        push_ansi_halfblocks(&mut output, &preview.cells);
+    } else {
+        for _ in &preview.cells {
+            output.push('▀');
+        }
+    }
+    output
+}
+
+fn push_ansi_halfblocks(output: &mut String, cells: &[crate::git::diff::ImageCell]) {
+    for cell in cells {
+        output.push_str("\x1b[38;2;");
+        push_u8(output, cell.upper[0]);
+        output.push(';');
+        push_u8(output, cell.upper[1]);
+        output.push(';');
+        push_u8(output, cell.upper[2]);
+        output.push_str("m\x1b[48;2;");
+        push_u8(output, cell.lower[0]);
+        output.push(';');
+        push_u8(output, cell.lower[1]);
+        output.push(';');
+        push_u8(output, cell.lower[2]);
+        output.push_str("m▀");
+    }
+    output.push_str("\x1b[0m");
+}
+
+fn push_u8(output: &mut String, value: u8) {
+    let buffer = itoa_buffer(value);
+    output.push_str(&buffer);
+}
+
+fn itoa_buffer(value: u8) -> String {
+    value.to_string()
 }
 
 pub(crate) fn history(commits: &[Commit]) -> String {
@@ -206,6 +267,21 @@ pub(crate) fn worktrees(worktrees: &[Worktree]) -> String {
             worktree.path.display(),
             branch
         ));
+    }
+    out.finish()
+}
+
+pub(crate) fn search(hits: &SearchHits) -> String {
+    let mut out = Report::default();
+    if hits.paths.is_empty() && hits.commits.is_empty() {
+        out.line("No matches");
+        return out.finish();
+    }
+    for path in &hits.paths {
+        out.line(path);
+    }
+    for commit in &hits.commits {
+        out.line(commit);
     }
     out.finish()
 }

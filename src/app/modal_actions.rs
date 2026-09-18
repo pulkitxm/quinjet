@@ -49,6 +49,12 @@ impl App {
                     *amend = !*amend;
                 }
             }
+            ModalAction::CycleSearchMode => {
+                self.cycle_search_mode(false);
+                self.schedule_search(now);
+                self.normalize_selection();
+                self.schedule_preview(now);
+            }
             ModalAction::ConfirmYes => {
                 let Some(Modal::Confirm { action, .. }) = self.modal.take() else {
                     return;

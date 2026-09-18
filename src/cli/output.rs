@@ -69,6 +69,16 @@ impl Emitter {
         Ok(())
     }
 
+    pub(super) fn diff(&self, document: &DiffDocument) -> Result<()> {
+        self.emit(document, || {
+            if stdout_is_terminal() {
+                render::diff_terminal(document)
+            } else {
+                render::diff(document)
+            }
+        })
+    }
+
     pub(super) fn message(&self, message: &str) -> Result<()> {
         self.emit(&Message { message }, || format!("{message}\n"))
     }

@@ -10,7 +10,7 @@ use crate::git::worker::stack_tests::{
 #[test]
 fn every_worker_command_has_the_expected_lane() {
     let scenarios = lane_scenarios();
-    assert_eq!(scenarios.len(), 32);
+    assert_eq!(scenarios.len(), 33);
     for (command, expected) in scenarios {
         assert_eq!(worker_lane(&command), expected, "{command:?}");
     }
@@ -330,6 +330,17 @@ fn lane_scenarios() -> Vec<(WorkerCommand, WorkerLane)> {
             },
             WorkerLane::Background,
         ),
+        (
+            WorkerCommand::Search {
+                generation: 31,
+                request: Box::new(SearchRequest {
+                    query: String::new(),
+                    mode: crate::search::SearchMode::Name,
+                    target: SearchTarget::Changes { files: Vec::new() },
+                }),
+            },
+            WorkerLane::Background,
+        ),
         (WorkerCommand::Shutdown, WorkerLane::Background),
     ]
 }
@@ -483,6 +494,7 @@ fn identity(command: &WorkerCommand) -> (&'static str, u64) {
         WorkerCommand::LoadRecentProjects { generation } => ("projects", *generation),
         WorkerCommand::Operate { id, .. } => ("operate", *id),
         WorkerCommand::OperatePullRequest { id, .. } => ("operate-pr", *id),
+        WorkerCommand::Search { generation, .. } => ("search", *generation),
         WorkerCommand::Shutdown => ("shutdown", 0),
     }
 }

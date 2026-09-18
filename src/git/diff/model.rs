@@ -12,6 +12,7 @@ pub(crate) enum DiffLineKind {
     Added,
     Removed,
     Meta,
+    Image,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -41,6 +42,8 @@ pub(crate) struct DiffLine {
     pub old_line: Option<usize>,
     pub new_line: Option<usize>,
     pub spans: Vec<HighlightSpan>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<ImagePreview>,
 }
 
 impl DiffLine {
@@ -50,6 +53,7 @@ impl DiffLine {
             old_line: None,
             new_line: None,
             spans: vec![HighlightSpan::plain(text)],
+            image: None,
         }
     }
 
@@ -303,6 +307,7 @@ fn index_file_header(file: &DiffFileIndexEntry) -> DiffLine {
             HighlightSpan::plain(additions),
             HighlightSpan::plain(deletions),
         ],
+        image: None,
     }
 }
 
@@ -351,6 +356,7 @@ impl DiffDocument {
                 old_line: None,
                 new_line: None,
                 spans: vec![HighlightSpan::plain(message)],
+                image: None,
             }],
             truncated: false,
             commit_details: None,

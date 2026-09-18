@@ -211,7 +211,7 @@ impl Repository {
             .with_context(|| format!("failed to read {}", change.display_path()))?;
         let input_truncated = contents.len() > MAX_DIFF_BYTES;
         contents.truncate(MAX_DIFF_BYTES);
-        if contents.contains(&0) {
+        if contents.contains(&0) || crate::file_icons::is_image_path(&change.path) {
             return Ok((binary_patch(), input_truncated));
         }
 

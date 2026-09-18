@@ -1,6 +1,30 @@
 use super::*;
 
 #[test]
+fn header_shows_active_search_and_result_count() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    let mut app = App::new("/tmp/repo", "repo");
+    app.filter = "read".to_owned();
+    app.status.branch.head = "main".to_owned();
+    let mut terminal = Terminal::new(TestBackend::new(160, 24)).unwrap();
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+    let header = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(ratatui::buffer::Cell::symbol)
+        .collect::<String>();
+    assert!(header.contains("Search: read"));
+    assert!(header.contains("[Name]"));
+    assert!(header.contains("0 results"));
+}
+
+#[test]
 fn header_opens_the_project_menu_from_the_name_and_links_the_branch() {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;

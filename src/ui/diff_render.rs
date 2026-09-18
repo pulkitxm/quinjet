@@ -39,6 +39,8 @@ pub(super) fn draw_diff_side(
     emphasis: Option<&Range<usize>>,
     selected: bool,
     theme: &Theme,
+    remaining_height: u16,
+    image_state: &mut ImageDrawState,
 ) {
     let Some(line) = line else {
         frame.render_widget(
@@ -47,6 +49,18 @@ pub(super) fn draw_diff_side(
         );
         return;
     };
+    if line.kind == DiffLineKind::Image {
+        draw_image_line(
+            frame,
+            area,
+            line,
+            remaining_height,
+            theme,
+            selected_image_protocol(),
+            image_state,
+        );
+        return;
+    }
     let number = if old_side {
         line.old_line
     } else {
@@ -212,7 +226,9 @@ pub(super) fn marker_for(kind: DiffLineKind, theme: &Theme) -> (&'static str, St
                 .fg(theme.modified)
                 .add_modifier(Modifier::BOLD),
         ),
-        DiffLineKind::Context | DiffLineKind::Meta => ("  ", Style::default().fg(theme.muted)),
+        DiffLineKind::Context | DiffLineKind::Meta | DiffLineKind::Image => {
+            ("  ", Style::default().fg(theme.muted))
+        }
         DiffLineKind::FileHeader | DiffLineKind::FileFooter => {
             ("", Style::default().fg(theme.muted))
         }

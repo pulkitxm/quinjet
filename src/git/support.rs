@@ -219,7 +219,28 @@ pub(super) fn command_error(context: &str, output: &Output) -> String {
     }
 }
 
-pub(super) fn safe_worktree_path(root: &Path, relative: &Path) -> Result<PathBuf> {
+pub(crate) fn git_blob_spec(revision: &str, path: &Path) -> Option<OsString> {
+    if revision.is_empty() || revision.starts_with('-') {
+        return None;
+    }
+    if path.is_absolute()
+        || path.as_os_str().is_empty()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return None;
+    }
+    let mut spec = OsString::from(revision);
+    spec.push(":");
+    spec.push(path);
+    Some(spec)
+}
+
+pub(crate) fn safe_worktree_path(root: &Path, relative: &Path) -> Result<PathBuf> {
     if relative.is_absolute()
         || relative.components().any(|component| {
             matches!(

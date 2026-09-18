@@ -209,6 +209,8 @@ impl TextBuffer {
 pub(crate) enum PromptKind {
     Filter {
         previous: String,
+        previous_mode: SearchMode,
+        mode: SearchMode,
     },
     CreateBranch {
         start: Option<String>,
@@ -292,6 +294,7 @@ pub(crate) enum ModalAction {
     ConflictOurs,
     ConflictTheirs,
     ConflictResolved,
+    CycleSearchMode,
 }
 
 #[derive(Debug, Clone)]

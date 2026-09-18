@@ -22,6 +22,7 @@ fn line(kind: DiffLineKind, text: &str) -> DiffLine {
         old_line: None,
         new_line: None,
         spans: span(text),
+        image: None,
     }
 }
 

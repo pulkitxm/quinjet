@@ -15,10 +15,12 @@ const TAB_WIDTH: usize = 4;
 const MAX_SYNTAX_HIGHLIGHT_PATCH_BYTES: usize = 512 * 1024;
 const MAX_SYNTAX_HIGHLIGHT_LINE_BYTES: usize = 32 * 1024;
 
+mod image;
 mod model;
 mod parser;
 mod syntax;
 
+pub(crate) use image::*;
 pub(crate) use model::*;
 pub(crate) use parser::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]

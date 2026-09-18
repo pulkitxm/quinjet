@@ -117,7 +117,11 @@ pub(super) fn draw_pull_requests_sidebar(
         draw_pull_request_section_tab(
             frame,
             files_tab,
-            format!("Files {}", app.pull_request_total_files),
+            format!(
+                "Files {}{}",
+                app.pull_request_total_files,
+                app.search_title_suffix()
+            ),
             app.pull_request_section == PullRequestSection::Files,
             theme,
         );

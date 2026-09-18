@@ -245,6 +245,8 @@ mod output;
 mod remotes;
 #[path = "cli/repository.rs"]
 mod repository;
+#[path = "cli/search.rs"]
+mod search;
 #[path = "cli/shell.rs"]
 mod shell;
 #[cfg(unix)]

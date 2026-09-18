@@ -96,6 +96,20 @@ quinjet tui --theme nord --appearance light
 quinjet tui ~/code/project --theme gruvbox --appearance dark
 ```
 
+## Image previews
+
+Image diffs show the previous and new versions of a modified image. Added and
+deleted images show the available version. Quinjet uses Kitty, iTerm2, or Sixel
+graphics when the terminal is recognized. Native previews retain the decoded
+photo detail until they are fitted into the visible pane. Terminals without an
+image protocol get a colored half-block preview.
+
+Set `QUINJET_IMAGE_PROTOCOL` to `kitty`, `iterm2`, or `sixel` when a compatible
+terminal is not identified. Set it to `auto` to query an otherwise unidentified
+terminal, or `halfblocks` to use the text preview. The query runs once during
+terminal startup. These settings affect only the interactive interface. JSON
+and redirected command output contain no image escape sequences or raw pixels.
+
 ## What it refuses
 
 The interface needs a terminal on both ends. When stdin is not a terminal, or
@@ -459,6 +473,8 @@ The verbs in the right-hand column are documented in their groups:
 | `Delete` in the stash manager, then confirm | `quinjet stash drop <ref> --yes` |
 | `Ctrl+Delete` in the stash manager, then confirm | `quinjet stash clear --yes` |
 | `/` in Pull Requests, a number, Enter | `quinjet pr view <n>` |
+| `/` on the Files list of an open pull request | `quinjet search --scope pull-request --pr <n>` |
+| `/` in Changes or History | `quinjet search`. Results update while typing. Tab and Shift+Tab choose Name, Contents, or Both; the header shows the query, mode, and result state. Contents accepts case-insensitive regex. |
 | `o` in Pull Requests | `quinjet repos`, with the chosen entry becoming `--repo owner/name` |
 | `Shift+P` | `quinjet pr conversation <n>` beside `quinjet pr checks <n>` |
 | `Shift+F` | `quinjet pr files <n>` |
@@ -475,7 +491,7 @@ The verbs in the right-hand column are documented in their groups:
 | `e` / `E` in a check log | no verb. `pr logs` prints every step unfolded |
 | `Space` on a file header in the preview | no verb |
 | `Space`, `[`, `]` in a check log | no verb. They fold and move between steps |
-| `/` elsewhere | no verb. Filtering is a view over the list already read |
+| `/` elsewhere | `quinjet search`. Name is the previous in-memory filter; Contents and Both run through the git worker |
 | `z`, `Tab`, Enter, `gg`, `G`, `PgUp`, `PgDn`, `h`, `l`, `[`, `]`, arrows, wheel | no verb. Navigation and scrolling |
 | `Ctrl+D` / `Ctrl+U` | no verb. Half-page scroll |
 | `m` | no verb. Mouse capture belongs to the terminal, not to Git |
@@ -490,7 +506,8 @@ The interface can do these, and no verb can:
 
 - Side-by-side diffs (`v`), folding a single file in a multi-file patch, and
   folding one step of a check log. A verb prints the whole thing, unified.
-- Filtering a list in place (`/`), the command palette, and the shortcut help.
+- Filtering a list in place (`/` Name mode), the command palette, and the shortcut help.
+  Contents and Both search run `quinjet search` on the git worker.
 - Releasing the mouse (`m`) so the terminal can select text.
 - Remembering recently opened projects and keeping independent project tabs.
   The command line can list this repository's trees with `quinjet worktree

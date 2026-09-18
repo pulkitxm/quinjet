@@ -72,8 +72,19 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
                 theme,
             );
         }
-        Some(Modal::Prompt { title, input, .. }) => {
-            draw_prompt(frame, title, input, theme);
+        Some(Modal::Prompt { title, input, kind }) => {
+            let mode = match kind {
+                crate::app::PromptKind::Filter { mode, .. } => Some(*mode),
+                _ => None,
+            };
+            draw_prompt(
+                frame,
+                &mut app.geometry.modal_action_hits,
+                title,
+                input,
+                mode,
+                theme,
+            );
         }
         Some(Modal::PullRequestActions {
             title,
@@ -270,13 +281,16 @@ pub(super) fn draw_commit(
 
 pub(super) fn draw_prompt(
     frame: &mut Frame<'_>,
+    hits: &mut Vec<(Rect, ModalAction)>,
     title: &str,
     input: &crate::app::TextBuffer,
+    mode: Option<crate::search::SearchMode>,
     theme: &Theme,
 ) {
+    let height = if mode.is_some() { 9 } else { 7 };
     let area = centered_rect(
         frame.area().width.saturating_sub(14).min(68),
-        7,
+        height,
         frame.area(),
     );
     frame.render_widget(Clear, area);
@@ -290,7 +304,35 @@ pub(super) fn draw_prompt(
         input_area,
     );
     set_text_cursor(frame, input_area, input, false);
-    draw_modal_hint(frame, area, "Enter accept   Esc cancel", theme);
+    if let Some(mode) = mode {
+        let mode_area = Rect::new(inner.x, inner.y.saturating_add(3), inner.width, 1);
+        let mut label = String::from("Mode  ");
+        for option in crate::search::SearchMode::ALL {
+            if option == mode {
+                label.push('[');
+                label.push_str(option.label());
+                label.push(']');
+            } else {
+                label.push(' ');
+                label.push_str(option.label());
+                label.push(' ');
+            }
+            label.push(' ');
+        }
+        frame.render_widget(
+            Paragraph::new(label).style(Style::default().fg(theme.modified).bg(theme.panel_alt)),
+            mode_area,
+        );
+        hits.push((mode_area, ModalAction::CycleSearchMode));
+        draw_modal_hint(
+            frame,
+            area,
+            "Tab/Shift+Tab mode   Contents: regex, ignore case   Enter   Esc",
+            theme,
+        );
+    } else {
+        draw_modal_hint(frame, area, "Enter accept   Esc cancel", theme);
+    }
 }
 
 #[expect(

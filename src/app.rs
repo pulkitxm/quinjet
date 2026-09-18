@@ -29,6 +29,7 @@ use crate::git::{
     Worktree,
 };
 use crate::integration::{Client, HostAction};
+use crate::search::SearchMode;
 use crate::ssh::SshContext;
 use crate::tabs::{TabId, TabInfo};
 use crate::theme::{Appearance, AppearanceChoice, Theme, ThemeName, ThemeSelection};
@@ -134,6 +135,7 @@ mod interaction;
 mod keyboard;
 mod keyboard_stack;
 mod links;
+mod list_search;
 mod live;
 mod local_diff;
 mod modal;
@@ -337,6 +339,11 @@ pub(crate) struct App {
     pub collapse_preference_set: bool,
     pub resize_target: Option<ResizeTarget>,
     pub filter: String,
+    pub search_mode: SearchMode,
+    pub content_hits: HashSet<String>,
+    pub search_generation: u64,
+    pub search_pending: bool,
+    pub search_due: Option<Instant>,
     pub modal: Option<Modal>,
     pub modal_scroll: usize,
     pub modal_free_scroll: bool,

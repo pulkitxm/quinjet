@@ -39,6 +39,11 @@ impl App {
             self.request_preview(&mut effects);
             changed = true;
         }
+        if self.search_due.is_some_and(|due| now >= due) {
+            self.search_due = None;
+            self.request_search(&mut effects);
+            changed = true;
+        }
         if self.pull_request_poll_due.is_some_and(|due| now >= due) {
             self.refresh_pull_request_live(now, false, &mut effects);
             changed = true;
