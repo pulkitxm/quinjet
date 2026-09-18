@@ -42,11 +42,9 @@ impl PreparedPullRequest {
         let key = patch_cache_key(&self.merge_base, &self.head, &file.path);
         if let Some(patch) = cache_read_bounded(&key, CacheLife::Immutable, MAX_CACHED_PATCH_BYTES)
         {
-            return Ok(pull_request_file_document(
-                &patch,
-                &self.pull_request,
+            return Ok(self.with_images(
+                pull_request_file_document(&patch, &self.pull_request, file, false),
                 file,
-                false,
             ));
         }
         let (patch, truncated) = diff_selected_paths(
@@ -58,11 +56,9 @@ impl PreparedPullRequest {
         if !truncated {
             cache_write_bounded(&key, &patch, MAX_CACHED_PATCH_BYTES);
         }
-        Ok(pull_request_file_document(
-            &patch,
-            &self.pull_request,
+        Ok(self.with_images(
+            pull_request_file_document(&patch, &self.pull_request, file, truncated),
             file,
-            truncated,
         ))
     }
 
@@ -106,7 +102,10 @@ impl PreparedPullRequest {
             if let Some(body) = cached.get(&file.path) {
                 documents.push((
                     file.path.clone(),
-                    pull_request_file_document(body, &self.pull_request, file, false),
+                    self.with_images(
+                        pull_request_file_document(body, &self.pull_request, file, false),
+                        file,
+                    ),
                 ));
                 continue;
             }
@@ -122,7 +121,15 @@ impl PreparedPullRequest {
                 if truncated_fallback.is_none() {
                     truncated_fallback = Some((
                         file.path.clone(),
-                        pull_request_file_document(section.body, &self.pull_request, file, true),
+                        self.with_images(
+                            pull_request_file_document(
+                                section.body,
+                                &self.pull_request,
+                                file,
+                                true,
+                            ),
+                            file,
+                        ),
                     ));
                 }
                 continue;
@@ -133,11 +140,14 @@ impl PreparedPullRequest {
             }
             documents.push((
                 file.path.clone(),
-                pull_request_file_document(
-                    section.body,
-                    &self.pull_request,
+                self.with_images(
+                    pull_request_file_document(
+                        section.body,
+                        &self.pull_request,
+                        file,
+                        section_truncated,
+                    ),
                     file,
-                    section_truncated,
                 ),
             ));
         }
@@ -147,5 +157,45 @@ impl PreparedPullRequest {
             documents.push(fallback);
         }
         Ok(documents)
+    }
+
+    pub(crate) fn blob(&self, path: &Path) -> Result<Vec<u8>> {
+        let spec = crate::git::support::git_blob_spec(&self.head, path)
+            .ok_or_else(|| anyhow!("refusing to read {}", path.display()))?;
+        let output = run_repository_git(
+            self.repository.path(),
+            &[OsString::from("cat-file"), OsString::from("blob"), spec],
+            MAX_DIFF_BYTES,
+            MAX_GH_ERROR_BYTES,
+        )?;
+        if !output.status.success() && !output.stdout_truncated {
+            bail!(
+                "{}",
+                bounded_command_error("unable to read pull-request file", &output)
+            );
+        }
+        Ok(output.stdout)
+    }
+
+    fn with_images(&self, mut document: DiffDocument, file: &PullRequestFile) -> DiffDocument {
+        use crate::git::diff::{BlobOrigin, RevisionImageSource, attach_image_previews};
+        let previous = match file.status {
+            PullRequestFileStatus::Added => BlobOrigin::Missing,
+            _ => BlobOrigin::Revision(self.merge_base.as_str()),
+        };
+        let current = match file.status {
+            PullRequestFileStatus::Deleted => BlobOrigin::Missing,
+            _ => BlobOrigin::Revision(self.head.as_str()),
+        };
+        attach_image_previews(
+            &mut document,
+            &RevisionImageSource {
+                git_dir: self.repository.path(),
+                worktree: self.repository.path(),
+                previous,
+                current,
+            },
+        );
+        document
     }
 }

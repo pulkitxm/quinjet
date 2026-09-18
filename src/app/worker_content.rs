@@ -38,6 +38,12 @@ impl App {
                         });
                         self.restore_change_selection(selected.as_ref());
                         self.last_refresh = Some(now);
+                        if self.view == View::Changes
+                            && !self.filter.is_empty()
+                            && self.search_mode.includes_contents()
+                        {
+                            self.schedule_search(now);
+                        }
                         if branch_changed
                             && self.history_branch.is_none()
                             && (branch_was_known || !self.history_loading)
@@ -183,6 +189,12 @@ impl App {
                     Ok(index) => {
                         self.apply_pull_request_index(index);
                         self.pull_request_workspace_generation = Some(generation);
+                        if self.view == View::PullRequests
+                            && !self.filter.is_empty()
+                            && self.search_mode.includes_contents()
+                        {
+                            self.schedule_search(now);
+                        }
                         self.reset_sidebar_scroll();
                         self.content_scroll = 0;
                         self.horizontal_scroll = 0;

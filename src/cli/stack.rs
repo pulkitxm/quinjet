@@ -19,7 +19,7 @@ pub(super) fn stack(session: &mut Session, out: &Emitter, command: StackVerb) ->
             let index = prepare_stack(session, out, stack, from, to)?;
             let document =
                 prepared_pull_request_diff(session, out, &index, title, args.path.as_deref())?;
-            out.emit(&document, || render::diff(&document))?;
+            out.diff(&document)?;
         }
         command => {
             let (operation, yes) = command

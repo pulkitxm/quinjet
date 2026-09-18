@@ -5,6 +5,7 @@ mod pr_verbs;
 mod remote;
 mod render;
 mod review;
+mod search;
 mod session;
 mod stack;
 mod stack_verbs;
@@ -28,6 +29,7 @@ pub(crate) use command::{Command, Outcome};
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use pr_verbs::*;
+use search::SearchArgs;
 use serde::Serialize;
 pub(crate) use session::Session;
 use stack::stack;
@@ -46,6 +48,7 @@ use crate::git::github::{
 use crate::git::status::{Change, ChangeArea};
 use crate::git::{ConflictChoice, GitOperation, LocalDiffRequest, Repository};
 use crate::integration::Client;
+use crate::search::SearchMode;
 use crate::theme::{AppearanceChoice, ThemeName, ThemeSelection};
 
 pub(crate) const EXIT_FAILURE: u8 = 1;
@@ -188,6 +191,8 @@ enum Verb {
     Log(LogArgs),
     #[doc = " Show one commit and its patch"]
     Show(ShowArgs),
+    #[doc = " Search list names and file contents"]
+    Search(SearchArgs),
     #[doc = " Work with branches"]
     Branch {
         #[command(subcommand)]
@@ -265,6 +270,7 @@ impl Verb {
             Self::Sync => Some("Synchronizing changes"),
             Self::Log(_) => Some("Reading commit history"),
             Self::Show(_) => Some("Loading commit patch"),
+            Self::Search(_) => Some("Searching the repository"),
             Self::Branch { .. } => Some("Reading branch state"),
             Self::Stash { .. } => Some("Reading stash state"),
             Self::Worktree { .. } => Some("Reading worktrees"),

@@ -14,6 +14,7 @@ use crate::git::status::RepoStatus;
 use crate::git::{
     Branch, GitOperation, HistoryBranch, LocalDiffRequest, ProjectGroup, Stash, Worktree,
 };
+use crate::search::{SearchHits, SearchRequest};
 
 #[derive(Debug)]
 pub(crate) enum Command {
@@ -101,6 +102,7 @@ pub(crate) enum Command {
         pull_request: Box<PullRequest>,
         operation: PullRequestReviewOperation,
     },
+    Search(Box<SearchRequest>),
 }
 
 impl Command {
@@ -133,6 +135,7 @@ impl Command {
             Self::Operate(operation) => operation.label(),
             Self::OperatePullRequest { operation, .. } => operation.label(),
             Self::OperatePullRequestReview { operation, .. } => operation.label(),
+            Self::Search(_) => "Searching the repository",
         }
     }
 }
@@ -167,6 +170,7 @@ pub(crate) enum Outcome {
     Review(Box<PullRequestReviewSnapshot>),
     CheckLog(Box<CheckRunLog>),
     Warmed,
+    Search(Box<SearchHits>),
     Operation {
         label: String,
         changes_history: bool,
@@ -214,6 +218,7 @@ answers! {
     check_log, CheckLog -> CheckRunLog, |value: Box<CheckRunLog>| *value;
     local_github_repository, LocalGitHubRepository -> Option<GitHubRepository>,
         |value: Option<Box<GitHubRepository>>| value.map(|repository| *repository);
+    search, Search -> SearchHits, |value: Box<SearchHits>| *value;
 }
 
 impl Outcome {

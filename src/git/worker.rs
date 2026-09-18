@@ -20,6 +20,7 @@ use super::{
     Worktree,
 };
 use crate::cli::{Command, Outcome, Session};
+use crate::search::{SearchHits, SearchRequest, SearchTarget};
 
 #[derive(Debug)]
 pub(crate) enum WorkerCommand {
@@ -167,6 +168,10 @@ pub(crate) enum WorkerCommand {
         pull_request: Box<PullRequest>,
         operation: PullRequestOperation,
     },
+    Search {
+        generation: u64,
+        request: Box<SearchRequest>,
+    },
     Shutdown,
 }
 
@@ -284,6 +289,10 @@ pub(crate) enum WorkerEvent {
         generation: u64,
         result: Result<Vec<ProjectGroup>, String>,
     },
+    Search {
+        generation: u64,
+        result: Result<SearchHits, String>,
+    },
     OperationFinished {
         id: u64,
         label: String,
@@ -315,6 +324,7 @@ struct Mailbox {
     check_log: Option<WorkerCommand>,
     warm: Option<WorkerCommand>,
     stack_warm: Option<WorkerCommand>,
+    search: Option<WorkerCommand>,
     shutdown: bool,
 }
 
@@ -378,6 +388,7 @@ impl Mailbox {
             command @ WorkerCommand::PrefetchPullRequestStackMembers { .. } => {
                 self.stack_warm = Some(command);
             }
+            command @ WorkerCommand::Search { .. } => self.search = Some(command),
             WorkerCommand::Shutdown => self.shutdown = true,
         }
     }
@@ -388,6 +399,7 @@ impl Mailbox {
             .or_else(|| self.branches.take())
             .or_else(|| self.projects.take())
             .or_else(|| self.preview.take())
+            .or_else(|| self.search.take())
             .or_else(|| self.repositories.take())
             .or_else(|| self.pull_request.take())
             .or_else(|| self.stack_member.take())
@@ -448,6 +460,10 @@ const fn worker_lane(command: &WorkerCommand) -> WorkerLane {
         | WorkerCommand::PreparePullRequestStack { .. }
         | WorkerCommand::LoadPullRequestFile { .. }
         | WorkerCommand::LoadPullRequestFileBatch { .. } => WorkerLane::PullRequestPreview,
+        WorkerCommand::Search { request, .. } => match request.target {
+            SearchTarget::PullRequest { .. } => WorkerLane::PullRequestPreview,
+            SearchTarget::Changes { .. } | SearchTarget::History { .. } => WorkerLane::Background,
+        },
         _ => WorkerLane::Background,
     }
 }

@@ -33,7 +33,7 @@ pub(super) fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb
         PrVerb::Diff(args) => {
             let request = lookup(session, out, &args.pull_request)?;
             let document = pull_request_diff(session, out, &request, args.path.as_deref())?;
-            out.emit(&document, || render::diff(&document))?;
+            out.diff(&document)?;
             Ok(0)
         }
         PrVerb::Conversation(args) => {

@@ -99,13 +99,11 @@ impl App {
     pub(super) fn apply_live_modal_filter(&mut self) {
         if let Some(Modal::Prompt {
             input,
-            kind: PromptKind::Filter { .. },
+            kind: PromptKind::Filter { mode, .. },
             ..
         }) = self.modal.as_ref()
         {
-            self.filter.clone_from(&input.value);
-            self.normalize_selection();
-            self.preview_due = Some(Instant::now() + PREVIEW_DEBOUNCE);
+            self.update_live_search(&input.value.clone(), *mode, Instant::now());
         }
     }
 
@@ -175,12 +173,16 @@ impl App {
         }
         self.store_active_view();
         self.invalidate_preview();
+        self.search_generation = self.search_generation.wrapping_add(1);
         self.view = view;
         self.scm_menu_open = false;
         self.pr_menu_open = false;
         self.text_selection = None;
         self.resize_target = None;
         let resume_preview = self.restore_view(view);
+        if !self.filter.is_empty() && self.search_mode.includes_contents() {
+            self.schedule_search(Instant::now());
+        }
         if view == View::PullRequests {
             self.decorate_pull_request_review();
         }

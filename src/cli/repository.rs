@@ -59,6 +59,7 @@ pub(super) fn run(session: &mut Session, out: &Emitter, verb: Verb) -> Result<u8
         Verb::Sync => operate(session, out, GitOperation::Sync),
         Verb::Log(args) => log(session, out, &args),
         Verb::Show(args) => show(session, out, &args),
+        Verb::Search(args) => search::search(session, out, &args),
         Verb::Branch { command } => branch(session, out, command),
         Verb::Stash { command } => stash(session, out, command),
         Verb::Worktree { command } => worktree(session, out, command),
@@ -121,7 +122,7 @@ pub(super) fn working_diff(session: &mut Session, out: &Emitter, args: &DiffArgs
         },
         |workspace, path| Command::LocalDiffFile { workspace, path },
     )?;
-    out.emit(&document, || render::diff(&document))?;
+    out.diff(&document)?;
     Ok(0)
 }
 
@@ -170,7 +171,14 @@ pub(super) fn show(session: &mut Session, out: &Emitter, args: &ShowArgs) -> Res
             commit: &commit,
             diff: &document,
         },
-        || format!("{}{}", render::commit(&commit), render::diff(&document)),
+        || {
+            let diff = if stdout_is_terminal() {
+                render::diff_terminal(&document)
+            } else {
+                render::diff(&document)
+            };
+            format!("{}{diff}", render::commit(&commit))
+        },
     )?;
     Ok(0)
 }
@@ -255,7 +263,7 @@ pub(super) fn compare(
         },
         |workspace, path| Command::LocalDiffFile { workspace, path },
     )?;
-    out.emit(&document, || render::diff(&document))?;
+    out.diff(&document)?;
     Ok(0)
 }
 
@@ -337,7 +345,7 @@ pub(super) fn stash(session: &mut Session, out: &Emitter, command: StashVerb) ->
                 },
                 |workspace, path| Command::LocalDiffFile { workspace, path },
             )?;
-            out.emit(&document, || render::diff(&document))?;
+            out.diff(&document)?;
             Ok(0)
         }
     }

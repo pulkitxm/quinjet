@@ -1,10 +1,11 @@
-# `quinjet status`, `diff`, `log`, `show`
+# `quinjet status`, `diff`, `log`, `show`, `search`
 
-These four verbs are the reading group. They answer the four questions a source
+These five verbs are the reading group. They answer the questions a source
 control tool is asked most often: what has changed, what exactly changed, what
-happened before, and what one commit did. Between them they are the command
-line form of the terminal interface's Changes tab, its diff pane and its History
-tab, and they are the only verbs in Quinjet that read a repository without
+happened before, what one commit did, and which listed items match a name or
+content query. Between them they are the command line form of the terminal
+interface's Changes tab, its diff pane, its History tab and its `/` search
+prompt, and they are the only verbs in Quinjet that read a repository without
 naming a branch, a stash or a pull request.
 
 Nothing here writes. Every Git process this group starts is a read, and each one
@@ -56,6 +57,7 @@ each file's patch. Everything else, including a merge, uses the first parent.
 | `quinjet diff` | Prints the working-tree patch, optionally limited to the index, to the worktree, or to a set of path prefixes. |
 | `quinjet log` | Prints commits from any revision, newest first, in topological order. |
 | `quinjet show` | Prints one commit's metadata and its patch. |
+| `quinjet search` | Searches change paths, a history page, or pull-request files by Name, Contents, or Both. |
 
 ## Commands
 
@@ -63,6 +65,7 @@ each file's patch. Everything else, including a merge, uses the first parent.
 - [`quinjet diff`](./diff.md)
 - [`quinjet log`](./log.md)
 - [`quinjet show`](./show.md)
+- [`quinjet search`](./search.md)
 
 ## Exit codes
 

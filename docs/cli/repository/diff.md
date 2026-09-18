@@ -84,6 +84,13 @@ additions prefixed `+`, deletions `-`, context with a leading space. Tabs are
 expanded to four-column stops. `diff --git`, `index`, `---` and `+++` lines are
 gone. `git apply` will not accept the result.
 
+Image changes include previews of the available versions. Modified images show
+the previous and new versions, added images show the new version, and deleted
+images show the previous version. On a terminal, each preview uses colored
+half-block characters. Redirected text keeps the dimensions and an uncolored
+block approximation. Images larger than 8 MiB and SVG files get a labeled fallback. JSON
+includes preview metadata but excludes pixel data.
+
 Cost scales with file count, one Git process per file plus the status read plus
 the numstat reads, so a diff of a thousand untracked files starts a thousand
 child processes. The 16,384-path index cap does not apply here, because the file

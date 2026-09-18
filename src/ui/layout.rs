@@ -326,7 +326,7 @@ pub(super) fn draw_tabs(
         title_area,
     );
     let projects_hit = Some(repository_area).filter(|area| area.width > 0 && area.height > 0);
-    let title = vec![
+    let mut title = vec![
         Span::styled(
             prefix,
             Style::default()
@@ -340,6 +340,9 @@ pub(super) fn draw_tabs(
                 .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
         ),
     ];
+    if let Some(status) = app.search_header_status() {
+        title.push(Span::styled(status, Style::default().fg(theme.modified)));
+    }
     frame.render_widget(
         Paragraph::new(Line::from(title)).block(
             Block::default()

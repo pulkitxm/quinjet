@@ -32,6 +32,7 @@ pub(super) fn draw_unified_diff(
     let content_y = area.y + u16::from(sticky.is_some());
     let content_height = area.height.saturating_sub(u16::from(sticky.is_some()));
     let mut hits = Vec::new();
+    let mut image_state = ImageDrawState::new(rows.len() <= usize::from(content_height));
     if let Some(header) = sticky {
         let sticky_area = Rect::new(area.x, area.y, area.width, 1);
         draw_file_header(frame, sticky_area, header, app, theme);
@@ -74,6 +75,15 @@ pub(super) fn draw_unified_diff(
                 draw_file_footer(frame, row_area, theme);
                 in_file = false;
             }
+            DiffLineKind::Image => draw_image_line(
+                frame,
+                row_area,
+                line,
+                content_height.saturating_sub(cells(offset)),
+                theme,
+                selected_image_protocol(),
+                &mut image_state,
+            ),
             _ => draw_unified_line(
                 frame,
                 row_area,

@@ -200,6 +200,7 @@ pub(super) fn meta_line(kind: DiffLineKind, text: &str) -> DiffLine {
         old_line: None,
         new_line: None,
         spans: vec![HighlightSpan::plain(text)],
+        image: None,
     }
 }
 

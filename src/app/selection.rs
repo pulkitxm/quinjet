@@ -3,32 +3,49 @@ use super::*;
 
 impl App {
     pub(crate) fn visible_change_indices(&self) -> Vec<usize> {
-        let query = self.filter.to_lowercase();
         self.status
             .changes
             .iter()
             .enumerate()
             .filter(|(_, change)| {
-                query.is_empty() || change.display_path().to_lowercase().contains(&query)
+                self.list_item_visible(&change.display_path(), &change.display_path())
             })
             .map(|(index, _)| index)
             .collect()
     }
 
     pub(crate) fn visible_commit_indices(&self) -> Vec<usize> {
-        let query = self.filter.to_lowercase();
         self.history
             .iter()
             .enumerate()
             .filter(|(_, commit)| {
-                query.is_empty()
-                    || commit.subject.to_lowercase().contains(&query)
-                    || commit.author.to_lowercase().contains(&query)
-                    || commit.id.starts_with(&query)
-                    || commit
-                        .decorations
-                        .iter()
-                        .any(|decoration| decoration.to_lowercase().contains(&query))
+                let mut name = commit.subject.clone();
+                name.push(' ');
+                name.push_str(&commit.author);
+                name.push(' ');
+                name.push_str(&commit.id);
+                for decoration in &commit.decorations {
+                    name.push(' ');
+                    name.push_str(decoration);
+                }
+                let id_prefix = self.filter.to_lowercase();
+                let name_hit = self.search_mode.includes_name()
+                    && (self.filter.is_empty()
+                        || crate::search::name_matches(&self.filter, &name)
+                        || commit.id.starts_with(&id_prefix));
+                if self.filter.is_empty() {
+                    return true;
+                }
+                if self.search_mode == SearchMode::Contents && self.search_pending {
+                    return true;
+                }
+                let content_hit =
+                    self.search_mode.includes_contents() && self.content_hits.contains(&commit.id);
+                match self.search_mode {
+                    SearchMode::Name => name_hit,
+                    SearchMode::Contents => content_hit,
+                    SearchMode::Both => name_hit || content_hit,
+                }
             })
             .map(|(index, _)| index)
             .collect()
@@ -245,6 +262,9 @@ impl App {
         let mut entries = Vec::with_capacity(self.pull_request_files.len().saturating_mul(2));
         let mut root = PullRequestTreeNode::default();
         for (index, file) in self.pull_request_files.iter().enumerate() {
+            if !self.list_item_visible(&file.path.to_string_lossy(), &file.path.to_string_lossy()) {
+                continue;
+            }
             root.insert(&file.path, index);
         }
         root.append_entries(0, &self.collapsed_pull_request_directories, &mut entries);

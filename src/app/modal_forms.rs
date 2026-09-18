@@ -67,19 +67,34 @@ impl App {
             }
             Modal::Prompt { input, kind, .. } => {
                 if key.code == KeyCode::Esc {
-                    if let PromptKind::Filter { previous } = kind {
-                        self.filter.clone_from(previous);
+                    if let PromptKind::Filter {
+                        previous,
+                        previous_mode,
+                        ..
+                    } = kind
+                    {
+                        self.restore_search(previous.clone(), *previous_mode, now);
                         self.normalize_selection();
                         self.schedule_preview(now);
                     }
                     return effects;
                 }
+                if matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
+                    && matches!(kind, PromptKind::Filter { .. })
+                {
+                    let reverse =
+                        key.code == KeyCode::BackTab || key.modifiers.contains(KeyModifiers::SHIFT);
+                    self.modal = Some(modal);
+                    self.cycle_search_mode(reverse);
+                    self.schedule_search(now);
+                    self.normalize_selection();
+                    self.schedule_preview(now);
+                    return effects;
+                }
                 if key.code == KeyCode::Enter {
                     match kind {
-                        PromptKind::Filter { .. } => {
-                            self.filter.clone_from(&input.value);
-                            self.normalize_selection();
-                            self.schedule_preview(now);
+                        PromptKind::Filter { mode, .. } => {
+                            self.update_live_search(&input.value, *mode, now);
                         }
                         PromptKind::CreateBranch { start } => {
                             self.queue_operation(
@@ -129,10 +144,8 @@ impl App {
                     return effects;
                 }
                 edit_text(input, key, false);
-                if matches!(kind, PromptKind::Filter { .. }) {
-                    self.filter.clone_from(&input.value);
-                    self.normalize_selection();
-                    self.schedule_preview(now);
+                if let PromptKind::Filter { mode, .. } = kind {
+                    self.update_live_search(&input.value, *mode, now);
                 }
                 self.modal = Some(modal);
             }

@@ -1,6 +1,8 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
+mod images;
+
 impl Repository {
     pub(crate) fn prepare_local_diff(
         &self,
@@ -240,7 +242,7 @@ impl Repository {
             .iter()
             .find(|file| file.path == path)
             .with_context(|| format!("{} is not part of this diff", path.display()))?;
-        match request {
+        let mut document = match request {
             LocalDiffRequest::Changes {
                 changes, expanded, ..
             } => {
@@ -248,7 +250,7 @@ impl Repository {
                     .iter()
                     .find(|change| change.path == path)
                     .with_context(|| format!("{} is no longer changed", path.display()))?;
-                self.diff_for_change(change, *expanded)
+                self.diff_for_change(change, *expanded)?
             }
             LocalDiffRequest::Commit { commit, expanded } => {
                 let mut document = if let Some(parent) = commit.parent_ids.first() {
@@ -257,15 +259,19 @@ impl Repository {
                     self.root_commit_diff_file(commit, file, *expanded, &index.title)?
                 };
                 document.commit_details = Some(commit_details(commit));
-                Ok(document)
+                document
             }
             LocalDiffRequest::Branch {
                 branch, expanded, ..
-            } => self.revision_diff_file(&branch.reference, "HEAD", file, *expanded, &index.title),
-            LocalDiffRequest::Stash { stash, expanded } => {
-                self.stash_diff_file(stash, file, *expanded, &index.title)
+            } => {
+                self.revision_diff_file(&branch.reference, "HEAD", file, *expanded, &index.title)?
             }
-        }
+            LocalDiffRequest::Stash { stash, expanded } => {
+                self.stash_diff_file(stash, file, *expanded, &index.title)?
+            }
+        };
+        self.attach_local_images(&mut document, request, file);
+        Ok(document)
     }
 
     pub(super) fn revision_diff_file(

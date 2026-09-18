@@ -8,6 +8,9 @@ use super::*;
 pub(crate) struct ViewState {
     focus: Focus,
     filter: String,
+    search_mode: SearchMode,
+    content_hits: HashSet<String>,
+    search_pending: bool,
     auxiliary_preview: Option<AuxiliaryPreview>,
     document: DiffDocument,
     selected_preview_file: Option<PathBuf>,
@@ -44,6 +47,9 @@ impl ViewState {
         Self {
             focus: app.focus,
             filter: std::mem::take(&mut app.filter),
+            search_mode: app.search_mode,
+            content_hits: std::mem::take(&mut app.content_hits),
+            search_pending: app.search_pending,
             auxiliary_preview: app.auxiliary_preview.take(),
             document: std::mem::take(&mut app.document),
             selected_preview_file: app.selected_preview_file.take(),
@@ -74,6 +80,9 @@ impl ViewState {
     pub(super) fn restore(self, app: &mut App) -> bool {
         app.focus = self.focus;
         app.filter = self.filter;
+        app.search_mode = self.search_mode;
+        app.content_hits = self.content_hits;
+        app.search_pending = self.search_pending;
         app.auxiliary_preview = self.auxiliary_preview;
         app.set_document(self.document);
         app.selected_preview_file = self.selected_preview_file;
@@ -171,6 +180,10 @@ impl App {
     pub(super) fn reset_view_presentation(&mut self, view: View) {
         self.focus = Focus::Sidebar;
         self.filter.clear();
+        self.search_mode = SearchMode::Name;
+        self.content_hits.clear();
+        self.search_pending = false;
+        self.search_due = None;
         self.auxiliary_preview = None;
         self.selected_preview_file = None;
         self.preview_file_cursor = 0;

@@ -143,6 +143,7 @@ pub(crate) fn parse_diff(
                 old_line: None,
                 new_line: number,
                 spans,
+                image: None,
             });
         } else if let Some(content) = raw_line.strip_prefix('-') {
             let number = old_line;
@@ -156,6 +157,7 @@ pub(crate) fn parse_diff(
                 old_line: number,
                 new_line: None,
                 spans,
+                image: None,
             });
         } else if let Some(content) = raw_line.strip_prefix(' ') {
             let old_number = old_line;
@@ -170,6 +172,7 @@ pub(crate) fn parse_diff(
                 old_line: old_number,
                 new_line: new_number,
                 spans,
+                image: None,
             });
         } else if !raw_line.is_empty() {
             file_mut(&mut current_file, path_hint)
@@ -351,6 +354,7 @@ fn flush_file(mut file: FileBuilder, output: &mut Vec<DiffLine>) {
             HighlightSpan::plain(format!("+{}", file.additions)),
             HighlightSpan::plain(format!("-{}", file.deletions)),
         ],
+        image: None,
     });
     output.append(&mut file.lines);
     output.push(meta_line(DiffLineKind::FileFooter, ""));

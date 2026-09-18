@@ -78,5 +78,6 @@ fn run_test_git<const N: usize>(path: &Path, args: [&str; N]) -> String {
 }
 
 mod operations;
+mod search;
 mod stack_operation;
 mod status;

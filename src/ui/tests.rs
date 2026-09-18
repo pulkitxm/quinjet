@@ -70,6 +70,7 @@ fn test_file_header(path: &str, additions: usize, deletions: usize) -> DiffLine 
                 italic: false,
             },
         ],
+        image: None,
     }
 }
 
@@ -84,6 +85,7 @@ fn test_line(kind: DiffLineKind, text: &str) -> DiffLine {
             bold: false,
             italic: false,
         }],
+        image: None,
     }
 }
 

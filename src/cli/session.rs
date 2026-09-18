@@ -218,6 +218,18 @@ impl Session {
                     message,
                 })
             }
+            Command::Search(request) => match &request.target {
+                crate::search::SearchTarget::PullRequest { workspace, paths } => {
+                    Ok(Outcome::Search(Box::new(
+                        self.pull_request_workspace(*workspace)?.search_paths(
+                            &request.query,
+                            request.mode,
+                            paths,
+                        ),
+                    )))
+                }
+                _ => Ok(Outcome::Search(Box::new(self.repository.search(&request)?))),
+            },
         }
     }
 

@@ -66,18 +66,20 @@ impl App {
                 self.toggle_focus(&mut effects);
             }
             KeyCode::Char('r') => self.request_active_refresh(&mut effects),
+            KeyCode::Char('/')
+                if self.view == View::PullRequests
+                    && self.pull_request.is_some()
+                    && self.pull_request_section == PullRequestSection::Files =>
+            {
+                self.set_focus(Focus::Sidebar, &mut effects);
+                self.open_list_search();
+            }
             KeyCode::Char('/') if self.view == View::PullRequests => {
                 self.pull_request_lookup_active = true;
                 self.set_focus(Focus::Sidebar, &mut effects);
             }
             KeyCode::Char('/') => {
-                self.modal = Some(Modal::Prompt {
-                    title: "Filter".to_owned(),
-                    input: TextBuffer::new(self.filter.clone()),
-                    kind: PromptKind::Filter {
-                        previous: self.filter.clone(),
-                    },
-                });
+                self.open_list_search();
             }
             KeyCode::Char('v') => self.toggle_diff_layout(),
             KeyCode::Char('e' | 'E') if self.check_log_visible() => {
@@ -307,6 +309,11 @@ impl App {
                     ));
                 } else if !self.filter.is_empty() {
                     self.filter.clear();
+                    self.search_mode = SearchMode::Name;
+                    self.content_hits.clear();
+                    self.search_pending = false;
+                    self.search_generation = self.search_generation.wrapping_add(1);
+                    self.search_due = None;
                     self.normalize_selection();
                     self.schedule_preview(now);
                 } else {

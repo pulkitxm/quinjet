@@ -15,8 +15,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
 
 use self::diff::{
-    CommitDetails, DiffDocument, DiffFileIndexEntry, DiffIndex, DiffLineCounts, parse_diff,
-    parse_numstat,
+    CommitDetails, DiffDocument, DiffFileIndexEntry, DiffIndex, DiffLineCounts, LoadedBlob,
+    parse_diff, parse_numstat,
 };
 use self::github::{bounded_command_error, run_bounded_command};
 use self::history::{Commit, LOG_FORMAT, parse_log};
@@ -269,6 +269,30 @@ impl GitOperation {
     }
 }
 
+pub(crate) fn read_git_blob(dir: &Path, spec: &str, limit: usize) -> LoadedBlob {
+    if spec.is_empty() || spec.starts_with('-') {
+        return LoadedBlob::Missing;
+    }
+    let mut command = Command::new("git");
+    let _ = command
+        .arg("-C")
+        .arg(dir)
+        .args(["-c", "core.quotepath=false"])
+        .args(["cat-file", "blob", spec])
+        .env("LC_ALL", "C")
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_TERMINAL_PROMPT", "0");
+    match run_bounded_command(&mut command, limit, MAX_GIT_ERROR_BYTES) {
+        Ok(output) if output.stdout_truncated => LoadedBlob::TooLarge {
+            size: limit.saturating_add(1),
+        },
+        Ok(output) if output.status.success() && !output.stdout.is_empty() => {
+            LoadedBlob::Bytes(output.stdout)
+        }
+        _ => LoadedBlob::Missing,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct Repository {
     root: PathBuf,
@@ -279,6 +303,7 @@ mod local_diff;
 mod operations;
 mod reads;
 mod repository;
+mod search;
 mod stack_operation;
 pub(crate) mod support;
 

@@ -436,6 +436,17 @@ pub(super) fn run_worker(
                     ),
                 }
             }
+            WorkerCommand::Search {
+                generation,
+                request,
+            } => WorkerEvent::Search {
+                generation,
+                result: answer(
+                    session
+                        .execute(Command::Search(request))
+                        .and_then(Outcome::search),
+                ),
+            },
             WorkerCommand::Shutdown => break,
         };
 

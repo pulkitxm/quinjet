@@ -39,6 +39,9 @@ impl App {
                         }
                         self.history_complete = received < HISTORY_PAGE_SIZE;
                         if self.view == View::History {
+                            if !self.filter.is_empty() && self.search_mode.includes_contents() {
+                                self.schedule_search(now);
+                            }
                             self.schedule_preview(now);
                         }
                     }
@@ -401,6 +404,9 @@ impl App {
                         self.show_toast(error, ToastLevel::Error, now);
                     }
                 }
+            }
+            WorkerEvent::Search { generation, result } => {
+                self.apply_search_hits(generation, result, now);
             }
             WorkerEvent::OperationFinished {
                 id,

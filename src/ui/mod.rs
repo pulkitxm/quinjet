@@ -1,16 +1,3 @@
-use std::collections::{HashMap, HashSet};
-use std::num::NonZeroU16;
-use std::ops::Range;
-use std::path::Path;
-
-use ratatui::Frame;
-use ratatui::buffer::{Buffer, CellDiffOption};
-use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget, Wrap};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-
 use crate::app::{
     App, ChangeRow, ChangeSection, CheckListRow, ContentFileHit, ContentReviewHit, ContentStepHit,
     DiffLayout, Focus, HelpHit, LinkHit, Modal, ModalAction, OpenTarget, PaletteCommand,
@@ -36,6 +23,17 @@ use crate::git::status::{Change, ChangeArea, ChangeStatus};
 use crate::git::{Branch, HistoryBranch, ProjectGroup, Stash};
 use crate::ssh::SshContext;
 use crate::theme::{AppearanceChoice, Theme, ThemeName};
+use ratatui::Frame;
+use ratatui::buffer::{Buffer, CellDiffOption};
+use ratatui::layout::{Alignment, Constraint, Layout, Margin, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget, Wrap};
+use std::collections::{HashMap, HashSet};
+use std::num::NonZeroU16;
+use std::ops::Range;
+use std::path::Path;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 const DETAIL_LABEL_WIDTH: usize = 12;
 const MAX_INTRALINE_SOURCE_BYTES: usize = 32 * 1024;
@@ -141,7 +139,7 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
     },
     HelpRow::Shortcut {
         keys: "/",
-        description: "Filter the active list",
+        description: "Search the active list. Tab chooses Name, Contents, or Both (default Name)",
     },
     HelpRow::Shortcut {
         keys: "Shift+O",
@@ -227,7 +225,7 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
     },
     HelpRow::Shortcut {
         keys: "/",
-        description: "Focus the numeric PR field; Enter opens it",
+        description: "Focus the numeric PR field; Enter opens it. On Files, search those files",
     },
     HelpRow::Shortcut {
         keys: "o",
@@ -404,11 +402,11 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
         description: "Quit",
     },
 ];
-
 mod content;
 mod diff_render;
 mod feedback;
 mod help;
+mod image_diff;
 mod layout;
 mod modal_branches;
 mod modal_choices;
@@ -447,6 +445,8 @@ use feedback::{draw_modal_hint, draw_toast, progress_bar};
 pub(crate) use help::{draw_help, help_shortcut_count};
 #[cfg(test)]
 pub(crate) use help::{help_display_index, help_rows, help_shortcut_index_at};
+pub(crate) use image_diff::initialize_image_picker;
+use image_diff::{ImageDrawState, draw_image_line, image_side, selected_image_protocol};
 pub(crate) use layout::draw;
 use layout::draw_main_divider;
 #[cfg(test)]

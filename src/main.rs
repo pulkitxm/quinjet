@@ -6,6 +6,7 @@ mod file_icons;
 mod git;
 mod integration;
 mod onboarding;
+mod search;
 mod ssh;
 mod state;
 mod state_sorting;
@@ -121,6 +122,7 @@ fn open_terminal(
         .then(|| Onboarding::new(&options.path, ssh_context.cloned(), onboarding_mode));
     let onboarding_theme = theme::Theme::new_selection(options.theme, options.appearance.resolve());
     let mut terminal = TerminalGuard::enter(!options.no_mouse)?;
+    ui::initialize_image_picker();
     let render_tick = tick(Duration::from_millis(16));
     let relative_time_tick = tick(Duration::from_secs(1));
     let periodic_refresh = tick(Duration::from_secs(10));

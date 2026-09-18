@@ -1,5 +1,6 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
+use crate::git::diff::ImageSide;
 
 #[expect(clippy::integer_division, reason = "layout maths works in whole cells")]
 #[expect(
@@ -48,6 +49,7 @@ pub(super) fn draw_side_by_side_diff(
     let content_y = area.y + u16::from(sticky.is_some());
     let content_height = area.height.saturating_sub(u16::from(sticky.is_some()));
     let mut hits = Vec::new();
+    let mut image_state = ImageDrawState::new(rows.len() <= usize::from(content_height));
     if let Some(header) = sticky {
         let sticky_area = Rect::new(area.x, area.y, area.width, 1);
         draw_file_header(frame, sticky_area, header, app, theme);
@@ -112,6 +114,8 @@ pub(super) fn draw_side_by_side_diff(
                     old_emphasis.as_ref(),
                     old_line.is_some_and(|line| review_line_selected(app, line, Some(true))),
                     theme,
+                    content_height.saturating_sub(cells(offset)),
+                    &mut image_state,
                 );
                 frame.render_widget(
                     Paragraph::new("│").style(Style::default().fg(divider_color).bg(theme.panel)),
@@ -126,6 +130,8 @@ pub(super) fn draw_side_by_side_diff(
                     new_emphasis.as_ref(),
                     new_line.is_some_and(|line| review_line_selected(app, line, Some(false))),
                     theme,
+                    content_height.saturating_sub(cells(offset)),
+                    &mut image_state,
                 );
             }
         }
@@ -171,6 +177,34 @@ pub(super) fn side_by_side_rows(document: &DiffDocument, app: &App) -> Vec<SideB
                     boxed: in_file,
                 });
                 index += 1;
+            }
+            DiffLineKind::Image => {
+                let start = index;
+                while document
+                    .lines
+                    .get(index)
+                    .is_some_and(|line| line.kind == DiffLineKind::Image)
+                {
+                    index += 1;
+                }
+                let previous: Vec<usize> = (start..index)
+                    .filter(|&line_index| {
+                        document.lines.get(line_index).and_then(image_side)
+                            == Some(ImageSide::Previous)
+                    })
+                    .collect();
+                let current: Vec<usize> = (start..index)
+                    .filter(|&line_index| {
+                        document.lines.get(line_index).and_then(image_side) == Some(ImageSide::New)
+                    })
+                    .collect();
+                let pairs = previous.len().max(current.len()).max(1);
+                for pair_index in 0..pairs {
+                    rows.push(SideBySideRow::Split(
+                        previous.get(pair_index).copied(),
+                        current.get(pair_index).copied(),
+                    ));
+                }
             }
             DiffLineKind::Added => {
                 rows.push(SideBySideRow::Split(None, Some(index)));
