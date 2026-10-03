@@ -5,6 +5,21 @@ pub(super) fn file_icon_span(path: &Path, theme: &Theme) -> Span<'static> {
     Span::styled(icon.glyph, Style::default().fg(theme.syntax(icon.color)))
 }
 
+pub(super) fn file_path_spans(
+    path: &str,
+    width: usize,
+    style: Style,
+    theme: &Theme,
+) -> [Span<'static>; 3] {
+    let icon = file_icon_span(Path::new(path), theme);
+    let path_width = width.saturating_sub(icon.width() + 1);
+    [
+        icon,
+        Span::raw(" "),
+        Span::styled(truncate_path(path, path_width), style),
+    ]
+}
+
 pub(super) const fn disclosure_glyph(expanded: bool) -> &'static str {
     if expanded { "⌄" } else { "›" }
 }
@@ -170,6 +185,44 @@ pub(super) fn truncate_middle(value: &str, width: usize) -> String {
         slice_width(value, 0, left_width),
         suffix_width(value, right_width)
     )
+}
+
+pub(super) fn truncate_directory(directory: &str, width: usize) -> Option<String> {
+    if directory.width() <= width {
+        return Some(directory.to_owned());
+    }
+    directory
+        .match_indices('/')
+        .filter_map(|(index, _)| directory.get(index..))
+        .find(|tail| tail.width() < width)
+        .map(|tail| format!("…{tail}"))
+}
+
+pub(super) const FILE_DIRECTORY_GAP: &str = "  ";
+
+pub(super) fn fit_file_label(name: &str, directory: &str, width: usize) -> (String, String) {
+    let name = truncate_middle(name, width);
+    let room = width
+        .saturating_sub(name.width())
+        .saturating_sub(FILE_DIRECTORY_GAP.width());
+    let directory = truncate_directory(directory, room).unwrap_or_default();
+    (name, directory)
+}
+
+pub(super) fn truncate_path(path: &str, width: usize) -> String {
+    if path.width() <= width {
+        return path.to_owned();
+    }
+    let Some((directory, name)) = path.rsplit_once('/') else {
+        return truncate_middle(path, width);
+    };
+    let name = truncate_middle(name, width);
+    let room = width.saturating_sub(name.width()).saturating_sub(1);
+    match truncate_directory(directory, room) {
+        Some(directory) => format!("{directory}/{name}"),
+        None if room > 0 => format!("…/{name}"),
+        None => name,
+    }
 }
 
 pub(super) fn slice_width(value: &str, skip: usize, width: usize) -> String {

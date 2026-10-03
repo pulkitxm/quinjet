@@ -136,7 +136,7 @@ pub(super) fn draw_pull_request_file_tree(
                     file_icon_span(&file.path, theme),
                     Span::raw(" "),
                     Span::styled(
-                        truncate_end(&name, available),
+                        truncate_middle(&name, available),
                         Style::default().fg(theme.text).add_modifier(if selected {
                             Modifier::BOLD
                         } else {
@@ -168,6 +168,50 @@ pub(super) fn draw_pull_request_file_tree(
     }
     draw_scrollbar(frame, area, app.sidebar_offset, rows.len(), theme);
     hits
+}
+
+pub(super) fn pull_request_selected_file_line(
+    details: &PullRequestDetails,
+    width: usize,
+    theme: &Theme,
+) -> Line<'static> {
+    let counts = [
+        Span::raw("  "),
+        Span::styled(
+            format!("+{}", details.selected_file_additions),
+            Style::default()
+                .fg(theme.added)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            format!("-{}", details.selected_file_deletions),
+            Style::default()
+                .fg(theme.removed)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ];
+    let mut spans = vec![Span::styled(
+        format!("{:<DETAIL_LABEL_WIDTH$}", "Selected"),
+        Style::default().fg(theme.muted),
+    )];
+    if let Some(path) = details.selected_file.as_deref() {
+        spans.extend(file_path_spans(
+            path,
+            width
+                .saturating_sub(DETAIL_LABEL_WIDTH)
+                .saturating_sub(counts.iter().map(Span::width).sum()),
+            Style::default().fg(theme.text),
+            theme,
+        ));
+    } else {
+        spans.push(Span::styled(
+            "Preparing files",
+            Style::default().fg(theme.text),
+        ));
+    }
+    spans.extend(counts);
+    Line::from(spans)
 }
 
 pub(super) const fn pull_request_file_status_code(status: PullRequestFileStatus) -> &'static str {

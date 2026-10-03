@@ -194,9 +194,15 @@ pub(super) fn draw_file_header(
     };
     let additions = line.spans.get(1).map_or("+0", |span| span.text.as_str());
     let deletions = line.spans.get(2).map_or("-0", |span| span.text.as_str());
-    let icon = file_icon_span(Path::new(file_header_path(line).unwrap_or(label)), theme);
+    let path = file_header_path(line).unwrap_or(label);
+    let icon = file_icon_span(Path::new(path), theme);
     let reserved = 10_usize + additions.width() + deletions.width();
-    let label = truncate_middle(label, (area.width as usize).saturating_sub(reserved));
+    let label_width = (area.width as usize).saturating_sub(reserved);
+    let label = if label.width() <= label_width {
+        label.to_owned()
+    } else {
+        truncate_path(path, label_width)
+    };
     let fill = (area.width as usize)
         .saturating_sub(reserved)
         .saturating_sub(label.width());

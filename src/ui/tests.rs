@@ -107,6 +107,7 @@ fn rendered_text(buffer: &Buffer) -> String {
 
 mod controls;
 mod diff;
+mod file_labels;
 mod layout;
 mod logs;
 mod modals;
