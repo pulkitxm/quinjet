@@ -317,6 +317,7 @@ fn coalesced_refresh_waits_for_the_latest_status_before_reloading_the_diff() {
     let now = Instant::now();
     app.filesystem_changed(now);
     app.filesystem_changed(now + Duration::from_millis(100));
+    app.relative_time_generation = crate::date_time::relative_time_generation();
 
     let (effects, changed) = app.tick(now + Duration::from_millis(349));
     assert!(effects.is_empty());
