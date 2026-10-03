@@ -172,6 +172,33 @@ pub(super) fn truncate_middle(value: &str, width: usize) -> String {
     )
 }
 
+pub(super) fn truncate_start(value: &str, width: usize) -> String {
+    if value.width() <= width {
+        return value.to_owned();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    format!("…{}", suffix_width(value, width - 1))
+}
+
+pub(super) const FILE_DIRECTORY_GAP: &str = "  ";
+const MIN_FILE_DIRECTORY_WIDTH: usize = 4;
+
+pub(super) fn fit_file_label(name: &str, directory: &str, width: usize) -> (String, String) {
+    let name = truncate_middle(name, width);
+    let room = width
+        .saturating_sub(name.width())
+        .saturating_sub(FILE_DIRECTORY_GAP.width());
+    let directory =
+        if directory.is_empty() || room < MIN_FILE_DIRECTORY_WIDTH.min(directory.width()) {
+            String::new()
+        } else {
+            truncate_start(directory, room)
+        };
+    (name, directory)
+}
+
 pub(super) fn slice_width(value: &str, skip: usize, width: usize) -> String {
     let mut skipped = 0;
     let mut used = 0;
