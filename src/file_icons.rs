@@ -398,9 +398,7 @@ const fn sort_catalog<const N: usize>(mut catalog: [IconMapping; N]) -> [IconMap
     while index < N {
         let mut cursor = index;
         while cursor > 0 && catalog[cursor - 1].hash > catalog[cursor].hash {
-            let previous = catalog[cursor - 1];
-            catalog[cursor - 1] = catalog[cursor];
-            catalog[cursor] = previous;
+            (catalog[cursor - 1], catalog[cursor]) = (catalog[cursor], catalog[cursor - 1]);
             cursor -= 1;
         }
         index += 1;

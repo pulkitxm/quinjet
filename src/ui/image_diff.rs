@@ -203,7 +203,7 @@ fn draw_native(
     if width == 0 {
         return false;
     }
-    let rendered = ENCODED_IMAGES.with(|cache| {
+    ENCODED_IMAGES.with(|cache| {
         let mut cache = cache.borrow_mut();
         let position = cache.iter().position(|entry| {
             Arc::ptr_eq(&entry.raster, raster)
@@ -256,11 +256,7 @@ fn draw_native(
             return false;
         };
         render_native(frame, area, preview.row, remaining_height, entry)
-    });
-    if !rendered {
-        return false;
-    }
-    true
+    })
 }
 
 fn render_native(
