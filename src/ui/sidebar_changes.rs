@@ -159,14 +159,9 @@ pub(super) fn draw_changes_sidebar(
                     Style::default().bg(theme.panel)
                 };
                 let checked = app.checked_change_paths.contains(&change.path);
-                let path = change.parent_path();
-                let available = list_area.width.saturating_sub(17) as usize;
-                let name = truncate_middle(
-                    &change.file_name(),
-                    available.saturating_sub(path.width() + 1),
-                );
                 let check_label = if checked { "[x]" } else { "[ ]" };
-                let line = Line::from(vec![
+                let label_area = Rect::new(list_area.x, y, list_area.width.saturating_sub(7), 1);
+                let mut spans = vec![
                     Span::styled(
                         if selected { "•" } else { " " },
                         Style::default().fg(theme.accent),
@@ -178,26 +173,30 @@ pub(super) fn draw_changes_sidebar(
                     Span::raw(" "),
                     file_icon_span(&change.path, theme),
                     Span::raw(" "),
-                    Span::styled(
-                        name,
-                        Style::default().fg(theme.text).add_modifier(if selected {
-                            Modifier::BOLD
-                        } else {
-                            Modifier::empty()
-                        }),
-                    ),
-                    Span::styled(
-                        if path.is_empty() {
-                            String::new()
-                        } else {
-                            format!("  {path}")
-                        },
+                ];
+                let prefix_width = spans.iter().map(Span::width).sum::<usize>();
+                let (name, directory) = fit_file_label(
+                    &change.file_name(),
+                    &change.parent_path(),
+                    usize::from(label_area.width).saturating_sub(prefix_width),
+                );
+                spans.push(Span::styled(
+                    name,
+                    Style::default().fg(theme.text).add_modifier(if selected {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    }),
+                ));
+                if !directory.is_empty() {
+                    spans.push(Span::styled(
+                        format!("{FILE_DIRECTORY_GAP}{directory}"),
                         Style::default().fg(theme.muted),
-                    ),
-                ]);
+                    ));
+                }
                 frame.render_widget(
-                    Paragraph::new(line).style(row_style),
-                    Rect::new(list_area.x, y, list_area.width.saturating_sub(7), 1),
+                    Paragraph::new(Line::from(spans)).style(row_style),
+                    label_area,
                 );
                 action_hits.push(ScmActionHit {
                     area: Rect::new(list_area.x.saturating_add(1), y, 3, 1),

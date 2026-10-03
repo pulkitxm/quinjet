@@ -80,38 +80,6 @@ pub(super) fn draw_pull_request_details_scrolled(
             theme,
         ));
     }
-    let mut selected_file = vec![Span::styled(
-        format!("{:<DETAIL_LABEL_WIDTH$}", "Selected"),
-        Style::default().fg(theme.muted),
-    )];
-    if let Some(path) = details.selected_file.as_deref() {
-        selected_file.extend([
-            file_icon_span(Path::new(path), theme),
-            Span::raw(" "),
-            Span::styled(path, Style::default().fg(theme.text)),
-        ]);
-    } else {
-        selected_file.push(Span::styled(
-            "Preparing files",
-            Style::default().fg(theme.text),
-        ));
-    }
-    selected_file.extend([
-        Span::raw("  "),
-        Span::styled(
-            format!("+{}", details.selected_file_additions),
-            Style::default()
-                .fg(theme.added)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw("  "),
-        Span::styled(
-            format!("-{}", details.selected_file_deletions),
-            Style::default()
-                .fg(theme.removed)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]);
     let source_row = lines.len();
     lines.push(scrolled_link_detail_line(
         "Source",
@@ -163,7 +131,7 @@ pub(super) fn draw_pull_request_details_scrolled(
         link_hits,
     ));
     lines.extend([
-        Line::from(selected_file),
+        pull_request_selected_file_line(details, usize::from(inner.width), theme),
         Line::from(vec![
             Span::styled("PR total   ", Style::default().fg(theme.muted)),
             Span::styled(

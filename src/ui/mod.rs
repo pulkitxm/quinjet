@@ -23,9 +23,7 @@ use crate::app::{
 use crate::convert::cells;
 use crate::date_time::format_relative_timestamp;
 use crate::file_icons;
-#[cfg(test)]
-use crate::git::diff::PullRequestDetails;
-use crate::git::diff::{DiffDocument, DiffLine, DiffLineKind, HighlightSpan};
+use crate::git::diff::{DiffDocument, DiffLine, DiffLineKind, HighlightSpan, PullRequestDetails};
 use crate::git::github::{
     CheckLogLine, CheckLogSeverity, CheckStep, ConversationEntry, ConversationKind,
     GitHubRepository, PullRequest, PullRequestCheckStatus, PullRequestFileStatus,
