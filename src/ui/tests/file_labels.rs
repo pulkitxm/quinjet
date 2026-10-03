@@ -68,8 +68,8 @@ fn file_labels_shorten_the_directory_before_the_name() {
         ("presence.ts".to_owned(), "src".to_owned())
     );
     assert_eq!(
-        fit_file_label("conversation-presence.ts", "apps/server", 12),
-        ("convers…e.ts".to_owned(), String::new())
+        fit_file_label("very-long-component-name.ts", "apps/server", 12),
+        ("very-lo…e.ts".to_owned(), String::new())
     );
 }
 
@@ -92,8 +92,8 @@ fn path_truncation_keeps_the_file_name_whole() {
         "presence.ts"
     );
     assert_eq!(
-        truncate_path("conversation-presence.ts", 12),
-        "convers…e.ts"
+        truncate_path("very-long-component-name.ts", 12),
+        "very-lo…e.ts"
     );
 }
 
