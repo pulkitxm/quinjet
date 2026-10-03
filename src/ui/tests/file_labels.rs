@@ -32,10 +32,18 @@ fn sidebar_rows(changes: Vec<Change>, width: u16) -> Vec<String> {
 }
 
 #[test]
-fn start_truncation_keeps_the_nearest_directories() {
-    assert_eq!(truncate_start("apps/server/src/realtime", 10), "…/realtime");
-    assert_eq!(truncate_start("src", 10), "src");
-    assert_eq!(truncate_start("src/api", 0), "");
+fn directories_shorten_by_whole_segments_from_the_start() {
+    assert_eq!(
+        truncate_directory("apps/server/src/realtime", 14),
+        Some("…/src/realtime".to_owned())
+    );
+    assert_eq!(
+        truncate_directory("apps/server/src/realtime", 13),
+        Some("…/realtime".to_owned())
+    );
+    assert_eq!(truncate_directory("src", 3), Some("src".to_owned()));
+    assert_eq!(truncate_directory("apps/server/integration", 12), None);
+    assert_eq!(truncate_directory("integration", 8), None);
 }
 
 #[test]
@@ -49,7 +57,7 @@ fn file_labels_shorten_the_directory_before_the_name() {
     );
     assert_eq!(
         fit_file_label("presence.ts", "apps/server/src/realtime", 24),
-        ("presence.ts".to_owned(), "…c/realtime".to_owned())
+        ("presence.ts".to_owned(), "…/realtime".to_owned())
     );
     assert_eq!(
         fit_file_label("presence.ts", "apps/server/src/realtime", 15),
@@ -101,12 +109,18 @@ fn narrow_changes_sidebar_keeps_full_file_names() {
     );
     let rendered = rows.join("\n");
 
-    assert!(rendered.contains("sessions.ts  …"), "{rendered}");
-    assert!(rendered.contains("messages.ts  …"), "{rendered}");
-    assert!(rendered.contains("presence.test.ts  …"), "{rendered}");
-    assert!(rendered.contains("/routes"), "{rendered}");
-    assert!(rendered.contains("/chat"), "{rendered}");
-    assert!(!rendered.contains("apps/server"), "{rendered}");
+    assert!(
+        rendered.contains(" sessions.ts  …/api/routes   M [+]"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains(" messages.ts  …/src/chat     M [+]"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains(" presence.test.ts            M [+]"),
+        "{rendered}"
+    );
 }
 
 #[test]
@@ -133,9 +147,6 @@ fn file_header_shortens_the_directory_before_the_name() {
         .unwrap();
     let rendered = rendered_text(terminal.backend().buffer());
 
-    assert!(
-        rendered.contains("…src/realtime/presence.ts"),
-        "{rendered:?}"
-    );
+    assert!(rendered.contains("…/realtime/presence.ts"), "{rendered:?}");
     assert!(rendered.ends_with("+12 -3 ─"), "{rendered:?}");
 }

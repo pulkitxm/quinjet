@@ -187,30 +187,25 @@ pub(super) fn truncate_middle(value: &str, width: usize) -> String {
     )
 }
 
-pub(super) fn truncate_start(value: &str, width: usize) -> String {
-    if value.width() <= width {
-        return value.to_owned();
+pub(super) fn truncate_directory(directory: &str, width: usize) -> Option<String> {
+    if directory.width() <= width {
+        return Some(directory.to_owned());
     }
-    if width == 0 {
-        return String::new();
-    }
-    format!("…{}", suffix_width(value, width - 1))
+    directory
+        .match_indices('/')
+        .filter_map(|(index, _)| directory.get(index..))
+        .find(|tail| tail.width() < width)
+        .map(|tail| format!("…{tail}"))
 }
 
 pub(super) const FILE_DIRECTORY_GAP: &str = "  ";
-const MIN_FILE_DIRECTORY_WIDTH: usize = 4;
 
 pub(super) fn fit_file_label(name: &str, directory: &str, width: usize) -> (String, String) {
     let name = truncate_middle(name, width);
     let room = width
         .saturating_sub(name.width())
         .saturating_sub(FILE_DIRECTORY_GAP.width());
-    let directory =
-        if directory.is_empty() || room < MIN_FILE_DIRECTORY_WIDTH.min(directory.width()) {
-            String::new()
-        } else {
-            truncate_start(directory, room)
-        };
+    let directory = truncate_directory(directory, room).unwrap_or_default();
     (name, directory)
 }
 
@@ -223,10 +218,11 @@ pub(super) fn truncate_path(path: &str, width: usize) -> String {
     };
     let name = truncate_middle(name, width);
     let room = width.saturating_sub(name.width()).saturating_sub(1);
-    if directory.is_empty() || room == 0 {
-        return name;
+    match truncate_directory(directory, room) {
+        Some(directory) => format!("{directory}/{name}"),
+        None if room > 0 => format!("…/{name}"),
+        None => name,
     }
-    format!("{}/{name}", truncate_start(directory, room))
 }
 
 pub(super) fn slice_width(value: &str, skip: usize, width: usize) -> String {
