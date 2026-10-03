@@ -18,14 +18,12 @@ pub(super) fn draw_conflict(
     frame.render_widget(block, area);
     frame.render_widget(
         Paragraph::new(vec![
-            Line::from(vec![
-                file_icon_span(&change.path, theme),
-                Span::raw(" "),
-                Span::styled(
-                    change.display_path(),
-                    Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
-                ),
-            ]),
+            Line::from(Vec::from(file_path_spans(
+                &change.display_path(),
+                usize::from(inner.width),
+                Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                theme,
+            ))),
             Line::from(""),
             Line::from(vec![
                 Span::styled(

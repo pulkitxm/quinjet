@@ -5,6 +5,21 @@ pub(super) fn file_icon_span(path: &Path, theme: &Theme) -> Span<'static> {
     Span::styled(icon.glyph, Style::default().fg(theme.syntax(icon.color)))
 }
 
+pub(super) fn file_path_spans(
+    path: &str,
+    width: usize,
+    style: Style,
+    theme: &Theme,
+) -> [Span<'static>; 3] {
+    let icon = file_icon_span(Path::new(path), theme);
+    let path_width = width.saturating_sub(icon.width() + 1);
+    [
+        icon,
+        Span::raw(" "),
+        Span::styled(truncate_path(path, path_width), style),
+    ]
+}
+
 pub(super) const fn disclosure_glyph(expanded: bool) -> &'static str {
     if expanded { "⌄" } else { "›" }
 }
@@ -197,6 +212,21 @@ pub(super) fn fit_file_label(name: &str, directory: &str, width: usize) -> (Stri
             truncate_start(directory, room)
         };
     (name, directory)
+}
+
+pub(super) fn truncate_path(path: &str, width: usize) -> String {
+    if path.width() <= width {
+        return path.to_owned();
+    }
+    let Some((directory, name)) = path.rsplit_once('/') else {
+        return truncate_middle(path, width);
+    };
+    let name = truncate_middle(name, width);
+    let room = width.saturating_sub(name.width()).saturating_sub(1);
+    if directory.is_empty() || room == 0 {
+        return name;
+    }
+    format!("{}/{name}", truncate_start(directory, room))
 }
 
 pub(super) fn slice_width(value: &str, skip: usize, width: usize) -> String {

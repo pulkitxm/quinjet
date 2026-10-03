@@ -66,6 +66,30 @@ fn file_labels_shorten_the_directory_before_the_name() {
 }
 
 #[test]
+fn path_truncation_keeps_the_file_name_whole() {
+    assert_eq!(
+        truncate_path("apps/server/src/realtime/presence.ts", 36),
+        "apps/server/src/realtime/presence.ts"
+    );
+    assert_eq!(
+        truncate_path("apps/server/src/realtime/presence.ts", 22),
+        "…/realtime/presence.ts"
+    );
+    assert_eq!(
+        truncate_path("apps/server/src/realtime/presence.ts", 13),
+        "…/presence.ts"
+    );
+    assert_eq!(
+        truncate_path("apps/server/src/realtime/presence.ts", 11),
+        "presence.ts"
+    );
+    assert_eq!(
+        truncate_path("conversation-presence.ts", 12),
+        "convers…e.ts"
+    );
+}
+
+#[test]
 fn narrow_changes_sidebar_keeps_full_file_names() {
     let rows = sidebar_rows(
         vec![
@@ -93,4 +117,25 @@ fn wide_changes_sidebar_shows_the_whole_directory() {
         rendered.contains("messages.ts  apps/server/src/chat"),
         "{rendered}"
     );
+}
+
+#[test]
+fn file_header_shortens_the_directory_before_the_name() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    let header = test_file_header("apps/server/src/realtime/presence.ts", 12, 3);
+    let mut app = App::new("/tmp/repo", "repo");
+    app.document.lines = vec![header.clone()];
+    let mut terminal = Terminal::new(TestBackend::new(40, 1)).unwrap();
+    terminal
+        .draw(|frame| draw_file_header(frame, frame.area(), &header, &app, &Theme::default()))
+        .unwrap();
+    let rendered = rendered_text(terminal.backend().buffer());
+
+    assert!(
+        rendered.contains("…src/realtime/presence.ts"),
+        "{rendered:?}"
+    );
+    assert!(rendered.ends_with("+12 -3 ─"), "{rendered:?}");
 }
