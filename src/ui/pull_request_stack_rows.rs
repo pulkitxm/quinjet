@@ -325,7 +325,7 @@ fn stack_commit_rows(app: &App, theme: &Theme) -> (Vec<ContentRow>, Vec<ContentL
         let row = rows.len();
         let prefix = format!(" {} ", commit.abbreviated_oid);
         rows.push(ContentRow::wide(Line::from(vec![
-            Span::styled(prefix.clone(), Link::style(theme)),
+            Span::styled(prefix, Link::style(theme)),
             Span::styled(
                 commit.subject.clone(),
                 Style::default().fg(theme.text).add_modifier(Modifier::BOLD),

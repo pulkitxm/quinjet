@@ -5,3 +5,7 @@ reason = "yaml-rust is unmaintained and arrives through syntect's syntax loader,
 [[IgnoredVulns]]
 id = "RUSTSEC-2025-0141"
 reason = "bincode 1 is unmaintained and arrives through syntect's cached syntax dumps, which are built from the assets we ship"
+
+[[IgnoredVulns]]
+id = "GHSA-vfj7-8cjw-p6xm"
+reason = "braces has no fixed release and only reaches the markdownlint-cli2 CI tooling, which expands the fixed globs in .markdownlint-cli2.yaml rather than untrusted patterns"
