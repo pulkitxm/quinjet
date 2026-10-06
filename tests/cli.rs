@@ -241,6 +241,8 @@ mod github;
 mod metadata;
 #[path = "cli/output.rs"]
 mod output;
+#[path = "cli/pdf.rs"]
+mod pdf;
 #[path = "cli/remotes.rs"]
 mod remotes;
 #[path = "cli/repository.rs"]

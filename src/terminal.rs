@@ -5,7 +5,7 @@ use std::thread;
 
 use anyhow::{Context, Result};
 use crossterm::clipboard::CopyToClipboard;
-use crossterm::cursor::Show;
+use crossterm::cursor::{MoveTo, Show};
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
     KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
@@ -13,7 +13,7 @@ use crossterm::event::{
 use crossterm::execute;
 use crossterm::style::{Print, force_color_output};
 use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -153,8 +153,14 @@ impl TerminalGuard {
         TERMINAL_ENTERED.store(true, Ordering::SeqCst);
         let mut rollback = TerminalRollback { armed: true };
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)
-            .context("failed to enter alternate screen")?;
+        execute!(
+            stdout,
+            EnterAlternateScreen,
+            EnableBracketedPaste,
+            Clear(ClearType::All),
+            MoveTo(0, 0)
+        )
+        .context("failed to enter alternate screen")?;
         if mouse {
             execute!(stdout, EnableMouseCapture).context("failed to enable mouse capture")?;
         }
@@ -173,8 +179,7 @@ impl TerminalGuard {
             KEYBOARD_ENHANCED.store(true, Ordering::SeqCst);
         }
         let backend = CrosstermBackend::new(stdout);
-        let mut terminal = Terminal::new(backend).context("failed to initialize terminal")?;
-        terminal.clear().context("failed to clear terminal")?;
+        let terminal = Terminal::new(backend).context("failed to initialize terminal")?;
         rollback.armed = false;
         Ok(Self {
             terminal,

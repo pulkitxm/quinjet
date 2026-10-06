@@ -1,7 +1,7 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
-mod images;
+mod previews;
 
 impl Repository {
     pub(crate) fn prepare_local_diff(
@@ -270,7 +270,7 @@ impl Repository {
                 self.stash_diff_file(stash, file, *expanded, &index.title)?
             }
         };
-        self.attach_local_images(&mut document, request, file);
+        self.attach_local_previews(&mut document, request, file);
         Ok(document)
     }
 
