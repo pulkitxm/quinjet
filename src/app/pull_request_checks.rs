@@ -101,9 +101,10 @@ impl App {
         self.invalidate_diff_rows();
     }
 
-    pub(crate) const fn invalidate_diff_rows(&mut self) {
+    pub(crate) fn invalidate_diff_rows(&mut self) {
         self.document_layout_generation = self.document_layout_generation.wrapping_add(1);
         self.diff_rows_key = None;
+        drop(self.preview_layout.take());
     }
 
     pub(super) const fn invalidate_pull_request_content_rows(&mut self) {

@@ -104,6 +104,7 @@ impl App {
             auxiliary_preview: None,
             document: DiffDocument::empty("Working Tree", "Loading changes…"),
             document_layout_generation: 0,
+            preview_layout: OnceCell::new(),
             unified_diff_rows: Vec::new(),
             side_by_side_diff_rows: Vec::new(),
             diff_rows_key: None,

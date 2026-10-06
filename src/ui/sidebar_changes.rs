@@ -58,7 +58,7 @@ pub(super) fn draw_changes_sidebar(
         inner.height.saturating_sub(controls_height),
     );
     let visible = app.visible_change_indices();
-    let rows = app.change_rows();
+    let rows = app.change_rows_for(&visible);
     let row_count = rows.len();
     let height = list_area.height as usize;
     let selected_row = rows

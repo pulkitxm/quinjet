@@ -15,7 +15,6 @@ pub(super) fn draw_unified_diff(
     theme: &Theme,
 ) -> Vec<ContentFileHit> {
     let first_index = rows.get(diff_scroll).copied().unwrap_or_default();
-    let mut in_file = inside_file_before(&app.document, first_index);
     let emphasis = visible_intraline_emphasis(
         &app.document.lines,
         rows.iter()
@@ -28,7 +27,7 @@ pub(super) fn draw_unified_diff(
         .lines
         .get(first_index)
         .filter(|line| line.kind != DiffLineKind::FileHeader)
-        .and_then(|_| sticky_file_header(&app.document, first_index));
+        .and_then(|_| app.preview_header_at(first_index));
     let content_y = area.y + u16::from(sticky.is_some());
     let content_height = area.height.saturating_sub(u16::from(sticky.is_some()));
     let mut hits = Vec::new();
@@ -69,11 +68,9 @@ pub(super) fn draw_unified_diff(
                         path: path.into(),
                     });
                 }
-                in_file = true;
             }
             DiffLineKind::FileFooter => {
                 draw_file_footer(frame, row_area, theme);
-                in_file = false;
             }
             DiffLineKind::Image => draw_image_line(
                 frame,
@@ -88,7 +85,6 @@ pub(super) fn draw_unified_diff(
                 frame,
                 row_area,
                 line,
-                in_file,
                 app.horizontal_scroll,
                 emphasis.get(&line_index),
                 review_line_selected(app, line, None),
@@ -107,7 +103,6 @@ pub(super) fn draw_unified_line(
     frame: &mut Frame<'_>,
     area: Rect,
     line: &DiffLine,
-    _boxed: bool,
     horizontal_scroll: usize,
     emphasis: Option<&Range<usize>>,
     selected: bool,
@@ -138,30 +133,6 @@ pub(super) fn draw_unified_line(
         Paragraph::new(Line::from(spans)).style(line_background(line.kind, selected, theme)),
         content_area,
     );
-}
-
-pub(super) fn inside_file_before(document: &DiffDocument, offset: usize) -> bool {
-    let mut in_file = false;
-    for line in document.lines.iter().take(offset) {
-        match line.kind {
-            DiffLineKind::FileHeader => in_file = true,
-            DiffLineKind::FileFooter => in_file = false,
-            _ => {}
-        }
-    }
-    in_file
-}
-
-pub(super) fn sticky_file_header(document: &DiffDocument, line_index: usize) -> Option<&DiffLine> {
-    let mut header = None;
-    for line in document.lines.iter().take(line_index.saturating_add(1)) {
-        match line.kind {
-            DiffLineKind::FileHeader => header = Some(line),
-            DiffLineKind::FileFooter => header = None,
-            _ => {}
-        }
-    }
-    header
 }
 
 pub(super) fn file_header_path(line: &DiffLine) -> Option<&str> {
