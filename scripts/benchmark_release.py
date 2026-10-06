@@ -18,6 +18,7 @@ COMMANDS = {
     "capabilities": ["capabilities"],
     "status": ["--json", "status"],
     "diff_128_files": ["diff"],
+    "contents_search_128_files": ["--json", "search", "value_[0-9]+", "--mode", "contents"],
 }
 
 
@@ -25,7 +26,10 @@ def environment(root):
     env = {
         key: value
         for key, value in os.environ.items()
-        if not key.startswith(("GIT_", "QUINJET_", "SSH_", "XDG_"))
+        if not key.startswith(
+            ("GIT_", "QUINJET_", "SSH_", "XDG_", "CMUX_", "KITTY_", "ITERM_", "WEZTERM_")
+        )
+        and key not in {"TERM_PROGRAM", "TMUX", "TMUX_PANE", "COLORTERM", "COLORFGBG", "WT_SESSION"}
     }
     env.update(
         HOME=str(root),
