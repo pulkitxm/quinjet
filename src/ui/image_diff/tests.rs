@@ -5,9 +5,10 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui_image::picker::ProtocolType;
 
+use super::preparation::EncodedImage;
 use super::{
     IMAGE_PREPARATION, ImageDrawState, ImageKey, PreparationFrame, Rect, draw_image_line,
-    draw_native, picker_for_window, preparation::EncodedImage, prepare_native,
+    draw_native, picker_for_window, prepare_native,
 };
 use crate::git::diff::{
     DiffLine, DiffLineKind, HighlightSpan, ImageCell, ImagePreview, ImagePreviewKind,

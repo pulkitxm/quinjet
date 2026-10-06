@@ -35,6 +35,9 @@ def environment(root):
     env.update(
         HOME=str(root),
         USERPROFILE=str(root),
+        LOCALAPPDATA=str(root / "local-app-data"),
+        APPDATA=str(root / "roaming-app-data"),
+        ZDOTDIR=str(root),
         XDG_BIN_HOME=str(root / "bin"),
         XDG_CONFIG_HOME=str(root / "config"),
         XDG_DATA_HOME=str(root / "data"),
@@ -102,6 +105,40 @@ def invocation(binary, args, repository, env):
     return (time.perf_counter_ns() - started) / 1_000_000, result.stdout
 
 
+def finish_terminal(process, master, original_mode):
+    import select
+    import termios
+
+    try:
+        deadline = time.monotonic() + 3
+        while process.poll() is None and time.monotonic() < deadline:
+            with contextlib.suppress(OSError):
+                os.write(master, b"q")
+            readable, _, _ = select.select([master], [], [], 0.1)
+            if not readable:
+                continue
+            try:
+                if not os.read(master, 1 << 20):
+                    break
+            except OSError:
+                break
+        try:
+            process.wait(timeout=max(0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+            msg = "the synthetic terminal did not quit after receiving input"
+            raise RuntimeError(msg) from None
+        if process.returncode != 0:
+            msg = "the synthetic terminal exited unsuccessfully"
+            raise RuntimeError(msg)
+        if termios.tcgetattr(master) != original_mode:
+            msg = "the synthetic terminal did not restore its original mode"
+            raise RuntimeError(msg)
+    finally:
+        os.close(master)
+
+
 def first_frame(binary, repository, env, *, responsive):
     import fcntl
     import pty
@@ -111,6 +148,7 @@ def first_frame(binary, repository, env, *, responsive):
 
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 45, 160, 0, 0))
+    original_mode = termios.tcgetattr(slave)
     started = time.perf_counter_ns()
     terminal_env = dict(env, QUINJET_IMAGE_PROTOCOL="auto")
     appearance = "dark" if responsive else "system"
@@ -148,14 +186,7 @@ def first_frame(binary, repository, env, *, responsive):
         msg = "the synthetic terminal did not receive a complete first frame"
         raise RuntimeError(msg)
     finally:
-        with contextlib.suppress(OSError):
-            os.write(master, b"q")
-        try:
-            process.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
-        os.close(master)
+        finish_terminal(process, master, original_mode)
 
 
 def measure_trial(trial, binaries, results, root, *, terminal):
@@ -232,6 +263,13 @@ def benchmark(args):
         "aspirational_budget_bytes": 5_000_000,
         "candidate_below_aspirational_budget": results["candidate"]["bytes"] < 5_000_000,
         "regression_budget_bytes": args.budget,
+        "terminal_method": (
+            "160x45 PTY; basic cursor, primary-attribute, and window-geometry replies "
+            "in dark mode; "
+            "no replies in System mode; bounded quit-input retries; clean exit and mode restoration"
+            if terminal
+            else None
+        ),
         "results": results,
     }
     rendered = json.dumps(report, indent=2) + "\n"

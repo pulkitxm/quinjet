@@ -306,6 +306,9 @@ history, diff algorithms and parsing, isolated pull-request workspaces, API and
 cache strategy, byte-budgeted prefetch, progressive viewport rendering,
 concurrency, benchmarking, failure modes, and regression review.
 
+The [release performance guide](docs/guides/release-performance.md) records
+executable-size research and reproducible native startup and viewport comparisons.
+
 - Rendering and key handling never invoke Git directly.
 - Fixed, coalescing mailboxes replace obsolete reads; local previews, PR/network previews, and background metadata run independently so one slow request cannot block tab switching.
 - Filesystem event storms collapse into authoritative status snapshots.
