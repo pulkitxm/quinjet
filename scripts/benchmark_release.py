@@ -46,7 +46,16 @@ def environment(root):
         if not key.startswith(
             ("GIT_", "QUINJET_", "SSH_", "XDG_", "CMUX_", "KITTY_", "ITERM_", "WEZTERM_")
         )
-        and key not in {"TERM_PROGRAM", "TMUX", "TMUX_PANE", "COLORTERM", "COLORFGBG", "WT_SESSION"}
+        and key
+        not in {
+            "TERM_PROGRAM",
+            "LC_TERMINAL",
+            "TMUX",
+            "TMUX_PANE",
+            "COLORTERM",
+            "COLORFGBG",
+            "WT_SESSION",
+        }
     }
     env.update(
         HOME=str(root),

@@ -108,11 +108,18 @@ Image protocol selection uses terminal environment inference and explicit
 from the terminal window ioctl when available, with a 10-by-20-pixel fallback. These paths
 do not query terminal input.
 
+Inside tmux, passthrough setup runs once through a separate bounded CLI process. A stalled
+tmux command is terminated and reaped after a 500-millisecond setup budget. Image encoding
+uses the library's protocol constructors without repeating that subprocess during startup
+or background preparation.
+
 Explicit `QUINJET_IMAGE_PROTOCOL=auto` retains query-based discovery on unidentified
 terminals. A short-lived helper owns terminal input during negotiation and is reaped before
 the normal event reader starts. The parent's 500-millisecond deadline starts before spawning
 the helper, including process startup in the budget. Termination and reaping can add cleanup
-time. Failed or timed-out discovery falls back to environment inference and window geometry.
+time. The helper uses the library's capability parser without spawning descendants or
+changing terminal modes. Failed or timed-out discovery falls back to environment inference
+and window geometry.
 Successful discovery also supplies the queried font size. This opt-in negotiation cost is
 measured separately from immediate native selection.
 

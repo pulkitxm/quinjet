@@ -1,18 +1,24 @@
 use std::ffi::{OsStr, OsString};
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, IsTerminal, Read, Write};
 use std::process::ExitCode;
 use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::terminal::{WindowSize, is_raw_mode_enabled, window_size};
-use ratatui_image::picker::cap_parser::QueryStdioOptions;
-use ratatui_image::picker::{Picker, ProtocolType};
+use ratatui_image::picker::cap_parser::{Parser, QueryStdioOptions, Response};
 
 use super::{IMAGE_PICKER, ImageProtocol};
 
 const HELPER_ARGUMENT: &str = "--internal-image-picker-query";
 const QUERY_BUDGET: Duration = Duration::from_millis(500);
 const MAX_RECORD_BYTES: usize = 64;
+const MAX_QUERY_BYTES: u64 = 8192;
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ImagePicker {
+    pub(super) font_size: (u16, u16),
+    pub(super) is_tmux: bool,
+}
 
 pub(crate) fn image_picker_helper() -> Option<ExitCode> {
     if !helper_requested(wild::args_os().skip(1)) {
@@ -34,25 +40,68 @@ fn write_query_result() -> Result<()> {
         io::stdin().is_terminal() && io::stdout().is_terminal(),
         "image discovery requires an inherited terminal"
     );
-    let picker = Picker::from_query_stdio_with_options(QueryStdioOptions {
-        timeout: QUERY_BUDGET,
-        text_sizing_protocol: false,
-    })?;
-    let record = PickerRecord {
-        protocol: match picker.protocol_type() {
-            ProtocolType::Kitty => ImageProtocol::Kitty,
-            ProtocolType::Iterm2 => ImageProtocol::Iterm2,
-            ProtocolType::Sixel => ImageProtocol::Sixel,
-            ProtocolType::Halfblocks => ImageProtocol::Halfblocks,
-        },
-        font_size: picker.font_size(),
-    };
+    let record = query_record(
+        &mut io::stdin().lock().take(MAX_QUERY_BYTES),
+        &mut io::stdout().lock(),
+        ImageProtocol::detect(),
+        picker_for_window(window_size().ok().as_ref()),
+    )?;
     record.write(&mut io::stderr().lock())?;
     Ok(())
 }
 
+fn query_record(
+    reader: &mut impl Read,
+    writer: &mut impl Write,
+    inferred: ImageProtocol,
+    picker: ImagePicker,
+) -> Result<PickerRecord> {
+    let query = Parser::query(
+        picker.is_tmux,
+        QueryStdioOptions {
+            timeout: QUERY_BUDGET,
+            text_sizing_protocol: false,
+        },
+    );
+    writer.write_all(query.as_bytes())?;
+    writer.flush()?;
+    let mut parser = Parser::new();
+    let mut record = PickerRecord {
+        protocol: inferred,
+        font_size: picker.font_size,
+    };
+    let mut bytes = [0; 128];
+    loop {
+        let count = reader.read(&mut bytes)?;
+        anyhow::ensure!(
+            count != 0,
+            "terminal discovery ended before its status reply"
+        );
+        for byte in bytes.iter().take(count) {
+            for response in parser.push(char::from(*byte)) {
+                match response {
+                    Response::Kitty if !inferred.is_native() => {
+                        record.protocol = ImageProtocol::Kitty;
+                    }
+                    Response::Sixel
+                        if !inferred.is_native() && record.protocol != ImageProtocol::Kitty =>
+                    {
+                        record.protocol = ImageProtocol::Sixel;
+                    }
+                    Response::CellSize(Some(size)) => record.font_size = size,
+                    Response::Status => return Ok(record),
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
 pub(crate) fn initialize_image_picker() -> Result<()> {
     if IMAGE_PICKER.get().is_none() {
+        if tmux_detected() {
+            crate::cli::terminal_query::enable_tmux_passthrough(QUERY_BUDGET)?;
+        }
         let inferred = ImageProtocol::detect();
         let override_value = std::env::var("QUINJET_IMAGE_PROTOCOL").unwrap_or_default();
         let state = choose_picker(
@@ -71,21 +120,21 @@ fn choose_picker(
     override_value: &str,
     size: Option<&WindowSize>,
     query: impl FnOnce() -> Result<Option<PickerRecord>>,
-) -> Result<(Picker, ImageProtocol)> {
+) -> Result<(ImagePicker, ImageProtocol)> {
     let record = if override_value.eq_ignore_ascii_case("auto") {
         query()?
     } else {
         None
     };
     let Some(record) = record else {
-        return Ok((picker_for_window(inferred, size), inferred));
+        return Ok((picker_for_window(size), inferred));
     };
     let protocol = if inferred.is_native() {
         inferred
     } else {
         record.protocol
     };
-    Ok((picker_with_font(protocol, record.font_size), protocol))
+    Ok((picker_with_font(record.font_size), protocol))
 }
 
 fn query_in_child() -> Result<Option<PickerRecord>> {
@@ -144,7 +193,7 @@ impl PickerRecord {
     }
 }
 
-fn picker_for_window(protocol: ImageProtocol, size: Option<&WindowSize>) -> Picker {
+fn picker_for_window(size: Option<&WindowSize>) -> ImagePicker {
     let font_size = size
         .and_then(|size| {
             let width = size.width.checked_div(size.columns)?;
@@ -152,22 +201,23 @@ fn picker_for_window(protocol: ImageProtocol, size: Option<&WindowSize>) -> Pick
             (width > 0 && height > 0).then_some((width, height))
         })
         .unwrap_or((10, 20));
-    picker_with_font(protocol, font_size)
+    picker_with_font(font_size)
 }
 
-#[expect(
-    deprecated,
-    reason = "the explicit font-size constructor keeps queries outside the terminal event reader"
-)]
-fn picker_with_font(protocol: ImageProtocol, font_size: (u16, u16)) -> Picker {
-    let mut picker = Picker::from_fontsize(font_size);
-    picker.set_protocol_type(match protocol {
-        ImageProtocol::Kitty => ProtocolType::Kitty,
-        ImageProtocol::Iterm2 => ProtocolType::Iterm2,
-        ImageProtocol::Sixel => ProtocolType::Sixel,
-        ImageProtocol::Halfblocks => ProtocolType::Halfblocks,
-    });
-    picker
+pub(super) fn fallback_picker() -> ImagePicker {
+    picker_for_window(None)
+}
+
+fn picker_with_font(font_size: (u16, u16)) -> ImagePicker {
+    ImagePicker {
+        font_size,
+        is_tmux: tmux_detected(),
+    }
+}
+
+fn tmux_detected() -> bool {
+    std::env::var("TERM").is_ok_and(|term| term.starts_with("tmux"))
+        || std::env::var("TERM_PROGRAM").is_ok_and(|program| program == "tmux")
 }
 
 pub(in crate::ui) fn selected_image_protocol() -> ImageProtocol {

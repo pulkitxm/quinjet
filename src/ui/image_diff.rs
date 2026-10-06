@@ -1,13 +1,16 @@
 use std::num::NonZeroU16;
 use std::sync::{Arc, OnceLock};
 
-use image::{DynamicImage, RgbaImage};
+use image::{DynamicImage, Rgba, RgbaImage, imageops};
 use ratatui::buffer::CellDiffOption;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui_image::picker::{Picker, ProtocolType};
-use ratatui_image::protocol::Protocol;
+use ratatui_image::protocol::halfblocks::Halfblocks;
+use ratatui_image::protocol::iterm2::Iterm2;
+use ratatui_image::protocol::kitty::Kitty;
+use ratatui_image::protocol::sixel::Sixel;
+use ratatui_image::protocol::{ImageSource, Protocol};
 use ratatui_image::{Image, Resize};
 use unicode_width::UnicodeWidthStr;
 
@@ -17,12 +20,13 @@ use crate::git::diff::{ImagePreview, ImageProtocol, ImageRaster, ImageSide};
 mod kitty;
 use kitty::KittyPlacement;
 pub(super) mod picker;
+use picker::ImagePicker;
 pub(super) use picker::selected_image_protocol;
 pub(super) mod preparation;
 pub(super) use preparation::PreparationFrame;
 use preparation::{EncodedImage, IMAGE_PREPARATION, ImageKey};
 
-static IMAGE_PICKER: OnceLock<(Picker, ImageProtocol)> = OnceLock::new();
+static IMAGE_PICKER: OnceLock<(ImagePicker, ImageProtocol)> = OnceLock::new();
 
 pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     let _images_ready = crate::ui::image_preparation_ready();
@@ -170,26 +174,59 @@ fn draw_native(
 
 fn prepare_native(key: &ImageKey) -> Option<NativeDisplay> {
     let image = raster_dynamic(&key.raster)?;
-    let mut picker = IMAGE_PICKER
+    let picker = IMAGE_PICKER
         .get()
-        .map_or_else(Picker::halfblocks, |(picker, _)| picker.clone());
-    picker.set_protocol_type(match key.protocol {
-        ImageProtocol::Kitty => ProtocolType::Kitty,
-        ImageProtocol::Iterm2 => ProtocolType::Iterm2,
-        ImageProtocol::Sixel => ProtocolType::Sixel,
-        ImageProtocol::Halfblocks => ProtocolType::Halfblocks,
-    });
-    let encoded = picker
-        .new_protocol(
-            image,
-            Rect::new(0, 0, key.width, key.height),
-            Resize::Fit(None),
-        )
-        .ok()?;
+        .map_or_else(picker::fallback_picker, |(picker, _)| *picker);
+    let encoded = encode_native(
+        image,
+        key.protocol,
+        Rect::new(0, 0, key.width, key.height),
+        picker,
+    )?;
     if key.protocol == ImageProtocol::Kitty {
         KittyPlacement::new(&encoded).map(NativeDisplay::Kitty)
     } else {
         Some(NativeDisplay::Other(encoded))
+    }
+}
+
+fn encode_native(
+    image: DynamicImage,
+    protocol: ImageProtocol,
+    size: Rect,
+    picker: ImagePicker,
+) -> Option<Protocol> {
+    let source = ImageSource::new(image, picker.font_size, Rgba([0, 0, 0, 0]));
+    let (image, area) = match Resize::Fit(None).needs_resize(
+        &source,
+        picker.font_size,
+        source.desired,
+        size,
+        false,
+    ) {
+        Some(area) => {
+            let width = u32::from(area.width) * u32::from(picker.font_size.0);
+            let height = u32::from(area.height) * u32::from(picker.font_size.1);
+            let resized = source
+                .image
+                .resize(width, height, imageops::FilterType::Nearest);
+            let mut padded = DynamicImage::new_rgba8(width, height);
+            imageops::overlay(&mut padded, &resized, 0, 0);
+            (padded, area)
+        }
+        None => (source.image, source.desired),
+    };
+    match protocol {
+        ImageProtocol::Halfblocks => Halfblocks::new(image, area).ok().map(Protocol::Halfblocks),
+        ImageProtocol::Sixel => Sixel::new(image, area, picker.is_tmux)
+            .ok()
+            .map(Protocol::Sixel),
+        ImageProtocol::Kitty => Kitty::new(image, area, rand::random(), picker.is_tmux)
+            .ok()
+            .map(Protocol::Kitty),
+        ImageProtocol::Iterm2 => Iterm2::new(image, area, picker.is_tmux)
+            .ok()
+            .map(Protocol::ITerm2),
     }
 }
 
@@ -236,3 +273,6 @@ pub(super) fn image_side(line: &DiffLine) -> Option<ImageSide> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod encoding_tests;

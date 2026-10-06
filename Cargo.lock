@@ -2078,6 +2078,7 @@ dependencies = [
  "indicatif",
  "lopdf",
  "notify",
+ "rand 0.8.7",
  "ratatui",
  "ratatui-image",
  "self-replace",

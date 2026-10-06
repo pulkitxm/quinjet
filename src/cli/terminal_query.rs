@@ -1,5 +1,5 @@
 use std::io::Read;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -26,31 +26,44 @@ pub(crate) fn query_helper(
     else {
         return Ok(None);
     };
-    finish_helper(&mut child, deadline, max_record_bytes)
+    finish_query(&mut child, deadline, max_record_bytes)
 }
 
-fn finish_helper(
+pub(crate) fn enable_tmux_passthrough(budget: Duration) -> Result<()> {
+    let deadline = Instant::now() + budget;
+    let Ok(mut child) = Command::new("tmux")
+        .args(["set", "-p", "allow-passthrough", "on"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return Ok(());
+    };
+    let _status = wait_for_child(&mut child, deadline)?;
+    Ok(())
+}
+
+fn finish_query(
     child: &mut Child,
     deadline: Instant,
     max_record_bytes: usize,
 ) -> Result<Option<Vec<u8>>> {
+    Ok(wait_for_child(child, deadline)?
+        .filter(ExitStatus::success)
+        .and_then(|_status| read_record(child, max_record_bytes)))
+}
+
+fn wait_for_child(child: &mut Child, deadline: Instant) -> Result<Option<ExitStatus>> {
     while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
         match child.try_wait() {
-            Ok(Some(status)) => {
-                return Ok(if status.success() {
-                    read_record(child, max_record_bytes)
-                } else {
-                    None
-                });
-            }
+            Ok(Some(status)) => return Ok(Some(status)),
             Ok(None) => thread::sleep(remaining.min(HELPER_POLL_INTERVAL)),
             Err(_) => break,
         }
     }
     drop(child.kill());
-    let _status = child
-        .wait()
-        .context("failed to reap the terminal query helper")?;
+    let _status = child.wait().context("failed to reap the terminal helper")?;
     Ok(None)
 }
 
