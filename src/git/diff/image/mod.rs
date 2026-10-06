@@ -9,9 +9,11 @@ mod source;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use attach::attach_image_previews;
+pub(crate) use attach::{attach_image_previews, file_footer, header_identity};
 pub(crate) use detect::detect_protocol_from_vars;
-pub(crate) use source::{BlobOrigin, LoadedBlob, RevisionImageSource};
+#[cfg(test)]
+pub(crate) use source::MapBlobSource;
+pub(crate) use source::{BlobOrigin, DiffBlobSource, LoadedBlob, RevisionBlobSource};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]

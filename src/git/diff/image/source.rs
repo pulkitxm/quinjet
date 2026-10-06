@@ -14,6 +14,7 @@ use crate::git::support::safe_worktree_path;
 pub(crate) enum BlobOrigin<'a> {
     Missing,
     Revision(&'a str),
+    RevisionFallback(&'a str, &'a str),
     Index,
     Worktree,
 }
@@ -27,17 +28,17 @@ pub(crate) enum LoadedBlob {
 
 #[cfg(test)]
 #[derive(Debug, Clone, Default)]
-pub(crate) struct MapImageSource {
+pub(crate) struct MapBlobSource {
     pub previous: HashMap<PathBuf, Vec<u8>>,
     pub current: HashMap<PathBuf, Vec<u8>>,
 }
 
-pub(crate) trait ImageBlobSource {
+pub(crate) trait DiffBlobSource {
     fn load(&self, path: &Path, old_path: Option<&Path>, side: ImageSide) -> LoadedBlob;
 }
 
 #[cfg(test)]
-impl ImageBlobSource for MapImageSource {
+impl DiffBlobSource for MapBlobSource {
     fn load(&self, path: &Path, old_path: Option<&Path>, side: ImageSide) -> LoadedBlob {
         let key = match side {
             ImageSide::Previous => old_path.unwrap_or(path),
@@ -61,14 +62,14 @@ impl ImageBlobSource for MapImageSource {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct RevisionImageSource<'a> {
+pub(crate) struct RevisionBlobSource<'a> {
     pub git_dir: &'a Path,
     pub worktree: &'a Path,
     pub previous: BlobOrigin<'a>,
     pub current: BlobOrigin<'a>,
 }
 
-impl ImageBlobSource for RevisionImageSource<'_> {
+impl DiffBlobSource for RevisionBlobSource<'_> {
     fn load(&self, path: &Path, old_path: Option<&Path>, side: ImageSide) -> LoadedBlob {
         let origin = match side {
             ImageSide::Previous => self.previous,
@@ -87,6 +88,14 @@ fn load_origin(git_dir: &Path, worktree: &Path, origin: BlobOrigin<'_>, path: &P
         BlobOrigin::Missing => LoadedBlob::Missing,
         BlobOrigin::Revision(revision) => {
             read_git_blob(git_dir, &blob_spec(revision, path), MAX_IMAGE_BYTES)
+        }
+        BlobOrigin::RevisionFallback(primary, fallback) => {
+            match read_git_blob(git_dir, &blob_spec(primary, path), MAX_IMAGE_BYTES) {
+                LoadedBlob::Missing => {
+                    read_git_blob(git_dir, &blob_spec(fallback, path), MAX_IMAGE_BYTES)
+                }
+                blob => blob,
+            }
         }
         BlobOrigin::Index => {
             let spec = format!(":{}", path_spec(path));

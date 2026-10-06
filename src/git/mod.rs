@@ -286,9 +286,7 @@ pub(crate) fn read_git_blob(dir: &Path, spec: &str, limit: usize) -> LoadedBlob 
         Ok(output) if output.stdout_truncated => LoadedBlob::TooLarge {
             size: limit.saturating_add(1),
         },
-        Ok(output) if output.status.success() && !output.stdout.is_empty() => {
-            LoadedBlob::Bytes(output.stdout)
-        }
+        Ok(output) if output.status.success() => LoadedBlob::Bytes(output.stdout),
         _ => LoadedBlob::Missing,
     }
 }
