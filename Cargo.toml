@@ -205,7 +205,8 @@ verbose_file_reads = "deny"
 
 [profile.release]
 codegen-units = 1
-lto = "thin"
+lto = "fat"
+opt-level = "z"
 panic = "abort"
 strip = "symbols"
 
