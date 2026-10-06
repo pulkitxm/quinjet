@@ -7,7 +7,6 @@ use super::{ImagePreview, ImageSide};
 use crate::git::diff::{DiffDocument, DiffLine, DiffLineKind, HighlightSpan};
 
 pub(crate) fn attach_image_previews(document: &mut DiffDocument, source: &impl DiffBlobSource) {
-    crate::git::diff::pdf::attach_pdf_sources(document, source);
     let mut index = 0;
     while index < document.lines.len() {
         let Some(line) = document.lines.get(index) else {

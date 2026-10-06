@@ -4,19 +4,21 @@ use super::{
 };
 
 impl Repository {
-    pub(super) fn attach_local_images(
+    pub(super) fn attach_local_previews(
         &self,
         document: &mut DiffDocument,
         request: &LocalDiffRequest,
         file: &DiffFileIndexEntry,
     ) {
         match request {
-            LocalDiffRequest::Changes { changes, .. } => {
+            LocalDiffRequest::Changes {
+                changes, expanded, ..
+            } => {
                 let Some(change) = changes.iter().find(|change| change.path == file.path) else {
                     return;
                 };
                 let (previous, current) = change_blob_origins(change);
-                diff::attach_image_previews(
+                diff::attach_file_previews(
                     document,
                     &diff::RevisionBlobSource {
                         git_dir: self.root(),
@@ -24,11 +26,12 @@ impl Repository {
                         previous,
                         current,
                     },
+                    *expanded,
                 );
             }
-            LocalDiffRequest::Commit { commit, .. } => {
+            LocalDiffRequest::Commit { commit, expanded } => {
                 let parent = commit.parent_ids.first().map(String::as_str);
-                diff::attach_image_previews(
+                diff::attach_file_previews(
                     document,
                     &diff::RevisionBlobSource {
                         git_dir: self.root(),
@@ -37,10 +40,13 @@ impl Repository {
                             .map_or(diff::BlobOrigin::Missing, diff::BlobOrigin::Revision),
                         current: diff::BlobOrigin::Revision(&commit.id),
                     },
+                    *expanded,
                 );
             }
-            LocalDiffRequest::Branch { branch, .. } => {
-                diff::attach_image_previews(
+            LocalDiffRequest::Branch {
+                branch, expanded, ..
+            } => {
+                diff::attach_file_previews(
                     document,
                     &diff::RevisionBlobSource {
                         git_dir: self.root(),
@@ -48,18 +54,21 @@ impl Repository {
                         previous: diff::BlobOrigin::Revision(&branch.reference),
                         current: diff::BlobOrigin::Revision("HEAD"),
                     },
+                    *expanded,
                 );
             }
-            LocalDiffRequest::Stash { stash, .. } => {
+            LocalDiffRequest::Stash { stash, expanded } => {
                 let parent = format!("{}^1", stash.reference);
-                diff::attach_image_previews(
+                let untracked = format!("{}^3", stash.reference);
+                diff::attach_file_previews(
                     document,
                     &diff::RevisionBlobSource {
                         git_dir: self.root(),
                         worktree: self.root(),
                         previous: diff::BlobOrigin::Revision(&parent),
-                        current: diff::BlobOrigin::Revision(&stash.reference),
+                        current: diff::BlobOrigin::RevisionFallback(&stash.reference, &untracked),
                     },
+                    *expanded,
                 );
             }
         }

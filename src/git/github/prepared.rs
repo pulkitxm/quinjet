@@ -42,7 +42,7 @@ impl PreparedPullRequest {
         let key = patch_cache_key(&self.merge_base, &self.head, &file.path);
         if let Some(patch) = cache_read_bounded(&key, CacheLife::Immutable, MAX_CACHED_PATCH_BYTES)
         {
-            return Ok(self.with_images(
+            return Ok(self.with_file_previews(
                 pull_request_file_document(&patch, &self.pull_request, file, false),
                 file,
             ));
@@ -56,7 +56,7 @@ impl PreparedPullRequest {
         if !truncated {
             cache_write_bounded(&key, &patch, MAX_CACHED_PATCH_BYTES);
         }
-        Ok(self.with_images(
+        Ok(self.with_file_previews(
             pull_request_file_document(&patch, &self.pull_request, file, truncated),
             file,
         ))
@@ -102,7 +102,7 @@ impl PreparedPullRequest {
             if let Some(body) = cached.get(&file.path) {
                 documents.push((
                     file.path.clone(),
-                    self.with_images(
+                    self.with_file_previews(
                         pull_request_file_document(body, &self.pull_request, file, false),
                         file,
                     ),
@@ -121,7 +121,7 @@ impl PreparedPullRequest {
                 if truncated_fallback.is_none() {
                     truncated_fallback = Some((
                         file.path.clone(),
-                        self.with_images(
+                        self.with_file_previews(
                             pull_request_file_document(
                                 section.body,
                                 &self.pull_request,
@@ -140,7 +140,7 @@ impl PreparedPullRequest {
             }
             documents.push((
                 file.path.clone(),
-                self.with_images(
+                self.with_file_previews(
                     pull_request_file_document(
                         section.body,
                         &self.pull_request,
@@ -177,8 +177,12 @@ impl PreparedPullRequest {
         Ok(output.stdout)
     }
 
-    fn with_images(&self, mut document: DiffDocument, file: &PullRequestFile) -> DiffDocument {
-        use crate::git::diff::{BlobOrigin, RevisionBlobSource, attach_image_previews};
+    fn with_file_previews(
+        &self,
+        mut document: DiffDocument,
+        file: &PullRequestFile,
+    ) -> DiffDocument {
+        use crate::git::diff::{BlobOrigin, RevisionBlobSource, attach_file_previews};
         let previous = match file.status {
             PullRequestFileStatus::Added => BlobOrigin::Missing,
             _ => BlobOrigin::Revision(self.merge_base.as_str()),
@@ -187,7 +191,7 @@ impl PreparedPullRequest {
             PullRequestFileStatus::Deleted => BlobOrigin::Missing,
             _ => BlobOrigin::Revision(self.head.as_str()),
         };
-        attach_image_previews(
+        attach_file_previews(
             &mut document,
             &RevisionBlobSource {
                 git_dir: self.repository.path(),
@@ -195,6 +199,7 @@ impl PreparedPullRequest {
                 previous,
                 current,
             },
+            false,
         );
         document
     }

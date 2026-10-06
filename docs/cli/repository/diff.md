@@ -91,6 +91,19 @@ half-block characters. Redirected text keeps the dimensions and an uncolored
 block approximation. Images larger than 8 MiB and SVG files get a labeled fallback. JSON
 includes preview metadata but excludes pixel data.
 
+PDF changes show source code instead of page images. Quinjet decodes compressed
+streams and compares normalized PDF objects, retaining PDF drawing and text
+commands. The source rows use the usual additions, deletions, line numbers and
+side-by-side layout. `--expanded` includes the whole source.
+
+The source label distinguishes normalized objects from stored bytes. If decoding
+fails, or only the encoding or file layout changed, Quinjet compares stored
+bytes. Nonprintable bytes use `\xNN`, literal backslashes are doubled, and long
+rows continue with a trailing backslash. Source line numbers refer to this
+representation. Files and generated source are limited to 8 MiB; an unavailable
+source keeps the binary notice with a reason. The same view is used in History,
+branch comparisons, stashes and pull requests, and in their command-line diffs.
+
 Cost scales with file count, one Git process per file plus the status read plus
 the numstat reads, so a diff of a thousand untracked files starts a thousand
 child processes. The 16,384-path index cap does not apply here, because the file

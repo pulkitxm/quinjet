@@ -33,3 +33,12 @@ use syntax::*;
     reason = "test helpers return values the assertions do not use"
 )]
 mod tests;
+
+pub(crate) fn attach_file_previews(
+    document: &mut DiffDocument,
+    source: &impl DiffBlobSource,
+    expanded: bool,
+) {
+    pdf::attach_pdf_sources(document, source, expanded);
+    attach_image_previews(document, source);
+}

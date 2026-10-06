@@ -14,6 +14,7 @@ use crate::git::support::safe_worktree_path;
 pub(crate) enum BlobOrigin<'a> {
     Missing,
     Revision(&'a str),
+    RevisionFallback(&'a str, &'a str),
     Index,
     Worktree,
 }
@@ -87,6 +88,14 @@ fn load_origin(git_dir: &Path, worktree: &Path, origin: BlobOrigin<'_>, path: &P
         BlobOrigin::Missing => LoadedBlob::Missing,
         BlobOrigin::Revision(revision) => {
             read_git_blob(git_dir, &blob_spec(revision, path), MAX_IMAGE_BYTES)
+        }
+        BlobOrigin::RevisionFallback(primary, fallback) => {
+            match read_git_blob(git_dir, &blob_spec(primary, path), MAX_IMAGE_BYTES) {
+                LoadedBlob::Missing => {
+                    read_git_blob(git_dir, &blob_spec(fallback, path), MAX_IMAGE_BYTES)
+                }
+                blob => blob,
+            }
         }
         BlobOrigin::Index => {
             let spec = format!(":{}", path_spec(path));

@@ -51,9 +51,6 @@ pub(super) fn escaped_source(bytes: &[u8]) -> Result<Vec<u8>> {
             column = 0;
         }
     }
-    if !output.bytes.is_empty() && !output.bytes.ends_with(b"\n") {
-        output.write_all(b"\n")?;
-    }
     Ok(output.bytes)
 }
 
