@@ -178,7 +178,7 @@ impl PreparedPullRequest {
     }
 
     fn with_images(&self, mut document: DiffDocument, file: &PullRequestFile) -> DiffDocument {
-        use crate::git::diff::{BlobOrigin, RevisionImageSource, attach_image_previews};
+        use crate::git::diff::{BlobOrigin, RevisionBlobSource, attach_image_previews};
         let previous = match file.status {
             PullRequestFileStatus::Added => BlobOrigin::Missing,
             _ => BlobOrigin::Revision(self.merge_base.as_str()),
@@ -189,7 +189,7 @@ impl PreparedPullRequest {
         };
         attach_image_previews(
             &mut document,
-            &RevisionImageSource {
+            &RevisionBlobSource {
                 git_dir: self.repository.path(),
                 worktree: self.repository.path(),
                 previous,

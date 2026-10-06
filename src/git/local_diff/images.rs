@@ -18,7 +18,7 @@ impl Repository {
                 let (previous, current) = change_blob_origins(change);
                 diff::attach_image_previews(
                     document,
-                    &diff::RevisionImageSource {
+                    &diff::RevisionBlobSource {
                         git_dir: self.root(),
                         worktree: self.root(),
                         previous,
@@ -30,7 +30,7 @@ impl Repository {
                 let parent = commit.parent_ids.first().map(String::as_str);
                 diff::attach_image_previews(
                     document,
-                    &diff::RevisionImageSource {
+                    &diff::RevisionBlobSource {
                         git_dir: self.root(),
                         worktree: self.root(),
                         previous: parent
@@ -42,7 +42,7 @@ impl Repository {
             LocalDiffRequest::Branch { branch, .. } => {
                 diff::attach_image_previews(
                     document,
-                    &diff::RevisionImageSource {
+                    &diff::RevisionBlobSource {
                         git_dir: self.root(),
                         worktree: self.root(),
                         previous: diff::BlobOrigin::Revision(&branch.reference),
@@ -54,7 +54,7 @@ impl Repository {
                 let parent = format!("{}^1", stash.reference);
                 diff::attach_image_previews(
                     document,
-                    &diff::RevisionImageSource {
+                    &diff::RevisionBlobSource {
                         git_dir: self.root(),
                         worktree: self.root(),
                         previous: diff::BlobOrigin::Revision(&parent),

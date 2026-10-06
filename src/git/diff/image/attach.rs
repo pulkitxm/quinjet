@@ -2,11 +2,12 @@ use std::path::{Path, PathBuf};
 
 use super::decode::{decode_image, skipped_too_large};
 use super::detect::looks_like_image;
-use super::source::{ImageBlobSource, LoadedBlob};
+use super::source::{DiffBlobSource, LoadedBlob};
 use super::{ImagePreview, ImageSide};
 use crate::git::diff::{DiffDocument, DiffLine, DiffLineKind, HighlightSpan};
 
-pub(crate) fn attach_image_previews(document: &mut DiffDocument, source: &impl ImageBlobSource) {
+pub(crate) fn attach_image_previews(document: &mut DiffDocument, source: &impl DiffBlobSource) {
+    crate::git::diff::pdf::attach_pdf_sources(document, source);
     let mut index = 0;
     while index < document.lines.len() {
         let Some(line) = document.lines.get(index) else {
@@ -47,7 +48,7 @@ fn should_preview(path: &Path, old_path: Option<&Path>, binary: bool) -> bool {
 }
 
 fn preview_lines(
-    source: &impl ImageBlobSource,
+    source: &impl DiffBlobSource,
     path: &Path,
     old_path: Option<&Path>,
     status: &str,
@@ -131,7 +132,7 @@ fn is_rename_only(line: &DiffLine) -> bool {
     line.text() == "File renamed without content changes"
 }
 
-fn file_footer(lines: &[DiffLine], header: usize) -> Option<usize> {
+pub(crate) fn file_footer(lines: &[DiffLine], header: usize) -> Option<usize> {
     lines
         .iter()
         .enumerate()
@@ -139,7 +140,7 @@ fn file_footer(lines: &[DiffLine], header: usize) -> Option<usize> {
         .find_map(|(index, line)| (line.kind == DiffLineKind::FileFooter).then_some(index))
 }
 
-fn header_identity(line: &DiffLine) -> (PathBuf, Option<PathBuf>, &str) {
+pub(crate) fn header_identity(line: &DiffLine) -> (PathBuf, Option<PathBuf>, &str) {
     let label = line
         .spans
         .first()

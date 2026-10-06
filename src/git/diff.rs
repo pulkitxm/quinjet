@@ -18,6 +18,7 @@ const MAX_SYNTAX_HIGHLIGHT_LINE_BYTES: usize = 32 * 1024;
 mod image;
 mod model;
 mod parser;
+mod pdf;
 mod syntax;
 
 pub(crate) use image::*;

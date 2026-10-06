@@ -5,7 +5,7 @@ use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 
 use super::decode::decode_image;
 use super::detect::{detect_protocol_from_vars, sniff_image};
-use super::source::MapImageSource;
+use super::source::MapBlobSource;
 use super::{ImageProtocol, ImageSide, SniffedImage, attach_image_previews};
 use crate::git::diff::{DiffLineKind, parse_diff};
 
@@ -18,7 +18,7 @@ fn png(color: [u8; 4]) -> Vec<u8> {
     bytes.into_inner()
 }
 
-fn preview_sides(patch: &str, source: &MapImageSource) -> Vec<ImageSide> {
+fn preview_sides(patch: &str, source: &MapBlobSource) -> Vec<ImageSide> {
     let mut document = parse_diff(patch.as_bytes(), "images", None, false);
     attach_image_previews(&mut document, source);
     document
@@ -94,7 +94,7 @@ fn native_raster_retains_photo_pixels_before_terminal_fit() {
 #[test]
 fn modified_added_and_deleted_images_use_available_sides() {
     let path = PathBuf::from("picture.png");
-    let mut source = MapImageSource::default();
+    let mut source = MapBlobSource::default();
     drop(source.previous.insert(path.clone(), png([255, 0, 0, 255])));
     drop(source.current.insert(path, png([0, 0, 255, 255])));
     let modified = "diff --git a/picture.png b/picture.png\nBinary files a/picture.png and b/picture.png differ\n";
@@ -110,7 +110,7 @@ fn modified_added_and_deleted_images_use_available_sides() {
 
 #[test]
 fn changed_rename_uses_previous_path_and_new_path() {
-    let mut source = MapImageSource::default();
+    let mut source = MapBlobSource::default();
     drop(
         source
             .previous
@@ -130,7 +130,7 @@ fn changed_rename_uses_previous_path_and_new_path() {
 
 #[test]
 fn non_images_remain_binary_and_large_images_show_a_reason() {
-    let mut source = MapImageSource::default();
+    let mut source = MapBlobSource::default();
     drop(
         source
             .current

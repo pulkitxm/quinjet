@@ -81,6 +81,7 @@ image = { version = "0.25", default-features = false, features = [
   "qoi",
 ] }
 indicatif = { version = "0.18.3", features = ["in_memory"] }
+lopdf = { version = "0.45.0", default-features = false }
 notify = "8.0"
 ratatui = "0.30"
 ratatui-image = { version = "=10.0.0", default-features = false }
