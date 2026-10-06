@@ -1,7 +1,7 @@
 use std::env;
 use std::ffi::OsStr;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
 
@@ -52,14 +52,24 @@ fn install_with_mode(shell: Shell, automatic: bool) -> Result<Vec<PathBuf>> {
     let state = shell_state(shell)?;
     let installed_before = state.exists();
     let marker = binary_marker();
-    let script = script(shell)?;
-    let contents = format!("{marker}{script}");
     let targets = targets(shell)?;
+    let contents = targets
+        .iter()
+        .any(|target| {
+            !automatic
+                || !installed_before
+                || (target.script.exists()
+                    && !first_line(&target.script).is_ok_and(|line| line == marker))
+        })
+        .then(|| script(shell).map(|script| format!("{marker}{script}")))
+        .transpose()?;
     let legacy_shortcut = legacy_shortcut_exists(&targets)?;
     let mut installed = Vec::new();
     for target in &targets {
         if !automatic || !installed_before || target.script.exists() {
-            write_file(&target.script, contents.as_bytes())?;
+            if let Some(contents) = &contents {
+                write_file(&target.script, contents.as_bytes())?;
+            }
             installed.push(target.script.clone());
         }
         if let Some(profile) = &target.profile
@@ -227,7 +237,7 @@ fn completion_is_current(shell: Shell) -> Result<bool> {
 fn first_line(path: &Path) -> Result<String> {
     let file = File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     let mut line = String::new();
-    BufReader::new(file)
+    BufReader::new(file.take(256))
         .read_line(&mut line)
         .map(|_| ())
         .with_context(|| format!("failed to read {}", path.display()))?;

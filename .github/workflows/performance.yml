@@ -1,0 +1,305 @@
+name: Performance
+
+on:
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: performance-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  release-comparison:
+    name: Release comparison (${{ matrix.target }})
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            binary: quinjet
+            budget: 8_000_000
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            binary: quinjet
+            budget: 7_000_000
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            binary: quinjet
+            budget: 6_400_000
+          - os: macos-14
+            target: aarch64-apple-darwin
+            binary: quinjet
+            budget: 5_500_000
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: quinjet.exe
+            budget: 6_500_000
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      TARGET: ${{ matrix.target }}
+      BINARY: ${{ matrix.binary }}
+      RUNNER: ${{ matrix.os }}
+      BUDGET: ${{ matrix.budget }}
+      PYTHON: ${{ matrix.os == 'windows-latest' && 'python' || 'python3' }}
+      RUSTUP_TOOLCHAIN: stable
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: candidate
+          ref: ${{ env.CANDIDATE_SHA }}
+          persist-credentials: false
+      - name: Check out frozen v0.0.69 baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: fda4cf1eb8c19b22bf0394ef3f216e5072c09a70
+          path: baseline
+          persist-credentials: false
+      - name: Install musl linker
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes musl-tools
+      - name: Set up the shared stable toolchain
+        run: rustup toolchain install stable --profile minimal --no-self-update --target "${TARGET}"
+      - uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780
+        with:
+          tool: cargo-auditable@0.7.7,rust-audit-info@0.5.4
+          fallback: cargo-install
+      - name: Record reproducible build metadata
+        run: |
+          "${PYTHON}" - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          reports = Path("reports")
+          reports.mkdir()
+          revisions = {
+              label: subprocess.check_output(["git", "-C", label, "rev-parse", "HEAD"], text=True).strip()
+              for label in ("baseline", "candidate")
+          }
+          if revisions["baseline"] != "fda4cf1eb8c19b22bf0394ef3f216e5072c09a70":
+              raise RuntimeError("the frozen baseline revision does not match")
+          if revisions["candidate"] != os.environ["CANDIDATE_SHA"]:
+              raise RuntimeError("the candidate revision does not match the requested commit")
+          metadata = {
+              "revisions": revisions,
+              "baseline_version": "0.0.69",
+              "runner": os.environ["RUNNER"],
+              "target": os.environ["TARGET"],
+              "rustc": subprocess.check_output(["rustc", "-Vv"], text=True),
+              "cargo": subprocess.check_output(["cargo", "--version"], text=True).strip(),
+              "cargo_auditable": "0.7.7",
+              "rust_audit_info": "0.5.4",
+              "recipe": ["cargo", "auditable", "build", "--release", "--locked", "--target", os.environ["TARGET"]],
+              "aspirational_budget_bytes": 5_000_000,
+              "regression_budget_bytes": int(os.environ["BUDGET"]),
+              "samples": 21,
+              "build_method": "empty per-revision target directories; prefetched locked sources; baseline then candidate",
+          }
+          (reports / "build.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+          PY
+      - name: Prefetch locked sources before timing compilation
+        run: |
+          for revision in baseline candidate; do
+            (cd "${revision}" && cargo fetch --locked --target "${TARGET}")
+          done
+      - name: Build and stage exact auditable release binaries
+        run: |
+          "${PYTHON}" - <<'PY'
+          import json
+          import os
+          import re
+          import shutil
+          import subprocess
+          import time
+          from pathlib import Path
+
+          metadata = Path("reports/build.json")
+          report = json.loads(metadata.read_text(encoding="utf-8"))
+          report["builds"] = {}
+          for revision in ("baseline", "candidate"):
+              flags = ""
+              if revision == "candidate" and os.environ["TARGET"] == "x86_64-unknown-linux-musl":
+                  version = re.match(r"rustc (\d+)\.(\d+)\.", report["rustc"])
+                  if version is None or tuple(map(int, version.groups())) < (1, 93):
+                      raise RuntimeError("packed musl relocations require Rust 1.93 or newer")
+                  flags = "-C link-arg=-Wl,-z,pack-relative-relocs"
+              environment = dict(os.environ, RUSTFLAGS=flags)
+              started = time.monotonic()
+              subprocess.run(report["recipe"], cwd=revision, env=environment, check=True)
+              elapsed = time.monotonic() - started
+              binary = Path(revision) / "target" / os.environ["TARGET"] / "release" / os.environ["BINARY"]
+              shutil.copy2(binary, Path("reports") / f"{revision}-{os.environ['BINARY']}")
+              report["builds"][revision] = {
+                  "seconds": round(elapsed, 3), "bytes": binary.stat().st_size, "rustflags": flags,
+              }
+              metadata.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+          PY
+      - name: Verify packed Linux release remains self-contained
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          binary="reports/candidate-${BINARY}"
+          readelf --dynamic "${binary}" | grep -F '(RELR)'
+          if readelf --dynamic "${binary}" | grep -F '(NEEDED)'; then
+            echo 'the musl release must not need a dynamic library' >&2
+            exit 1
+          fi
+          if readelf --program-headers "${binary}" | grep -F 'INTERP'; then
+            echo 'the musl release must not need a dynamic loader' >&2
+            exit 1
+          fi
+      - name: Extract and verify embedded dependency metadata
+        run: |
+          "${PYTHON}" - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          for revision in ("baseline", "candidate"):
+              binary = Path("reports") / f"{revision}-{os.environ['BINARY']}"
+              audit = json.loads(subprocess.check_output(["rust-audit-info", str(binary)], text=True))
+              metadata = json.loads(subprocess.check_output(
+                  ["cargo", "metadata", "--locked", "--format-version", "1", "--filter-platform", os.environ["TARGET"]],
+                  cwd=revision, text=True,
+              ))
+              packages = {package["id"]: package for package in metadata["packages"]}
+              nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
+              root_id = metadata["resolve"]["root"]
+              pending = [root_id]
+              reachable = set()
+              while pending:
+                  package_id = pending.pop()
+                  if package_id in reachable:
+                      continue
+                  reachable.add(package_id)
+                  pending.extend(
+                      dep["pkg"] for dep in nodes[package_id]["deps"]
+                      if any(kind["kind"] != "dev" for kind in dep["dep_kinds"])
+                  )
+              identity = lambda package: (package["name"], package["version"])
+              metadata_graph = {identity(packages[package_id]) for package_id in reachable}
+              command = [
+                  "cargo", "tree", "--locked", "--target", os.environ["TARGET"], "--edges", "normal,build",
+                  "--prefix", "none", "--format", "{p}", "--color", "never",
+              ]
+              tree = subprocess.check_output(command, cwd=revision, text=True)
+              rows = [re.match(r"^(\S+) v(\S+)(?: |$)", line) for line in tree.splitlines() if line]
+              if not rows or any(row is None for row in rows):
+                  raise RuntimeError(f"{revision} release dependency tree could not be parsed")
+              release = {row.groups() for row in rows}
+              if not release <= metadata_graph:
+                  raise RuntimeError(f"{revision} release graph contains packages missing from the locked metadata")
+              embedded = audit["packages"]
+              embedded_graph = {identity(package) for package in embedded}
+              roots = [identity(package) for package in embedded if package.get("root")]
+              if roots != [identity(packages[root_id])] or packages[root_id]["name"] != "quinjet":
+                  raise RuntimeError(f"{revision} audit root does not match the release package")
+              if not release <= embedded_graph:
+                  raise RuntimeError(f"{revision} audit is missing compiled release dependencies")
+              if embedded_graph != metadata_graph or len(embedded) != len(embedded_graph):
+                  raise RuntimeError(f"{revision} audit dependencies do not match the locked audit metadata graph")
+              for package in embedded:
+                  if any(
+                      type(index) is not int or not 0 <= index < len(embedded)
+                      for index in package.get("dependencies", [])
+                  ):
+                      raise RuntimeError(f"{revision} audit contains an invalid dependency index")
+              root = next(package for package in embedded if package.get("root"))
+              direct = {identity(packages[dep["pkg"]]) for dep in nodes[root_id]["deps"]
+                        if any(kind["kind"] != "dev" for kind in dep["dep_kinds"])}
+              if {identity(embedded[index]) for index in root.get("dependencies", [])} != direct:
+                  raise RuntimeError(f"{revision} audit direct dependencies do not match the release package")
+              audit["verification"] = {
+                  "metadata_basis": "cargo-auditable 0.7.7 embeds dev-feature-unified cargo metadata",
+                  "release_graph_command": command,
+                  "release_packages": [{"name": name, "version": version} for name, version in sorted(release)],
+                  "metadata_only_packages": [{"name": name, "version": version} for name, version in sorted(embedded_graph - release)],
+              }
+              output = Path("reports") / f"{revision}-audit.json"
+              output.write_text(json.dumps(audit, indent=2) + "\n", encoding="utf-8")
+          PY
+      - name: Freeze the identical synthetic render harness
+        run: |
+          "${PYTHON}" - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          harness = Path("candidate/src/ui/tests/performance.rs").read_bytes()
+          Path("baseline/src/ui/tests/performance.rs").write_bytes(harness)
+          tests = Path("baseline/src/ui/tests.rs")
+          source = tests.read_text(encoding="utf-8")
+          if "mod performance;" not in source.splitlines():
+              tests.write_text(source + "\nmod performance;\n", encoding="utf-8")
+          metadata = Path("reports/build.json")
+          report = json.loads(metadata.read_text(encoding="utf-8"))
+          report["render_harness_sha256"] = hashlib.sha256(harness).hexdigest()
+          metadata.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+          PY
+      - name: Measure release rendering with synthetic data
+        run: |
+          for revision in baseline candidate; do
+            (cd "${revision}" && cargo test --release --locked --target "${TARGET}" --bin quinjet \
+              ui::tests::performance::release_render_timings \
+              -- --ignored --exact --nocapture --test-threads=1) >"${RUNNER_TEMP}/${revision}-render.txt"
+          done
+      - name: Save clean render comparison results
+        run: |
+          "${PYTHON}" - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          expected = {"collapsed_100_files", "collapsed_1000_files", "collapsed_4000_files", "deep_100000_rows"}
+          pattern = r"render (\w+): first_ms=([\d.]+) median_ms=([\d.]+) p95_ms=([\d.]+) samples=(\d+)"
+          results = {}
+          for revision in ("baseline", "candidate"):
+              raw = (Path(os.environ["RUNNER_TEMP"]) / f"{revision}-render.txt").read_text(encoding="utf-8")
+              matches = re.findall(pattern, raw)
+              if len(matches) != len(expected) or {match[0] for match in matches} != expected:
+                  raise RuntimeError(f"{revision} render benchmark did not produce every synthetic scenario")
+              if any(int(match[4]) != 31 for match in matches):
+                  raise RuntimeError(f"{revision} render benchmark sample count does not match")
+              results[revision] = {
+                  label: {"first_ms": float(first), "median_ms": float(median), "p95_ms": float(p95), "samples": int(samples)}
+                  for label, first, median, p95, samples in matches
+              }
+          output = Path("reports/render.json")
+          output.write_text(json.dumps({"viewport": "160x45", "results": results}, indent=2) + "\n", encoding="utf-8")
+          PY
+      - name: Compare exact CLI output, startup, PTY frames, and size
+        run: |
+          "${PYTHON}" candidate/scripts/benchmark_release.py \
+            --baseline "reports/baseline-${BINARY}" --candidate "reports/candidate-${BINARY}" \
+            --samples 21 --budget "${BUDGET}" --output reports/benchmark.json
+      - name: Upload synthetic results and measured release binaries
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: performance-${{ matrix.target }}
+          path: |
+            reports/build.json
+            reports/benchmark.json
+            reports/render.json
+            reports/baseline-audit.json
+            reports/candidate-audit.json
+            reports/baseline-${{ matrix.binary }}
+            reports/candidate-${{ matrix.binary }}
+          if-no-files-found: error
+          retention-days: 14

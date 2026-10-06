@@ -18,12 +18,21 @@ fn json_output_is_one_document_per_invocation() -> Result<()> {
 }
 
 #[test]
-fn diff_json_exposes_theme_independent_syntax_roles() -> Result<()> {
+fn diff_plain_preserves_code_and_json_exposes_theme_independent_syntax_roles() -> Result<()> {
     let scratch = Scratch::repository()?;
     scratch.write("main.rs", "fn main() {}\n")?;
     scratch.git(&["add", "main.rs"])?;
     scratch.git(&["commit", "--message=rust"])?;
     scratch.write("main.rs", "fn main() { let value = 1; }\n")?;
+    let plain = scratch.quinjet(&["diff"])?.success()?;
+    ensure!(plain.stderr.is_empty(), "{}", plain.stderr);
+    ensure!(
+        plain.stdout
+            == "main.rs  · modified +1 -1\n@@ -1 +1 @@\n-fn main() {}\n+fn main() { let value = 1; }\n",
+        "{}",
+        plain.stdout
+    );
+    ensure!(!plain.stdout.contains('\u{1b}'));
     let document = scratch.quinjet(&["diff", "--json"])?.success()?.json()?;
     let foregrounds: Vec<&str> = document["lines"]
         .as_array()

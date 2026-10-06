@@ -12,6 +12,7 @@ param(
 
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 [Net.ServicePointManager]::SecurityProtocol =
     [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
@@ -68,7 +69,7 @@ function Invoke-Download {
     )
 
     try {
-        Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing
+        Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing -TimeoutSec 30
     }
     catch {
         throw "failed to download ${Uri}: $($_.Exception.Message)"
@@ -124,17 +125,30 @@ function Install-Quinjet {
     }
 
     if ($RequestedVersion -eq "latest") {
-        $releaseUrl = "$ReleasesUrl/latest/download"
-        $versionLabel = "latest"
+        $response = Invoke-WebRequest -Uri "$ReleasesUrl/latest" -Method Head -UseBasicParsing -TimeoutSec 30 -MaximumRedirection 5
+        $resolvedUrl = if ($PSVersionTable.PSVersion.Major -ge 6) {
+            $response.BaseResponse.RequestMessage.RequestUri.AbsoluteUri
+        }
+        else {
+            $response.BaseResponse.ResponseUri.AbsoluteUri
+        }
+        $tagPrefix = "$ReleasesUrl/tag/"
+        if (-not $resolvedUrl.StartsWith($tagPrefix, [StringComparison]::Ordinal)) {
+            throw "invalid latest release URL: $resolvedUrl"
+        }
+        $releaseTag = $resolvedUrl.Substring($tagPrefix.Length)
+        if ($releaseTag -cnotmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
+            throw "invalid latest release tag: $releaseTag"
+        }
     }
     else {
         $releaseTag = if ($RequestedVersion.StartsWith("v")) { $RequestedVersion } else { "v$RequestedVersion" }
         if ($releaseTag -notmatch '^v[0-9][0-9A-Za-z._+-]*$') {
             throw "invalid release version: $RequestedVersion"
         }
-        $releaseUrl = "$ReleasesUrl/download/$releaseTag"
-        $versionLabel = $releaseTag
     }
+    $releaseUrl = "$ReleasesUrl/download/$releaseTag"
+    $versionLabel = $releaseTag
 
     $tempDir = Join-Path ([IO.Path]::GetTempPath()) ("quinjet-install-" + [Guid]::NewGuid().ToString("N"))
     $downloadPath = Join-Path $tempDir $asset
@@ -146,23 +160,27 @@ function Install-Quinjet {
         Write-Info "detected Windows $architecture"
         Write-Info "downloading Quinjet $versionLabel"
         Invoke-Download -Uri "$releaseUrl/SHA256SUMS" -OutFile $checksumsPath
-        Invoke-Download -Uri "$releaseUrl/$asset" -OutFile $downloadPath
 
         $escapedAsset = [Regex]::Escape($asset)
-        $checksumPattern = "^(?<hash>[0-9A-Fa-f]{64})\s+\*?(?:dist/)?${escapedAsset}$"
-        $checksumMatch = $null
+        $expectedChecksum = $null
         foreach ($line in Get-Content -LiteralPath $checksumsPath) {
-            $match = [Regex]::Match($line.Trim(), $checksumPattern)
-            if ($match.Success) {
-                $checksumMatch = $match
-                break
+            $fields = @($line.Trim() -split '\s+')
+            if ($fields[-1] -cnotmatch "^\*?(?:dist/)?${escapedAsset}$") {
+                continue
             }
+            if ($null -ne $expectedChecksum) {
+                throw "the release checksum for $asset is duplicated"
+            }
+            if ($fields.Count -ne 2 -or $fields[0] -cnotmatch '^[0-9A-Fa-f]{64}$') {
+                throw "the release checksum for $asset is invalid"
+            }
+            $expectedChecksum = $fields[0]
         }
-        if ($null -eq $checksumMatch) {
+        if ($null -eq $expectedChecksum) {
             throw "the release checksum for $asset is missing or invalid"
         }
 
-        $expectedChecksum = $checksumMatch.Groups["hash"].Value
+        Invoke-Download -Uri "$releaseUrl/$asset" -OutFile $downloadPath
         $actualChecksum = (Get-FileHash -LiteralPath $downloadPath -Algorithm SHA256).Hash
         if (-not $expectedChecksum.Equals($actualChecksum, [StringComparison]::OrdinalIgnoreCase)) {
             throw "checksum verification failed for $asset"

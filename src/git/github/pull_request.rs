@@ -150,6 +150,7 @@ impl Repository {
             pull_request,
             merge_base,
             head,
+            diff_highlighting: self.diff_highlighting,
             index: PullRequestDiffIndex {
                 files,
                 total_files,

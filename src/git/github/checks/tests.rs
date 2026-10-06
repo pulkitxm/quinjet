@@ -308,6 +308,7 @@ fn a_warm_up_stops_as_soon_as_the_pull_request_it_serves_is_left() {
     let repository = Repository {
         root: std::path::PathBuf::from("/nonexistent-on-purpose"),
         github_cli: None,
+        diff_highlighting: true,
     };
     let checks = [settled("one"), settled("two"), settled("three")];
 
@@ -338,6 +339,7 @@ fn an_empty_check_list_is_cached() {
     let repository = Repository {
         root: directory.path().to_path_buf(),
         github_cli: Some(executable),
+        diff_highlighting: true,
     };
     let pull_request = PullRequest {
         number: 9,

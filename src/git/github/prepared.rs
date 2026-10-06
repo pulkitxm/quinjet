@@ -21,6 +21,7 @@ pub(crate) struct PreparedPullRequest {
     pub(super) merge_base: String,
     pub(super) head: String,
     pub(super) index: PullRequestDiffIndex,
+    pub(super) diff_highlighting: bool,
 }
 
 impl PreparedPullRequest {
@@ -42,10 +43,7 @@ impl PreparedPullRequest {
         let key = patch_cache_key(&self.merge_base, &self.head, &file.path);
         if let Some(patch) = cache_read_bounded(&key, CacheLife::Immutable, MAX_CACHED_PATCH_BYTES)
         {
-            return Ok(self.with_file_previews(
-                pull_request_file_document(&patch, &self.pull_request, file, false),
-                file,
-            ));
+            return Ok(self.file_document(&patch, file, false));
         }
         let (patch, truncated) = diff_selected_paths(
             self.repository.path(),
@@ -56,10 +54,7 @@ impl PreparedPullRequest {
         if !truncated {
             cache_write_bounded(&key, &patch, MAX_CACHED_PATCH_BYTES);
         }
-        Ok(self.with_file_previews(
-            pull_request_file_document(&patch, &self.pull_request, file, truncated),
-            file,
-        ))
+        Ok(self.file_document(&patch, file, truncated))
     }
 
     #[doc = " Produce many file documents from a single `git diff`. Spawning one Git"]
@@ -100,13 +95,7 @@ impl PreparedPullRequest {
         let mut truncated_fallback = None;
         for file in files {
             if let Some(body) = cached.get(&file.path) {
-                documents.push((
-                    file.path.clone(),
-                    self.with_file_previews(
-                        pull_request_file_document(body, &self.pull_request, file, false),
-                        file,
-                    ),
-                ));
+                documents.push((file.path.clone(), self.file_document(body, file, false)));
                 continue;
             }
             let Some((index, section)) = sections
@@ -121,15 +110,7 @@ impl PreparedPullRequest {
                 if truncated_fallback.is_none() {
                     truncated_fallback = Some((
                         file.path.clone(),
-                        self.with_file_previews(
-                            pull_request_file_document(
-                                section.body,
-                                &self.pull_request,
-                                file,
-                                true,
-                            ),
-                            file,
-                        ),
+                        self.file_document(section.body, file, true),
                     ));
                 }
                 continue;
@@ -140,15 +121,7 @@ impl PreparedPullRequest {
             }
             documents.push((
                 file.path.clone(),
-                self.with_file_previews(
-                    pull_request_file_document(
-                        section.body,
-                        &self.pull_request,
-                        file,
-                        section_truncated,
-                    ),
-                    file,
-                ),
+                self.file_document(section.body, file, section_truncated),
             ));
         }
         if documents.is_empty()
@@ -177,12 +150,15 @@ impl PreparedPullRequest {
         Ok(output.stdout)
     }
 
-    fn with_file_previews(
-        &self,
-        mut document: DiffDocument,
-        file: &PullRequestFile,
-    ) -> DiffDocument {
+    fn file_document(&self, patch: &[u8], file: &PullRequestFile, truncated: bool) -> DiffDocument {
         use crate::git::diff::{BlobOrigin, RevisionBlobSource, attach_file_previews};
+        let mut document = pull_request_file_document(
+            patch,
+            &self.pull_request,
+            file,
+            truncated,
+            self.diff_highlighting,
+        );
         let previous = match file.status {
             PullRequestFileStatus::Added => BlobOrigin::Missing,
             _ => BlobOrigin::Revision(self.merge_base.as_str()),
@@ -200,6 +176,7 @@ impl PreparedPullRequest {
                 current,
             },
             false,
+            self.diff_highlighting,
         );
         document
     }

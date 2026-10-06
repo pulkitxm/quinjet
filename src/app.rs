@@ -1,3 +1,4 @@
+use std::cell::OnceCell;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::ffi::OsString;
 use std::fmt::Write;
@@ -149,6 +150,7 @@ mod mouse;
 mod mouse_sidebar;
 mod operations;
 mod palette;
+mod preview_layout;
 mod projects;
 mod pull_request_actions;
 mod pull_request_checks;
@@ -170,6 +172,7 @@ mod worker_stack;
 
 pub(crate) use geometry::*;
 pub(crate) use modal::*;
+use preview_layout::PreviewLayout;
 pub(crate) use projects::{ProjectOpenMode, ProjectRow};
 pub(crate) use pull_request_actions::*;
 pub(crate) use stack_inspector::*;
@@ -304,6 +307,7 @@ pub(crate) struct App {
     pub auxiliary_preview: Option<AuxiliaryPreview>,
     pub document: DiffDocument,
     pub document_layout_generation: u64,
+    pub preview_layout: OnceCell<PreviewLayout>,
     pub unified_diff_rows: Vec<usize>,
     pub side_by_side_diff_rows: Vec<SideBySideRow>,
     pub diff_rows_key: Option<(u64, bool)>,

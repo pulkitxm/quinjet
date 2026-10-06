@@ -9,6 +9,7 @@ pub(super) struct ReposArgs {
 }
 
 pub(super) fn run(session: &mut Session, out: &Emitter, verb: Verb) -> Result<u8> {
+    session.set_diff_highlighting(out.json);
     match verb {
         Verb::Tui(_) => Err(Failure::new(
             EXIT_FAILURE,

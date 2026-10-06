@@ -117,7 +117,6 @@ fi
 
 case "${VERSION}" in
     latest)
-        RELEASE_URL=${RELEASES_URL}/latest/download
         VERSION_LABEL=latest
         ;;
     '')
@@ -224,20 +223,42 @@ download() {
     destination=$2
     case "${DOWNLOADER}" in
         curl)
-            curl --proto '=https' --tlsv1.2 -fsSL "${url}" -o "${destination}" ||
+            curl --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 30 -fsSL "${url}" -o "${destination}" ||
                 fail "failed to download ${url}"
             ;;
         wget)
-            wget -q "${url}" -O "${destination}" || fail "failed to download ${url}"
+            wget --https-only --timeout=30 --tries=1 -q "${url}" -O "${destination}" || fail "failed to download ${url}"
             ;;
         *) fail "no supported downloader is available" ;;
     esac
 }
 
+if [ "${VERSION}" = latest ]; then
+    case "${DOWNLOADER}" in
+        curl)
+            LATEST_URL=$(curl --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 30 -fsSLI \
+                -o /dev/null -w '%{url_effective}' "${RELEASES_URL}/latest") || fail "failed to resolve the latest release"
+            ;;
+        wget)
+            wget --https-only --timeout=30 --tries=1 --spider --server-response "${RELEASES_URL}/latest" \
+                2>"${TEMP_DIR}/latest-headers" || fail "failed to resolve the latest release"
+            LATEST_URL=$(awk 'tolower($1) == "location:" { url = $2 } END { print url }' "${TEMP_DIR}/latest-headers")
+            ;;
+        *) fail "no supported downloader is available" ;;
+    esac
+    case "${LATEST_URL}" in
+        "${RELEASES_URL}"/tag/*) RELEASE_TAG=${LATEST_URL#"${RELEASES_URL}"/tag/} ;;
+        *) fail "invalid latest release URL: ${LATEST_URL}" ;;
+    esac
+    awk -v tag="${RELEASE_TAG}" 'BEGIN { exit !(tag ~ /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/) }' ||
+        fail "invalid latest release tag: ${RELEASE_TAG}"
+    RELEASE_URL=${RELEASES_URL}/download/${RELEASE_TAG}
+    VERSION_LABEL=${RELEASE_TAG}
+fi
+
 info "detected ${OS} ${ARCH}"
 info "downloading Quinjet ${VERSION_LABEL}"
 download "${RELEASE_URL}/SHA256SUMS" "${CHECKSUMS_PATH}"
-download "${RELEASE_URL}/${ASSET}" "${DOWNLOAD_PATH}"
 
 EXPECTED_CHECKSUM=$(awk -v asset="${ASSET}" '
     {
@@ -245,16 +266,23 @@ EXPECTED_CHECKSUM=$(awk -v asset="${ASSET}" '
         sub(/^\*/, "", name)
         sub(/^dist\//, "", name)
         if (name == asset) {
-            print $1
-            exit
+            count++
+            checksum = $1
+            if (NF != 2) invalid = 1
         }
     }
-' "${CHECKSUMS_PATH}")
+    END {
+        if (count != 1 || invalid) exit 1
+        print checksum
+    }
+' "${CHECKSUMS_PATH}") || fail "the release checksum for ${ASSET} is missing, invalid, or duplicated"
 case "${EXPECTED_CHECKSUM}" in
     '' | *[!0-9A-Fa-f]*) fail "the release checksum for ${ASSET} is missing or invalid" ;;
     *) ;;
 esac
 [ "${#EXPECTED_CHECKSUM}" -eq 64 ] || fail "the release checksum for ${ASSET} is missing or invalid"
+
+download "${RELEASE_URL}/${ASSET}" "${DOWNLOAD_PATH}"
 
 case "${CHECKSUM_TOOL}" in
     sha256sum) ACTUAL_CHECKSUM=$(sha256sum "${DOWNLOAD_PATH}" | awk '{print $1}') ;;

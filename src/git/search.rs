@@ -1,8 +1,7 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 use crate::search::{
-    SearchFile, SearchHits, SearchMode, SearchRequest, SearchSource, SearchTarget,
-    haystack_matches, name_matches,
+    PreparedSearch, SearchFile, SearchHits, SearchMode, SearchRequest, SearchSource, SearchTarget,
 };
 
 const COMMIT_BODY_FORMAT: &str = "%H%x1f%B%x1e";
@@ -38,13 +37,14 @@ impl Repository {
         mode: SearchMode,
         files: &[SearchFile],
     ) -> Result<SearchHits> {
+        let mut search = PreparedSearch::new(query, mode);
         let mut paths = Vec::new();
         for file in files {
-            let name_hit = mode.includes_name()
-                && (query.is_empty() || name_matches(query, &file.path.to_string_lossy()));
+            let name_hit =
+                mode.includes_name() && search.name_matches(&file.path.to_string_lossy());
             let content_hit = mode.includes_contents()
                 && !query.is_empty()
-                && self.file_contents_match(query, file)?;
+                && self.file_contents_match(&mut search, file)?;
             if query.is_empty() || name_hit || content_hit {
                 paths.push(file.path.to_string_lossy().into_owned());
             }
@@ -70,20 +70,20 @@ impl Repository {
             return Ok(SearchHits::empty(mode, query.to_owned())
                 .with_commits(commits.into_iter().map(|commit| commit.id).collect()));
         }
+        let mut search = PreparedSearch::new(query, mode);
         let mut hits = Vec::new();
         if mode.includes_name() {
-            let lowered = query.to_lowercase();
             hits.extend(
                 commits
                     .iter()
-                    .filter(|commit| commit_name_matches(commit, &lowered))
+                    .filter(|commit| commit_name_matches(commit, search.normalized_query()))
                     .map(|commit| commit.id.clone()),
             );
         }
         if mode.includes_contents() {
-            hits.extend(self.search_commit_messages(query, revision, skip, limit)?);
+            hits.extend(self.search_commit_messages(&mut search, revision, skip, limit)?);
             if let Some(selected) = selected
-                && self.commit_patch_matches(query, selected)
+                && self.commit_patch_matches(&mut search, selected)
             {
                 hits.push(selected.to_owned());
             }
@@ -91,7 +91,7 @@ impl Repository {
         Ok(SearchHits::empty(mode, query.to_owned()).with_commits(hits))
     }
 
-    fn file_contents_match(&self, query: &str, file: &SearchFile) -> Result<bool> {
+    fn file_contents_match(&self, search: &mut PreparedSearch, file: &SearchFile) -> Result<bool> {
         match file.source {
             SearchSource::Worktree => {
                 let Ok(path) = safe_worktree_path(&self.root, &file.path) else {
@@ -107,7 +107,7 @@ impl Repository {
                     .read_to_end(&mut contents)
                     .with_context(|| format!("failed to read {}", file.path.display()))?;
                 contents.truncate(MAX_DIFF_BYTES);
-                Ok(haystack_matches(query, &contents))
+                Ok(search.haystack_matches(&contents))
             }
             SearchSource::Index => {
                 let Some(spec) = git_blob_spec(":0", &file.path) else {
@@ -117,7 +117,7 @@ impl Repository {
                     [OsString::from("cat-file"), OsString::from("blob"), spec],
                     MAX_DIFF_BYTES,
                 ) {
-                    Ok((bytes, _)) => Ok(haystack_matches(query, &bytes)),
+                    Ok((bytes, _)) => Ok(search.haystack_matches(&bytes)),
                     Err(_) => Ok(false),
                 }
             }
@@ -126,7 +126,7 @@ impl Repository {
 
     fn search_commit_messages(
         &self,
-        query: &str,
+        search: &mut PreparedSearch,
         revision: &str,
         skip: usize,
         limit: usize,
@@ -149,10 +149,10 @@ impl Repository {
             ],
             MAX_DIFF_BYTES,
         )?;
-        Ok(parse_matching_commit_bodies(&output, query))
+        Ok(parse_matching_commit_bodies(&output, search))
     }
 
-    fn commit_patch_matches(&self, query: &str, selected: &str) -> bool {
+    fn commit_patch_matches(&self, search: &mut PreparedSearch, selected: &str) -> bool {
         if selected.is_empty() || selected.starts_with('-') {
             return false;
         }
@@ -168,7 +168,7 @@ impl Repository {
             ],
             MAX_DIFF_BYTES,
         ) {
-            Ok((bytes, _)) => haystack_matches(query, &bytes),
+            Ok((bytes, _)) => search.haystack_matches(&bytes),
             Err(_) => false,
         }
     }
@@ -181,13 +181,13 @@ impl github::PreparedPullRequest {
         mode: SearchMode,
         paths: &[PathBuf],
     ) -> SearchHits {
+        let mut search = PreparedSearch::new(query, mode);
         let mut matched = Vec::new();
         for path in paths {
-            let name_hit = mode.includes_name()
-                && (query.is_empty() || name_matches(query, &path.to_string_lossy()));
+            let name_hit = mode.includes_name() && search.name_matches(&path.to_string_lossy());
             let content_hit = mode.includes_contents()
                 && !query.is_empty()
-                && self.file_contents_match(query, path);
+                && self.file_contents_match(&mut search, path);
             if query.is_empty() || name_hit || content_hit {
                 matched.push(path.to_string_lossy().into_owned());
             }
@@ -195,9 +195,9 @@ impl github::PreparedPullRequest {
         SearchHits::empty(mode, query.to_owned()).with_paths(matched)
     }
 
-    fn file_contents_match(&self, query: &str, path: &Path) -> bool {
+    fn file_contents_match(&self, search: &mut PreparedSearch, path: &Path) -> bool {
         self.blob(path)
-            .is_ok_and(|bytes| haystack_matches(query, &bytes))
+            .is_ok_and(|bytes| search.haystack_matches(&bytes))
     }
 }
 
@@ -211,7 +211,7 @@ fn commit_name_matches(commit: &Commit, query: &str) -> bool {
             .any(|decoration| decoration.to_lowercase().contains(query))
 }
 
-fn parse_matching_commit_bodies(output: &[u8], query: &str) -> Vec<String> {
+fn parse_matching_commit_bodies(output: &[u8], search: &mut PreparedSearch) -> Vec<String> {
     let mut hits = Vec::new();
     for record in output.split(|byte| *byte == 0x1e) {
         let record = trim_ascii(record);
@@ -223,7 +223,7 @@ fn parse_matching_commit_bodies(output: &[u8], query: &str) -> Vec<String> {
             continue;
         };
         let body = fields.next().unwrap_or(b"");
-        if haystack_matches(query, body) {
+        if search.haystack_matches(body) {
             hits.push(text(id));
         }
     }

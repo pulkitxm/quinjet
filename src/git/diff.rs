@@ -38,7 +38,8 @@ pub(crate) fn attach_file_previews(
     document: &mut DiffDocument,
     source: &impl DiffBlobSource,
     expanded: bool,
+    highlighting: bool,
 ) {
-    pdf::attach_pdf_sources(document, source, expanded);
+    pdf::attach_pdf_sources(document, source, expanded, highlighting);
     attach_image_previews(document, source);
 }

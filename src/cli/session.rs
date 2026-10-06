@@ -19,6 +19,12 @@ impl Session {
         }
     }
 
+    pub(crate) fn set_diff_highlighting(&mut self, enabled: bool) {
+        self.repository.set_diff_highlighting(enabled);
+        self.local_diffs = LocalDiffWorkspaces::new();
+        self.pull_request_diff = None;
+    }
+
     pub(crate) fn execute(&mut self, command: Command) -> Result<Outcome> {
         self.execute_with(command, &mut |_| {}, &|| true)
     }
@@ -299,18 +305,64 @@ impl<T> LocalDiffWorkspaces<T> {
 mod tests {
     #[cfg(unix)]
     use std::cell::Cell;
-    #[cfg(unix)]
     use std::fs;
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
 
     #[cfg(unix)]
-    use super::{Command, Outcome, Session};
-    use super::{LocalDiffWorkspaceKind, LocalDiffWorkspaces};
+    use super::Outcome;
+    use super::{Command, LocalDiffRequest, LocalDiffWorkspaceKind, LocalDiffWorkspaces, Session};
     #[cfg(unix)]
     use crate::git::github::{GitHubRepository, PullRequest};
-    #[cfg(unix)]
     use crate::git::tests::TestRepository;
+
+    #[test]
+    fn plain_diff_presentation_preserves_text_and_default_sessions_keep_syntax() {
+        let fixture = TestRepository::with_branch("main");
+        let repository = fixture.repository();
+        fs::write(
+            repository.root().join("main.rs"),
+            "fn main() {\n\tlet value = \"猫\";\n}\n",
+        )
+        .unwrap();
+        let request = LocalDiffRequest::Changes {
+            changes: repository.status().unwrap().changes,
+            version: 0,
+            expanded: false,
+        };
+        let mut session = Session::new(repository);
+        let mut rendered = Vec::new();
+        for highlighting in [true, false] {
+            drop(
+                session
+                    .execute(Command::PrepareLocalDiff {
+                        workspace: 1,
+                        request: Box::new(request.clone()),
+                    })
+                    .unwrap(),
+            );
+            let (_, document) = session
+                .execute(Command::LocalDiffFile {
+                    workspace: 1,
+                    path: "main.rs".into(),
+                })
+                .unwrap()
+                .local_diff_file()
+                .unwrap();
+            assert_eq!(
+                document
+                    .lines
+                    .iter()
+                    .flat_map(|line| &line.spans)
+                    .any(|span| span.foreground.is_some()),
+                highlighting
+            );
+            rendered.push((
+                super::super::render::diff(&document),
+                super::super::render::diff_terminal(&document),
+            ));
+            session.set_diff_highlighting(false);
+        }
+        assert_eq!(rendered[0], rendered[1]);
+    }
 
     #[test]
     fn paused_changes_workspace_survives_history_browsing() {
@@ -343,20 +395,17 @@ mod tests {
     fn stack_warming_continues_after_a_member_read_fails() {
         let fixture = TestRepository::with_branch("main");
         let repository = fixture.repository();
-        let executable = repository.root().join("gh");
+        let script = repository.root().join("pr");
         let calls = repository.root().join("calls");
         fs::write(
-            &executable,
+            &script,
             format!(
-                "#!/bin/sh\nprintf 'call\\n' >> '{}'\nprintf 'failed\\n' >&2\nexit 1\n",
+                "printf '%s\\n' \"$2\" >> '{}'\nprintf 'failed\\n' >&2\nexit 1\n",
                 calls.display()
             ),
         )
         .unwrap();
-        let mut permissions = fs::metadata(&executable).unwrap().permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&executable, permissions).unwrap();
-        let mut session = Session::new(fixture.repository_with_github_cli(executable));
+        let mut session = Session::new(fixture.repository_with_github_cli("/bin/sh".into()));
         let pull_requests = [41, 42]
             .map(|number| PullRequest {
                 number,
@@ -385,6 +434,6 @@ mod tests {
             .unwrap();
 
         assert!(matches!(outcome, Outcome::Warmed));
-        assert_eq!(fs::read_to_string(calls).unwrap(), "call\ncall\n");
+        assert_eq!(fs::read_to_string(calls).unwrap(), "41\n42\n");
     }
 }

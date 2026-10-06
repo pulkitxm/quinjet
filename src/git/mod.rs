@@ -16,7 +16,7 @@ use serde::Serialize;
 
 use self::diff::{
     CommitDetails, DiffDocument, DiffFileIndexEntry, DiffIndex, DiffLineCounts, LoadedBlob,
-    parse_diff, parse_numstat,
+    parse_diff_with_highlighting, parse_numstat,
 };
 use self::github::{bounded_command_error, run_bounded_command};
 use self::history::{Commit, LOG_FORMAT, parse_log};
@@ -295,6 +295,7 @@ pub(crate) fn read_git_blob(dir: &Path, spec: &str, limit: usize) -> LoadedBlob 
 pub(crate) struct Repository {
     root: PathBuf,
     github_cli: Option<PathBuf>,
+    diff_highlighting: bool,
 }
 
 mod local_diff;

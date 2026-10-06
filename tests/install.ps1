@@ -28,6 +28,22 @@ function Assert-Contains {
     }
 }
 
+function Assert-InstallFailure {
+    param(
+        [string] $RequestedVersion,
+        [string] $Directory,
+        [string] $Pattern,
+        [string] $Log = (Join-Path $TestRoot "failed-install.log")
+    )
+    try {
+        & $Installer -Version $RequestedVersion -BinDir $Directory -NoModifyPath *> $Log
+        throw "installation unexpectedly succeeded"
+    }
+    catch {
+        if ($_.Exception.Message -notlike $Pattern) { throw }
+    }
+}
+
 function New-ExecutableFixture {
     param([string] $OutputAssembly)
 
@@ -88,20 +104,44 @@ function global:Invoke-WebRequest {
         [Parameter(Mandatory)]
         [string] $Uri,
 
-        [Parameter(Mandatory)]
+        [Parameter()]
         [string] $OutFile,
 
         [Parameter()]
-        [switch] $UseBasicParsing
+        [switch] $UseBasicParsing,
+
+        [Parameter()]
+        [string] $Method = "Get",
+
+        [Parameter()]
+        [int] $TimeoutSec,
+
+        [Parameter()]
+        [int] $MaximumRedirection
     )
 
+    Assert-Equal -Expected 30 -Actual $TimeoutSec -Message "request timeout"
+    Assert-Equal -Expected "SilentlyContinue" -Actual $ProgressPreference -Message "download progress"
     Add-Content -LiteralPath $global:QuinjetDownloadsLog -Value $Uri
+    if ($Method -eq "Head") {
+        Assert-Equal -Expected 5 -Actual $MaximumRedirection -Message "redirect limit"
+        return [pscustomobject]@{
+            BaseResponse = [pscustomobject]@{
+                ResponseUri = [Uri] $global:QuinjetLatestUrl
+                RequestMessage = [pscustomobject]@{ RequestUri = [Uri] $global:QuinjetLatestUrl }
+            }
+        }
+    }
+    if ($Uri -like "*/latest/download/*") {
+        throw "asset download was not pinned"
+    }
     $asset = [IO.Path]::GetFileName(([Uri] $Uri).AbsolutePath)
     Copy-Item -LiteralPath (Join-Path $global:QuinjetFixtures $asset) -Destination $OutFile
 }
 
 $global:QuinjetFixtures = $Fixtures
 $global:QuinjetDownloadsLog = $DownloadsLog
+$global:QuinjetLatestUrl = "https://github.com/pulkitxm/quinjet/releases/tag/v1.2.3"
 $originalInstallDir = $env:QUINJET_INSTALL_DIR
 $originalVersion = $env:QUINJET_VERSION
 $originalNoModifyPath = $env:QUINJET_NO_MODIFY_PATH
@@ -122,6 +162,35 @@ try {
     Assert-Contains -Needle "https://github.com/pulkitxm/quinjet/releases/download/v1.2.3/quinjet-windows-x86_64.exe" -Path $DownloadsLog
     Assert-Contains -Needle "verified SHA-256 checksum" -Path (Join-Path $TestRoot "successful-install.log")
 
+    Write-Host "test: resolves latest once and pins both downloads"
+    $downloadCount = (Get-Content -LiteralPath $DownloadsLog).Count
+    & $Installer -Version "latest" -BinDir (Join-Path $TestRoot "latest-install\bin") -NoModifyPath *> (Join-Path $TestRoot "latest-install.log")
+    Assert-Equal -Expected ($downloadCount + 3) -Actual (Get-Content -LiteralPath $DownloadsLog).Count -Message "pinned latest request count"
+
+    Write-Host "test: rejects invalid latest redirects before fetching assets"
+    foreach ($latestUrl in @("https://example.com/releases/tag/v1.2.3", "https://github.com/pulkitxm/quinjet/releases/tag/v1.2.3-beta.1")) {
+        $global:QuinjetLatestUrl = $latestUrl
+        $downloadCount = (Get-Content -LiteralPath $DownloadsLog).Count
+        Assert-InstallFailure -RequestedVersion "latest" -Directory (Join-Path $TestRoot "invalid-latest") -Pattern "invalid latest release*"
+        Assert-Equal -Expected ($downloadCount + 1) -Actual (Get-Content -LiteralPath $DownloadsLog).Count -Message "invalid redirect request count"
+    }
+    $global:QuinjetLatestUrl = "https://github.com/pulkitxm/quinjet/releases/tag/v1.2.3"
+
+    Write-Host "test: rejects invalid checksum records before fetching the binary"
+    foreach ($checksumCase in @("duplicate", "missing", "malformed")) {
+        Set-ReleaseFixture -Contents "new binary"
+        $checksums = Join-Path $Fixtures "SHA256SUMS"
+        switch ($checksumCase) {
+            "duplicate" { Add-Content -LiteralPath $checksums -Value ([IO.File]::ReadAllText($checksums)) }
+            "missing" { [IO.File]::WriteAllText($checksums, (("0" * 64) + "  other.exe`n")) }
+            "malformed" { [IO.File]::WriteAllText($checksums, "invalid  quinjet-windows-x86_64.exe`n") }
+        }
+        $downloadCount = (Get-Content -LiteralPath $DownloadsLog).Count
+        Assert-InstallFailure -RequestedVersion "1.2.3" -Directory $binDir -Pattern "the release checksum*"
+        Assert-Equal -Expected ($downloadCount + 1) -Actual (Get-Content -LiteralPath $DownloadsLog).Count -Message "invalid checksum request count"
+        Assert-Equal -Expected $expectedHash -Actual (Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash -Message "existing binary preserved"
+    }
+
     Write-Host "test: rejects a checksum mismatch without replacing an installation"
     $binDir = Join-Path $TestRoot "bad-checksum\bin"
     New-Item -ItemType Directory -Path $binDir | Out-Null
@@ -129,41 +198,13 @@ try {
     [IO.File]::WriteAllText($installed, "existing binary")
     Set-ReleaseFixture -Contents "tampered binary" -InvalidChecksum
 
-    $failedAsExpected = $false
-    try {
-        & $Installer -Version "latest" -BinDir $binDir -NoModifyPath *> (Join-Path $TestRoot "bad-checksum.log")
-    }
-    catch {
-        if ($_.Exception.Message -like "*checksum verification failed*") {
-            $failedAsExpected = $true
-        }
-        else {
-            throw
-        }
-    }
-    if (-not $failedAsExpected) {
-        throw "checksum mismatch unexpectedly succeeded"
-    }
+    Assert-InstallFailure -RequestedVersion "latest" -Directory $binDir -Pattern "*checksum verification failed*" -Log (Join-Path $TestRoot "bad-checksum.log")
     Assert-Equal -Expected "existing binary" -Actual ([IO.File]::ReadAllText($installed)) -Message "existing installation"
-    Assert-Contains -Needle "https://github.com/pulkitxm/quinjet/releases/latest/download/quinjet-windows-x86_64.exe" -Path $DownloadsLog
+    Assert-Contains -Needle "https://github.com/pulkitxm/quinjet/releases/download/v1.2.3/quinjet-windows-x86_64.exe" -Path $DownloadsLog
 
     Write-Host "test: rejects unsafe version values before downloading"
     $downloadCount = (Get-Content -LiteralPath $DownloadsLog).Count
-    $failedAsExpected = $false
-    try {
-        & $Installer -Version "v1/../../invalid" -BinDir (Join-Path $TestRoot "invalid-version") -NoModifyPath
-    }
-    catch {
-        if ($_.Exception.Message -like "*invalid release version*") {
-            $failedAsExpected = $true
-        }
-        else {
-            throw
-        }
-    }
-    if (-not $failedAsExpected) {
-        throw "invalid release version unexpectedly succeeded"
-    }
+    Assert-InstallFailure -RequestedVersion "v1/../../invalid" -Directory (Join-Path $TestRoot "invalid-version") -Pattern "*invalid release version*"
     Assert-Equal -Expected $downloadCount -Actual (Get-Content -LiteralPath $DownloadsLog).Count -Message "download count"
 
     Write-Host "All PowerShell installer tests passed."
@@ -176,5 +217,6 @@ finally {
     Remove-Item Function:\Invoke-WebRequest -Force -ErrorAction SilentlyContinue
     Remove-Variable QuinjetFixtures -Scope Global -ErrorAction SilentlyContinue
     Remove-Variable QuinjetDownloadsLog -Scope Global -ErrorAction SilentlyContinue
+    Remove-Variable QuinjetLatestUrl -Scope Global -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $TestRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

@@ -45,6 +45,10 @@ impl App {
 
     pub(crate) fn change_rows(&self) -> Vec<ChangeRow> {
         let visible = self.visible_change_indices();
+        self.change_rows_for(&visible)
+    }
+
+    pub(crate) fn change_rows_for(&self, visible: &[usize]) -> Vec<ChangeRow> {
         let mut rows = Vec::new();
         for section in ChangeSection::ALL {
             let members = visible
@@ -114,20 +118,13 @@ impl App {
             return self.pull_request_file_view == PullRequestFileView::AllFiles
                 && self.pull_request_files.len() > 1;
         }
-        let rendered_files = self.document.file_count();
         if self.local_diff_preserving_document {
-            return rendered_files > 1;
+            return self.preview_header_indices().len() > 1;
         }
         if let Some(index) = self.local_diff_index.as_ref() {
             return index.files.len() > 1;
         }
-        self.document
-            .lines
-            .iter()
-            .filter(|line| line.kind == DiffLineKind::FileHeader)
-            .take(2)
-            .count()
-            > 1
+        self.preview_header_indices().len() > 1
     }
 
     pub(crate) fn preview_file_collapsed(&self, path: &str) -> bool {
@@ -285,21 +282,12 @@ impl App {
     }
 
     pub(crate) fn preview_files_all_collapsed(&self) -> bool {
-        let paths = self.preview_file_paths();
-        paths.len() > 1
-            && paths
-                .iter()
-                .all(|path| self.preview_file_collapsed(&path.to_string_lossy()))
+        let mut paths = self.rendered_preview_paths();
+        paths.clone().take(2).count() > 1 && paths.all(|path| self.preview_file_collapsed(path))
     }
 
     pub(super) fn preview_file_paths(&self) -> Vec<PathBuf> {
-        self.document
-            .lines
-            .iter()
-            .filter(|line| line.kind == DiffLineKind::FileHeader)
-            .filter_map(|line| line.spans.first())
-            .map(|span| PathBuf::from(span.text.split("  · ").next().unwrap_or(span.text.as_str())))
-            .collect()
+        self.rendered_preview_paths().map(PathBuf::from).collect()
     }
 
     pub(super) fn navigate_preview_file(&mut self, amount: isize) {
