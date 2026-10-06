@@ -1,10 +1,6 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "the draw pass reads better as one top-to-bottom pass"
-)]
 #[doc = " Parse a unified diff and highlight code on the old and new sides independently."]
 #[doc = " Keeping two parser states avoids additions corrupting the old-file syntax state and"]
 #[doc = " removals corrupting the new-file state."]
@@ -14,12 +10,27 @@ pub(crate) fn parse_diff(
     path_hint: Option<&Path>,
     truncated: bool,
 ) -> DiffDocument {
+    parse_diff_with_highlighting(raw, title, path_hint, truncated, true)
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "the draw pass reads better as one top-to-bottom pass"
+)]
+pub(crate) fn parse_diff_with_highlighting(
+    raw: &[u8],
+    title: impl Into<String>,
+    path_hint: Option<&Path>,
+    truncated: bool,
+    highlighting: bool,
+) -> DiffDocument {
     let title = title.into();
     if raw.is_empty() {
         return DiffDocument::empty(title, "No textual diff to display");
     }
 
-    let assets = (raw.len() <= MAX_SYNTAX_HIGHLIGHT_PATCH_BYTES).then(highlight_assets);
+    let assets =
+        (highlighting && raw.len() <= MAX_SYNTAX_HIGHLIGHT_PATCH_BYTES).then(highlight_assets);
     let mut active_path = path_hint.map(Path::to_path_buf);
     let mut old_highlighter = highlighter_for_path(assets, active_path.as_deref());
     let mut new_highlighter = highlighter_for_path(assets, active_path.as_deref());

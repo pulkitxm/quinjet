@@ -24,6 +24,7 @@ impl Repository {
         Ok(Self {
             root: PathBuf::from(root),
             github_cli: None,
+            diff_highlighting: true,
         })
     }
 
@@ -33,6 +34,10 @@ impl Repository {
 
     pub(crate) fn clone_for_worker(&self) -> Self {
         self.clone()
+    }
+
+    pub(crate) const fn set_diff_highlighting(&mut self, enabled: bool) {
+        self.diff_highlighting = enabled;
     }
 
     pub(crate) fn name(&self) -> String {
