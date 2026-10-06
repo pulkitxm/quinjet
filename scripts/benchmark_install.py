@@ -103,7 +103,7 @@ def benchmark(args):
     with tempfile.TemporaryDirectory(
         prefix="quinjet-install-comparison-", dir=args.temp_dir
     ) as directory:
-        root = Path(directory)
+        root = Path(directory).resolve()
         tools = prepare_transport(root, binaries, args.asset)
         for trial in range(args.samples):
             order = ("baseline", "candidate") if trial % 2 == 0 else ("candidate", "baseline")

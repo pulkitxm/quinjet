@@ -277,7 +277,7 @@ def benchmark(args):
     terminal = os.name == "posix" and not args.no_terminal
     results = binary_results(binaries, terminal=terminal)
     with tempfile.TemporaryDirectory(prefix="quinjet-benchmark-", dir=args.temp_dir) as directory:
-        root = Path(directory)
+        root = Path(directory).resolve()
         repository = fixture(root, environment(root / "git-home"))
         staged = []
         binary_name = "quinjet.exe" if os.name == "nt" else "quinjet"
