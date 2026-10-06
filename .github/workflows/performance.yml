@@ -72,7 +72,7 @@ jobs:
           sudo apt-get install --yes musl-tools
       - name: Set up the shared stable toolchain
         run: rustup toolchain install stable --profile minimal --no-self-update --target "${TARGET}"
-      - uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780
+      - uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7
         with:
           tool: cargo-auditable@0.7.7,rust-audit-info@0.5.4
           fallback: cargo-install
