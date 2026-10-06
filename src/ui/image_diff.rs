@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::num::NonZeroU16;
 use std::sync::{Arc, OnceLock};
 
@@ -13,23 +12,21 @@ use ratatui_image::protocol::Protocol;
 use ratatui_image::{Image, Resize};
 use unicode_width::UnicodeWidthStr;
 
-use super::{DiffLine, Frame, Rect, Theme};
+use super::{App, DiffLine, Frame, Rect, Theme};
 use crate::git::diff::{ImagePreview, ImageProtocol, ImageRaster, ImageSide};
 
 mod kitty;
 use kitty::KittyPlacement;
+pub(super) mod preparation;
+pub(super) use preparation::PreparationFrame;
+use preparation::{EncodedImage, IMAGE_PREPARATION, ImageKey};
 
 static IMAGE_PICKER: OnceLock<(Picker, ImageProtocol)> = OnceLock::new();
-thread_local! {
-    static ENCODED_IMAGES: RefCell<Vec<EncodedImage>> = const { RefCell::new(Vec::new()) };
-}
 
-struct EncodedImage {
-    raster: Arc<ImageRaster>,
-    protocol: ImageProtocol,
-    width: u16,
-    height: u16,
-    display: NativeDisplay,
+pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
+    let _images_ready = crate::ui::image_preparation_ready();
+    let _image_frame = PreparationFrame::begin();
+    super::layout::draw(frame, app, theme);
 }
 
 enum NativeDisplay {
@@ -191,60 +188,44 @@ fn draw_native(
     if width == 0 {
         return false;
     }
-    ENCODED_IMAGES.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        let position = cache.iter().position(|entry| {
-            Arc::ptr_eq(&entry.raster, raster)
-                && entry.protocol == protocol
-                && entry.width == width
-                && entry.height == height
-        });
-        if let Some(position) = position {
-            let Some(entry) = cache.get_mut(position) else {
-                return false;
-            };
-            return render_native(frame, area, preview.row, remaining_height, entry);
-        }
-        let Some(image) = raster_dynamic(raster) else {
-            return false;
-        };
-        let mut picker = IMAGE_PICKER
-            .get()
-            .map_or_else(Picker::halfblocks, |(picker, _)| picker.clone());
-        picker.set_protocol_type(match protocol {
-            ImageProtocol::Kitty => ProtocolType::Kitty,
-            ImageProtocol::Iterm2 => ProtocolType::Iterm2,
-            ImageProtocol::Sixel => ProtocolType::Sixel,
-            ImageProtocol::Halfblocks => ProtocolType::Halfblocks,
-        });
-        let Ok(encoded) =
-            picker.new_protocol(image, Rect::new(0, 0, width, height), Resize::Fit(None))
-        else {
-            return false;
-        };
-        if cache.len() == 4 {
-            drop(cache.remove(0));
-        }
-        let display = if protocol == ImageProtocol::Kitty {
-            let Some(placement) = KittyPlacement::new(&encoded) else {
-                return false;
-            };
-            NativeDisplay::Kitty(placement)
-        } else {
-            NativeDisplay::Other(encoded)
-        };
-        cache.push(EncodedImage {
+    IMAGE_PREPARATION.with(|preparation| {
+        let mut preparation = preparation.borrow_mut();
+        let key = ImageKey {
             raster: Arc::clone(raster),
             protocol,
             width,
             height,
-            display,
-        });
-        let Some(entry) = cache.last_mut() else {
+        };
+        let Some(entry) = preparation.display(key) else {
             return false;
         };
         render_native(frame, area, preview.row, remaining_height, entry)
     })
+}
+
+fn prepare_native(key: &ImageKey) -> Option<NativeDisplay> {
+    let image = raster_dynamic(&key.raster)?;
+    let mut picker = IMAGE_PICKER
+        .get()
+        .map_or_else(Picker::halfblocks, |(picker, _)| picker.clone());
+    picker.set_protocol_type(match key.protocol {
+        ImageProtocol::Kitty => ProtocolType::Kitty,
+        ImageProtocol::Iterm2 => ProtocolType::Iterm2,
+        ImageProtocol::Sixel => ProtocolType::Sixel,
+        ImageProtocol::Halfblocks => ProtocolType::Halfblocks,
+    });
+    let encoded = picker
+        .new_protocol(
+            image,
+            Rect::new(0, 0, key.width, key.height),
+            Resize::Fit(None),
+        )
+        .ok()?;
+    if key.protocol == ImageProtocol::Kitty {
+        KittyPlacement::new(&encoded).map(NativeDisplay::Kitty)
+    } else {
+        Some(NativeDisplay::Other(encoded))
+    }
 }
 
 fn render_native(
@@ -254,16 +235,19 @@ fn render_native(
     remaining_height: u16,
     entry: &mut EncodedImage,
 ) -> bool {
-    match &mut entry.display {
+    let Some(display) = entry.display.as_mut() else {
+        return false;
+    };
+    match display {
         NativeDisplay::Kitty(placement) => {
             placement.render(frame, area, row_offset, remaining_height)
         }
         NativeDisplay::Other(encoded) => {
             frame.render_widget(
                 Image::new(encoded),
-                Rect::new(area.x, area.y, entry.width, entry.height),
+                Rect::new(area.x, area.y, entry.key.width, entry.key.height),
             );
-            for row in 0..entry.height {
+            for row in 0..entry.key.height {
                 if let Some(cell) = frame
                     .buffer_mut()
                     .cell_mut((area.x, area.y.saturating_add(row)))

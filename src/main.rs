@@ -155,6 +155,7 @@ fn open_terminal(
         }
     }
     while running {
+        dirty |= ui::image_preparation_ready();
         if dirty {
             if let Some(current) = workspace.as_mut() {
                 let Some(app) = current.active_app_mut() else {

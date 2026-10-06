@@ -443,9 +443,9 @@ use feedback::{draw_modal_hint, draw_toast, progress_bar};
 pub(crate) use help::{draw_help, help_shortcut_count};
 #[cfg(test)]
 pub(crate) use help::{help_display_index, help_rows, help_shortcut_index_at};
-pub(crate) use image_diff::initialize_image_picker;
+pub(crate) use image_diff::preparation::image_preparation_ready;
 use image_diff::{ImageDrawState, draw_image_line, image_side, selected_image_protocol};
-pub(crate) use layout::draw;
+pub(crate) use image_diff::{draw, initialize_image_picker};
 use layout::draw_main_divider;
 #[cfg(test)]
 use layout::draw_text_selection;
