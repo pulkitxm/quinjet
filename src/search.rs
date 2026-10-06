@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use clap::ValueEnum;
-use grep_regex::RegexMatcherBuilder;
+use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use grep_searcher::sinks::Bytes;
-use grep_searcher::{BinaryDetection, SearcherBuilder};
+use grep_searcher::{BinaryDetection, Searcher, SearcherBuilder};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum, Serialize)]
@@ -123,6 +123,64 @@ impl SearchHits {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct PreparedSearch {
+    normalized_query: String,
+    contents: Option<PreparedContents>,
+}
+
+#[derive(Debug)]
+struct PreparedContents {
+    matcher: RegexMatcher,
+    searcher: Searcher,
+}
+
+impl PreparedSearch {
+    pub(crate) fn new(query: &str, mode: SearchMode) -> Self {
+        let contents = if mode.includes_contents() && !query.is_empty() {
+            matcher_for(query).map(|matcher| PreparedContents {
+                matcher,
+                searcher: SearcherBuilder::new()
+                    .binary_detection(BinaryDetection::quit(0))
+                    .build(),
+            })
+        } else {
+            None
+        };
+        Self {
+            normalized_query: query.to_lowercase(),
+            contents,
+        }
+    }
+
+    pub(crate) const fn normalized_query(&self) -> &str {
+        self.normalized_query.as_str()
+    }
+
+    pub(crate) fn name_matches(&self, text: &str) -> bool {
+        self.normalized_query.is_empty() || text.to_lowercase().contains(&self.normalized_query)
+    }
+
+    pub(crate) fn haystack_matches(&mut self, haystack: &[u8]) -> bool {
+        if self.normalized_query.is_empty() {
+            return true;
+        }
+        let Some(contents) = self.contents.as_mut() else {
+            return false;
+        };
+        let mut found = false;
+        drop(contents.searcher.search_slice(
+            &contents.matcher,
+            haystack,
+            Bytes(|_, _| {
+                found = true;
+                Ok(false)
+            }),
+        ));
+        found
+    }
+}
+
 pub(crate) fn name_matches(query: &str, text: &str) -> bool {
     if query.is_empty() {
         return true;
@@ -130,29 +188,7 @@ pub(crate) fn name_matches(query: &str, text: &str) -> bool {
     text.to_lowercase().contains(&query.to_lowercase())
 }
 
-pub(crate) fn haystack_matches(query: &str, haystack: &[u8]) -> bool {
-    if query.is_empty() {
-        return true;
-    }
-    let Some(matcher) = matcher_for(query) else {
-        return false;
-    };
-    let mut found = false;
-    let mut searcher = SearcherBuilder::new()
-        .binary_detection(BinaryDetection::quit(0))
-        .build();
-    drop(searcher.search_slice(
-        &matcher,
-        haystack,
-        Bytes(|_, _| {
-            found = true;
-            Ok(false)
-        }),
-    ));
-    found
-}
-
-fn matcher_for(query: &str) -> Option<grep_regex::RegexMatcher> {
+fn matcher_for(query: &str) -> Option<RegexMatcher> {
     RegexMatcherBuilder::new()
         .case_insensitive(true)
         .build(query)
@@ -180,12 +216,69 @@ mod tests {
 
     #[test]
     fn contents_uses_ripgrep_regex_and_falls_back_to_literals() {
+        let haystack_matches = |query: &str, haystack: &[u8]| {
+            PreparedSearch::new(query, SearchMode::Contents).haystack_matches(haystack)
+        };
         assert!(haystack_matches("foo", b"hello foo bar"));
         assert!(haystack_matches("FOO", b"hello foo bar"));
         assert!(haystack_matches("f.o", b"fao"));
         assert!(!haystack_matches("zzz", b"hello foo"));
         assert!(haystack_matches("(", b"value (ok)"));
         assert!(haystack_matches("", b"anything"));
+        assert!(haystack_matches("école", "ÉCOLE".as_bytes()));
+        assert!(haystack_matches("^foo$", b"before\nFOO\nafter\n"));
+        assert!(!haystack_matches("^foo$", b"beforeFOOafter\n"));
+    }
+
+    #[test]
+    fn prepared_search_resets_between_documents() {
+        let mut early_match_utf16 = vec![0xff, 0xfe];
+        early_match_utf16.extend("needle\n".encode_utf16().flat_map(u16::to_le_bytes));
+        early_match_utf16.resize(512 * 1024, b' ');
+        let documents: &[(&[u8], bool)] = &[
+            (b"", false),
+            (b"no match\n", false),
+            (b"before\nNEEDLE\nafter\n", true),
+            (b"", false),
+            (b"\xef\xbb\xbfNEEDLE\n", true),
+            (b"\xff\xfen\0e\0e\0d\0l\0e\0\n\0", true),
+            (b"needle\0needle\n", false),
+            (b"no match\n", false),
+            (b"\xfe\xff\0N\0E\0E\0D\0L\0E\0\n", true),
+            (b"\0needle\n", false),
+            (&early_match_utf16, true),
+            (b"\xff\xfen\0o\0\n\0", false),
+            (b"no match\n", false),
+            (b"needle\n", true),
+            (b"", false),
+        ];
+        for query in ["needle", "^needle$"] {
+            let mut search = PreparedSearch::new(query, SearchMode::Contents);
+            for _ in 0..2 {
+                for (index, &(document, expected)) in documents.iter().enumerate() {
+                    let fresh =
+                        PreparedSearch::new(query, SearchMode::Contents).haystack_matches(document);
+                    let reused = search.haystack_matches(document);
+                    assert_eq!(reused, fresh, "{query:?}: document {index}");
+                    assert_eq!(reused, expected, "{query:?}: document {index}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn name_only_and_empty_queries_skip_contents_preparation() {
+        let search = PreparedSearch::new("(READ", SearchMode::Name);
+        assert!(search.contents.is_none(), "{search:?}");
+        assert!(search.name_matches("src/(read).txt"));
+        assert!(!search.name_matches("README.md"));
+        for mode in SearchMode::ALL {
+            let mut search = PreparedSearch::new("", mode);
+            assert!(search.contents.is_none(), "{search:?}");
+            for document in [b"".as_slice(), b"\0binary", b"\xff\xfe"] {
+                assert!(search.haystack_matches(document), "{mode:?}: {document:?}");
+            }
+        }
     }
 
     #[test]
