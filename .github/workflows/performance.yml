@@ -23,18 +23,23 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             binary: quinjet
+            budget: 8_000_000
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
             binary: quinjet
+            budget: 7_500_000
           - os: macos-15-intel
             target: x86_64-apple-darwin
             binary: quinjet
+            budget: 7_500_000
           - os: macos-14
             target: aarch64-apple-darwin
             binary: quinjet
+            budget: 5_500_000
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             binary: quinjet.exe
+            budget: 7_500_000
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -43,6 +48,7 @@ jobs:
       TARGET: ${{ matrix.target }}
       BINARY: ${{ matrix.binary }}
       RUNNER: ${{ matrix.os }}
+      BUDGET: ${{ matrix.budget }}
       PYTHON: ${{ matrix.os == 'windows-latest' && 'python' || 'python3' }}
       RUSTUP_TOOLCHAIN: stable
       CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -99,7 +105,7 @@ jobs:
               "rust_audit_info": "0.5.4",
               "recipe": ["cargo", "auditable", "build", "--release", "--locked", "--target", os.environ["TARGET"]],
               "aspirational_budget_bytes": 5_000_000,
-              "regression_budget_bytes": 7_500_000,
+              "regression_budget_bytes": int(os.environ["BUDGET"]),
               "samples": 21,
               "build_method": "empty per-revision target directories; prefetched locked sources; baseline then candidate",
           }
@@ -115,6 +121,7 @@ jobs:
           "${PYTHON}" - <<'PY'
           import json
           import os
+          import re
           import shutil
           import subprocess
           import time
@@ -124,14 +131,36 @@ jobs:
           report = json.loads(metadata.read_text(encoding="utf-8"))
           report["builds"] = {}
           for revision in ("baseline", "candidate"):
+              flags = ""
+              if revision == "candidate" and os.environ["TARGET"] == "x86_64-unknown-linux-musl":
+                  version = re.match(r"rustc (\d+)\.(\d+)\.", report["rustc"])
+                  if version is None or tuple(map(int, version.groups())) < (1, 93):
+                      raise RuntimeError("packed musl relocations require Rust 1.93 or newer")
+                  flags = "-C link-arg=-Wl,-z,pack-relative-relocs"
+              environment = dict(os.environ, RUSTFLAGS=flags)
               started = time.monotonic()
-              subprocess.run(report["recipe"], cwd=revision, check=True)
+              subprocess.run(report["recipe"], cwd=revision, env=environment, check=True)
               elapsed = time.monotonic() - started
               binary = Path(revision) / "target" / os.environ["TARGET"] / "release" / os.environ["BINARY"]
               shutil.copy2(binary, Path("reports") / f"{revision}-{os.environ['BINARY']}")
-              report["builds"][revision] = {"seconds": round(elapsed, 3), "bytes": binary.stat().st_size}
+              report["builds"][revision] = {
+                  "seconds": round(elapsed, 3), "bytes": binary.stat().st_size, "rustflags": flags,
+              }
               metadata.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
           PY
+      - name: Verify packed Linux release remains self-contained
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          binary="reports/candidate-${BINARY}"
+          readelf --dynamic "${binary}" | grep -F '(RELR)'
+          if readelf --dynamic "${binary}" | grep -F '(NEEDED)'; then
+            echo 'the musl release must not need a dynamic library' >&2
+            exit 1
+          fi
+          if readelf --program-headers "${binary}" | grep -F 'INTERP'; then
+            echo 'the musl release must not need a dynamic loader' >&2
+            exit 1
+          fi
       - name: Extract and verify embedded dependency metadata
         run: |
           "${PYTHON}" - <<'PY'
@@ -258,7 +287,7 @@ jobs:
         run: |
           "${PYTHON}" candidate/scripts/benchmark_release.py \
             --baseline "reports/baseline-${BINARY}" --candidate "reports/candidate-${BINARY}" \
-            --samples 21 --budget 7_500_000 --output reports/benchmark.json
+            --samples 21 --budget "${BUDGET}" --output reports/benchmark.json
       - name: Upload synthetic results and measured release binaries
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

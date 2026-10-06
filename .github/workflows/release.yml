@@ -145,7 +145,7 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780
         with:
-          tool: cargo-auditable
+          tool: cargo-auditable@0.7.7
       - uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780
         if: runner.os == 'Linux'
         with:
@@ -155,7 +155,20 @@ jobs:
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
-        run: cargo auditable build --release --locked --target "${TARGET}"
+        run: |
+          if [ "${TARGET}" = x86_64-unknown-linux-musl ]; then
+            version=$(rustc --version)
+            version=${version#rustc }
+            major=${version%%.*}
+            version=${version#*.}
+            minor=${version%%.*}
+            if [ "${major}" -lt 1 ] || { [ "${major}" -eq 1 ] && [ "${minor}" -lt 93 ]; }; then
+              echo 'packed musl relocations require Rust 1.93 or newer' >&2
+              exit 1
+            fi
+            export RUSTFLAGS='-C link-arg=-Wl,-z,pack-relative-relocs'
+          fi
+          cargo auditable build --release --locked --target "${TARGET}"
       - name: Prepare artifact (Unix)
         if: runner.os != 'Windows'
         env:
