@@ -158,9 +158,10 @@ before test builds can activate
 development-only dependency features or overwrite build outputs.
 
 Cargo-auditable `0.7.7` records a dev-feature-unified metadata graph. Audit verification
-therefore checks the actual normal/build release tree separately, validates dependency
-identities and edges, and reports metadata-only entries explicitly. A package appearing
-in that metadata is not sufficient evidence that its code is linked.
+therefore checks the actual normal/build release tree separately, validates package
+identities, dependency-index validity, and root dependency edges, and reports metadata-only
+entries explicitly. A package appearing in that metadata is not sufficient evidence that
+its code is linked.
 
 The [process benchmark](../../scripts/benchmark_release.py) can also run locally:
 
@@ -180,7 +181,8 @@ fixture or public results.
 Measurements include:
 
 1. Exact executable bytes, SHA-256, and deterministic gzip level-nine bytes.
-2. Fresh-home first-use `--version`, including automatic shell integration.
+2. Fresh-home first-use `--version`, with a newly created adjacent shortcut and verified
+   automatic Bash completion generation.
 3. Already-initialized `--version`, `--help`, and `capabilities`.
 4. JSON status, a complete 128-file plain-text diff, and a 128-file contents regex search.
 5. A 160-by-45 first frame with an explicit Kitty protocol and dark mode. The synthetic
@@ -229,6 +231,10 @@ network delay. Timings include checksum verification, staged binary installation
 completion installation, and shortcut creation. Each run verifies the installed completion
 file and immediately executes the `q` shortcut. Reports record executable and installer
 digests, asset-request order, median, and p95.
+
+The transport launches one Python mock process per curl invocation. Local elapsed times
+include that interpreter startup and asset-copy overhead. Invocation counts describe the
+mocked calls, rather than HTTP requests including redirect chains.
 
 Pinned installation downloads checksums and the executable. Latest installation first
 resolves one release tag, then downloads both assets from that immutable tag. The extra

@@ -224,7 +224,7 @@ def first_frame(binary, repository, env, *, case):
             output.extend(chunk)
             pending.extend(chunk)
             answer_terminal(master, pending, replies)
-            if b"\x1b[?25l" in chunk and len(output) > 1_000:
+            if b"\x1b[?25l" in output and len(output) > 1_000:
                 return (time.perf_counter_ns() - started) / 1_000_000
         msg = "the synthetic terminal did not receive a complete first frame"
         raise RuntimeError(msg)
@@ -238,9 +238,17 @@ def measure_trial(trial, binaries, results, root, *, terminal):
     outputs = {}
     for label, binary in order:
         env = environment(root / label)
-        cold_env = environment(root / f"first-use-{label}-{trial}")
-        elapsed, _ = invocation(binary, ["--version"], repository, cold_env)
+        cold_home = root / f"first-use-{label}-{trial}"
+        cold_env = environment(cold_home)
+        shortcut = binary.with_name("q.cmd" if os.name == "nt" else "q")
+        shortcut.unlink(missing_ok=True)
+        elapsed, output = invocation(binary, ["--version"], repository, cold_env)
+        completion = cold_home / "data" / "bash-completion" / "completions" / "quinjet"
+        if not completion.is_file() or not completion.stat().st_size or not shortcut.is_file():
+            msg = "first-use shell integration is missing"
+            raise RuntimeError(msg)
         results[label]["timings"]["first_use_version"].append(elapsed)
+        outputs[label, "first_use_version"] = output
         for name, command in COMMANDS.items():
             elapsed, output = invocation(binary, command, repository, env)
             results[label]["timings"][name].append(elapsed)
@@ -249,7 +257,7 @@ def measure_trial(trial, binaries, results, root, *, terminal):
             for case in TERMINAL_CASES:
                 elapsed = first_frame(binary, repository, env, case=case)
                 results[label]["timings"][case].append(elapsed)
-    for name in COMMANDS:
+    for name in ("first_use_version", *COMMANDS):
         if outputs["baseline", name] != outputs["candidate", name]:
             msg = f"{name} output differs between the baseline and candidate"
             raise RuntimeError(msg)
@@ -301,8 +309,10 @@ def benchmark(args):
         "method": (
             "alternating order; warm OS cache; fresh process; identical executable names; "
             "isolated homes and executable directories first on PATH; synthetic Bash integration; "
+            "fresh home and adjacent shortcut for first use; completion and shortcut verified; "
             "p95 nearest rank"
         ),
+        "first_use_integration_verified": True,
         "aspirational_budget_bytes": 5_000_000,
         "candidate_below_aspirational_budget": results["candidate"]["bytes"] < 5_000_000,
         "regression_budget_bytes": args.budget,
