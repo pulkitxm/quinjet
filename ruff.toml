@@ -6,6 +6,7 @@ select = ["ALL"]
 ignore = ["ANN", "COM812", "CPY001", "D203", "D213", "ISC001", "S603", "S607", "T201"]
 
 [lint.per-file-ignores]
+"scripts/benchmark_release.py" = ["D", "INP001", "PLC0415", "PLR2004"]
 "scripts/drive.py" = ["D", "PLR2004", "INP001", "PTH111", "PLW1509", "PLW1510"]
 
 [format]
