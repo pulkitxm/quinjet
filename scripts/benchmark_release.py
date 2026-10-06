@@ -6,6 +6,7 @@ import json
 import math
 import os
 import platform
+import shutil
 import statistics
 import subprocess
 import tempfile
@@ -205,6 +206,15 @@ def benchmark(args):
     with tempfile.TemporaryDirectory(prefix="quinjet-benchmark-", dir=args.temp_dir) as directory:
         root = Path(directory)
         repository = fixture(root, environment(root / "git-home"))
+        staged = []
+        binary_name = "quinjet.exe" if os.name == "nt" else "quinjet"
+        for label, binary in binaries:
+            destination = root / "executables" / label / binary_name
+            destination.parent.mkdir(parents=True)
+            shutil.copy2(binary, destination)
+            destination.chmod(destination.stat().st_mode | 0o111)
+            staged.append((label, destination))
+        binaries = staged
         for label, binary in binaries:
             invocation(binary, ["--version"], repository, environment(root / label))
         for trial in range(args.samples):
@@ -216,8 +226,12 @@ def benchmark(args):
         "architecture": platform.machine(),
         "fixture": "128 modified synthetic Rust files, one local commit, no remotes",
         "method": (
-            "alternating order; warm OS cache; fresh process; isolated homes; p95 nearest rank"
+            "alternating order; warm OS cache; fresh process; identical executable names; "
+            "isolated homes; p95 nearest rank"
         ),
+        "aspirational_budget_bytes": 5_000_000,
+        "candidate_below_aspirational_budget": results["candidate"]["bytes"] < 5_000_000,
+        "regression_budget_bytes": args.budget,
         "results": results,
     }
     rendered = json.dumps(report, indent=2) + "\n"

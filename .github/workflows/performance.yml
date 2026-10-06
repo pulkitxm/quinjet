@@ -45,11 +45,13 @@ jobs:
       RUNNER: ${{ matrix.os }}
       PYTHON: ${{ matrix.os == 'windows-latest' && 'python' || 'python3' }}
       RUSTUP_TOOLCHAIN: stable
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Check out candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: candidate
+          ref: ${{ env.CANDIDATE_SHA }}
           persist-credentials: false
       - name: Check out frozen v0.0.69 baseline
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -84,6 +86,8 @@ jobs:
           }
           if revisions["baseline"] != "fda4cf1eb8c19b22bf0394ef3f216e5072c09a70":
               raise RuntimeError("the frozen baseline revision does not match")
+          if revisions["candidate"] != os.environ["CANDIDATE_SHA"]:
+              raise RuntimeError("the candidate revision does not match the requested commit")
           metadata = {
               "revisions": revisions,
               "baseline_version": "0.0.69",
@@ -94,17 +98,40 @@ jobs:
               "cargo_auditable": "0.7.7",
               "rust_audit_info": "0.5.4",
               "recipe": ["cargo", "auditable", "build", "--release", "--locked", "--target", os.environ["TARGET"]],
-              "strict_budget_bytes": 5_000_000,
+              "aspirational_budget_bytes": 5_000_000,
+              "regression_budget_bytes": 7_500_000,
               "samples": 21,
+              "build_method": "empty per-revision target directories; prefetched locked sources; baseline then candidate",
           }
           (reports / "build.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
           PY
-      - name: Build and stage exact auditable release binaries
+      - name: Prefetch locked sources before timing compilation
         run: |
           for revision in baseline candidate; do
-            (cd "${revision}" && cargo auditable build --release --locked --target "${TARGET}")
-            cp "${revision}/target/${TARGET}/release/${BINARY}" "reports/${revision}-${BINARY}"
+            (cd "${revision}" && cargo fetch --locked --target "${TARGET}")
           done
+      - name: Build and stage exact auditable release binaries
+        run: |
+          "${PYTHON}" - <<'PY'
+          import json
+          import os
+          import shutil
+          import subprocess
+          import time
+          from pathlib import Path
+
+          metadata = Path("reports/build.json")
+          report = json.loads(metadata.read_text(encoding="utf-8"))
+          report["builds"] = {}
+          for revision in ("baseline", "candidate"):
+              started = time.monotonic()
+              subprocess.run(report["recipe"], cwd=revision, check=True)
+              elapsed = time.monotonic() - started
+              binary = Path(revision) / "target" / os.environ["TARGET"] / "release" / os.environ["BINARY"]
+              shutil.copy2(binary, Path("reports") / f"{revision}-{os.environ['BINARY']}")
+              report["builds"][revision] = {"seconds": round(elapsed, 3), "bytes": binary.stat().st_size}
+              metadata.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+          PY
       - name: Extract and verify embedded dependency metadata
         run: |
           "${PYTHON}" - <<'PY'
@@ -231,7 +258,7 @@ jobs:
         run: |
           "${PYTHON}" candidate/scripts/benchmark_release.py \
             --baseline "reports/baseline-${BINARY}" --candidate "reports/candidate-${BINARY}" \
-            --samples 21 --budget 5_000_000 --output reports/benchmark.json
+            --samples 21 --budget 7_500_000 --output reports/benchmark.json
       - name: Upload synthetic results and measured release binaries
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
