@@ -39,6 +39,9 @@ use crate::webhook::WebhookListener;
 use crate::workspace::{RepositoryWorkspace, RoutedEffects, WorkspaceContext};
 
 fn main() -> ExitCode {
+    if let Some(code) = ui::image_picker_helper() {
+        return code;
+    }
     match cli::dispatch() {
         Ok(Launch::Terminal(options)) => terminal_launch::exit_code(&options),
         Ok(Launch::Finished(code)) => ExitCode::from(code),
@@ -128,7 +131,7 @@ fn open_terminal(
             |app| app.theme,
         );
     let mut terminal = TerminalGuard::enter(!options.no_mouse)?;
-    ui::initialize_image_picker();
+    ui::initialize_image_picker()?;
     let render_tick = tick(Duration::from_millis(16));
     let relative_time_tick = tick(Duration::from_secs(1));
     let periodic_refresh = tick(Duration::from_secs(10));

@@ -1,7 +1,6 @@
 use std::num::NonZeroU16;
 use std::sync::{Arc, OnceLock};
 
-use crossterm::terminal::{WindowSize, window_size};
 use image::{DynamicImage, RgbaImage};
 use ratatui::buffer::CellDiffOption;
 use ratatui::style::{Color, Style};
@@ -17,6 +16,8 @@ use crate::git::diff::{ImagePreview, ImageProtocol, ImageRaster, ImageSide};
 
 mod kitty;
 use kitty::KittyPlacement;
+pub(super) mod picker;
+pub(super) use picker::selected_image_protocol;
 pub(super) mod preparation;
 pub(super) use preparation::PreparationFrame;
 use preparation::{EncodedImage, IMAGE_PREPARATION, ImageKey};
@@ -55,42 +56,6 @@ impl ImageDrawState {
     fn remember(&mut self, raster: &Arc<ImageRaster>) {
         self.active.push(Arc::clone(raster));
     }
-}
-
-pub(crate) fn initialize_image_picker() {
-    let _state = IMAGE_PICKER.get_or_init(|| {
-        let protocol = ImageProtocol::detect();
-        let picker = picker_for_window(protocol, window_size().ok().as_ref());
-        (picker, protocol)
-    });
-}
-
-#[expect(
-    deprecated,
-    reason = "the explicit font-size constructor avoids terminal queries and competing input readers"
-)]
-fn picker_for_window(protocol: ImageProtocol, size: Option<&WindowSize>) -> Picker {
-    let font_size = size
-        .and_then(|size| {
-            let width = size.width.checked_div(size.columns)?;
-            let height = size.height.checked_div(size.rows)?;
-            (width > 0 && height > 0).then_some((width, height))
-        })
-        .unwrap_or((10, 20));
-    let mut picker = Picker::from_fontsize(font_size);
-    picker.set_protocol_type(match protocol {
-        ImageProtocol::Kitty => ProtocolType::Kitty,
-        ImageProtocol::Iterm2 => ProtocolType::Iterm2,
-        ImageProtocol::Sixel => ProtocolType::Sixel,
-        ImageProtocol::Halfblocks => ProtocolType::Halfblocks,
-    });
-    picker
-}
-
-pub(super) fn selected_image_protocol() -> ImageProtocol {
-    IMAGE_PICKER
-        .get()
-        .map_or_else(ImageProtocol::detect, |(_, protocol)| *protocol)
 }
 
 #[expect(

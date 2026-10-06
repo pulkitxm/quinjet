@@ -105,10 +105,16 @@ encoding. Matching teardown and the panic hook restore terminal state.
 
 Image protocol selection uses terminal environment inference and explicit
 `QUINJET_IMAGE_PROTOCOL=kitty`, `iterm2`, `sixel`, or `halfblocks` overrides. Font size comes
-from the terminal window ioctl when available, with a 10-by-20-pixel fallback. Startup
-does not consume stdin to query image capabilities. Unidentified terminals, including
-query-only discovery through the `auto` setting, use halfblocks until a native override
-is provided.
+from the terminal window ioctl when available, with a 10-by-20-pixel fallback. These paths
+do not query terminal input.
+
+Explicit `QUINJET_IMAGE_PROTOCOL=auto` retains query-based discovery on unidentified
+terminals. A short-lived helper owns terminal input during negotiation and is reaped before
+the normal event reader starts. The parent's 500-millisecond deadline starts before spawning
+the helper, including process startup in the budget. Termination and reaping can add cleanup
+time. Failed or timed-out discovery falls back to environment inference and window geometry.
+Successful discovery also supplies the queried font size. This opt-in negotiation cost is
+measured separately from immediate native selection.
 
 Human CLI diff rendering skips syntax grammar initialization and regex compilation.
 The shared command/session path retains the same text and media previews. JSON and
@@ -121,8 +127,8 @@ shows halfblocks immediately, then repaints when the current native payload is r
 One coalesced request batch and four pending preparations bound the work. The cache retains
 the currently visible encodings plus four offscreen outputs, so a fifth visible image can
 also become native without repeated encoding. Raster identity, protocol, dimensions, and
-cancellation tickets reject obsolete
-results after scrolling, resizing, or changing the displayed document.
+cancellation tickets reject obsolete results after scrolling, resizing, or changing the
+displayed document.
 
 ## Reproducing executable and startup measurements
 
@@ -170,9 +176,12 @@ Measurements include:
 2. Fresh-home first-use `--version`, including automatic shell integration.
 3. Already-initialized `--version`, `--help`, and `capabilities`.
 4. JSON status, a complete 128-file plain-text diff, and a 128-file contents regex search.
-5. A 160-by-45 first frame with basic cursor, primary-attribute, and window-geometry replies
-   and explicit dark mode. Other capability queries are unanswered.
-6. A first frame with System appearance and a terminal that answers no capability query.
+5. A 160-by-45 first frame with an explicit Kitty protocol and dark mode. The synthetic
+   terminal answers keyboard enhancement, cursor, Kitty graphics, primary attributes,
+   pixel geometry, and the terminating device-status query.
+6. The same Kitty selection with System appearance and no capability replies.
+7. Explicit `auto` on an unidentified terminal, with Sixel capability replies in dark mode.
+8. Explicit `auto` with dark mode and no capability replies.
 
 Baseline and candidate invocations alternate order. Each sample launches a fresh process
 with warm OS caches. Reports include median, nearest-rank p95, minimum, and sample count.
@@ -181,6 +190,11 @@ POSIX PTY cases. PTY runs verify input-driven clean exit and original terminal-m
 restoration, draining output and retrying quit input for at most three seconds after the
 timed frame. Both executables are staged under the same filename so clap's generated
 usage text compares the command interface rather than artifact labels.
+
+The synthetic shell is Bash on every platform, including Windows. Fresh-home first use
+includes that integration, rather than PowerShell profile discovery. Executable directories
+come first on `PATH`, so shortcut setup stays inside the fixture. Hosted installer tests
+separately exercise Windows PowerShell integration.
 
 Use `--budget 5000000` to require the strict aspirational byte target. Always preserve the
 actual measured result when that target is missed. Run final latency comparisons after

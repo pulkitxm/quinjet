@@ -21,6 +21,22 @@ COMMANDS = {
     "diff_128_files": ["diff"],
     "contents_search_128_files": ["--json", "search", "value_[0-9]+", "--mode", "contents"],
 }
+TERMINAL_CASES = {
+    "first_frame_160x45": ("kitty", "kitty", "dark"),
+    "first_frame_system_no_responses": ("kitty", "none", "system"),
+    "first_frame_auto_sixel_160x45": ("auto", "sixel", "dark"),
+    "first_frame_auto_no_responses": ("auto", "none", "dark"),
+}
+TERMINAL_REPLIES = (
+    (b"\x1b[?u", b"\x1b[?31u"),
+    (b"\x1b[6n", b"\x1b[1;1R"),
+    (b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\", None),
+    (b"\x1b[c", b"\x1b[?64;4;28c"),
+    (b"\x1b[0c", b"\x1b[?64;4;28c"),
+    (b"\x1b[16t", b"\x1b[6;18;9t"),
+    (b"\x1b[14t", b"\x1b[4;810;1440t"),
+    (b"\x1b[5n", b"\x1b[0n"),
+)
 
 
 def environment(root):
@@ -94,6 +110,7 @@ def summary(values):
 
 
 def invocation(binary, args, repository, env):
+    env = dict(env, PATH=os.pathsep.join((str(binary.parent), env["PATH"])))
     started = time.perf_counter_ns()
     result = subprocess.run(
         [str(binary), "-C", str(repository), *args],
@@ -139,7 +156,25 @@ def finish_terminal(process, master, original_mode):
         os.close(master)
 
 
-def first_frame(binary, repository, env, *, responsive):
+def answer_terminal(master, pending, mode):
+    if mode == "none":
+        pending.clear()
+        return
+    for request, reply in TERMINAL_REPLIES:
+        while request in pending:
+            if reply is None:
+                status = b"OK" if mode == "kitty" else b"ENOTSUP"
+                reply_bytes = b"\x1b_Gi=31;" + status + b"\x1b\\"
+            else:
+                reply_bytes = reply
+            os.write(master, reply_bytes)
+            position = pending.index(request)
+            del pending[position : position + len(request)]
+    if len(pending) > 256:
+        del pending[:-256]
+
+
+def first_frame(binary, repository, env, *, case):
     import fcntl
     import pty
     import select
@@ -150,8 +185,12 @@ def first_frame(binary, repository, env, *, responsive):
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 45, 160, 0, 0))
     original_mode = termios.tcgetattr(slave)
     started = time.perf_counter_ns()
-    terminal_env = dict(env, QUINJET_IMAGE_PROTOCOL="auto")
-    appearance = "dark" if responsive else "system"
+    protocol, replies, appearance = TERMINAL_CASES[case]
+    terminal_env = dict(
+        env,
+        PATH=os.pathsep.join((str(binary.parent), env["PATH"])),
+        QUINJET_IMAGE_PROTOCOL=protocol,
+    )
     process = subprocess.Popen(
         [str(binary), "-C", str(repository), "tui", "--appearance", appearance, "--no-mouse"],
         env=terminal_env,
@@ -162,6 +201,7 @@ def first_frame(binary, repository, env, *, responsive):
     )
     os.close(slave)
     output = bytearray()
+    pending = bytearray()
     try:
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
@@ -173,14 +213,8 @@ def first_frame(binary, repository, env, *, responsive):
             except OSError:
                 break
             output.extend(chunk)
-            if responsive and b"\x1b[6n" in chunk:
-                os.write(master, b"\x1b[1;1R")
-            if responsive and (b"\x1b[c" in chunk or b"\x1b[0c" in chunk):
-                os.write(master, b"\x1b[?1;2c")
-            if responsive and b"\x1b[16t" in chunk:
-                os.write(master, b"\x1b[6;18;9t")
-            if responsive and b"\x1b[14t" in chunk:
-                os.write(master, b"\x1b[4;810;1440t")
+            pending.extend(chunk)
+            answer_terminal(master, pending, replies)
             if b"\x1b[?25l" in chunk and len(output) > 1_000:
                 return (time.perf_counter_ns() - started) / 1_000_000
         msg = "the synthetic terminal did not receive a complete first frame"
@@ -203,10 +237,9 @@ def measure_trial(trial, binaries, results, root, *, terminal):
             results[label]["timings"][name].append(elapsed)
             outputs[label, name] = output
         if terminal:
-            elapsed = first_frame(binary, repository, env, responsive=True)
-            results[label]["timings"]["first_frame_160x45"].append(elapsed)
-            elapsed = first_frame(binary, repository, env, responsive=False)
-            results[label]["timings"]["first_frame_system_no_responses"].append(elapsed)
+            for case in TERMINAL_CASES:
+                elapsed = first_frame(binary, repository, env, case=case)
+                results[label]["timings"][case].append(elapsed)
     for name in COMMANDS:
         if outputs["baseline", name] != outputs["candidate", name]:
             msg = f"{name} output differs between the baseline and candidate"
@@ -225,8 +258,8 @@ def binary_results(binaries, *, terminal):
         }
         results[label]["timings"]["first_use_version"] = []
         if terminal:
-            results[label]["timings"]["first_frame_160x45"] = []
-            results[label]["timings"]["first_frame_system_no_responses"] = []
+            for case in TERMINAL_CASES:
+                results[label]["timings"][case] = []
     return results
 
 
@@ -258,15 +291,28 @@ def benchmark(args):
         "fixture": "128 modified synthetic Rust files, one local commit, no remotes",
         "method": (
             "alternating order; warm OS cache; fresh process; identical executable names; "
-            "isolated homes; p95 nearest rank"
+            "isolated homes and executable directories first on PATH; synthetic Bash integration; "
+            "p95 nearest rank"
         ),
         "aspirational_budget_bytes": 5_000_000,
         "candidate_below_aspirational_budget": results["candidate"]["bytes"] < 5_000_000,
         "regression_budget_bytes": args.budget,
         "terminal_method": (
-            "160x45 PTY; basic cursor, primary-attribute, and window-geometry replies "
-            "in dark mode; "
-            "no replies in System mode; bounded quit-input retries; clean exit and mode restoration"
+            "160x45 PTY; Kitty override with complete capability replies in dark mode "
+            "or no replies in System mode; explicit auto with Sixel replies or no replies; "
+            "bounded quit-input retries; clean exit and mode restoration"
+            if terminal
+            else None
+        ),
+        "terminal_cases": (
+            {
+                case: {
+                    "image_protocol": protocol,
+                    "capability_replies": replies,
+                    "appearance": appearance,
+                }
+                for case, (protocol, replies, appearance) in TERMINAL_CASES.items()
+            }
             if terminal
             else None
         ),
