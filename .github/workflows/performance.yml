@@ -131,12 +131,16 @@ jobs:
                   if package_id in reachable:
                       continue
                   reachable.add(package_id)
-                  pending.extend(dep["pkg"] for dep in nodes[package_id]["deps"]
-                                 if any(kind["kind"] != "dev" for kind in dep["dep_kinds"]))
+                  pending.extend(
+                      dep["pkg"] for dep in nodes[package_id]["deps"]
+                      if any(kind["kind"] != "dev" for kind in dep["dep_kinds"])
+                  )
               identity = lambda package: (package["name"], package["version"])
               metadata_graph = {identity(packages[package_id]) for package_id in reachable}
-              command = ["cargo", "tree", "--locked", "--target", os.environ["TARGET"], "--edges", "normal,build",
-                         "--prefix", "none", "--format", "{p}", "--color", "never"]
+              command = [
+                  "cargo", "tree", "--locked", "--target", os.environ["TARGET"], "--edges", "normal,build",
+                  "--prefix", "none", "--format", "{p}", "--color", "never",
+              ]
               tree = subprocess.check_output(command, cwd=revision, text=True)
               rows = [re.match(r"^(\S+) v(\S+)(?: |$)", line) for line in tree.splitlines() if line]
               if not rows or any(row is None for row in rows):
@@ -154,8 +158,10 @@ jobs:
               if embedded_graph != metadata_graph or len(embedded) != len(embedded_graph):
                   raise RuntimeError(f"{revision} audit dependencies do not match the locked audit metadata graph")
               for package in embedded:
-                  if any(type(index) is not int or not 0 <= index < len(embedded)
-                         for index in package.get("dependencies", [])):
+                  if any(
+                      type(index) is not int or not 0 <= index < len(embedded)
+                      for index in package.get("dependencies", [])
+                  ):
                       raise RuntimeError(f"{revision} audit contains an invalid dependency index")
               root = next(package for package in embedded if package.get("root"))
               direct = {identity(packages[dep["pkg"]]) for dep in nodes[root_id]["deps"]

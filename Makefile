@@ -131,7 +131,7 @@ bloat:
 deep: miri careful sanitize mutants minimal-versions udeps bloat
 
 hack:
-	$(call preserve-lockfiles,$(CARGO) hack --feature-powerset --no-dev-deps check --locked)
+	$(call preserve-lockfiles,$(CARGO) fetch --locked && $(CARGO) hack --feature-powerset --no-dev-deps check --offline)
 
 coverage:
 	$(CARGO) llvm-cov --all-features --locked --fail-under-lines $(COVERAGE_MIN)

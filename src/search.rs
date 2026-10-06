@@ -227,7 +227,7 @@ mod tests {
         assert!(haystack_matches("", b"anything"));
         assert!(haystack_matches("école", "ÉCOLE".as_bytes()));
         assert!(haystack_matches("^foo$", b"before\nFOO\nafter\n"));
-        assert!(!haystack_matches("^foo$", b"beforeFOOafter\n"));
+        assert!(!haystack_matches("^foo$", b"before-FOO-after\n"));
     }
 
     #[test]
