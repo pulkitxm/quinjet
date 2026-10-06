@@ -17,7 +17,7 @@ struct ControlledEncoder {
 impl ControlledEncoder {
     fn install() -> Self {
         let (requests, queued) = bounded(1);
-        let (completed, results) = bounded(MAX_IMAGES);
+        let (completed, results) = bounded(MAX_PENDING_IMAGES);
         IMAGE_PREPARATION.with(|preparation| {
             *preparation.borrow_mut() = ImagePreparation {
                 encoded: Vec::new(),
@@ -170,8 +170,8 @@ fn resize_raster_and_protocol_churn_coalesces_and_rejects_old_generation() {
                 "only the current raster remains desired"
             );
             assert!(
-                preparation.encoded.len() <= MAX_IMAGES,
-                "encoded cache is bounded"
+                preparation.encoded.len() <= preparation.wanted.len() + MAX_OFFSCREEN_IMAGES,
+                "encoded cache is bounded by the viewport and offscreen allowance"
             );
             assert_eq!(
                 preparation.encoder.as_ref().expect("encoder").queued.len(),
@@ -272,8 +272,8 @@ fn failed_preparation_keeps_fallback_without_repeating_work() {
         .remove(0);
     encoder.finish(request);
     assert!(
-        !image_preparation_ready(),
-        "failed encoding does not change the fallback"
+        image_preparation_ready(),
+        "failed encoding completes its slot and lets other visible images prepare"
     );
     request_frame(std::slice::from_ref(&invalid));
     assert!(
@@ -296,34 +296,77 @@ fn failed_preparation_keeps_fallback_without_repeating_work() {
 }
 
 #[test]
-fn desired_jobs_and_encoded_cache_stay_within_four_images() {
+fn every_visible_image_prepares_in_bounded_batches_and_remains_cached() {
     let encoder = ControlledEncoder::install();
-    for _ in 0..3 {
-        let images = (1..=6)
-            .map(|width| key(width, ImageProtocol::Kitty))
-            .collect::<Vec<_>>();
+    let images = (1..=6)
+        .map(|width| key(width, ImageProtocol::Kitty))
+        .collect::<Vec<_>>();
+    for expected in [MAX_PENDING_IMAGES, 2] {
         request_frame(&images);
         let requests = encoder.requests.try_recv().expect("bounded requests");
-        assert_eq!(requests.len(), MAX_IMAGES, "visible preparation is capped");
+        assert_eq!(requests.len(), expected, "one bounded preparation batch");
         for request in requests {
             encoder.finish(request);
         }
         assert!(image_preparation_ready(), "current images complete");
-        IMAGE_PREPARATION.with(|preparation| {
-            let preparation = preparation.borrow();
-            assert_eq!(
-                preparation.encoded.len(),
-                MAX_IMAGES,
-                "cache eviction preserves its bound"
-            );
-            assert_eq!(
-                preparation.wanted.len(),
-                MAX_IMAGES,
-                "desired identities remain bounded"
-            );
-            assert!(preparation.pending.is_empty(), "completed work is removed");
-        });
     }
+    request_frame(&images);
+    assert!(encoder.requests.is_empty(), "every visible image is cached");
+    IMAGE_PREPARATION.with(|preparation| {
+        let mut preparation = preparation.borrow_mut();
+        assert_eq!(preparation.encoded.len(), images.len());
+        assert_eq!(preparation.wanted.len(), images.len());
+        assert!(preparation.pending.is_empty(), "completed work is removed");
+        for image in &images {
+            assert!(
+                preparation
+                    .display(image.clone())
+                    .expect("cached image")
+                    .display
+                    .is_some(),
+                "the fifth and later visible images retain native output"
+            );
+        }
+    });
+    request_frame(&[]);
+    IMAGE_PREPARATION.with(|preparation| {
+        assert_eq!(
+            preparation.borrow().encoded.len(),
+            MAX_OFFSCREEN_IMAGES,
+            "only four offscreen encodings remain"
+        );
+    });
+}
+
+#[test]
+fn failed_first_batch_does_not_starve_a_later_visible_image() {
+    let encoder = ControlledEncoder::install();
+    let images = (1..=5)
+        .map(|width| key(width, ImageProtocol::Kitty))
+        .collect::<Vec<_>>();
+    request_frame(&images);
+    for request in encoder.requests.try_recv().expect("first batch") {
+        encoder
+            .completed
+            .send(PreparationResult {
+                request,
+                display: None,
+            })
+            .expect("failed result");
+    }
+    assert!(
+        image_preparation_ready(),
+        "completed slots request a repaint"
+    );
+    request_frame(&images);
+    let requests = encoder.requests.try_recv().expect("remaining batch");
+    assert_eq!(requests.len(), 1);
+    for request in requests {
+        encoder.finish(request);
+    }
+    assert!(image_preparation_ready(), "the fifth image becomes ready");
+    request_frame(&images);
+    assert!(encoder.requests.is_empty(), "failed keys are not retried");
 }
 
 #[test]

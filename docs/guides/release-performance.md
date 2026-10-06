@@ -118,8 +118,10 @@ line-oriented matching, invalid-pattern literal fallback, and UTF-16 BOM decodin
 
 Native image resizing and protocol encoding run on one lazy background worker. Rendering
 shows halfblocks immediately, then repaints when the current native payload is ready.
-One coalesced request batch, four desired preparations, and four cached outputs bound the
-work. Raster identity, protocol, dimensions, and cancellation tickets reject obsolete
+One coalesced request batch and four pending preparations bound the work. The cache retains
+the currently visible encodings plus four offscreen outputs, so a fifth visible image can
+also become native without repeated encoding. Raster identity, protocol, dimensions, and
+cancellation tickets reject obsolete
 results after scrolling, resizing, or changing the displayed document.
 
 ## Reproducing executable and startup measurements

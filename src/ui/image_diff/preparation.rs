@@ -7,7 +7,8 @@ use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
 
 use super::{ImageProtocol, ImageRaster, NativeDisplay, prepare_native};
 
-const MAX_IMAGES: usize = 4;
+const MAX_PENDING_IMAGES: usize = 4;
+const MAX_OFFSCREEN_IMAGES: usize = 4;
 
 thread_local! {
     pub(super) static IMAGE_PREPARATION: RefCell<ImagePreparation> = RefCell::new(ImagePreparation::default());
@@ -47,9 +48,6 @@ pub(super) struct ImagePreparation {
 impl ImagePreparation {
     pub(super) fn display(&mut self, key: ImageKey) -> Option<&mut EncodedImage> {
         if !self.wanted.iter().any(|wanted| wanted.matches(&key)) {
-            if self.wanted.len() == MAX_IMAGES {
-                return None;
-            }
             self.wanted.push(key.clone());
         }
         if let Some(position) = self
@@ -62,7 +60,7 @@ impl ImagePreparation {
         if self.unavailable || self.pending.iter().any(|request| request.key.matches(&key)) {
             return None;
         }
-        if self.pending.len() == MAX_IMAGES {
+        if self.pending.len() == MAX_PENDING_IMAGES {
             let position = self.pending.iter().position(|request| {
                 !self
                     .wanted
@@ -84,6 +82,7 @@ impl ImagePreparation {
     }
 
     fn finish_frame(&mut self) {
+        self.trim_cache();
         self.pending.retain(|request| {
             if self
                 .wanted
@@ -144,15 +143,29 @@ impl ImagePreparation {
         {
             return false;
         }
-        let ready = completed.display.is_some();
-        if self.encoded.len() == MAX_IMAGES {
-            drop(self.encoded.remove(0));
-        }
         self.encoded.push(EncodedImage {
             key: request.key,
             display: completed.display,
         });
-        ready
+        self.trim_cache();
+        true
+    }
+
+    fn trim_cache(&mut self) {
+        let mut remove = self
+            .encoded
+            .iter()
+            .filter(|entry| !self.wanted.iter().any(|wanted| wanted.matches(&entry.key)))
+            .count()
+            .saturating_sub(MAX_OFFSCREEN_IMAGES);
+        self.encoded.retain(|entry| {
+            if remove > 0 && !self.wanted.iter().any(|wanted| wanted.matches(&entry.key)) {
+                remove -= 1;
+                false
+            } else {
+                true
+            }
+        });
     }
 }
 
@@ -233,7 +246,7 @@ impl Encoder {
         prepare: impl FnMut(&ImageKey) -> Option<NativeDisplay> + Send + 'static,
     ) -> Option<Self> {
         let (requests, queued) = bounded(1);
-        let (complete, completed) = bounded(MAX_IMAGES);
+        let (complete, completed) = bounded(MAX_PENDING_IMAGES);
         let work = queued.clone();
         let _thread = thread::Builder::new()
             .name("image-encoder".to_owned())
