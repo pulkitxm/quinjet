@@ -97,7 +97,7 @@ def invocation(binary, args, repository, env):
     return (time.perf_counter_ns() - started) / 1_000_000, result.stdout
 
 
-def first_frame(binary, repository, env):
+def first_frame(binary, repository, env, *, responsive):
     import fcntl
     import pty
     import select
@@ -107,9 +107,11 @@ def first_frame(binary, repository, env):
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 45, 160, 0, 0))
     started = time.perf_counter_ns()
+    terminal_env = dict(env, QUINJET_IMAGE_PROTOCOL="auto")
+    appearance = "dark" if responsive else "system"
     process = subprocess.Popen(
-        [str(binary), "-C", str(repository), "tui", "--appearance", "dark", "--no-mouse"],
-        env=env,
+        [str(binary), "-C", str(repository), "tui", "--appearance", appearance, "--no-mouse"],
+        env=terminal_env,
         stdin=slave,
         stdout=slave,
         stderr=slave,
@@ -128,13 +130,13 @@ def first_frame(binary, repository, env):
             except OSError:
                 break
             output.extend(chunk)
-            if b"\x1b[6n" in chunk:
+            if responsive and b"\x1b[6n" in chunk:
                 os.write(master, b"\x1b[1;1R")
-            if b"\x1b[c" in chunk or b"\x1b[0c" in chunk:
+            if responsive and (b"\x1b[c" in chunk or b"\x1b[0c" in chunk):
                 os.write(master, b"\x1b[?1;2c")
-            if b"\x1b[16t" in chunk:
+            if responsive and b"\x1b[16t" in chunk:
                 os.write(master, b"\x1b[6;18;9t")
-            if b"\x1b[14t" in chunk:
+            if responsive and b"\x1b[14t" in chunk:
                 os.write(master, b"\x1b[4;810;1440t")
             if b"\x1b[?25l" in chunk and len(output) > 1_000:
                 return (time.perf_counter_ns() - started) / 1_000_000
@@ -165,8 +167,10 @@ def measure_trial(trial, binaries, results, root, *, terminal):
             results[label]["timings"][name].append(elapsed)
             outputs[label, name] = output
         if terminal:
-            elapsed = first_frame(binary, repository, env)
+            elapsed = first_frame(binary, repository, env, responsive=True)
             results[label]["timings"]["first_frame_160x45"].append(elapsed)
+            elapsed = first_frame(binary, repository, env, responsive=False)
+            results[label]["timings"]["first_frame_system_no_responses"].append(elapsed)
     for name in COMMANDS:
         if outputs["baseline", name] != outputs["candidate", name]:
             msg = f"{name} output differs between the baseline and candidate"
@@ -186,6 +190,7 @@ def binary_results(binaries, *, terminal):
         results[label]["timings"]["first_use_version"] = []
         if terminal:
             results[label]["timings"]["first_frame_160x45"] = []
+            results[label]["timings"]["first_frame_system_no_responses"] = []
     return results
 
 
