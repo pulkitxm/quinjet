@@ -306,8 +306,6 @@ mod tests {
     #[cfg(unix)]
     use std::cell::Cell;
     use std::fs;
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
 
     #[cfg(unix)]
     use super::Outcome;
@@ -397,20 +395,17 @@ mod tests {
     fn stack_warming_continues_after_a_member_read_fails() {
         let fixture = TestRepository::with_branch("main");
         let repository = fixture.repository();
-        let executable = repository.root().join("gh");
+        let script = repository.root().join("pr");
         let calls = repository.root().join("calls");
         fs::write(
-            &executable,
+            &script,
             format!(
-                "#!/bin/sh\nprintf 'call\\n' >> '{}'\nprintf 'failed\\n' >&2\nexit 1\n",
+                "printf '%s\\n' \"$2\" >> '{}'\nprintf 'failed\\n' >&2\nexit 1\n",
                 calls.display()
             ),
         )
         .unwrap();
-        let mut permissions = fs::metadata(&executable).unwrap().permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&executable, permissions).unwrap();
-        let mut session = Session::new(fixture.repository_with_github_cli(executable));
+        let mut session = Session::new(fixture.repository_with_github_cli("/bin/sh".into()));
         let pull_requests = [41, 42]
             .map(|number| PullRequest {
                 number,
@@ -439,6 +434,6 @@ mod tests {
             .unwrap();
 
         assert!(matches!(outcome, Outcome::Warmed));
-        assert_eq!(fs::read_to_string(calls).unwrap(), "call\ncall\n");
+        assert_eq!(fs::read_to_string(calls).unwrap(), "41\n42\n");
     }
 }
