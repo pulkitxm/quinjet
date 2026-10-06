@@ -1,6 +1,7 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
+#[cfg(test)]
 #[doc = " Parse a unified diff and highlight code on the old and new sides independently."]
 #[doc = " Keeping two parser states avoids additions corrupting the old-file syntax state and"]
 #[doc = " removals corrupting the new-file state."]

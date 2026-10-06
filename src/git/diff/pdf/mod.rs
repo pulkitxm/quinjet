@@ -6,7 +6,7 @@ use anyhow::{Result, ensure};
 
 use super::{
     DiffBlobSource, DiffDocument, DiffLine, DiffLineKind, ImageSide, LoadedBlob, file_footer,
-    header_identity, meta_line, parse_diff,
+    header_identity, meta_line, parse_diff_with_highlighting,
 };
 use crate::git::github::run_bounded_command;
 
@@ -20,6 +20,7 @@ pub(super) fn attach_pdf_sources(
     document: &mut DiffDocument,
     source: &impl DiffBlobSource,
     expanded: bool,
+    highlighting: bool,
 ) {
     let mut index = 0;
     while index < document.lines.len() {
@@ -38,7 +39,14 @@ pub(super) fn attach_pdf_sources(
             index = footer + 1;
             continue;
         }
-        let replacement = source_lines(source, &path, old_path.as_deref(), status, expanded);
+        let replacement = source_lines(
+            source,
+            &path,
+            old_path.as_deref(),
+            status,
+            expanded,
+            highlighting,
+        );
         match replacement {
             Ok((lines, truncated)) => {
                 update_counts(document, index, &lines);
@@ -70,6 +78,7 @@ fn source_lines(
     old_path: Option<&Path>,
     status: &str,
     expanded: bool,
+    highlighting: bool,
 ) -> Result<(Vec<DiffLine>, bool)> {
     let previous = load_bytes(source.load(path, old_path, ImageSide::Previous))?;
     let current = load_bytes(source.load(path, old_path, ImageSide::New))?;
@@ -122,7 +131,8 @@ fn source_lines(
         .map_or(patch_text.len(), |index| index + 1);
     let mut raw = b"diff --git a/source.pdf b/source.pdf\n".to_vec();
     raw.extend_from_slice(diff_bytes.get(body_start..).unwrap_or_default());
-    let parsed = parse_diff(&raw, "PDF source", Some(path), truncated);
+    let parsed =
+        parse_diff_with_highlighting(&raw, "PDF source", Some(path), truncated, highlighting);
     let mut lines = vec![meta_line(DiffLineKind::Meta, label)];
     if body_start < diff_bytes.len() {
         lines.extend(parsed.lines.into_iter().filter(|line| {

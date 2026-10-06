@@ -176,6 +176,7 @@ impl PreparedPullRequest {
                 current,
             },
             false,
+            self.diff_highlighting,
         );
         document
     }
