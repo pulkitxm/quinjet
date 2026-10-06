@@ -31,7 +31,10 @@ fail() {
 assert_contains() {
     needle=$1
     file=$2
-    grep -F "${needle}" "${file}" >/dev/null 2>&1 || fail "expected '${needle}' in ${file}"
+    if ! grep -F "${needle}" "${file}" >/dev/null 2>&1; then
+        cat "${file}" >&2
+        fail "expected '${needle}' in ${file}"
+    fi
 }
 
 assert_equals() {
@@ -69,10 +72,22 @@ cat >"${FAKE_BIN}/curl" <<'EOF'
 #!/bin/sh
 output=
 url=
+effective=0
+timeout=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -o | --output)
             output=$2
+            shift 2
+            ;;
+        --max-time)
+            [ "$2" = 30 ] || exit 2
+            timeout=1
+            shift 2
+            ;;
+        -w | --write-out)
+            [ "$2" = '%{url_effective}' ] || exit 2
+            effective=1
             shift 2
             ;;
         http://* | https://*)
@@ -84,9 +99,17 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
-[ -n "$output" ] && [ -n "$url" ] || exit 2
+[ -n "$output" ] && [ -n "$url" ] && [ "$timeout" = 1 ] || exit 2
 printf '%s\n' "$url" >>"$QUINJET_TEST_DOWNLOAD_LOG"
-cp "$QUINJET_TEST_FIXTURES/${url##*/}" "$output"
+if [ "$effective" = 1 ]; then
+    [ "$url" = https://github.com/pulkitxm/quinjet/releases/latest ] || exit 2
+    printf '%s' "${QUINJET_TEST_LATEST_URL-https://github.com/pulkitxm/quinjet/releases/tag/v1.2.3}"
+else
+    case "$url" in
+        */latest/download/*) exit 2 ;;
+    esac
+    cp "$QUINJET_TEST_FIXTURES/${url##*/}" "$output"
+fi
 EOF
 chmod +x "${FAKE_BIN}/uname" "${FAKE_BIN}/curl"
 
@@ -122,9 +145,11 @@ printf 'test: selects the latest macOS Apple Silicon release\n'
 case_dir=${TEST_ROOT}/macos-arm
 bin_dir=${case_dir}/bin
 prepare_release quinjet-macos-aarch64 'macOS ARM binary'
+before=$(wc -l <"${DOWNLOAD_LOG}" | tr -d ' ')
 run_installer "${case_dir}/home" Darwin arm64 --bin-dir "${bin_dir}" >"${case_dir}.out" 2>&1
 assert_equals 'macOS ARM binary' "$(cat "${bin_dir}/quinjet")"
-assert_contains 'https://github.com/pulkitxm/quinjet/releases/latest/download/quinjet-macos-aarch64' "${DOWNLOAD_LOG}"
+assert_contains 'https://github.com/pulkitxm/quinjet/releases/download/v1.2.3/quinjet-macos-aarch64' "${DOWNLOAD_LOG}"
+assert_equals "$((before + 3))" "$(wc -l <"${DOWNLOAD_LOG}" | tr -d ' ')"
 
 printf 'test: selects the Linux ARM64 release\n'
 case_dir=${TEST_ROOT}/linux-arm
@@ -132,7 +157,42 @@ bin_dir=${case_dir}/bin
 prepare_release quinjet-linux-aarch64 'Linux ARM binary'
 run_installer "${case_dir}/home" Linux aarch64 --bin-dir "${bin_dir}" >"${case_dir}.out" 2>&1
 assert_equals 'Linux ARM binary' "$(cat "${bin_dir}/quinjet")"
-assert_contains 'https://github.com/pulkitxm/quinjet/releases/latest/download/quinjet-linux-aarch64' "${DOWNLOAD_LOG}"
+assert_contains 'https://github.com/pulkitxm/quinjet/releases/download/v1.2.3/quinjet-linux-aarch64' "${DOWNLOAD_LOG}"
+
+printf 'test: rejects invalid release redirects before fetching assets\n'
+for latest_url in 'https://example.com/releases/tag/v1.2.3' 'https://github.com/pulkitxm/quinjet/releases/tag/v1.2.3-beta.1'; do
+    before=$(wc -l <"${DOWNLOAD_LOG}" | tr -d ' ')
+    if QUINJET_TEST_LATEST_URL="${latest_url}" run_installer "${TEST_ROOT}/invalid-latest/home" Linux x86_64 --bin-dir "${TEST_ROOT}/invalid-latest/bin" >"${TEST_ROOT}/invalid-latest.out" 2>&1; then
+        fail "invalid latest redirect unexpectedly succeeded"
+    fi
+    assert_equals "$((before + 1))" "$(wc -l <"${DOWNLOAD_LOG}" | tr -d ' ')"
+    assert_contains 'invalid latest release' "${TEST_ROOT}/invalid-latest.out"
+done
+unset QUINJET_TEST_LATEST_URL
+
+printf 'test: rejects invalid checksum records before fetching the binary\n'
+case_dir=${TEST_ROOT}/invalid-checksum
+mkdir -p "${case_dir}/bin"
+printf 'existing binary' >"${case_dir}/bin/quinjet"
+for checksum_case in duplicate missing malformed; do
+    prepare_release quinjet-linux-x86_64 'new binary'
+    case "${checksum_case}" in
+        duplicate)
+            cp "${FIXTURES}/SHA256SUMS" "${FIXTURES}/duplicate"
+            cat "${FIXTURES}/duplicate" >>"${FIXTURES}/SHA256SUMS"
+            ;;
+        missing) printf '%064d  quinjet-linux-aarch64\n' 0 >"${FIXTURES}/SHA256SUMS" ;;
+        malformed) printf 'invalid  quinjet-linux-x86_64\n' >"${FIXTURES}/SHA256SUMS" ;;
+        *) fail "unsupported checksum fixture" ;;
+    esac
+    before=$(wc -l <"${DOWNLOAD_LOG}" | tr -d ' ')
+    if run_installer "${case_dir}/home" Linux x86_64 --version 1.2.3 --bin-dir "${case_dir}/bin" >"${case_dir}.out" 2>&1; then
+        fail "${checksum_case} checksum unexpectedly succeeded"
+    fi
+    assert_equals "$((before + 1))" "$(wc -l <"${DOWNLOAD_LOG}" | tr -d ' ')"
+    assert_equals 'existing binary' "$(cat "${case_dir}/bin/quinjet")"
+    assert_contains 'release checksum' "${case_dir}.out"
+done
 
 printf 'test: rejects a checksum mismatch without replacing an installation\n'
 case_dir=${TEST_ROOT}/bad-checksum
@@ -247,6 +307,24 @@ esac'
     assert_contains 'installed to /usr/local/bin/quinjet' "${case_dir}.out"
     assert_equals 'quinjet test' "$(PATH=/usr/local/bin quinjet --version)"
     assert_equals 'quinjet test' "$(PATH=/usr/local/bin q --version)"
+fi
+
+if [ -n "${QUINJET_TEST_BINARY:-}" ]; then
+    printf 'test: explicit completion installation skips unrelated bootstrap\n'
+    case_dir=${TEST_ROOT}/explicit-bootstrap
+    mkdir -p "${case_dir}/bin"
+    cp "${QUINJET_TEST_BINARY}" "${case_dir}/bin/quinjet"
+    env HOME="${case_dir}/home" XDG_DATA_HOME="${case_dir}/data" XDG_CONFIG_HOME="${case_dir}/config" \
+        XDG_STATE_HOME="${case_dir}/state" SHELL=/bin/fish PATH="${case_dir}/bin:${ORIGINAL_PATH}" \
+        "${case_dir}/bin/quinjet" completions bash --install --automatic >/dev/null
+    [ -s "${case_dir}/data/bash-completion/completions/quinjet" ] || fail "explicit bash completion was not installed"
+    [ ! -e "${case_dir}/config/fish/completions/quinjet.fish" ] || fail "explicit installation bootstrapped another shell"
+    [ -L "${case_dir}/bin/q" ] || fail "explicit installation did not create q"
+    printf 'test: first-use --version still bootstraps the configured shell\n'
+    env HOME="${case_dir}/first-home" XDG_DATA_HOME="${case_dir}/first-data" XDG_CONFIG_HOME="${case_dir}/first-config" \
+        XDG_STATE_HOME="${case_dir}/first-state" SHELL=/bin/bash PATH="${case_dir}/bin:${ORIGINAL_PATH}" \
+        "${case_dir}/bin/quinjet" --version >/dev/null
+    [ -s "${case_dir}/first-data/bash-completion/completions/quinjet" ] || fail "first-use --version skipped bootstrap"
 fi
 
 printf 'All shell installer tests passed.\n'
