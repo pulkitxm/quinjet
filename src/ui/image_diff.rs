@@ -1,14 +1,13 @@
 use std::cell::RefCell;
 use std::num::NonZeroU16;
 use std::sync::{Arc, OnceLock};
-use std::time::Duration;
 
+use crossterm::terminal::{WindowSize, window_size};
 use image::{DynamicImage, RgbaImage};
 use ratatui::buffer::CellDiffOption;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui_image::picker::cap_parser::QueryStdioOptions;
 use ratatui_image::picker::{Picker, ProtocolType};
 use ratatui_image::protocol::Protocol;
 use ratatui_image::{Image, Resize};
@@ -63,43 +62,32 @@ impl ImageDrawState {
 
 pub(crate) fn initialize_image_picker() {
     let _state = IMAGE_PICKER.get_or_init(|| {
-        let inferred = ImageProtocol::detect();
-        let override_value = std::env::var("QUINJET_IMAGE_PROTOCOL")
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        let query = should_query(inferred, &override_value);
-        let picker = if query {
-            Picker::from_query_stdio_with_options(QueryStdioOptions {
-                timeout: Duration::from_millis(500),
-                text_sizing_protocol: false,
-            })
-            .unwrap_or_else(|_| Picker::halfblocks())
-        } else {
-            Picker::halfblocks()
-        };
-        let protocol = choose_protocol(inferred, &override_value, picker.protocol_type());
+        let protocol = ImageProtocol::detect();
+        let picker = picker_for_window(protocol, window_size().ok().as_ref());
         (picker, protocol)
     });
 }
 
-fn should_query(inferred: ImageProtocol, override_value: &str) -> bool {
-    inferred.is_native() || override_value == "auto"
-}
-
-fn choose_protocol(
-    inferred: ImageProtocol,
-    override_value: &str,
-    queried: ProtocolType,
-) -> ImageProtocol {
-    if override_value == "halfblocks" || inferred.is_native() {
-        return inferred;
-    }
-    match queried {
-        ProtocolType::Kitty => ImageProtocol::Kitty,
-        ProtocolType::Iterm2 => ImageProtocol::Iterm2,
-        ProtocolType::Sixel => ImageProtocol::Sixel,
-        ProtocolType::Halfblocks => ImageProtocol::Halfblocks,
-    }
+#[expect(
+    deprecated,
+    reason = "the explicit font-size constructor avoids terminal queries and competing input readers"
+)]
+fn picker_for_window(protocol: ImageProtocol, size: Option<&WindowSize>) -> Picker {
+    let font_size = size
+        .and_then(|size| {
+            let width = size.width.checked_div(size.columns)?;
+            let height = size.height.checked_div(size.rows)?;
+            (width > 0 && height > 0).then_some((width, height))
+        })
+        .unwrap_or((10, 20));
+    let mut picker = Picker::from_fontsize(font_size);
+    picker.set_protocol_type(match protocol {
+        ImageProtocol::Kitty => ProtocolType::Kitty,
+        ImageProtocol::Iterm2 => ProtocolType::Iterm2,
+        ImageProtocol::Sixel => ProtocolType::Sixel,
+        ImageProtocol::Halfblocks => ProtocolType::Halfblocks,
+    });
+    picker
 }
 
 pub(super) fn selected_image_protocol() -> ImageProtocol {

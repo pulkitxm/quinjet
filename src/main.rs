@@ -120,7 +120,13 @@ fn open_terminal(
     let mut onboarding = workspace
         .is_none()
         .then(|| Onboarding::new(&options.path, ssh_context.cloned(), onboarding_mode));
-    let onboarding_theme = theme::Theme::new_selection(options.theme, options.appearance.resolve());
+    let onboarding_theme = workspace
+        .as_mut()
+        .and_then(RepositoryWorkspace::active_app_mut)
+        .map_or_else(
+            || theme::Theme::new_selection(options.theme, options.appearance.resolve()),
+            |app| app.theme,
+        );
     let mut terminal = TerminalGuard::enter(!options.no_mouse)?;
     ui::initialize_image_picker();
     let render_tick = tick(Duration::from_millis(16));

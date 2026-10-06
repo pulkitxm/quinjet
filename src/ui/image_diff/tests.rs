@@ -1,36 +1,105 @@
 use std::sync::Arc;
 
+use crossterm::terminal::WindowSize;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui_image::picker::ProtocolType;
 
 use super::{
-    ENCODED_IMAGES, ImageDrawState, Rect, choose_protocol, draw_image_line, draw_native,
-    should_query,
+    ENCODED_IMAGES, ImageDrawState, Rect, draw_image_line, draw_native, picker_for_window,
 };
 use crate::git::diff::{
     DiffLine, DiffLineKind, HighlightSpan, ImageCell, ImagePreview, ImagePreviewKind,
-    ImageProtocol, ImageRaster, ImageSide,
+    ImageProtocol, ImageRaster, ImageSide, detect_protocol_from_vars,
 };
 use crate::theme::{Appearance, Theme, ThemeName};
 
 #[test]
-fn protocol_selection_respects_override_and_query() {
-    assert!(should_query(ImageProtocol::Kitty, ""));
-    assert!(should_query(ImageProtocol::Halfblocks, "auto"));
-    assert!(!should_query(ImageProtocol::Halfblocks, "halfblocks"));
+fn picker_selects_native_protocols_from_environment_without_queries() {
+    for (key, value, expected) in [
+        ("TERM", "xterm-kitty", ProtocolType::Kitty),
+        ("TERM_PROGRAM", "ghostty", ProtocolType::Kitty),
+        ("TERM_PROGRAM", "iTerm.app", ProtocolType::Iterm2),
+        ("TERM_PROGRAM", "WezTerm", ProtocolType::Iterm2),
+        ("TERM", "xterm-sixel", ProtocolType::Sixel),
+        ("TERM", "xterm-256color", ProtocolType::Halfblocks),
+    ] {
+        let protocol = detect_protocol_from_vars([(key, value)]);
+        assert_eq!(picker_for_window(protocol, None).protocol_type(), expected);
+    }
+}
+
+#[test]
+fn picker_respects_explicit_overrides_and_environment_only_auto_detection() {
+    for (override_value, expected) in [
+        ("kitty", ProtocolType::Kitty),
+        ("ITERM2", ProtocolType::Iterm2),
+        ("sixel", ProtocolType::Sixel),
+        ("halfblocks", ProtocolType::Halfblocks),
+        ("auto", ProtocolType::Kitty),
+    ] {
+        let protocol = detect_protocol_from_vars([
+            ("TERM", "xterm-kitty"),
+            ("QUINJET_IMAGE_PROTOCOL", override_value),
+        ]);
+        assert_eq!(picker_for_window(protocol, None).protocol_type(), expected);
+    }
+    let unknown = detect_protocol_from_vars([
+        ("TERM", "xterm-256color"),
+        ("QUINJET_IMAGE_PROTOCOL", "auto"),
+    ]);
     assert_eq!(
-        choose_protocol(ImageProtocol::Halfblocks, "auto", ProtocolType::Kitty),
-        ImageProtocol::Kitty
+        picker_for_window(unknown, None).protocol_type(),
+        ProtocolType::Halfblocks
     );
+}
+
+#[test]
+fn picker_uses_window_pixel_geometry_for_native_protocols() {
+    let size = WindowSize {
+        columns: 80,
+        rows: 24,
+        width: 720,
+        height: 432,
+    };
+    for protocol in [
+        ImageProtocol::Kitty,
+        ImageProtocol::Iterm2,
+        ImageProtocol::Sixel,
+    ] {
+        assert_eq!(
+            picker_for_window(protocol, Some(&size)).font_size(),
+            (9, 18)
+        );
+    }
+}
+
+#[test]
+fn picker_falls_back_for_missing_or_invalid_window_geometry() {
     assert_eq!(
-        choose_protocol(ImageProtocol::Halfblocks, "halfblocks", ProtocolType::Kitty),
-        ImageProtocol::Halfblocks
+        picker_for_window(ImageProtocol::Kitty, None).font_size(),
+        (10, 20)
     );
-    assert_eq!(
-        choose_protocol(ImageProtocol::Iterm2, "iterm2", ProtocolType::Halfblocks),
-        ImageProtocol::Iterm2
-    );
+    for (columns, rows, width, height) in [
+        (80, 24, 0, 0),
+        (0, 24, 720, 432),
+        (80, 0, 720, 432),
+        (80, 24, 0, 432),
+        (80, 24, 720, 0),
+        (80, 24, 79, 432),
+        (80, 24, 720, 23),
+    ] {
+        let size = WindowSize {
+            columns,
+            rows,
+            width,
+            height,
+        };
+        assert_eq!(
+            picker_for_window(ImageProtocol::Kitty, Some(&size)).font_size(),
+            (10, 20)
+        );
+    }
 }
 
 #[test]

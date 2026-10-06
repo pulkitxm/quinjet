@@ -164,17 +164,16 @@ impl TerminalGuard {
         if mouse {
             execute!(stdout, EnableMouseCapture).context("failed to enable mouse capture")?;
         }
-        if crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false)
-            && execute!(
-                stdout,
-                PushKeyboardEnhancementFlags(
-                    KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-                        | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
-                        | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
-                        | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
-                )
+        if execute!(
+            stdout,
+            PushKeyboardEnhancementFlags(
+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                    | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+                    | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
             )
-            .is_ok()
+        )
+        .is_ok()
         {
             KEYBOARD_ENHANCED.store(true, Ordering::SeqCst);
         }
