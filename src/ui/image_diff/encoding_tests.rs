@@ -10,6 +10,15 @@ use super::*;
     reason = "the comparison uses the original library encoder"
 )]
 fn native_encoding_matches_the_original_fit_and_padding() {
+    if std::env::var("TERM").is_ok_and(|term| term.starts_with("tmux"))
+        || std::env::var("TERM_PROGRAM").is_ok_and(|program| program == "tmux")
+    {
+        crate::cli::terminal_query::test_without_tmux(
+            "ui::image_diff::encoding_tests::native_encoding_matches_the_original_fit_and_padding",
+        )
+        .unwrap();
+        return;
+    }
     for font_size in [(10, 20), (9, 18)] {
         let mut original = Picker::from_fontsize(font_size);
         for (width, height, size) in [

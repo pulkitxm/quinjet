@@ -77,5 +77,23 @@ fn read_record(child: &mut Child, max_record_bytes: usize) -> Option<Vec<u8>> {
     (bytes.len() <= max_record_bytes).then_some(bytes)
 }
 
+#[cfg(test)]
+pub(crate) fn test_without_tmux(test_name: &str) -> Result<()> {
+    // nosemgrep: rust.lang.security.current-exe.current-exe
+    let executable = std::env::current_exe()?;
+    let mut child = Command::new(executable)
+        .args(["--exact", test_name, "--nocapture"])
+        .env("TERM", "dumb")
+        .env_remove("TERM_PROGRAM")
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .stdin(Stdio::null())
+        .spawn()?;
+    let status = wait_for_child(&mut child, Instant::now() + Duration::from_secs(5))?
+        .context("isolated encoding test timed out")?;
+    anyhow::ensure!(status.success(), "isolated encoding test failed");
+    Ok(())
+}
+
 #[cfg(all(test, unix))]
 mod tests;
