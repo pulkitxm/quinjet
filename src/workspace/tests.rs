@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -344,6 +344,8 @@ fn replacement_keeps_tab_identity_and_new_tabs_follow_the_close_lifecycle() {
 #[test]
 fn failed_project_open_returns_to_the_picker() {
     let (_directory, repository) = test_repository("first");
+    let missing = repository.root().join("missing-project");
+    assert!(!missing.exists());
     let mut workspace = workspace(&repository);
     let source = workspace.active_id().expect("active tab");
     workspace.app_mut(source).expect("source app").modal = Some(Modal::Projects {
@@ -352,13 +354,13 @@ fn failed_project_open_returns_to_the_picker() {
         query: TextBuffer::default(),
         collapsed: HashSet::new(),
         loading: false,
-        opening: Some("/missing/project".into()),
+        opening: Some(missing.clone()),
         mode: ProjectOpenMode::CurrentTab,
     });
 
     assert!(
         workspace
-            .switch_repository(source, Path::new("/missing/project"), Instant::now())
+            .switch_repository(source, &missing, Instant::now())
             .is_none()
     );
     assert!(matches!(
