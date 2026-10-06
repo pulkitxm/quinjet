@@ -6,14 +6,16 @@ pub(super) fn pull_request_file_document(
     pull_request: &PullRequest,
     file: &PullRequestFile,
     truncated: bool,
+    highlighting: bool,
 ) -> DiffDocument {
     let file_additions = count_patch_lines(output, b'+');
     let file_deletions = count_patch_lines(output, b'-');
-    let mut document = parse_diff(
+    let mut document = parse_diff_with_highlighting(
         output,
         format!("PR #{}  ·  {}", pull_request.number, file.path.display()),
         Some(&file.path),
         truncated,
+        highlighting,
     );
     document.truncated |= truncated;
     document.pull_request_details = Some(PullRequestDetails {

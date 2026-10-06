@@ -38,15 +38,10 @@ pub(super) fn draw_side_by_side_diff(
     let lines = &app.document.lines;
     let sticky = rows.get(diff_scroll).and_then(|first| match first {
         SideBySideRow::FileHeader(_) | SideBySideRow::FileFooter => None,
-        _ => rows
-            .get(..diff_scroll)
-            .unwrap_or_default()
-            .iter()
-            .rev()
-            .find_map(|row| match row {
-                SideBySideRow::FileHeader(header) => lines.get(*header),
-                _ => None,
-            }),
+        SideBySideRow::Full { index, .. } => app.preview_header_at(*index),
+        SideBySideRow::Split(old, new) => {
+            old.or(*new).and_then(|index| app.preview_header_at(index))
+        }
     });
     let content_y = area.y + u16::from(sticky.is_some());
     let content_height = area.height.saturating_sub(u16::from(sticky.is_some()));

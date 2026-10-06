@@ -3,18 +3,30 @@ use super::*;
 
 impl App {
     pub(crate) fn visible_change_indices(&self) -> Vec<usize> {
+        if self.filter.is_empty()
+            || (self.search_mode == SearchMode::Contents && self.search_pending)
+        {
+            return (0..self.status.changes.len()).collect();
+        }
         self.status
             .changes
             .iter()
             .enumerate()
             .filter(|(_, change)| {
-                self.list_item_visible(&change.display_path(), &change.display_path())
+                let path = change.display_path();
+                self.list_item_visible(&path, &path)
             })
             .map(|(index, _)| index)
             .collect()
     }
 
     pub(crate) fn visible_commit_indices(&self) -> Vec<usize> {
+        if self.filter.is_empty()
+            || (self.search_mode == SearchMode::Contents && self.search_pending)
+        {
+            return (0..self.history.len()).collect();
+        }
+        let id_prefix = self.filter.to_lowercase();
         self.history
             .iter()
             .enumerate()
@@ -28,17 +40,9 @@ impl App {
                     name.push(' ');
                     name.push_str(decoration);
                 }
-                let id_prefix = self.filter.to_lowercase();
                 let name_hit = self.search_mode.includes_name()
-                    && (self.filter.is_empty()
-                        || crate::search::name_matches(&self.filter, &name)
+                    && (crate::search::name_matches(&self.filter, &name)
                         || commit.id.starts_with(&id_prefix));
-                if self.filter.is_empty() {
-                    return true;
-                }
-                if self.search_mode == SearchMode::Contents && self.search_pending {
-                    return true;
-                }
                 let content_hit =
                     self.search_mode.includes_contents() && self.content_hits.contains(&commit.id);
                 match self.search_mode {

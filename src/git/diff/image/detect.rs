@@ -53,6 +53,7 @@ where
     let mut kitty = false;
     let mut iterm_session = false;
     let mut wezterm = false;
+    let mut iterm_terminal = false;
     let mut override_protocol = None;
     for (key, value) in vars {
         let key = key.as_ref();
@@ -66,6 +67,7 @@ where
             "KITTY_WINDOW_ID" => kitty = true,
             "ITERM_SESSION_ID" => iterm_session = true,
             "WEZTERM_EXECUTABLE" => wezterm = true,
+            "LC_TERMINAL" => iterm_terminal = value.contains("iTerm"),
             "QUINJET_IMAGE_PROTOCOL" => {
                 override_protocol = match value.to_ascii_lowercase().as_str() {
                     "kitty" => Some(ImageProtocol::Kitty),
@@ -90,6 +92,7 @@ where
     }
     if iterm_session
         || wezterm
+        || iterm_terminal
         || term_program.contains("iterm")
         || term_program.contains("wezterm")
         || term_program.contains("mintty")
@@ -97,6 +100,8 @@ where
         || term_program.contains("tabby")
         || term_program.contains("hyper")
         || term_program.contains("warp")
+        || term_program.contains("rio")
+        || term_program.contains("bobcat")
     {
         return ImageProtocol::Iterm2;
     }

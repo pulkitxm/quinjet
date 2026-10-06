@@ -2,36 +2,17 @@ use std::sync::Arc;
 
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-use ratatui_image::picker::ProtocolType;
 
+use super::preparation::EncodedImage;
 use super::{
-    ENCODED_IMAGES, ImageDrawState, Rect, choose_protocol, draw_image_line, draw_native,
-    should_query,
+    IMAGE_PREPARATION, ImageDrawState, ImageKey, PreparationFrame, Rect, draw_image_line,
+    draw_native, prepare_native,
 };
 use crate::git::diff::{
     DiffLine, DiffLineKind, HighlightSpan, ImageCell, ImagePreview, ImagePreviewKind,
     ImageProtocol, ImageRaster, ImageSide,
 };
 use crate::theme::{Appearance, Theme, ThemeName};
-
-#[test]
-fn protocol_selection_respects_override_and_query() {
-    assert!(should_query(ImageProtocol::Kitty, ""));
-    assert!(should_query(ImageProtocol::Halfblocks, "auto"));
-    assert!(!should_query(ImageProtocol::Halfblocks, "halfblocks"));
-    assert_eq!(
-        choose_protocol(ImageProtocol::Halfblocks, "auto", ProtocolType::Kitty),
-        ImageProtocol::Kitty
-    );
-    assert_eq!(
-        choose_protocol(ImageProtocol::Halfblocks, "halfblocks", ProtocolType::Kitty),
-        ImageProtocol::Halfblocks
-    );
-    assert_eq!(
-        choose_protocol(ImageProtocol::Iterm2, "iterm2", ProtocolType::Halfblocks),
-        ImageProtocol::Iterm2
-    );
-}
 
 #[test]
 fn native_protocols_write_image_payloads_for_both_sides() {
@@ -44,8 +25,10 @@ fn native_protocols_write_image_payloads_for_both_sides() {
         let mut terminal = Terminal::new(backend).expect("test terminal");
         let previous = preview(ImageSide::Previous);
         let current = preview(ImageSide::New);
+        warm_native_images(&[&previous, &current], protocol, 5);
         let _frame = terminal
             .draw(|frame| {
+                let _images = PreparationFrame::begin();
                 assert!(draw_native(
                     frame,
                     Rect::new(0, 0, 5, 2),
@@ -83,8 +66,10 @@ fn scrolled_away_native_images_leave_no_stale_cells() {
         let mut terminal = Terminal::new(TestBackend::new(12, 4)).expect("test terminal");
         let previous = preview(ImageSide::Previous);
         let current = preview(ImageSide::New);
+        warm_native_images(&[&previous, &current], protocol, 5);
         let _frame = terminal
             .draw(|frame| {
+                let _images = PreparationFrame::begin();
                 assert!(draw_native(
                     frame,
                     Rect::new(0, 0, 5, 2),
@@ -120,7 +105,6 @@ fn scrolled_away_native_images_leave_no_stale_cells() {
     reason = "the test follows one image pair through repeated scroll positions"
 )]
 fn scrolling_keeps_native_pair_dimensions_and_clears_stale_placements() {
-    ENCODED_IMAGES.with(|cache| cache.borrow_mut().clear());
     let theme = Theme::new(ThemeName::Quinjet, Appearance::Dark);
     let mut lake = preview(ImageSide::New);
     lake.rows = 8;
@@ -143,6 +127,7 @@ fn scrolling_keeps_native_pair_dimensions_and_clears_stale_placements() {
         height: 64,
         rgba: vec![255; 512],
     }));
+    warm_native_images(&[&lake, &previous, &current], ImageProtocol::Kitty, 5);
     let lake_line = image_line(lake);
     let previous_line = image_line(previous.clone());
     let current_line = image_line(current.clone());
@@ -152,6 +137,7 @@ fn scrolling_keeps_native_pair_dimensions_and_clears_stale_placements() {
     for pass in 0..12 {
         let _frame = terminal
             .draw(|frame| {
+                let _images = PreparationFrame::begin();
                 let mut state = ImageDrawState::default();
                 match pass % 4 {
                     0 => {
@@ -266,17 +252,18 @@ fn scrolling_keeps_native_pair_dimensions_and_clears_stale_placements() {
                 third_row = Some(visible.to_owned());
             }
         }
-        ENCODED_IMAGES.with(|cache| {
-            let cache = cache.borrow();
+        IMAGE_PREPARATION.with(|preparation| {
+            let preparation = preparation.borrow();
+            let cache = &preparation.encoded;
             assert!(cache.len() <= 3);
             assert!(
                 cache
                     .iter()
-                    .all(|entry| entry.height == 8 && entry.width == 5)
+                    .all(|entry| entry.key.height == 8 && entry.key.width == 5)
             );
         });
     }
-    ENCODED_IMAGES.with(|cache| assert_eq!(cache.borrow().len(), 3));
+    IMAGE_PREPARATION.with(|preparation| assert_eq!(preparation.borrow().encoded.len(), 3));
 }
 
 #[test]
@@ -284,35 +271,44 @@ fn other_native_protocols_use_consistent_fallback_when_scrolling() {
     let theme = Theme::new(ThemeName::Quinjet, Appearance::Dark);
     let mut image = preview(ImageSide::New);
     image.rows = 8;
-    let mut terminal = Terminal::new(TestBackend::new(12, 4)).expect("scroll viewport");
+    let mut terminal = Terminal::new(TestBackend::new(12, 10)).expect("scroll viewport");
     for protocol in [ImageProtocol::Iterm2, ImageProtocol::Sixel] {
-        for row in [0, 3, 0] {
+        warm_native_images(&[&image], protocol, 5);
+        for (row, remaining_height, allow_native, expected_native) in [
+            (0, 8, true, true),
+            (0, 4, true, false),
+            (3, 8, true, false),
+            (0, 8, false, false),
+        ] {
             image.row = row;
             let _frame = terminal
                 .draw(|frame| {
+                    let _images = PreparationFrame::begin();
                     draw_image_line(
                         frame,
                         Rect::new(0, 0, 5, 1),
                         &image_line(image.clone()),
-                        4,
+                        remaining_height,
                         &theme,
                         protocol,
-                        &mut ImageDrawState::default(),
+                        &mut ImageDrawState::new(allow_native),
                     );
                 })
                 .expect("scroll frame");
-            assert!(
+            assert_eq!(
                 terminal
                     .backend()
                     .buffer()
                     .cell((0, 0))
-                    .is_some_and(|cell| !cell.symbol().contains('\x1b'))
+                    .is_some_and(|cell| cell.symbol().contains('\x1b')),
+                expected_native,
+                "{protocol:?}, row {row}, remaining height {remaining_height}, native {allow_native}"
             );
         }
     }
 }
 
-fn image_line(preview: ImagePreview) -> DiffLine {
+pub(super) fn image_line(preview: ImagePreview) -> DiffLine {
     DiffLine {
         kind: DiffLineKind::Image,
         old_line: None,
@@ -327,7 +323,7 @@ fn image_line(preview: ImagePreview) -> DiffLine {
     }
 }
 
-fn preview(side: ImageSide) -> ImagePreview {
+pub(super) fn preview(side: ImageSide) -> ImagePreview {
     ImagePreview {
         side,
         path: "photo.png".to_owned(),
@@ -350,4 +346,24 @@ fn preview(side: ImageSide) -> ImagePreview {
             rgba: vec![255; 16],
         })),
     }
+}
+
+fn warm_native_images(previews: &[&ImagePreview], protocol: ImageProtocol, width: u16) {
+    IMAGE_PREPARATION.with(|preparation| {
+        let mut preparation = preparation.borrow_mut();
+        *preparation = super::preparation::ImagePreparation::default();
+        for preview in previews {
+            let key = ImageKey {
+                raster: Arc::clone(preview.raster.as_ref().expect("test raster")),
+                protocol,
+                width,
+                height: preview.rows,
+            };
+            let display = prepare_native(&key).expect("prepared test image");
+            preparation.encoded.push(EncodedImage {
+                key,
+                display: Some(display),
+            });
+        }
+    });
 }

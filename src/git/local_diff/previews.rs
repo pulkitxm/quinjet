@@ -27,6 +27,7 @@ impl Repository {
                         current,
                     },
                     *expanded,
+                    self.diff_highlighting,
                 );
             }
             LocalDiffRequest::Commit { commit, expanded } => {
@@ -41,6 +42,7 @@ impl Repository {
                         current: diff::BlobOrigin::Revision(&commit.id),
                     },
                     *expanded,
+                    self.diff_highlighting,
                 );
             }
             LocalDiffRequest::Branch {
@@ -55,6 +57,7 @@ impl Repository {
                         current: diff::BlobOrigin::Revision("HEAD"),
                     },
                     *expanded,
+                    self.diff_highlighting,
                 );
             }
             LocalDiffRequest::Stash { stash, expanded } => {
@@ -69,6 +72,7 @@ impl Repository {
                         current: diff::BlobOrigin::RevisionFallback(&stash.reference, &untracked),
                     },
                     *expanded,
+                    self.diff_highlighting,
                 );
             }
         }

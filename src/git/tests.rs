@@ -43,6 +43,7 @@ impl TestRepository {
         Repository {
             root: self.path.clone(),
             github_cli: None,
+            diff_highlighting: true,
         }
     }
 
@@ -51,6 +52,7 @@ impl TestRepository {
         Repository {
             root: self.path.clone(),
             github_cli: Some(github_cli),
+            diff_highlighting: true,
         }
     }
 }

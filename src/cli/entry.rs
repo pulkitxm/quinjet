@@ -2,8 +2,14 @@
 use super::*;
 
 pub(crate) fn dispatch() -> Result<Launch> {
-    completion::auto_install();
-    let cli = Cli::parse();
+    let parsed = Cli::try_parse();
+    if !parsed
+        .as_ref()
+        .is_ok_and(|cli| matches!(&cli.command, Some(Verb::Completions(args)) if args.install))
+    {
+        completion::auto_install();
+    }
+    let cli = parsed.unwrap_or_else(|error| error.exit());
     if let Some(target) = cli.remote.as_deref() {
         let (terminal, implicit_terminal, folder) = match cli.command.as_ref() {
             None => (true, true, cli.repository.as_path()),

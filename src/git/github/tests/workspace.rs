@@ -1,4 +1,5 @@
 use super::*;
+use crate::git::diff::DiffLine;
 
 #[test]
 fn changed_file_index_includes_add_modify_delete_and_rename_statuses() {
@@ -63,13 +64,14 @@ fn locally_available_pr_objects_avoid_disposable_fetches() {
     let source = initialized_repository();
     let base_oid = source.git(&["rev-parse", "HEAD"]);
     source.git(&["switch", "-c", "feature/local-preview"]);
-    fs::write(source.0.join("local.txt"), "available locally\n").unwrap();
-    source.git(&["add", "local.txt"]);
+    fs::write(source.0.join("local.rs"), "pub const VALUE: usize = 1;\n").unwrap();
+    source.git(&["add", "local.rs"]);
     source.git(&["commit", "--message=local preview"]);
     let head_oid = source.git(&["rev-parse", "HEAD"]);
-    let git_repository = Repository {
+    let mut git_repository = Repository {
         root: source.0.clone(),
         github_cli: None,
+        diff_highlighting: true,
     };
     let mut request = pull_request(
         repository(
@@ -97,9 +99,40 @@ fn locally_available_pr_objects_avoid_disposable_fetches() {
         document
             .lines
             .iter()
-            .any(|line| line.text().contains("local.txt"))
+            .any(|line| line.text().contains("local.rs"))
     );
     assert!(elapsed < Duration::from_secs(2));
+    assert!(
+        document
+            .lines
+            .iter()
+            .flat_map(|line| &line.spans)
+            .any(|span| span.foreground.is_some())
+    );
+    git_repository.set_diff_highlighting(false);
+    let plain_workspace = git_repository
+        .prepare_pull_request_diff(&request, |_| {})
+        .unwrap();
+    let plain = plain_workspace.diff_file(&index.files[0].path).unwrap();
+    assert!(
+        plain
+            .lines
+            .iter()
+            .flat_map(|line| &line.spans)
+            .all(|span| span.foreground.is_none())
+    );
+    assert_eq!(
+        plain.lines.iter().map(DiffLine::text).collect::<Vec<_>>(),
+        document
+            .lines
+            .iter()
+            .map(DiffLine::text)
+            .collect::<Vec<_>>()
+    );
+    let highlighted_cached = workspace
+        .diff_files(&[index.files[0].path.clone()])
+        .unwrap();
+    assert_eq!(highlighted_cached[0].1, document);
 }
 
 #[test]
@@ -128,6 +161,7 @@ fn disposable_pr_workspace_indexes_all_files_and_does_not_mutate_the_source() {
     let git_repository = Repository {
         root: source.0.clone(),
         github_cli: None,
+        diff_highlighting: true,
     };
     let mut request = pull_request(
         repository("acme/widget", remote.0.to_str().unwrap(), &["test-origin"]),

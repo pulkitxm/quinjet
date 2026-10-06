@@ -22,7 +22,7 @@ pub(crate) use self::checks::{
 };
 pub(crate) use self::conversation::{ConversationEntry, ConversationKind, PullRequestConversation};
 use super::diff::{
-    DiffDocument, DiffLineCounts, PullRequestDetails, parse_diff, parse_numstat,
+    DiffDocument, DiffLineCounts, PullRequestDetails, parse_diff_with_highlighting, parse_numstat,
     split_patch_by_file,
 };
 use super::{MAX_DIFF_BYTES, Repository, StackOperation, text, trim_ascii};

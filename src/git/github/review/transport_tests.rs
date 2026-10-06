@@ -96,6 +96,7 @@ esac
     let repository = Repository {
         root: directory.path().to_path_buf(),
         github_cli: Some(executable),
+        diff_highlighting: true,
     };
     (directory, repository)
 }

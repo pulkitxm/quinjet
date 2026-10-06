@@ -279,6 +279,7 @@ fn discovers_distinct_fetch_and_push_repositories_for_each_remote() {
     let repository = Repository {
         root: directory.0.clone(),
         github_cli: None,
+        diff_highlighting: true,
     };
 
     let (urls, warnings) = repository.remote_urls().unwrap();
@@ -474,7 +475,7 @@ fn selected_file_counts_include_raw_patch_lines_when_rendering_is_truncated() {
         status: PullRequestFileStatus::Modified,
         counts: None,
     };
-    let document = pull_request_file_document(patch, &request, &file, true);
+    let document = pull_request_file_document(patch, &request, &file, true, true);
     let details = document.pull_request_details.unwrap();
 
     assert_eq!(

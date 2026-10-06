@@ -384,7 +384,13 @@ impl Repository {
         if truncated {
             truncate_to_complete_line(&mut output);
         }
-        Ok(parse_diff(&output, title, Some(&file.path), truncated))
+        Ok(parse_diff_with_highlighting(
+            &output,
+            title,
+            Some(&file.path),
+            truncated,
+            self.diff_highlighting,
+        ))
     }
 
     pub(super) fn diff_document_from_args<I, S>(
@@ -401,7 +407,13 @@ impl Repository {
         if truncated {
             truncate_to_complete_line(&mut output);
         }
-        Ok(parse_diff(&output, title, Some(path), truncated))
+        Ok(parse_diff_with_highlighting(
+            &output,
+            title,
+            Some(path),
+            truncated,
+            self.diff_highlighting,
+        ))
     }
 
     pub(crate) fn diff_for_change(&self, change: &Change, expanded: bool) -> Result<DiffDocument> {
@@ -412,7 +424,13 @@ impl Repository {
             change.area.label(),
             change.status.label()
         );
-        Ok(parse_diff(&output, title, Some(&change.path), truncated))
+        Ok(parse_diff_with_highlighting(
+            &output,
+            title,
+            Some(&change.path),
+            truncated,
+            self.diff_highlighting,
+        ))
     }
 
     pub(super) fn raw_diff_for_change(

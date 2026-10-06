@@ -72,6 +72,9 @@ pub(super) fn profile_destination(profile: &Path) -> Result<PathBuf> {
 }
 
 pub(super) fn write_file(path: &Path, contents: &[u8]) -> Result<()> {
+    if fs::read(path).is_ok_and(|existing| existing == contents) {
+        return Ok(());
+    }
     let parent = path
         .parent()
         .with_context(|| format!("{} has no parent directory", path.display()))?;
@@ -127,4 +130,20 @@ pub(super) fn env_path(name: &str) -> Option<PathBuf> {
 
 pub(super) fn single_quote(value: &str) -> String {
     value.replace('\'', "'\\''")
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn identical_integration_preserves_the_existing_file() -> Result<()> {
+    use std::os::unix::fs::MetadataExt;
+
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("integration");
+    write_file(&path, b"current\n")?;
+    let original = fs::metadata(&path)?;
+    write_file(&path, b"current\n")?;
+    anyhow::ensure!(fs::metadata(&path)?.ino() == original.ino());
+    write_file(&path, b"updated\n")?;
+    anyhow::ensure!(fs::read(&path)? == b"updated\n");
+    Ok(())
 }
