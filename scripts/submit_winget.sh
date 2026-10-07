@@ -89,7 +89,7 @@ if ! git diff --cached --quiet; then
 fi
 jq -n --arg head "pulkitxm:${branch}" --arg version "${version}" \
     '{head: $head, base: "master", title: ("Update: Pulkitxm.Quinjet to " + $version),
-      body: ("Updates Quinjet to " + $version + " using its released manifests and checksum-verified Windows archive.")}' \
+        body: ("Updates Quinjet to " + $version + " using its released manifests and checksum-verified Windows archive.")}' \
     >"${work}/pull-request.json"
 if [[ "${mode}" = --dry-run ]]; then
     cat "${work}/pull-request.json"
