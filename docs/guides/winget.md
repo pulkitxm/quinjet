@@ -86,7 +86,7 @@ synchronization and owner-qualified pull request support.
 
 Run **Publish to WinGet** from the Actions tab with a stable release tag, or leave
 the tag empty to submit the latest release. The same operation is available
-locally with an authenticated GitHub CLI and Pukbot installation:
+locally with an authenticated GitHub CLI and Pukbot v0.3.32 or later:
 
 ```bash
 bash scripts/submit_winget.sh v0.0.70 --dry-run
