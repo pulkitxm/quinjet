@@ -68,6 +68,7 @@ jobs:
 
   test:
     name: Test (${{ matrix.os }})
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -87,7 +88,7 @@ jobs:
       - name: Tests
         run: cargo nextest run --all-features --locked --no-fail-fast
       - name: Tests (release)
-        run: cargo test --all-features --locked --release
+        run: cargo nextest run --all-features --locked --release --no-fail-fast
       - name: Release build
         run: cargo build --release --locked
 
