@@ -62,11 +62,13 @@ The repository publishes x86-64 and ARM64 packages. Upgrade with
 On Windows:
 
 ```powershell
-winget install Pulkitxm.Quinjet
+winget install --id Pulkitxm.Quinjet --exact
 ```
 
 Winget installs the `quinjet` and `q` commands and installs Git when it is
-missing. Upgrade with `winget upgrade Pulkitxm.Quinjet`. See the
+missing. Refresh the catalog with `winget source update`, then upgrade with
+`winget upgrade --id Pulkitxm.Quinjet --exact`. New releases appear after
+Microsoft validates the submission and publishes its catalog. See the
 [Winget guide](docs/guides/winget.md) for inspection and removal commands.
 
 ### Homebrew

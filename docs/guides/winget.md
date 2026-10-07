@@ -3,7 +3,7 @@
 Windows Package Manager installs Quinjet from Microsoft's community source:
 
 ```powershell
-winget install Pulkitxm.Quinjet
+winget install --id Pulkitxm.Quinjet --exact
 ```
 
 The package installs both command names:
@@ -18,7 +18,7 @@ view additionally needs an authenticated GitHub CLI installation, which remains
 optional:
 
 ```powershell
-winget install GitHub.cli
+winget install --id GitHub.cli --exact
 gh auth login
 ```
 
@@ -29,24 +29,29 @@ same way as a PowerShell-script installation.
 ## Update
 
 ```powershell
-winget upgrade Pulkitxm.Quinjet
+winget source update
+winget upgrade --id Pulkitxm.Quinjet --exact
 ```
 
 `quinjet update` refuses to replace a Winget-owned executable because doing so
 would leave Winget's installed-version record behind. It prints the Winget
 upgrade command instead. `quinjet update --check` remains available.
 
+New releases appear after Microsoft validates the submission and publishes its
+catalog. Refreshing the source downloads the current catalog; it does not make a
+pending release available sooner.
+
 ## Inspect
 
 ```powershell
-winget show Pulkitxm.Quinjet
-winget list --id Pulkitxm.Quinjet
+winget show --id Pulkitxm.Quinjet --exact
+winget list --id Pulkitxm.Quinjet --exact
 ```
 
 ## Remove
 
 ```powershell
-winget uninstall Pulkitxm.Quinjet
+winget uninstall --id Pulkitxm.Quinjet --exact
 ```
 
 ## Releasing
