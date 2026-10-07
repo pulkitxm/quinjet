@@ -1,0 +1,53 @@
+name: Publish to WinGet
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Stable release tag to submit, or leave empty for the latest release
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: winget-${{ github.event.release.tag_name || inputs.tag || 'latest' }}
+  cancel-in-progress: false
+
+jobs:
+  submit:
+    name: Submit release manifests
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: pukbot-production
+    steps:
+      - name: Check publishing credential
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo 'Set WINGET_TOKEN in the pukbot-production environment to submit WinGet updates.' >&2
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install Pukbot
+        run: |
+          set -euo pipefail
+          binary="${RUNNER_TEMP}/pukbot"
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+            https://github.com/pulkitxm/pukbot/releases/download/v0.3.30/pukbot-linux-x86_64 \
+            --output "${binary}"
+          printf '%s  %s\n' bd2539c5a5d45650bd80ba48efc6e42ca14251b2eb0e586622ed064652c8e033 "${binary}" | sha256sum --check
+          chmod +x "${binary}"
+          echo "${RUNNER_TEMP}" >>"${GITHUB_PATH}"
+      - name: Submit the verified release
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: bash scripts/submit_winget.sh "${TAG}"
