@@ -137,8 +137,8 @@ coverage:
 	$(CARGO) llvm-cov --all-features --locked --fail-under-lines $(COVERAGE_MIN)
 
 shell:
-	shellcheck --severity=style --enable=all install.sh tests/install.sh scripts/build_apt_repository.sh scripts/update_homebrew_tap.sh
-	shfmt --diff --indent 4 --case-indent install.sh tests/install.sh scripts/build_apt_repository.sh scripts/update_homebrew_tap.sh
+	shellcheck --severity=style --enable=all install.sh tests/install.sh scripts/build_apt_repository.sh scripts/update_homebrew_tap.sh scripts/submit_winget.sh
+	shfmt --diff --indent 4 --case-indent install.sh tests/install.sh scripts/build_apt_repository.sh scripts/update_homebrew_tap.sh scripts/submit_winget.sh
 
 actions:
 	actionlint
