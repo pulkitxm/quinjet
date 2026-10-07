@@ -6,6 +6,7 @@ import json
 import math
 import os
 import platform
+import re
 import shutil
 import statistics
 import subprocess
@@ -232,6 +233,16 @@ def first_frame(binary, repository, env, *, case):
         finish_terminal(process, master, original_mode)
 
 
+def comparison_output(name, output):
+    if name in {"first_use_version", "version"}:
+        pattern = rb"\A(quinjet )[0-9]+\.[0-9]+\.[0-9]+(\r?\n)\Z"
+    elif name == "capabilities":
+        pattern = rb"\A(Quinjet )[0-9]+\.[0-9]+\.[0-9]+( command capabilities)"
+    else:
+        return output
+    return re.sub(pattern, rb"\g<1><version>\g<2>", output, count=1)
+
+
 def measure_trial(trial, binaries, results, root, *, terminal):
     order = binaries if trial % 2 == 0 else list(reversed(binaries))
     repository = root / "repository"
@@ -258,7 +269,9 @@ def measure_trial(trial, binaries, results, root, *, terminal):
                 elapsed = first_frame(binary, repository, env, case=case)
                 results[label]["timings"][case].append(elapsed)
     for name in ("first_use_version", *COMMANDS):
-        if outputs["baseline", name] != outputs["candidate", name]:
+        baseline = comparison_output(name, outputs["baseline", name])
+        candidate = comparison_output(name, outputs["candidate", name])
+        if baseline != candidate:
             msg = f"{name} output differs between the baseline and candidate"
             raise RuntimeError(msg)
 
@@ -297,7 +310,8 @@ def benchmark(args):
             staged.append((label, destination))
         binaries = staged
         for label, binary in binaries:
-            invocation(binary, ["--version"], repository, environment(root / label))
+            _, output = invocation(binary, ["--version"], repository, environment(root / label))
+            results[label]["version"] = output.decode().strip()
         for trial in range(args.samples):
             measure_trial(trial, binaries, results, root, terminal=terminal)
     for result in results.values():
@@ -310,6 +324,7 @@ def benchmark(args):
             "alternating order; warm OS cache; fresh process; identical executable names; "
             "isolated homes and executable directories first on PATH; synthetic Bash integration; "
             "fresh home and adjacent shortcut for first use; completion and shortcut verified; "
+            "only leading CLI version labels normalized for cross-release output comparison; "
             "p95 nearest rank"
         ),
         "first_use_integration_verified": True,
