@@ -41,9 +41,9 @@ jobs:
           set -euo pipefail
           binary="${RUNNER_TEMP}/pukbot"
           curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
-            https://github.com/pulkitxm/pukbot/releases/download/v0.3.30/pukbot-linux-x86_64 \
+            https://github.com/pulkitxm/pukbot/releases/download/v0.3.32/pukbot-linux-x86_64 \
             --output "${binary}"
-          printf '%s  %s\n' bd2539c5a5d45650bd80ba48efc6e42ca14251b2eb0e586622ed064652c8e033 "${binary}" | sha256sum --check
+          printf '%s  %s\n' aaf47ccf6f8dd89722c3ee94b6fa6a05f5ab7a833cdd19fa2948c652f77a658e "${binary}" | sha256sum --check
           chmod +x "${binary}"
           echo "${RUNNER_TEMP}" >>"${GITHUB_PATH}"
       - name: Submit the verified release

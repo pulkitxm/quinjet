@@ -77,9 +77,10 @@ to `pulkitxm/winget-pkgs` and permission to dispatch the Operation workflow in
 `pulkitxm/pukbot`. An installation token cannot open a pull request in
 Microsoft's repository where the app is not installed.
 
-Branches and commits use Pukbot. Fork synchronization and cross-fork pull
-request creation use GitHub CLI because Pukbot does not support those operations.
-The workflow installs a pinned, checksum-verified Pukbot release.
+Fork synchronization, branches, commits, and cross-fork pull requests all use
+Pukbot. GitHub CLI provides authentication and read-only release inspection.
+The workflow installs a pinned, checksum-verified Pukbot release with fork
+synchronization and owner-qualified pull request support.
 
 ### Retry a submission
 

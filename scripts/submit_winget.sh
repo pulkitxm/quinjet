@@ -70,11 +70,12 @@ if git ls-remote --exit-code origin "refs/heads/${branch}" >/dev/null; then
     git switch --quiet -c "${branch}" FETCH_HEAD
 else
     sha=$(git rev-parse HEAD)
+    arguments=(repository sync-fork --repo "${fork}" --branch master --json)
+    if [[ "${mode}" = --dry-run ]]; then arguments+=(--dry-run); fi
+    pukbot "${arguments[@]}"
     if [[ "${mode}" = --dry-run ]]; then
-        printf 'Would fast-forward %s master from %s\n' "${fork}" "${upstream}"
         pukbot ref create "refs/heads/${branch}" --repo "${fork}" --sha "${sha}" --dry-run --json
     else
-        gh repo sync "${fork}" --source "${upstream}" --branch master
         pukbot ref create "refs/heads/${branch}" --repo "${fork}" --sha "${sha}" --json
     fi
     git switch --quiet -c "${branch}"
@@ -87,12 +88,8 @@ if ! git diff --cached --quiet; then
     if [[ "${mode}" = --dry-run ]]; then arguments+=(--dry-run); fi
     pukbot "${arguments[@]}"
 fi
-jq -n --arg head "pulkitxm:${branch}" --arg version "${version}" \
-    '{head: $head, base: "master", title: ("Update: Pulkitxm.Quinjet to " + $version),
-        body: ("Updates Quinjet to " + $version + " using its released manifests and checksum-verified Windows archive.")}' \
-    >"${work}/pull-request.json"
-if [[ "${mode}" = --dry-run ]]; then
-    cat "${work}/pull-request.json"
-else
-    gh api --method POST "repos/${upstream}/pulls" --input "${work}/pull-request.json" --jq .html_url
-fi
+arguments=(pr create --repo "${upstream}" --head "pulkitxm:${branch}" --base master
+    --title "Update: Pulkitxm.Quinjet to ${version}"
+    --body "Updates Quinjet to ${version} using its released manifests and checksum-verified Windows archive." --json)
+if [[ "${mode}" = --dry-run ]]; then arguments+=(--dry-run); fi
+pukbot "${arguments[@]}"
