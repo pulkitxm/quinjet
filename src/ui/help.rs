@@ -9,7 +9,7 @@ pub(crate) fn help_rows(exit_locked: bool) -> Vec<&'static HelpRow> {
                 || !matches!(
                     row,
                     HelpRow::Shortcut {
-                        keys: "Ctrl+W" | "Right-click project tab" | "q",
+                        keys: "Ctrl+W" | "Right-click project tab",
                         ..
                     }
                 )

@@ -181,7 +181,7 @@ fn help_catalog_covers_sections_and_previously_missing_bindings() {
             HelpRow::Section(_) | HelpRow::Spacer => None,
         })
         .collect::<Vec<_>>();
-    assert!(!managed_keys.contains(&"q"));
+    assert!(managed_keys.contains(&"q"));
     assert!(!managed_keys.contains(&"Ctrl+W"));
     assert!(!managed_keys.contains(&"Right-click project tab"));
 }
