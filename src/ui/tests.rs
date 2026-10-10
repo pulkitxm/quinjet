@@ -114,6 +114,7 @@ mod modals;
 mod overview;
 mod performance;
 mod preview_layout;
+mod pull_request_viewport;
 mod rendering;
 mod scrolling;
 mod stack;

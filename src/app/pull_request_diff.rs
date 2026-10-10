@@ -11,6 +11,8 @@ impl App {
         self.pull_request_document_order.clear();
         self.pull_request_document_bytes = 0;
         self.pull_request_viewport_paths.clear();
+        self.pull_request_scroll_anchor = None;
+        self.pull_request_restore_scroll = false;
         self.pull_request_prefetch_paths.clear();
         self.pull_request_loading_path = None;
         self.pull_request_single_file = None;
@@ -72,6 +74,12 @@ impl App {
     pub(super) fn apply_pull_request_index(&mut self, index: PullRequestDiffIndex) {
         self.pull_request_file_view = PullRequestFileView::AllFiles;
         self.pull_request_documents.clear();
+        self.pull_request_document_order.clear();
+        self.pull_request_document_bytes = 0;
+        self.pull_request_viewport_paths.clear();
+        self.pull_request_prefetch_paths.clear();
+        self.pull_request_scroll_anchor = None;
+        self.pull_request_restore_scroll = false;
         self.pull_request_loading_path = None;
         self.pull_request_single_file = None;
         self.pull_request_prefetching = false;
@@ -165,6 +173,7 @@ impl App {
         let mut document = index
             .document_with_visibility(&self.pull_request_documents, |path| visible.contains(path));
         document.pull_request_details = Some(pull_request_details(&pull_request));
+        self.pull_request_restore_scroll = self.pull_request_scroll_anchor.is_some();
         self.set_document(document);
     }
 
@@ -203,7 +212,12 @@ impl App {
         while self.pull_request_document_bytes > maximum_bytes
             && self.pull_request_documents.len() > 1
         {
-            let Some(expired) = self.pull_request_document_order.pop_front() else {
+            let position = self
+                .pull_request_document_order
+                .iter()
+                .position(|path| !self.pull_request_viewport_paths.contains(path))
+                .unwrap_or_default();
+            let Some(expired) = self.pull_request_document_order.remove(position) else {
                 break;
             };
             if let Some(document) = self.pull_request_documents.remove(&expired) {

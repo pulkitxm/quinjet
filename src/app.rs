@@ -388,6 +388,8 @@ pub(crate) struct App {
     pub pull_request_document_order: VecDeque<PathBuf>,
     pub pull_request_document_bytes: usize,
     pub pull_request_viewport_paths: Vec<PathBuf>,
+    pub pull_request_scroll_anchor: Option<(PathBuf, usize, usize)>,
+    pub pull_request_restore_scroll: bool,
     pub pull_request_prefetch_paths: Vec<PathBuf>,
     pub pull_request_loading_path: Option<PathBuf>,
     #[doc = " The path whose patch currently occupies `document` in single-file view."]

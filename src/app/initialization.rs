@@ -178,6 +178,8 @@ impl App {
             pull_request_document_order: VecDeque::new(),
             pull_request_document_bytes: 0,
             pull_request_viewport_paths: Vec::new(),
+            pull_request_scroll_anchor: None,
+            pull_request_restore_scroll: false,
             pull_request_prefetch_paths: Vec::new(),
             pull_request_loading_path: None,
             pull_request_single_file: None,

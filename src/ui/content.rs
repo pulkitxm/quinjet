@@ -106,6 +106,14 @@ pub(super) fn draw_content(
         && let Some(row) = anchored_diff_row(app, side_by_side, &anchor)
     {
         app.content_scroll = details_rows.saturating_add(row);
+        app.pull_request_restore_scroll = false;
+    }
+    if std::mem::take(&mut app.pull_request_restore_scroll)
+        && let Some((path, offset, scroll)) = &app.pull_request_scroll_anchor
+        && *scroll == app.content_scroll
+        && let Some(row) = anchored_diff_row(app, side_by_side, path)
+    {
+        app.content_scroll = details_rows.saturating_add(row).saturating_add(*offset);
     }
     let visual_length = details_rows + diff_rows;
     let max_scroll = visual_length.saturating_sub(inner.height as usize);
@@ -155,6 +163,7 @@ pub(super) fn draw_content(
         side_by_side,
         diff_scroll,
         inner.height as usize,
+        details_rows,
     );
     let render_area = Rect::new(
         diff_area.x,
@@ -195,7 +204,7 @@ pub(super) fn draw_content(
 #[doc = " Clickable shortcuts to either end of whatever the content pane holds, each"]
 #[doc = " shown on the border it points at whenever the reader is not already there."]
 #[doc = " On a huge diff or conversation they replace paging through thousands of rows."]
-fn anchored_diff_row(app: &App, side_by_side: bool, anchor: &Path) -> Option<usize> {
+pub(super) fn anchored_diff_row(app: &App, side_by_side: bool, anchor: &Path) -> Option<usize> {
     let matches_anchor = |index: &usize| {
         app.document
             .lines
