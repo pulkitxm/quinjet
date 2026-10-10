@@ -90,6 +90,40 @@ fn horizontal_wheel_events_outside_code_never_move_the_preview() {
 }
 
 #[test]
+fn horizontal_swipes_over_short_code_rows_pan_the_overflowing_diff() {
+    for layout in [DiffLayout::Unified, DiffLayout::SideBySide] {
+        let mut app = long_code_app(layout);
+        app.document
+            .lines
+            .insert(2, test_line(DiffLineKind::Added, "short code"));
+        let mut terminal = Terminal::new(TestBackend::new(180, 48)).unwrap();
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+        let region = app.horizontal_scroll_regions[0];
+        swipe(
+            &mut app,
+            MouseEventKind::ScrollRight,
+            region.x,
+            region.y + 1,
+            KeyModifiers::NONE,
+        );
+        assert_eq!(app.horizontal_scroll, 3);
+        terminal
+            .draw(|frame| draw(frame, &mut app, &Theme::default()))
+            .unwrap();
+        swipe(
+            &mut app,
+            MouseEventKind::ScrollLeft,
+            region.x,
+            region.y + 1,
+            KeyModifiers::NONE,
+        );
+        assert_eq!(app.horizontal_scroll, 0);
+    }
+}
+
+#[test]
 fn repeated_swipes_stop_at_the_visible_text_extent_and_reset_is_reachable() {
     for layout in [DiffLayout::Unified, DiffLayout::SideBySide] {
         let mut app = long_code_app(layout);
