@@ -62,6 +62,25 @@ fn horizontal_wheel_events_outside_code_never_move_the_preview() {
         swipe(
             &mut app,
             MouseEventKind::ScrollRight,
+            region.x - 1,
+            region.y,
+            KeyModifiers::NONE,
+        );
+        assert_eq!(app.horizontal_scroll, 0);
+        if layout == DiffLayout::SideBySide {
+            let column = app.geometry.content.x + 3;
+            swipe(
+                &mut app,
+                MouseEventKind::ScrollRight,
+                column,
+                region.y,
+                KeyModifiers::NONE,
+            );
+            assert_eq!(app.horizontal_scroll, 0);
+        }
+        swipe(
+            &mut app,
+            MouseEventKind::ScrollRight,
             region.x,
             region.y,
             KeyModifiers::NONE,

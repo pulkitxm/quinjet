@@ -28,38 +28,46 @@ pub(super) fn update_diff_scroll(app: &mut App, area: Rect, side_by_side: bool, 
         / 100;
     let right_width = area.width.saturating_sub(1).saturating_sub(left_width);
     for row in scroll..scroll.saturating_add(usize::from(area.height)) {
-        let overflow =
-            if side_by_side {
-                app.side_by_side_diff_rows
-                    .get(row)
-                    .map_or(0, |row| match row {
-                        SideBySideRow::Split(old, new) => {
-                            line_overflow(app, *old, left_width.saturating_sub(7))
-                                .max(line_overflow(app, *new, right_width.saturating_sub(7)))
-                        }
-                        SideBySideRow::Full { index, .. } => {
-                            line_overflow(app, Some(*index), area.width.saturating_sub(2))
-                        }
-                        SideBySideRow::FileHeader(_) | SideBySideRow::FileFooter => 0,
-                    })
-            } else {
-                line_overflow(
-                    app,
-                    app.unified_diff_rows.get(row).copied(),
-                    area.width.saturating_sub(12),
-                )
-            };
-        if overflow > 0 {
-            app.horizontal_scroll_regions.push(Rect::new(
-                area.x,
-                area.y.saturating_add(cells(row.saturating_sub(scroll))),
-                area.width,
-                1,
-            ));
-            app.horizontal_scroll_limit = app.horizontal_scroll_limit.max(overflow);
+        let y = area.y.saturating_add(cells(row.saturating_sub(scroll)));
+        if side_by_side {
+            match app.side_by_side_diff_rows.get(row).copied() {
+                Some(SideBySideRow::Split(old, new)) => {
+                    register_overflow(app, old, Rect::new(area.x, y, left_width, 1), 7);
+                    register_overflow(
+                        app,
+                        new,
+                        Rect::new(area.x + left_width + 1, y, right_width, 1),
+                        7,
+                    );
+                }
+                Some(SideBySideRow::Full { index, .. }) => {
+                    register_overflow(app, Some(index), Rect::new(area.x, y, area.width, 1), 2);
+                }
+                _ => {}
+            }
+        } else {
+            register_overflow(
+                app,
+                app.unified_diff_rows.get(row).copied(),
+                Rect::new(area.x, y, area.width, 1),
+                12,
+            );
         }
     }
     app.horizontal_scroll = app.horizontal_scroll.min(app.horizontal_scroll_limit);
+}
+
+fn register_overflow(app: &mut App, index: Option<usize>, area: Rect, gutter: u16) {
+    let overflow = line_overflow(app, index, area.width.saturating_sub(gutter));
+    if overflow > 0 {
+        app.horizontal_scroll_regions.push(Rect::new(
+            area.x.saturating_add(gutter),
+            area.y,
+            area.width.saturating_sub(gutter),
+            1,
+        ));
+        app.horizontal_scroll_limit = app.horizontal_scroll_limit.max(overflow);
+    }
 }
 
 fn line_overflow(app: &App, index: Option<usize>, width: u16) -> usize {
