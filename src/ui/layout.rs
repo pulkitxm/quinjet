@@ -8,6 +8,7 @@ use super::*;
 pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     app.horizontal_scroll_regions.clear();
     app.horizontal_scroll_limit = 0;
+    app.geometry.horizontal_scrollbar = None;
     frame.render_widget(
         Block::default().style(Style::default().bg(theme.background)),
         frame.area(),
@@ -92,6 +93,12 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
         )
     };
     scm_action_hits.extend(draw_jump_controls(frame, workspace.content, app, theme));
+    let horizontal_scrollbar = horizontal_scrollbar::draw(frame, workspace.content, app, theme);
+    if let Some(scrollbar) = horizontal_scrollbar {
+        app.horizontal_scroll_regions.push(scrollbar.area);
+    } else {
+        app.horizontal_scroll_drag = None;
+    }
     draw_footer(frame, footer, app, theme, &mut link_hits, &mut project_hits);
 
     app.geometry = UiGeometry {
@@ -108,6 +115,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
         sidebar_divider: workspace.sidebar_divider,
         content: workspace.content,
         diff_divider: workspace.diff_divider,
+        horizontal_scrollbar,
         sidebar_hits: workspace.sidebar_hits,
         stack_inspector_hits: workspace.stack_inspector_hits,
         scm_action_hits,

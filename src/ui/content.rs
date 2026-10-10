@@ -241,8 +241,8 @@ pub(super) fn anchored_diff_row(app: &App, side_by_side: bool, anchor: &Path) ->
 }
 
 const JUMP_TOP_LABEL: &str = " ↑ Top ";
-const JUMP_BOTTOM_LABEL: &str = " ↓ Bottom ";
-const JUMP_CONTROL_MARGIN: u16 = 3;
+pub(super) const JUMP_BOTTOM_LABEL: &str = " ↓ Bottom ";
+pub(super) const JUMP_CONTROL_MARGIN: u16 = 3;
 
 fn jump_control_reserve() -> usize {
     JUMP_TOP_LABEL
@@ -260,26 +260,6 @@ pub(super) fn draw_jump_controls(
         return Vec::new();
     }
     let mut hits = Vec::new();
-    if app.horizontal_scroll_limit > 0 {
-        let label = format!(
-            " ←/→ {}/{}  [0 Reset] ",
-            app.horizontal_scroll, app.horizontal_scroll_limit
-        );
-        let area = Rect::new(
-            content.x.saturating_add(2),
-            content.bottom().saturating_sub(1),
-            cells(label.width()).min(content.width.saturating_sub(15)),
-            1,
-        );
-        frame.render_widget(
-            Paragraph::new(label).style(Style::default().fg(theme.accent).bg(theme.panel)),
-            area,
-        );
-        hits.push(ScmActionHit {
-            area,
-            action: ScmAction::ResetHorizontalScroll,
-        });
-    }
     if app.content_scroll > 0 {
         hits.push(draw_jump_control(
             frame,

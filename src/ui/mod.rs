@@ -13,8 +13,8 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{
     App, ChangeRow, ChangeSection, CheckListRow, ContentFileHit, ContentReviewHit, ContentStepHit,
-    DiffLayout, Focus, HelpHit, LinkHit, Modal, ModalAction, OpenTarget, PaletteCommand,
-    PrActionItem, PrMenuItem, ProjectOpenMode, ProjectRow, PullRequestContentLink,
+    DiffLayout, Focus, HelpHit, HorizontalScrollbar, LinkHit, Modal, ModalAction, OpenTarget,
+    PaletteCommand, PrActionItem, PrMenuItem, ProjectOpenMode, ProjectRow, PullRequestContentLink,
     PullRequestContentRow, PullRequestSection, PullRequestTreeEntry, RepositoryTabAction,
     RepositoryTabHit, ScmAction, ScmActionHit, ScmMenuItem, SideBySideRow, SidebarHit,
     SidebarHitArea, StackInspectorHit, StackInspectorHitArea, StackMemberSection, ToastLevel,
@@ -44,6 +44,7 @@ mod diff_scrolling;
 mod diff_wrapping;
 mod feedback;
 mod help;
+mod horizontal_scrollbar;
 mod image_diff;
 mod layout;
 mod modal_branches;

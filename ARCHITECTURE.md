@@ -109,7 +109,7 @@ Important parity findings incorporated in the first implementation:
 - Event-driven refresh with noise filtering and snapshot reconciliation.
 - Git CLI delegation for hooks, credentials, config, refs, and index semantics.
 - Paginated history for an explicit branch revision and lazy commit preview.
-- Side-by-side and unified syntax-highlighted diff surfaces. Code wrapping toggles with `Alt+z` or the command palette, preserves source line positions, and reflows when pane widths change. Horizontal gestures over code rows pan when any visible line overflows and clamp to the visible text extent; `0` resets the offset.
+- Side-by-side and unified syntax-highlighted diff surfaces. Code wrapping toggles with `Alt+z` or the command palette, preserves source line positions, and reflows when pane widths change. Horizontal gestures over code rows pan when any visible line overflows and clamp to the visible text extent; `0` resets the offset. A local horizontal scrollbar shows the position and supports track clicks, arrow clicks, and thumb dragging.
 - Context-sensitive operations, confirmations, keyboard help, and optional mouse support.
 
 ## Deliberate Next Steps

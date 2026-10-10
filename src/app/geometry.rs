@@ -99,7 +99,6 @@ pub(crate) enum ScmAction {
     PrToggleMenu,
     PrMenu(PrMenuItem),
     JumpToTop,
-    ResetHorizontalScroll,
     JumpToBottom,
 }
 
@@ -113,6 +112,18 @@ pub(crate) struct HelpHit {
 pub(crate) struct ScmActionHit {
     pub area: Rect,
     pub action: ScmAction,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HorizontalScrollbar {
+    pub area: Rect,
+    pub thumb: Rect,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct HorizontalScrollDrag {
+    pub column: u16,
+    pub offset: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -193,6 +204,7 @@ pub(crate) struct UiGeometry {
     pub sidebar_divider: Rect,
     pub content: Rect,
     pub diff_divider: Option<Rect>,
+    pub horizontal_scrollbar: Option<HorizontalScrollbar>,
     pub sidebar_hits: Vec<SidebarHitArea>,
     pub stack_inspector_hits: Vec<StackInspectorHitArea>,
     pub scm_action_hits: Vec<ScmActionHit>,
