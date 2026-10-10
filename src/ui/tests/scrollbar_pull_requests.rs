@@ -1,9 +1,11 @@
-use super::scrollbars::{mouse, render};
-use super::*;
+use std::fmt::Write;
+
 use crossterm::event::{MouseButton, MouseEventKind};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-use std::fmt::Write;
+
+use super::scrollbars::{mouse, render};
+use super::*;
 
 fn scroll_to_end(app: &mut App, terminal: &mut Terminal<TestBackend>, sidebar: bool) {
     render(app, terminal);
