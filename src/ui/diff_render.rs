@@ -274,17 +274,35 @@ pub(super) fn draw_scrollbar(
         return;
     };
     for row in scrollbar.track.y..scrollbar.track.bottom() {
-        let in_thumb = scrollbar.thumb.contains((scrollbar.track.x, row).into());
-        frame.render_widget(
-            Paragraph::new(if in_thumb { "▐" } else { "│" }).style(Style::default().fg(
-                if in_thumb {
+        for column in scrollbar.track.x..scrollbar.track.right() {
+            let in_thumb = scrollbar.thumb.contains((column, row).into());
+            let symbol = match (scrollbar.horizontal, in_thumb) {
+                (true, true) => "━",
+                (true, false) => "─",
+                (false, true) => "▐",
+                (false, false) => "│",
+            };
+            frame.render_widget(
+                Paragraph::new(symbol).style(Style::default().fg(if in_thumb {
                     theme.accent_soft
                 } else {
                     theme.border
-                },
-            )),
-            Rect::new(scrollbar.track.x, row, 1, 1),
-        );
+                })),
+                Rect::new(column, row, 1, 1),
+            );
+        }
+    }
+    if scrollbar.horizontal {
+        for (column, symbol) in [
+            (scrollbar.area.x, "◀"),
+            (scrollbar.area.right().saturating_sub(1), "▶"),
+        ] {
+            frame.render_widget(
+                Paragraph::new(symbol)
+                    .style(Style::default().fg(theme.accent_soft).bg(theme.panel)),
+                Rect::new(column, scrollbar.area.y, 1, 1),
+            );
+        }
     }
 }
 

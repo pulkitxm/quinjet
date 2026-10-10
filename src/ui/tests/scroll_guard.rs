@@ -318,7 +318,7 @@ fn horizontal_scrollbar_accepts_track_clicks_arrows_and_bounded_thumb_dragging()
             Instant::now(),
         );
         assert!(effects.is_empty());
-        assert!(app.horizontal_scroll_drag.is_none());
+        assert!(app.scrollbar_drag.is_none());
         assert!(app.text_selection.is_none());
     }
 }
@@ -345,7 +345,7 @@ fn horizontal_scrollbar_reflows_on_resize_and_disappears_when_code_wraps() {
             bar.thumb.y,
             KeyModifiers::NONE,
         );
-        assert!(app.horizontal_scroll_drag.is_some());
+        assert!(app.scrollbar_drag.is_some());
         app.handle_key(
             KeyEvent::new(KeyCode::Char('z'), KeyModifiers::ALT),
             Instant::now(),
@@ -355,6 +355,6 @@ fn horizontal_scrollbar_reflows_on_resize_and_disappears_when_code_wraps() {
             .unwrap();
         assert_eq!(app.horizontal_scroll, 0);
         assert!(app.geometry.horizontal_scrollbar.is_none());
-        assert!(app.horizontal_scroll_drag.is_none());
+        assert!(app.scrollbar_drag.is_none());
     }
 }

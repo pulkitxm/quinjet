@@ -114,18 +114,6 @@ pub(crate) struct ScmActionHit {
     pub action: ScmAction,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct HorizontalScrollbar {
-    pub area: Rect,
-    pub thumb: Rect,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct HorizontalScrollDrag {
-    pub column: u16,
-    pub offset: usize,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RepositoryTabAction {
     OpenProject,
@@ -204,7 +192,7 @@ pub(crate) struct UiGeometry {
     pub sidebar_divider: Rect,
     pub content: Rect,
     pub diff_divider: Option<Rect>,
-    pub horizontal_scrollbar: Option<HorizontalScrollbar>,
+    pub horizontal_scrollbar: Option<Scrollbar>,
     pub sidebar_scrollbar: Option<Scrollbar>,
     pub content_scrollbar: Option<Scrollbar>,
     pub sidebar_hits: Vec<SidebarHitArea>,

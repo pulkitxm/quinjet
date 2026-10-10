@@ -126,15 +126,10 @@ pub(super) fn draw_pull_request_overview(
     app.horizontal_scroll_limit = overflow;
     app.horizontal_scroll = app.horizontal_scroll.min(overflow);
 
-    let mut title = overview_title(app, showing_check);
-    if overflow > 0 {
-        title.push_str("·  ←/→ ");
-        title.push_str(&app.horizontal_scroll.to_string());
-        title.push('/');
-        title.push_str(&overflow.to_string());
-        title.push(' ');
-    }
-    frame.render_widget(panel_block(title, focused, theme), area);
+    frame.render_widget(
+        panel_block(overview_title(app, showing_check), focused, theme),
+        area,
+    );
 
     if showing_check && app.pull_request_step_reveal {
         app.pull_request_step_reveal = false;

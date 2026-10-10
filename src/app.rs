@@ -130,7 +130,6 @@ fn updated_recent_pull_requests(
 mod changes;
 mod dialogs;
 mod geometry;
-mod horizontal_scrollbar;
 mod initialization;
 mod interaction;
 mod keyboard;
@@ -344,7 +343,6 @@ pub(crate) struct App {
     pub horizontal_scroll: usize,
     pub horizontal_scroll_limit: usize,
     pub horizontal_scroll_regions: Vec<Rect>,
-    pub horizontal_scroll_drag: Option<HorizontalScrollDrag>,
     pub sidebar_width: u16,
     pub sidebar_hidden: bool,
     pub diff_split_percent: u16,

@@ -171,10 +171,6 @@ impl App {
             return effects;
         }
         if self.modal.is_some() {
-            self.horizontal_scroll_drag = None;
-            return effects;
-        }
-        if self.handle_horizontal_scrollbar_mouse(event) {
             return effects;
         }
         if event.modifiers.contains(KeyModifiers::SHIFT) {
