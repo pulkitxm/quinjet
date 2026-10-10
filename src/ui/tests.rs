@@ -118,6 +118,7 @@ mod preview_layout;
 mod pull_request_viewport;
 mod rendering;
 mod scroll_guard;
+mod scrollbar_pull_requests;
 mod scrollbars;
 mod scrolling;
 mod stack;

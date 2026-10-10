@@ -69,7 +69,12 @@ impl App {
         event: MouseEvent,
         effects: &mut Vec<AppEffect>,
     ) -> bool {
-        if self.modal.is_some() || self.repository_tab_menu.is_some() || !self.mouse_capture {
+        if self.modal.is_some()
+            || self.repository_tab_menu.is_some()
+            || self.scm_menu_open
+            || self.pr_menu_open
+            || !self.mouse_capture
+        {
             self.scrollbar_drag = None;
             return false;
         }

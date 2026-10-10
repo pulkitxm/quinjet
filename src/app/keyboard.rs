@@ -7,6 +7,7 @@ impl App {
         reason = "the draw pass reads better as one top-to-bottom pass"
     )]
     pub(crate) fn handle_key(&mut self, key: KeyEvent, now: Instant) -> Vec<AppEffect> {
+        self.scrollbar_drag = None;
         self.link_hover = None;
         if self.repository_tab_menu.is_some() {
             return self.handle_repository_tab_key(key).unwrap_or_default();

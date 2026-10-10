@@ -51,7 +51,7 @@ pub(super) fn draw_changes_sidebar(
     } else {
         2
     };
-    let list_area = Rect::new(
+    let scrollbar_area = Rect::new(
         inner.x,
         inner.y,
         inner.width,
@@ -60,6 +60,14 @@ pub(super) fn draw_changes_sidebar(
     let visible = app.visible_change_indices();
     let rows = app.change_rows_for(&visible);
     let row_count = rows.len();
+    let list_area = Rect::new(
+        scrollbar_area.x,
+        scrollbar_area.y,
+        scrollbar_area
+            .width
+            .saturating_sub(u16::from(row_count > usize::from(scrollbar_area.height))),
+        scrollbar_area.height,
+    );
     let height = list_area.height as usize;
     let selected_row = rows
         .iter()
@@ -249,7 +257,7 @@ pub(super) fn draw_changes_sidebar(
     }
 
     app.geometry.sidebar_scrollbar = crate::app::Scrollbar::new(
-        list_area,
+        scrollbar_area,
         app.sidebar_offset,
         rows.len(),
         usize::from(list_area.height),
