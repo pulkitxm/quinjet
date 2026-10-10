@@ -32,7 +32,13 @@ pub(super) fn draw(frame: &mut Frame<'_>, app: &App, theme: &Theme) {
     let Some(point) = app.mouse_hover.map(Into::into) else {
         return;
     };
-    if app.modal.is_some() || app.repository_tab_menu.is_some() || app.resize_target.is_some() {
+    if app.modal.is_some()
+        || app.repository_tab_menu.is_some()
+        || app.scm_menu_open
+        || app.pr_menu_open
+        || app.resize_target.is_some()
+        || app.scrollbar_drag.is_some()
+    {
         return;
     }
     if let Some(hit) = app

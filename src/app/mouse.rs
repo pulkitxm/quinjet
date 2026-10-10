@@ -14,6 +14,7 @@ impl App {
         self.mouse_hover =
             (event.kind == MouseEventKind::Moved).then_some((event.column, event.row));
         if self.handle_scrollbar_mouse(event, &mut effects) {
+            self.link_hover = None;
             return effects;
         }
         if self.modal.is_none() {

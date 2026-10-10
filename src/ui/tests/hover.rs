@@ -247,3 +247,120 @@ fn selection_and_modals_take_precedence_over_hover() {
         .unwrap();
     assert_eq!(hovered, *terminal.backend().buffer());
 }
+
+#[test]
+fn scrollbar_drag_takes_precedence_over_hover_feedback() {
+    use super::scrollbars::mouse;
+
+    let theme = Theme::default();
+    let mut app = diff_app(DiffLayout::Unified, false);
+    app.document.lines.splice(
+        3..3,
+        std::iter::repeat_n(test_line(DiffLineKind::Context, "example text"), 100),
+    );
+    let mut terminal = Terminal::new(TestBackend::new(120, 32)).unwrap();
+    terminal
+        .draw(|frame| draw(frame, &mut app, &theme))
+        .unwrap();
+    let scrollbar = app.geometry.content_scrollbar.unwrap();
+    let viewport = app.geometry.diff_viewport.unwrap();
+    hover_at(&mut app, viewport.area.x + 15, viewport.area.y + 2);
+    app.link_hover = app.mouse_hover;
+    drop(mouse(
+        &mut app,
+        MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        scrollbar.thumb.x,
+        scrollbar.thumb.y,
+    ));
+    assert!(app.scrollbar_drag.is_some());
+    assert!(app.mouse_hover.is_none());
+    assert!(app.link_hover.is_none());
+    hover_at(&mut app, viewport.area.x + 15, viewport.area.y + 2);
+    terminal
+        .draw(|frame| draw(frame, &mut app, &theme))
+        .unwrap();
+    let dragging = terminal.backend().buffer().clone();
+    app.mouse_hover = None;
+    terminal
+        .draw(|frame| draw(frame, &mut app, &theme))
+        .unwrap();
+    assert_eq!(dragging, *terminal.backend().buffer());
+    let effects = mouse(
+        &mut app,
+        MouseEventKind::Up(crossterm::event::MouseButton::Left),
+        scrollbar.thumb.x,
+        scrollbar.thumb.y,
+    );
+    assert!(effects.is_empty());
+    assert!(app.scrollbar_drag.is_none());
+}
+
+#[test]
+fn scrollbar_click_remains_available_after_momentum_crosses_panes() {
+    use super::scrollbars::mouse;
+
+    let theme = Theme::default();
+    let mut app = diff_app(DiffLayout::Unified, false);
+    app.sidebar_hidden = false;
+    app.document.lines.splice(
+        3..3,
+        std::iter::repeat_n(test_line(DiffLineKind::Context, "example text"), 100),
+    );
+    app.status.changes = (0..100)
+        .map(|index| Change {
+            path: format!("example-{index}.txt").into(),
+            original_path: None,
+            area: ChangeArea::Unstaged,
+            status: ChangeStatus::Modified,
+        })
+        .collect();
+    let mut terminal = Terminal::new(TestBackend::new(160, 32)).unwrap();
+    terminal
+        .draw(|frame| draw(frame, &mut app, &theme))
+        .unwrap();
+    let content = app.geometry.content;
+    let sidebar = app.geometry.sidebar;
+    drop(mouse(
+        &mut app,
+        MouseEventKind::ScrollDown,
+        content.x + 10,
+        content.y + 5,
+    ));
+    hover_at(&mut app, sidebar.x + 10, sidebar.y + 5);
+    drop(mouse(
+        &mut app,
+        MouseEventKind::ScrollDown,
+        sidebar.x + 10,
+        sidebar.y + 5,
+    ));
+    assert_eq!(app.sidebar_offset, 0);
+    let scrollbar = app.geometry.sidebar_scrollbar.unwrap();
+    drop(mouse(
+        &mut app,
+        MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        scrollbar.thumb.x,
+        scrollbar.thumb.y,
+    ));
+    drop(mouse(
+        &mut app,
+        MouseEventKind::Drag(crossterm::event::MouseButton::Left),
+        scrollbar.thumb.x,
+        scrollbar.track.y + 10,
+    ));
+    assert!(app.sidebar_offset > 0);
+    let effects = mouse(
+        &mut app,
+        MouseEventKind::Up(crossterm::event::MouseButton::Left),
+        scrollbar.thumb.x,
+        scrollbar.track.y + 10,
+    );
+    assert!(effects.is_empty());
+    let offset = app.sidebar_offset;
+    drop(mouse(
+        &mut app,
+        MouseEventKind::ScrollUp,
+        sidebar.x + 10,
+        sidebar.y + 5,
+    ));
+    assert_eq!(app.sidebar_offset, offset - 2);
+}
