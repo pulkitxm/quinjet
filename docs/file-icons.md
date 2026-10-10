@@ -49,7 +49,7 @@ Add an exact filename to `special_name_icon` or an extension to
 `extension_icon` in `src/file_icons.rs`. Reuse an existing `FileIcon` constant
 when its glyph and color fit. For a new glyph, add one constant near the other
 icon definitions and use a code point present in the current Nerd Fonts
-[`glyphnames.json`](https://github.com/ryanoasis/nerd-fonts/blob/master/glyphnames.json).
+[`glyphnames.json`](https://raw.githubusercontent.com/ryanoasis/nerd-fonts/master/glyphnames.json).
 Prefer the `fa-` entry when Font Awesome has the icon, then use `dev-` only for
 a missing language brand.
 

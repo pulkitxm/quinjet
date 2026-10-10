@@ -307,4 +307,4 @@ References:
 - [GNU linker options](https://sourceware.org/binutils/docs/ld/Options.html)
 - [musl release history](https://musl.libc.org/releases.html)
 - [Rust 1.93 bundled-musl update](https://blog.rust-lang.org/2026/01/22/Rust-1.93.0/)
-- [BOLT prerequisites](https://github.com/llvm/llvm-project/blob/main/bolt/README.md)
+- [BOLT prerequisites](https://raw.githubusercontent.com/llvm/llvm-project/main/bolt/README.md)
