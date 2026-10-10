@@ -112,8 +112,18 @@ pub(super) fn draw_pull_request_overview(
     }
     let rows = &app.pull_request_content_rows;
     let row_links = &app.pull_request_content_links;
-    let content_width = app.pull_request_content_width;
+    let max_scroll = rows.len().saturating_sub(inner.height as usize);
+    app.content_scroll = app.content_scroll.min(max_scroll);
+    let content_width = rows
+        .iter()
+        .skip(app.content_scroll)
+        .take(inner.height as usize)
+        .filter(|row| row.wide)
+        .map(|row| row.line.width())
+        .max()
+        .unwrap_or_default();
     let overflow = content_width.saturating_sub(width);
+    app.horizontal_scroll_limit = overflow;
     app.horizontal_scroll = app.horizontal_scroll.min(overflow);
 
     let mut title = overview_title(app, showing_check);
@@ -140,8 +150,6 @@ pub(super) fn draw_pull_request_overview(
             );
         }
     }
-    let max_scroll = rows.len().saturating_sub(inner.height as usize);
-    app.content_scroll = app.content_scroll.min(max_scroll);
     app.content_at_bottom = app.content_scroll == max_scroll;
 
     let mut hits = Vec::new();
@@ -153,6 +161,9 @@ pub(super) fn draw_pull_request_overview(
     {
         let source_row = app.content_scroll.saturating_add(offset);
         let row_area = Rect::new(inner.x, inner.y + cells(offset), inner.width, 1);
+        if row.wide && row.line.width() > width {
+            app.horizontal_scroll_regions.push(row_area);
+        }
         let selected = showing_check && row.step == Some(app.pull_request_step_cursor);
         frame.render_widget(
             Paragraph::new(if row.wide {

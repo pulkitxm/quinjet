@@ -171,6 +171,7 @@ pub(super) fn draw_content(
         diff_area.width.saturating_sub(1),
         diff_area.height,
     );
+    diff_scrolling::update_diff_scroll(app, render_area, side_by_side, diff_scroll);
     let mut content_review_hits = Vec::new();
     let (divider, content_file_hits) = if render_area.width < 2 || render_area.height == 0 {
         (None, Vec::new())
@@ -241,6 +242,26 @@ pub(super) fn draw_jump_controls(
         return Vec::new();
     }
     let mut hits = Vec::new();
+    if app.horizontal_scroll_limit > 0 {
+        let label = format!(
+            " ←/→ {}/{}  [0 Reset] ",
+            app.horizontal_scroll, app.horizontal_scroll_limit
+        );
+        let area = Rect::new(
+            content.x.saturating_add(2),
+            content.bottom().saturating_sub(1),
+            cells(label.width()).min(content.width.saturating_sub(15)),
+            1,
+        );
+        frame.render_widget(
+            Paragraph::new(label).style(Style::default().fg(theme.accent).bg(theme.panel)),
+            area,
+        );
+        hits.push(ScmActionHit {
+            area,
+            action: ScmAction::ResetHorizontalScroll,
+        });
+    }
     if app.content_scroll > 0 {
         hits.push(draw_jump_control(
             frame,

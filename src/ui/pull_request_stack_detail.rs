@@ -74,10 +74,18 @@ pub(super) fn draw_stack_member_detail(
         app.stack_inspector_content_rows_key = Some(key);
     }
     let rows = &app.stack_inspector_content_rows;
-    let overflow = app.stack_inspector_content_width.saturating_sub(width);
-    app.horizontal_scroll = app.horizontal_scroll.min(overflow);
     let max_scroll = rows.len().saturating_sub(usize::from(body.height));
     app.content_scroll = app.content_scroll.min(max_scroll);
+    let overflow = rows
+        .iter()
+        .skip(app.content_scroll)
+        .take(usize::from(body.height))
+        .filter(|row| row.wide)
+        .map(|row| row.line.width().saturating_sub(width))
+        .max()
+        .unwrap_or_default();
+    app.horizontal_scroll_limit = overflow;
+    app.horizontal_scroll = app.horizontal_scroll.min(overflow);
     app.content_at_bottom = app.content_scroll == max_scroll;
     for (offset, row) in rows
         .iter()
@@ -87,6 +95,9 @@ pub(super) fn draw_stack_member_detail(
     {
         let source_row = app.content_scroll.saturating_add(offset);
         let row_area = Rect::new(body.x, body.y.saturating_add(cells(offset)), body.width, 1);
+        if row.wide && row.line.width() > width {
+            app.horizontal_scroll_regions.push(row_area);
+        }
         frame.render_widget(
             Paragraph::new(if row.wide {
                 shift_line(&row.line, app.horizontal_scroll, width)

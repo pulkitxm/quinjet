@@ -41,7 +41,7 @@ pub(super) fn update_pull_request_diff_viewport(
     app.pull_request_viewport_paths = paths;
 }
 
-fn diff_row_line_index(app: &App, side_by_side: bool, row: usize) -> Option<usize> {
+pub(super) fn diff_row_line_index(app: &App, side_by_side: bool, row: usize) -> Option<usize> {
     if side_by_side {
         app.side_by_side_diff_rows
             .get(row)

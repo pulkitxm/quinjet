@@ -404,6 +404,8 @@ fn dragging_plain_preview_content_selects_only_its_starting_pane() {
 #[test]
 fn horizontal_swipes_accept_native_and_shift_wheel_events() {
     let mut app = app_with_changes();
+    app.horizontal_scroll_regions = vec![Rect::new(20, 4, 40, 20)];
+    app.horizontal_scroll_limit = 20;
     let event = |kind, modifiers| MouseEvent {
         kind,
         column: 40,

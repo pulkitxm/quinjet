@@ -99,6 +99,7 @@ pub(crate) enum ScmAction {
     PrToggleMenu,
     PrMenu(PrMenuItem),
     JumpToTop,
+    ResetHorizontalScroll,
     JumpToBottom,
 }
 

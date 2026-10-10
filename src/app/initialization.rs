@@ -128,6 +128,8 @@ impl App {
             sidebar_last_cursor: None,
             content_scroll: 0,
             horizontal_scroll: 0,
+            horizontal_scroll_limit: 0,
+            horizontal_scroll_regions: Vec::new(),
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
             sidebar_hidden: false,
             diff_split_percent: DEFAULT_DIFF_SPLIT_PERCENT,

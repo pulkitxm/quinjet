@@ -6,6 +6,8 @@ use super::*;
     reason = "the root draw pass keeps geometry assignment in one coordinate space"
 )]
 pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
+    app.horizontal_scroll_regions.clear();
+    app.horizontal_scroll_limit = 0;
     frame.render_widget(
         Block::default().style(Style::default().bg(theme.background)),
         frame.area(),

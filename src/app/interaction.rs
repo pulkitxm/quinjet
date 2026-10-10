@@ -55,13 +55,29 @@ impl App {
         );
     }
 
-    pub(super) const fn scroll_horizontal(&mut self, right: bool) {
+    pub(super) fn scroll_horizontal(&mut self, right: bool) {
+        self.scroll_horizontal_by(right, 3);
+    }
+
+    pub(super) fn scroll_horizontal_by(&mut self, right: bool, amount: usize) {
         self.horizontal_scroll = if right {
-            self.horizontal_scroll.saturating_add(3)
+            self.horizontal_scroll
+                .saturating_add(amount)
+                .min(self.horizontal_scroll_limit)
         } else {
-            self.horizontal_scroll.saturating_sub(3)
+            self.horizontal_scroll.saturating_sub(amount)
         };
         self.text_selection = None;
+    }
+
+    pub(super) fn scroll_horizontal_at(&mut self, event: MouseEvent, right: bool) {
+        if self
+            .horizontal_scroll_regions
+            .iter()
+            .any(|area| area.contains((event.column, event.row).into()))
+        {
+            self.scroll_horizontal(right);
+        }
     }
 
     pub(super) fn text_selection_pane(&self, column: u16, row: u16) -> Option<Rect> {

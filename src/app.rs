@@ -335,6 +335,8 @@ pub(crate) struct App {
     pub sidebar_last_cursor: Option<usize>,
     pub content_scroll: usize,
     pub horizontal_scroll: usize,
+    pub horizontal_scroll_limit: usize,
+    pub horizontal_scroll_regions: Vec<Rect>,
     pub sidebar_width: u16,
     pub sidebar_hidden: bool,
     pub diff_split_percent: u16,
