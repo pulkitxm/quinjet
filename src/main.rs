@@ -136,6 +136,7 @@ fn open_terminal(
     let render_tick = tick(Duration::from_millis(16));
     let relative_time_tick = tick(Duration::from_secs(1));
     let periodic_refresh = tick(Duration::from_secs(10));
+    let mut input = terminal_input::Reader::default();
     let mut dirty = true;
     let mut running = true;
     let mut switch_ssh_machine = None;
@@ -237,7 +238,7 @@ fn open_terminal(
             dirty = true;
         }
 
-        for event in terminal_input::read_batch()? {
+        for event in input.read_batch()? {
             if let Some(current) = workspace.as_mut() {
                 let Some(id) = current.active_id() else {
                     break;

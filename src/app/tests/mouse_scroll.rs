@@ -121,3 +121,25 @@ fn horizontal_momentum_stops_after_leaving_code() {
     drop(app.handle_mouse(mouse(MouseEventKind::ScrollRight, 50), now));
     assert_eq!(app.horizontal_scroll, 3);
 }
+
+#[test]
+fn overscrolling_either_pane_does_not_delay_direction_reversal() {
+    for column in [10, 50] {
+        let mut app = scroll_app();
+        app.geometry.sidebar_max_scroll = Some(8);
+        app.geometry.content_max_scroll = Some(8);
+        let now = Instant::now();
+        for _ in 0..100 {
+            drop(app.handle_mouse(mouse(MouseEventKind::ScrollDown, column), now));
+        }
+        drop(app.handle_mouse(mouse(MouseEventKind::ScrollUp, column), now));
+        assert_eq!(
+            if column == 10 {
+                app.sidebar_offset
+            } else {
+                app.content_scroll
+            },
+            6
+        );
+    }
+}

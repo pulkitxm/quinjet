@@ -200,6 +200,8 @@ pub(crate) struct UiGeometry {
     pub content: Rect,
     pub diff_divider: Option<Rect>,
     pub diff_viewport: Option<DiffViewport>,
+    pub sidebar_max_scroll: Option<usize>,
+    pub content_max_scroll: Option<usize>,
     pub horizontal_scrollbar: Option<Scrollbar>,
     pub sidebar_scrollbar: Option<Scrollbar>,
     pub content_scrollbar: Option<Scrollbar>,

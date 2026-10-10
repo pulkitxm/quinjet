@@ -133,6 +133,7 @@ pub(super) fn draw_content(
     diff_wrapping::restore_scroll(app, side_by_side, details_rows);
     let visual_length = details_rows + diff_rows;
     let max_scroll = visual_length.saturating_sub(inner.height as usize);
+    app.geometry.content_max_scroll = Some(max_scroll);
     app.content_scroll = app.content_scroll.min(max_scroll);
     app.content_at_bottom = app.content_scroll >= max_scroll;
 

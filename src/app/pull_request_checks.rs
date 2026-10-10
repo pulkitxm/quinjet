@@ -72,6 +72,7 @@ impl App {
     #[doc = " window from the selection so the list can be browsed without changing"]
     #[doc = " the preview; any selection movement reattaches it."]
     pub(crate) fn sidebar_viewport(&mut self, cursor: usize, height: usize, length: usize) {
+        self.geometry.sidebar_max_scroll = Some(length.saturating_sub(height));
         if self.sidebar_last_cursor != Some(cursor) {
             self.sidebar_last_cursor = Some(cursor);
             self.sidebar_free_scroll = false;

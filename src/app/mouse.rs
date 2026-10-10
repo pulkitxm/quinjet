@@ -357,7 +357,10 @@ impl App {
                 {
                     self.focus = Focus::Sidebar;
                     self.sidebar_free_scroll = true;
-                    self.sidebar_offset = self.sidebar_offset.saturating_add(2);
+                    self.sidebar_offset = self
+                        .sidebar_offset
+                        .saturating_add(2)
+                        .min(self.geometry.sidebar_max_scroll.unwrap_or(usize::MAX));
                     let visible_height =
                         usize::from(self.geometry.sidebar.height.saturating_sub(2));
                     let visible_end = self.sidebar_offset.saturating_add(visible_height);
@@ -368,7 +371,10 @@ impl App {
                     .contains((event.column, event.row).into())
                 {
                     self.focus = Focus::Content;
-                    self.content_scroll = self.content_scroll.saturating_add(2);
+                    self.content_scroll = self
+                        .content_scroll
+                        .saturating_add(2)
+                        .min(self.geometry.content_max_scroll.unwrap_or(usize::MAX));
                 }
             }
             MouseEventKind::ScrollUp => {

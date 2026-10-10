@@ -75,6 +75,7 @@ pub(super) fn draw_stack_member_detail(
     }
     let rows = &app.stack_inspector_content_rows;
     let max_scroll = rows.len().saturating_sub(usize::from(body.height));
+    app.geometry.content_max_scroll = Some(max_scroll);
     app.content_scroll = app.content_scroll.min(max_scroll);
     let overflow = rows
         .iter()

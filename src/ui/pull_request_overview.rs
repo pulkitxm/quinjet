@@ -113,6 +113,7 @@ pub(super) fn draw_pull_request_overview(
     let rows = &app.pull_request_content_rows;
     let row_links = &app.pull_request_content_links;
     let max_scroll = rows.len().saturating_sub(inner.height as usize);
+    app.geometry.content_max_scroll = Some(max_scroll);
     app.content_scroll = app.content_scroll.min(max_scroll);
     let content_width = rows
         .iter()
