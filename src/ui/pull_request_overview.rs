@@ -194,7 +194,13 @@ pub(super) fn draw_pull_request_overview(
             Link::new(link.target.clone()).register(area, link_hits);
         }
     }
-    draw_scrollbar(frame, inner, app.content_scroll, rows.len(), theme);
+    app.geometry.content_scrollbar = crate::app::Scrollbar::new(
+        inner,
+        app.content_scroll,
+        rows.len(),
+        usize::from(inner.height),
+    );
+    draw_scrollbar(frame, app.geometry.content_scrollbar, theme);
     hits
 }
 

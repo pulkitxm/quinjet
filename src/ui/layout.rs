@@ -9,6 +9,8 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     app.horizontal_scroll_regions.clear();
     app.horizontal_scroll_limit = 0;
     app.geometry.horizontal_scrollbar = None;
+    app.geometry.sidebar_scrollbar = None;
+    app.geometry.content_scrollbar = None;
     frame.render_widget(
         Block::default().style(Style::default().bg(theme.background)),
         frame.area(),
@@ -116,6 +118,8 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
         content: workspace.content,
         diff_divider: workspace.diff_divider,
         horizontal_scrollbar,
+        sidebar_scrollbar: app.geometry.sidebar_scrollbar,
+        content_scrollbar: app.geometry.content_scrollbar,
         sidebar_hits: workspace.sidebar_hits,
         stack_inspector_hits: workspace.stack_inspector_hits,
         scm_action_hits,

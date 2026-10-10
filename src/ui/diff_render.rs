@@ -265,25 +265,25 @@ pub(super) const fn line_foreground(kind: DiffLineKind, theme: &Theme) -> Color 
     }
 }
 
-#[expect(clippy::integer_division, reason = "layout maths works in whole cells")]
 pub(super) fn draw_scrollbar(
     frame: &mut Frame<'_>,
-    area: Rect,
-    offset: usize,
-    length: usize,
+    scrollbar: Option<crate::app::Scrollbar>,
     theme: &Theme,
 ) {
-    if length <= area.height as usize || area.width == 0 {
+    let Some(scrollbar) = scrollbar else {
         return;
-    }
-    let height = area.height as usize;
-    let thumb_height = (height * height / length).max(1).min(height);
-    let max_offset = length.saturating_sub(height).max(1);
-    let thumb_start = offset.min(max_offset) * (height - thumb_height) / max_offset;
-    for row in thumb_start..thumb_start + thumb_height {
+    };
+    for row in scrollbar.track.y..scrollbar.track.bottom() {
+        let in_thumb = scrollbar.thumb.contains((scrollbar.track.x, row).into());
         frame.render_widget(
-            Paragraph::new("▐").style(Style::default().fg(theme.accent_soft)),
-            Rect::new(area.right().saturating_sub(1), area.y + cells(row), 1, 1),
+            Paragraph::new(if in_thumb { "▐" } else { "│" }).style(Style::default().fg(
+                if in_thumb {
+                    theme.accent_soft
+                } else {
+                    theme.border
+                },
+            )),
+            Rect::new(scrollbar.track.x, row, 1, 1),
         );
     }
 }

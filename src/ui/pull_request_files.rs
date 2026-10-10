@@ -166,7 +166,13 @@ pub(super) fn draw_pull_request_file_tree(
             }
         }
     }
-    draw_scrollbar(frame, area, app.sidebar_offset, rows.len(), theme);
+    app.geometry.sidebar_scrollbar = crate::app::Scrollbar::new(
+        area,
+        app.sidebar_offset,
+        rows.len(),
+        usize::from(area.height),
+    );
+    draw_scrollbar(frame, app.geometry.sidebar_scrollbar, theme);
     hits
 }
 
@@ -335,7 +341,13 @@ pub(super) fn draw_pull_request_check_list(
             }
         }
     }
-    draw_scrollbar(frame, area, app.sidebar_offset, rows.len(), theme);
+    app.geometry.sidebar_scrollbar = crate::app::Scrollbar::new(
+        area,
+        app.sidebar_offset,
+        rows.len(),
+        usize::from(area.height),
+    );
+    draw_scrollbar(frame, app.geometry.sidebar_scrollbar, theme);
 
     if app.pull_request_checks.is_empty() && area.height > 1 {
         let message = if app.pull_request_checks_loading {

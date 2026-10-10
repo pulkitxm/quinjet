@@ -8,6 +8,9 @@ impl App {
     )]
     pub(crate) fn handle_mouse(&mut self, event: MouseEvent, now: Instant) -> Vec<AppEffect> {
         let mut effects = Vec::new();
+        if self.handle_scrollbar_mouse(event, &mut effects) {
+            return effects;
+        }
         if self.modal.is_none() {
             self.modal_scroll = 0;
             self.modal_free_scroll = false;

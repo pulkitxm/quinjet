@@ -205,6 +205,8 @@ pub(crate) struct UiGeometry {
     pub content: Rect,
     pub diff_divider: Option<Rect>,
     pub horizontal_scrollbar: Option<HorizontalScrollbar>,
+    pub sidebar_scrollbar: Option<Scrollbar>,
+    pub content_scrollbar: Option<Scrollbar>,
     pub sidebar_hits: Vec<SidebarHitArea>,
     pub stack_inspector_hits: Vec<StackInspectorHitArea>,
     pub scm_action_hits: Vec<ScmActionHit>,

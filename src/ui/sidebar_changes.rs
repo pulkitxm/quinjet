@@ -248,7 +248,13 @@ pub(super) fn draw_changes_sidebar(
         }
     }
 
-    draw_scrollbar(frame, list_area, app.sidebar_offset, rows.len(), theme);
+    app.geometry.sidebar_scrollbar = crate::app::Scrollbar::new(
+        list_area,
+        app.sidebar_offset,
+        rows.len(),
+        usize::from(list_area.height),
+    );
+    draw_scrollbar(frame, app.geometry.sidebar_scrollbar, theme);
 
     if visible.is_empty() {
         let message = if app.status.changes.is_empty() {

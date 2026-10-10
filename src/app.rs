@@ -161,6 +161,7 @@ mod pull_request_stack;
 mod refresh;
 mod repository_tabs;
 mod scm;
+mod scrollbar;
 mod selection;
 mod stack_inspector;
 mod support;
@@ -176,6 +177,7 @@ pub(crate) use modal::*;
 use preview_layout::PreviewLayout;
 pub(crate) use projects::{ProjectOpenMode, ProjectRow};
 pub(crate) use pull_request_actions::*;
+pub(crate) use scrollbar::{Scrollbar, ScrollbarDrag};
 pub(crate) use stack_inspector::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use support::*;
@@ -350,6 +352,7 @@ pub(crate) struct App {
     pub files_collapsed: bool,
     pub collapse_preference_set: bool,
     pub resize_target: Option<ResizeTarget>,
+    pub scrollbar_drag: Option<ScrollbarDrag>,
     pub filter: String,
     pub search_mode: SearchMode,
     pub content_hits: HashSet<String>,

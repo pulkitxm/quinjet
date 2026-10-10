@@ -219,7 +219,13 @@ pub(super) fn draw_content(
         );
         (None, hits)
     };
-    draw_scrollbar(frame, inner, app.content_scroll, visual_length, theme);
+    app.geometry.content_scrollbar = crate::app::Scrollbar::new(
+        inner,
+        app.content_scroll,
+        visual_length,
+        usize::from(inner.height),
+    );
+    draw_scrollbar(frame, app.geometry.content_scrollbar, theme);
     (divider, content_file_hits, Vec::new(), content_review_hits)
 }
 

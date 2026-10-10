@@ -123,7 +123,13 @@ pub(super) fn draw_stack_member_detail(
             );
         }
     }
-    draw_scrollbar(frame, body, app.content_scroll, rows.len(), theme);
+    app.geometry.content_scrollbar = crate::app::Scrollbar::new(
+        body,
+        app.content_scroll,
+        rows.len(),
+        usize::from(body.height),
+    );
+    draw_scrollbar(frame, app.geometry.content_scrollbar, theme);
     (None, Vec::new(), Vec::new(), Vec::new())
 }
 

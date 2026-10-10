@@ -127,7 +127,9 @@ pub(super) fn draw_history_sidebar(
         });
     }
 
-    draw_scrollbar(frame, inner, app.sidebar_offset, visible.len(), theme);
+    app.geometry.sidebar_scrollbar =
+        crate::app::Scrollbar::new(inner, app.sidebar_offset, visible.len(), height);
+    draw_scrollbar(frame, app.geometry.sidebar_scrollbar, theme);
 
     if visible.is_empty() {
         frame.render_widget(

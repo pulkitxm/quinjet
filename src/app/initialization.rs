@@ -142,6 +142,7 @@ impl App {
             files_collapsed: false,
             collapse_preference_set: false,
             resize_target: None,
+            scrollbar_drag: None,
             filter: String::new(),
             search_mode: SearchMode::Name,
             content_hits: HashSet::new(),
