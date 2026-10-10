@@ -67,6 +67,7 @@ static CACHE_WRITE_ID: AtomicU64 = AtomicU64::new(0);
 mod api;
 mod cache;
 mod change_index;
+mod comparison_cache;
 mod discovery;
 mod http;
 mod model;

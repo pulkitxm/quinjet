@@ -179,7 +179,9 @@ fn disposable_pr_workspace_indexes_all_files_and_does_not_mutate_the_source() {
         .unwrap();
     let temporary_path = match &workspace.repository {
         PreparedRepository::Temporary(repository) => repository.path.clone(),
-        PreparedRepository::Opened(_) => panic!("expected an isolated PR workspace"),
+        PreparedRepository::Opened(_) | PreparedRepository::Deferred(_) => {
+            panic!("expected an isolated PR workspace")
+        }
     };
     let index = workspace.index();
     assert_eq!(index.files.len(), 21);

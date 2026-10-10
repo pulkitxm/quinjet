@@ -168,7 +168,7 @@ pub(crate) struct PullRequestCommits {
     pub from_cache: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum PullRequestFileStatus {
     Added,
@@ -181,7 +181,7 @@ pub(crate) enum PullRequestFileStatus {
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PullRequestFile {
     pub path: PathBuf,
@@ -190,7 +190,7 @@ pub(crate) struct PullRequestFile {
     pub counts: Option<DiffLineCounts>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PullRequestDiffIndex {
     pub files: Vec<PullRequestFile>,

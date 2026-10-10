@@ -82,6 +82,10 @@ impl Repository {
     where
         F: FnMut(PullRequestProgress),
     {
+        if let Some(prepared) = comparison_cache::load(self, pull_request, exact_base) {
+            progress(PullRequestProgress::EnumeratingFiles);
+            return Ok(prepared);
+        }
         let (repository, merge_base, head, api_counts) =
             if self.has_commit(&pull_request.base_oid) && self.has_commit(&pull_request.head_oid) {
                 progress(PullRequestProgress::FindingMergeBase);
@@ -145,7 +149,7 @@ impl Repository {
                 .map(|counts| counts.deletions)
                 .sum();
         }
-        Ok(PreparedPullRequest {
+        let prepared = PreparedPullRequest {
             repository,
             pull_request,
             merge_base,
@@ -156,7 +160,9 @@ impl Repository {
                 total_files,
                 truncated,
             },
-        })
+        };
+        comparison_cache::save(&prepared, exact_base);
+        Ok(prepared)
     }
 
     pub(super) fn pull_request_metadata(

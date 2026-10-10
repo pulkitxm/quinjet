@@ -83,7 +83,7 @@ pub(crate) struct CommitDetails {
     pub committed_at: String,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DiffLineCounts {
     pub additions: usize,

@@ -4,6 +4,7 @@ use super::*;
 pub(super) enum PreparedRepository {
     Opened(PathBuf),
     Temporary(TemporaryBareRepository),
+    Deferred(comparison_cache::DeferredRepository),
 }
 
 impl PreparedRepository {
@@ -11,6 +12,7 @@ impl PreparedRepository {
         match self {
             Self::Opened(path) => path,
             Self::Temporary(repository) => &repository.path,
+            Self::Deferred(repository) => &repository.source,
         }
     }
 }
@@ -46,7 +48,7 @@ impl PreparedPullRequest {
             return Ok(self.file_document(&patch, file, false));
         }
         let (patch, truncated) = diff_selected_paths(
-            self.repository.path(),
+            self.repository_path()?,
             &self.merge_base,
             &self.head,
             std::slice::from_ref(&file.path),
@@ -84,7 +86,7 @@ impl PreparedPullRequest {
             (Vec::new(), false)
         } else {
             diff_selected_paths(
-                self.repository.path(),
+                self.repository_path()?,
                 &self.merge_base,
                 &self.head,
                 &requested,
@@ -136,7 +138,7 @@ impl PreparedPullRequest {
         let spec = crate::git::support::git_blob_spec(&self.head, path)
             .ok_or_else(|| anyhow!("refusing to read {}", path.display()))?;
         let output = run_repository_git(
-            self.repository.path(),
+            self.repository_path()?,
             &[OsString::from("cat-file"), OsString::from("blob"), spec],
             MAX_DIFF_BYTES,
             MAX_GH_ERROR_BYTES,
@@ -151,7 +153,7 @@ impl PreparedPullRequest {
     }
 
     fn file_document(&self, patch: &[u8], file: &PullRequestFile, truncated: bool) -> DiffDocument {
-        use crate::git::diff::{BlobOrigin, RevisionBlobSource, attach_file_previews};
+        use crate::git::diff::attach_file_previews;
         let mut document = pull_request_file_document(
             patch,
             &self.pull_request,
@@ -159,25 +161,49 @@ impl PreparedPullRequest {
             truncated,
             self.diff_highlighting,
         );
-        let previous = match file.status {
-            PullRequestFileStatus::Added => BlobOrigin::Missing,
-            _ => BlobOrigin::Revision(self.merge_base.as_str()),
-        };
-        let current = match file.status {
-            PullRequestFileStatus::Deleted => BlobOrigin::Missing,
-            _ => BlobOrigin::Revision(self.head.as_str()),
-        };
-        attach_file_previews(
-            &mut document,
-            &RevisionBlobSource {
-                git_dir: self.repository.path(),
-                worktree: self.repository.path(),
-                previous,
-                current,
-            },
-            false,
-            self.diff_highlighting,
-        );
+        attach_file_previews(&mut document, self, false, self.diff_highlighting);
         document
+    }
+}
+
+impl PreparedPullRequest {
+    fn repository_path(&self) -> Result<&Path> {
+        match &self.repository {
+            PreparedRepository::Deferred(repository) => {
+                repository.resolve(&self.pull_request, &self.merge_base, &self.head)
+            }
+            repository => Ok(repository.path()),
+        }
+    }
+}
+
+impl crate::git::diff::DiffBlobSource for PreparedPullRequest {
+    fn load(
+        &self,
+        path: &Path,
+        old_path: Option<&Path>,
+        side: crate::git::diff::ImageSide,
+    ) -> crate::git::diff::LoadedBlob {
+        use crate::git::diff::{BlobOrigin, ImageSide, LoadedBlob, RevisionBlobSource};
+        let Some(file) = self.index.files.iter().find(|file| file.path == path) else {
+            return LoadedBlob::Missing;
+        };
+        if matches!(
+            (side, file.status),
+            (ImageSide::Previous, PullRequestFileStatus::Added)
+                | (ImageSide::New, PullRequestFileStatus::Deleted)
+        ) {
+            return LoadedBlob::Missing;
+        }
+        let Ok(repository) = self.repository_path() else {
+            return LoadedBlob::Missing;
+        };
+        RevisionBlobSource {
+            git_dir: repository,
+            worktree: repository,
+            previous: BlobOrigin::Revision(&self.merge_base),
+            current: BlobOrigin::Revision(&self.head),
+        }
+        .load(path, old_path, side)
     }
 }
