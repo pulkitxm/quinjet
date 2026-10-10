@@ -109,6 +109,7 @@ mod code_wrap;
 mod controls;
 mod diff;
 mod file_labels;
+mod horizontal_scrollbars;
 mod layout;
 mod logs;
 mod modals;
