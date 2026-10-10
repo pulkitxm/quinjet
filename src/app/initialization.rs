@@ -156,6 +156,8 @@ impl App {
             mouse_capture_preference: true,
             local_browser: true,
             link_hover: None,
+            mouse_hover: None,
+            mouse_scroll: None,
             text_selection: None,
             rendered_cells: Vec::new(),
             webhooks_listening: false,

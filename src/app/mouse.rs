@@ -8,6 +8,11 @@ impl App {
     )]
     pub(crate) fn handle_mouse(&mut self, event: MouseEvent, now: Instant) -> Vec<AppEffect> {
         let mut effects = Vec::new();
+        if !self.accept_mouse_scroll(event, now) {
+            return effects;
+        }
+        self.mouse_hover =
+            (event.kind == MouseEventKind::Moved).then_some((event.column, event.row));
         if self.handle_scrollbar_mouse(event, &mut effects) {
             return effects;
         }
@@ -357,7 +362,11 @@ impl App {
                         usize::from(self.geometry.sidebar.height.saturating_sub(2));
                     let visible_end = self.sidebar_offset.saturating_add(visible_height);
                     self.request_history_near_end(visible_end, &mut effects);
-                } else {
+                } else if self
+                    .geometry
+                    .content
+                    .contains((event.column, event.row).into())
+                {
                     self.focus = Focus::Content;
                     self.content_scroll = self.content_scroll.saturating_add(2);
                 }
@@ -371,7 +380,11 @@ impl App {
                     self.focus = Focus::Sidebar;
                     self.sidebar_free_scroll = true;
                     self.sidebar_offset = self.sidebar_offset.saturating_sub(2);
-                } else {
+                } else if self
+                    .geometry
+                    .content
+                    .contains((event.column, event.row).into())
+                {
                     self.focus = Focus::Content;
                     self.content_scroll = self.content_scroll.saturating_sub(2);
                 }

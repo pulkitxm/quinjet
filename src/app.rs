@@ -146,6 +146,8 @@ mod modal_help;
 mod modal_pickers;
 mod modal_review;
 mod mouse;
+mod mouse_scroll;
+pub(crate) use mouse_scroll::ScrollBurst;
 mod mouse_sidebar;
 mod operations;
 mod palette;
@@ -365,6 +367,8 @@ pub(crate) struct App {
     pub mouse_capture_preference: bool,
     pub local_browser: bool,
     pub link_hover: Option<(u16, u16)>,
+    pub mouse_hover: Option<(u16, u16)>,
+    pub mouse_scroll: Option<ScrollBurst>,
     pub text_selection: Option<TextSelection>,
     pub rendered_cells: Vec<Vec<char>>,
     pub webhooks_listening: bool,
