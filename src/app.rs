@@ -44,7 +44,6 @@ const PULL_REQUEST_PREFETCH_BATCH: usize = 32;
 const PULL_REQUEST_PREFETCH_BYTE_BUDGET: usize = 6 * 1024 * 1024;
 const PULL_REQUEST_PATCH_FALLBACK_ESTIMATE: usize = 512 * 1024;
 const PULL_REQUEST_PATCH_LINE_ESTIMATE: usize = 80;
-const MAX_PREFETCHED_PULL_REQUEST_FILES: usize = 4_096;
 const MAX_PULL_REQUEST_DOCUMENT_BYTES: usize = 32 * 1024 * 1024;
 #[doc = " Poll cadences for an open pull request. A run in progress changes state in"]
 #[doc = " seconds and is worth watching closely; a settled pull request only needs to"]
@@ -155,6 +154,7 @@ mod projects;
 mod pull_request_actions;
 mod pull_request_checks;
 mod pull_request_diff;
+mod pull_request_prefetch;
 mod pull_request_review;
 mod pull_request_stack;
 mod refresh;
@@ -387,7 +387,8 @@ pub(crate) struct App {
     pub pull_request_documents: HashMap<PathBuf, DiffDocument>,
     pub pull_request_document_order: VecDeque<PathBuf>,
     pub pull_request_document_bytes: usize,
-    pub pull_request_prefetched_paths: HashSet<PathBuf>,
+    pub pull_request_viewport_paths: Vec<PathBuf>,
+    pub pull_request_prefetch_paths: Vec<PathBuf>,
     pub pull_request_loading_path: Option<PathBuf>,
     #[doc = " The path whose patch currently occupies `document` in single-file view."]
     #[doc = " Tracking it explicitly keeps the cache authoritative about which files"]

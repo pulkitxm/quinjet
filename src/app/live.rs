@@ -48,6 +48,7 @@ impl App {
             self.refresh_pull_request_live(now, false, &mut effects);
             changed = true;
         }
+        self.request_pull_request_prefetch(&mut effects);
         let generation = crate::date_time::relative_time_generation();
         if self.relative_time_generation != generation {
             self.relative_time_generation = generation;

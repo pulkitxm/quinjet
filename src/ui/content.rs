@@ -150,6 +150,12 @@ pub(super) fn draw_content(
         diff_scroll = diff_scroll.saturating_sub(details_rows);
     }
 
+    pull_request_viewport::update_pull_request_diff_viewport(
+        app,
+        side_by_side,
+        diff_scroll,
+        inner.height as usize,
+    );
     let render_area = Rect::new(
         diff_area.x,
         diff_area.y,

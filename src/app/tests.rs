@@ -306,6 +306,7 @@ mod interaction;
 mod links;
 mod modal_mouse;
 mod prefetch;
+mod prefetch_viewport;
 mod projects;
 mod refresh;
 mod refresh_preview;

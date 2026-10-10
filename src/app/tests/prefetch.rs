@@ -17,12 +17,19 @@ fn pull_request_prefetch_batches_by_estimated_patch_size() {
     };
     let mut app = App::new("/tmp/repo", "repo");
     app.pull_request_workspace_generation = Some(10);
+    app.view = View::PullRequests;
+    app.pull_request_section = PullRequestSection::Files;
     app.pull_request_files = vec![
         file("src/huge.rs", 200_000),
         file("src/small.rs", 10),
         file("src/tiny.rs", 5),
     ];
 
+    app.pull_request_viewport_paths = app
+        .pull_request_files
+        .iter()
+        .map(|file| file.path.clone())
+        .collect();
     let mut effects = Vec::new();
     app.request_pull_request_prefetch(&mut effects);
     assert!(
@@ -61,7 +68,7 @@ fn pull_request_prefetch_batches_by_estimated_patch_size() {
 }
 
 #[test]
-fn prefetch_starts_at_the_files_viewport_and_wraps_around() {
+fn prefetch_follows_the_content_viewport_without_walking_the_index() {
     let counts = |additions: usize| {
         Some(DiffLineCounts {
             additions,
@@ -79,9 +86,12 @@ fn prefetch_starts_at_the_files_viewport_and_wraps_around() {
     app.pull_request_workspace_generation = Some(10);
     app.view = View::PullRequests;
     app.pull_request_section = PullRequestSection::Files;
+    app.view = View::PullRequests;
+    app.pull_request_section = PullRequestSection::Files;
     app.pull_request_files = vec![file("a.rs"), file("b.rs"), file("c.rs"), file("d.rs")];
     let _ = app.pull_request_tree_entries();
-    app.sidebar_offset = 2;
+    app.sidebar_offset = 0;
+    app.pull_request_viewport_paths = vec![PathBuf::from("c.rs"), PathBuf::from("d.rs")];
 
     let mut effects = Vec::new();
     app.request_pull_request_prefetch(&mut effects);
@@ -94,12 +104,10 @@ fn prefetch_starts_at_the_files_viewport_and_wraps_around() {
                     if paths == &[
                         PathBuf::from("c.rs"),
                         PathBuf::from("d.rs"),
-                        PathBuf::from("a.rs"),
-                        PathBuf::from("b.rs"),
                     ]
             )
         ),
-        "fill starts at the visible file and wraps around the index"
+        "the content viewport takes priority over the sidebar and unseen files"
     );
 }
 
@@ -107,6 +115,8 @@ fn prefetch_starts_at_the_files_viewport_and_wraps_around() {
 fn pull_request_prefetch_retries_once_after_a_failure() {
     let mut app = App::new("/tmp/repo", "repo");
     app.pull_request_workspace_generation = Some(10);
+    app.view = View::PullRequests;
+    app.pull_request_section = PullRequestSection::Files;
     app.pull_request_files = vec![PullRequestFile {
         path: PathBuf::from("src/first.rs"),
         old_path: None,
@@ -114,6 +124,9 @@ fn pull_request_prefetch_retries_once_after_a_failure() {
         counts: None,
     }];
     app.pull_request_prefetching = true;
+    app.pull_request_viewport_paths = vec![PathBuf::from("src/first.rs")];
+    app.pull_request_prefetch_paths
+        .clone_from(&app.pull_request_viewport_paths);
 
     let effects = app.handle_worker_event(
         WorkerEvent::PullRequestDiffBatch {

@@ -10,7 +10,8 @@ impl App {
         self.pull_request_documents.clear();
         self.pull_request_document_order.clear();
         self.pull_request_document_bytes = 0;
-        self.pull_request_prefetched_paths.clear();
+        self.pull_request_viewport_paths.clear();
+        self.pull_request_prefetch_paths.clear();
         self.pull_request_loading_path = None;
         self.pull_request_single_file = None;
         self.pull_request_prefetching = false;
@@ -104,7 +105,7 @@ impl App {
         };
         let title = match source {
             PullRequestDiffSource::PullRequest => format!(
-                "PR #{} — All Files · {} changed",
+                "PR #{} : All Files · {} changed",
                 pull_request.number, self.pull_request_total_files
             ),
             PullRequestDiffSource::Stack { from, to } => format!(
@@ -193,7 +194,6 @@ impl App {
         self.pull_request_document_bytes = self
             .pull_request_document_bytes
             .saturating_add(diff_document_size(&document));
-        let _ = self.pull_request_prefetched_paths.insert(path.clone());
         self.pull_request_document_order.push_back(path.clone());
         drop(self.pull_request_documents.insert(path, document));
         self.prune_pull_request_documents(MAX_PULL_REQUEST_DOCUMENT_BYTES);
@@ -373,75 +373,5 @@ impl App {
             binary: false,
         });
         true
-    }
-
-    #[doc = " Where background fill should start: the first file visible in the"]
-    #[doc = " Files tree, so patches land where the reader is looking and then wrap"]
-    #[doc = " around the rest of the index in order."]
-    pub(super) fn prefetch_anchor_index(&self) -> usize {
-        if self.view != View::PullRequests || self.pull_request_section != PullRequestSection::Files
-        {
-            return 0;
-        }
-        self.pull_request_tree
-            .iter()
-            .skip(self.sidebar_offset)
-            .find_map(|entry| match entry {
-                PullRequestTreeEntry::File { index, .. } => Some(*index),
-                PullRequestTreeEntry::Directory { .. } => None,
-            })
-            .unwrap_or(0)
-    }
-
-    #[doc = " Walk the index in batches until every file has a patch. Each batch is one"]
-    #[doc = " Git invocation and lands as soon as it is parsed, so the diff fills in"]
-    #[doc = " progressively instead of a file at a time on demand."]
-    pub(super) fn request_pull_request_prefetch(&mut self, effects: &mut Vec<AppEffect>) {
-        if self.pull_request_prefetching {
-            return;
-        }
-        let Some(workspace_generation) = self.pull_request_workspace_generation else {
-            return;
-        };
-        if self.pull_request_prefetched_paths.len() >= MAX_PREFETCHED_PULL_REQUEST_FILES {
-            return;
-        }
-        let remaining = MAX_PREFETCHED_PULL_REQUEST_FILES
-            .saturating_sub(self.pull_request_prefetched_paths.len());
-        let limit = PULL_REQUEST_PREFETCH_BATCH.min(remaining);
-        let anchor = self
-            .prefetch_anchor_index()
-            .min(self.pull_request_files.len());
-        let (before, from_anchor) = self.pull_request_files.split_at(anchor);
-        let mut batch_bytes = 0_usize;
-        let mut paths: Vec<PathBuf> = Vec::new();
-        for file in from_anchor.iter().chain(before.iter()) {
-            if paths.len() >= limit {
-                break;
-            }
-            if !self.pull_request_file_needs_patch(&file.path)
-                || self.pull_request_prefetched_paths.contains(&file.path)
-            {
-                continue;
-            }
-            let estimate = estimated_patch_bytes(file.counts);
-            if !paths.is_empty()
-                && batch_bytes.saturating_add(estimate) > PULL_REQUEST_PREFETCH_BYTE_BUDGET
-            {
-                break;
-            }
-            batch_bytes = batch_bytes.saturating_add(estimate);
-            paths.push(file.path.clone());
-        }
-        if paths.is_empty() {
-            return;
-        }
-        self.pull_request_prefetching = true;
-        effects.push(AppEffect::Git(Box::new(
-            WorkerCommand::LoadPullRequestFileBatch {
-                workspace_generation,
-                paths,
-            },
-        )));
     }
 }

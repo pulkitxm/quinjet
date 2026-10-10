@@ -168,7 +168,7 @@ fn numeric_lookup_discovers_the_repository_on_demand() {
 }
 
 #[test]
-fn opening_a_pull_request_prefetches_diffs_checks_and_conversation_from_overview() {
+fn opening_a_pull_request_indexes_files_without_loading_unseen_patches() {
     let mut app = App::new("/tmp/repo", "repo");
     app.view = View::PullRequests;
     app.pull_request_generation = 3;
@@ -254,17 +254,10 @@ fn opening_a_pull_request_prefetches_diffs_checks_and_conversation_from_overview
         Instant::now(),
     );
     assert_eq!(app.pull_request_section, PullRequestSection::Overview);
-    assert!(matches!(
-        effects.as_slice(),
-        [AppEffect::Git(command)] if matches!(
-            command.as_ref(),
-            WorkerCommand::LoadPullRequestFileBatch {
-                workspace_generation: generation,
-                paths,
-            } if *generation == workspace_generation
-                && paths == &[PathBuf::from("src/first.rs"), PathBuf::from("src/second.rs")]
-        )
-    ));
+    assert!(
+        effects.is_empty(),
+        "the overview does not load file patches"
+    );
     assert_eq!(
         app.pull_request.as_ref().unwrap().description,
         "A detailed pull-request description"

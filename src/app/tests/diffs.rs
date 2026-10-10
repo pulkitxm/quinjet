@@ -304,19 +304,7 @@ fn pull_request_defaults_to_all_files_then_files_tab_restores_it_from_single_fil
     assert_eq!(app.pull_request_file_view, PullRequestFileView::AllFiles);
     assert_eq!(app.document.file_count(), 2);
     assert!(app.preview_files_all_collapsed());
-    assert!(
-        matches!(
-            effects.as_slice(),
-            [AppEffect::Git(command)] if matches!(
-                command.as_ref(),
-                WorkerCommand::LoadPullRequestFileBatch {
-                    workspace_generation: 10,
-                    paths,
-                } if paths == &[PathBuf::from("src/first.rs"), PathBuf::from("src/second.rs")]
-            )
-        ),
-        "the whole index is fetched in one batch rather than a file at a time"
-    );
+    assert!(effects.is_empty(), "collapsed files do not fetch patches");
 
     let effects = app.handle_worker_event(
         WorkerEvent::PullRequestDiffBatch {

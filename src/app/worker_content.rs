@@ -261,6 +261,14 @@ impl App {
                     return effects;
                 }
                 self.pull_request_prefetching = false;
+                let paths = std::mem::take(&mut self.pull_request_prefetch_paths);
+                let result = result.and_then(|documents| {
+                    if documents.is_empty() && !paths.is_empty() {
+                        Err("No file diffs were returned".to_owned())
+                    } else {
+                        Ok(documents)
+                    }
+                });
                 match result {
                     Ok(documents) => {
                         self.pull_request_prefetch_retrying = false;
@@ -287,8 +295,22 @@ impl App {
                         self.pull_request_prefetch_retrying = true;
                         self.request_pull_request_prefetch(&mut effects);
                     }
-                    Err(_) => {
+                    Err(error) => {
                         self.pull_request_prefetch_retrying = false;
+                        for path in paths {
+                            self.cache_pull_request_document(
+                                path,
+                                DiffDocument::empty(
+                                    "Diff unavailable",
+                                    format!("Unable to load diff: {error}"),
+                                ),
+                            );
+                        }
+                        if self.view == View::PullRequests
+                            && self.pull_request_file_view == PullRequestFileView::AllFiles
+                        {
+                            self.rebuild_pull_request_all_files_document();
+                        }
                     }
                 }
             }

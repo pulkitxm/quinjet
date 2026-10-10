@@ -427,6 +427,7 @@ mod pull_request_stack_detail;
 mod pull_request_stack_gate;
 mod pull_request_stack_rows;
 mod pull_request_stack_strip;
+mod pull_request_viewport;
 mod repository_tabs;
 mod side_by_side;
 mod sidebar_changes;
