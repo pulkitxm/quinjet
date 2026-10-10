@@ -1,6 +1,7 @@
+use std::sync::OnceLock;
+
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
-use std::sync::OnceLock;
 
 #[derive(Deserialize, Serialize)]
 struct CachedComparison {
