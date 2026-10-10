@@ -369,9 +369,6 @@ impl RepositoryWorkspace {
     }
 
     pub(crate) fn close(&mut self, id: TabId, now: Instant) -> (bool, Option<SshSwitch>) {
-        if self.exit_locked() {
-            return (true, None);
-        }
         drop(self.tabs.close(id));
         if let Some(context) = self.ssh_context.as_mut() {
             drop(context.tabs.close(id));

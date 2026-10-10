@@ -45,7 +45,7 @@ impl App {
         }
 
         match key.code {
-            KeyCode::Char('q') if !self.exit_locked() => effects.push(AppEffect::Quit),
+            KeyCode::Char('q') => effects.push(self.close_current_repository_tab()),
             KeyCode::Char('?') => {
                 self.modal = Some(Modal::Help {
                     selected: 0,

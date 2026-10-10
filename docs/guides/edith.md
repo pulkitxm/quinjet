@@ -210,15 +210,14 @@ picker.
 The following exceptions exist only when `--client edith` is present:
 
 - Quinjet does not open its own project or worktree modal for `w` or `N`.
-- `q` does not quit the managed Quinjet process.
+- `q` closes the active Quinjet repository tab and exits on the last tab.
 - `Ctrl+W` does not close a Quinjet repository tab.
-- Quit is removed from the command palette and help list.
+- Quit is removed from the command palette.
 - Repository-tab close icons and the right-click close menu are hidden.
-- Close-all and final-tab close requests are rejected by the workspace and the
-  terminal loop.
+- Close-all requests are rejected by the terminal loop.
 
-These safeguards keep Edith as the lifecycle owner and prevent a quit or close
-shortcut from leaving a blank terminal behind.
+Project navigation remains managed by the host. Pressing `q` explicitly ends
+the active review; after the last tab closes, the host offers Restart.
 
 ## SSH transport contract
 

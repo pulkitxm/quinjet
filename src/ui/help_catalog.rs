@@ -368,6 +368,6 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
     },
     HelpRow::Shortcut {
         keys: "q",
-        description: "Quit",
+        description: "Close current tab, quit on the last tab",
     },
 ];

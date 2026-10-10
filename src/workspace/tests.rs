@@ -370,7 +370,7 @@ fn failed_project_open_returns_to_the_picker() {
 }
 
 #[test]
-fn edith_workspace_refuses_to_close_its_managed_session() {
+fn closing_the_last_edith_tab_finishes_its_managed_session() {
     let (_directory, repository) = test_repository("managed");
     let mut workspace = RepositoryWorkspace::new(
         &repository,
@@ -384,9 +384,9 @@ fn edith_workspace_refuses_to_close_its_managed_session() {
 
     assert!(workspace.exit_locked());
     let (keep_running, handoff) = workspace.close(active, Instant::now());
-    assert!(keep_running);
+    assert!(!keep_running);
     assert!(handoff.is_none());
-    assert_eq!(workspace.active_id(), Some(active));
+    assert_eq!(workspace.active_id(), None);
 }
 
 #[test]

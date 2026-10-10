@@ -294,7 +294,7 @@ The UI intentionally stays uncluttered; press `?` for the complete shortcut refe
 | `[` / `]` | Previous/next diff hunk |
 | `:` or `Ctrl+P` | Command palette |
 | `?` | Shortcut help |
-| `q` | Quit |
+| `q` | Close current tab, quit on the last tab |
 
 Drag the divider between the file list and preview to resize the main panes. In side-by-side mode, drag the center divider to resize old/new sides. Double-click either divider to restore that split to its default size.
 

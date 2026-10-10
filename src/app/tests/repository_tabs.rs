@@ -113,15 +113,14 @@ fn edith_client_delegates_project_shortcuts_without_opening_quinjet_modals() {
 }
 
 #[test]
-fn edith_client_removes_interactive_exit_paths() {
+fn edith_client_closes_tabs_with_q_and_keeps_other_exit_paths_locked() {
     let (tabs, ..) = repository_tabs();
     let mut app = app_with_repository_tabs(&tabs);
     app.set_host_client(Some(Client::Edith));
     let now = Instant::now();
 
     assert!(
-        app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE), now)
-            .is_empty()
+        matches!(app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE), now).as_slice(), [AppEffect::CloseRepositoryTab(id)] if Some(*id) == tabs.active_id())
     );
     assert!(
         app.handle_key(
@@ -417,4 +416,24 @@ fn repository_tab_commands_leave_each_app_view_state_independent() {
     first_app.set_repository_tabs(tabs.infos());
     assert_eq!(first_app.view, View::PullRequests);
     assert_eq!(first_app.content_scroll, 47);
+}
+
+#[test]
+fn q_closes_the_active_tab_until_the_final_tab_exits() {
+    let (mut tabs, first, second, third) = repository_tabs();
+    let now = Instant::now();
+    for active in [second, third, first] {
+        assert!(tabs.activate(active));
+        let mut app = app_with_repository_tabs(&tabs);
+        let effects = app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE), now);
+        assert!(matches!(effects.as_slice(), [AppEffect::CloseRepositoryTab(id)] if *id == active));
+        assert!(tabs.close(active).is_some());
+    }
+    assert!(tabs.is_empty());
+    let mut app = App::new("/one", "one");
+    assert!(matches!(
+        app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE), now)
+            .as_slice(),
+        [AppEffect::Quit]
+    ));
 }

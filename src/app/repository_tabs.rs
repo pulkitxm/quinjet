@@ -214,6 +214,11 @@ impl App {
         }
     }
 
+    pub(super) fn close_current_repository_tab(&self) -> AppEffect {
+        self.active_repository_tab()
+            .map_or(AppEffect::Quit, AppEffect::CloseRepositoryTab)
+    }
+
     fn active_repository_tab(&self) -> Option<TabId> {
         self.repository_tabs
             .iter()
