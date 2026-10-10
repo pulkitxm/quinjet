@@ -41,6 +41,7 @@ use help_catalog::{HELP_ROWS, HelpRow};
 mod content;
 mod diff_render;
 mod diff_scrolling;
+mod diff_wrapping;
 mod feedback;
 mod help;
 mod image_diff;

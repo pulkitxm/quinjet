@@ -80,6 +80,13 @@ impl App {
         }
     }
 
+    pub(super) fn toggle_code_wrap(&mut self) {
+        self.wrap_code = !self.wrap_code;
+        self.horizontal_scroll = 0;
+        self.diff_restore_scroll = self.diff_scroll_anchor.is_some();
+        self.invalidate_diff_rows();
+    }
+
     pub(super) fn text_selection_pane(&self, column: u16, row: u16) -> Option<Rect> {
         let point = (column, row).into();
         if !self.geometry.content.contains(point) {

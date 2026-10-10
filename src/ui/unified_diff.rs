@@ -85,7 +85,12 @@ pub(super) fn draw_unified_diff(
                 frame,
                 row_area,
                 line,
-                app.horizontal_scroll,
+                if app.wrap_code && diff_wrapping::code_line(line) {
+                    diff_wrapping::row_offset(app, diff_scroll + offset, true)
+                } else {
+                    app.horizontal_scroll
+                },
+                app.wrap_code && diff_wrapping::row_offset(app, diff_scroll + offset, true) > 0,
                 emphasis.get(&line_index),
                 review_line_selected(app, line, None),
                 theme,
@@ -104,6 +109,7 @@ pub(super) fn draw_unified_line(
     area: Rect,
     line: &DiffLine,
     horizontal_scroll: usize,
+    continuation: bool,
     emphasis: Option<&Range<usize>>,
     selected: bool,
     theme: &Theme,
@@ -111,9 +117,11 @@ pub(super) fn draw_unified_line(
     let content_area = area;
     let old = line
         .old_line
+        .filter(|_| !continuation)
         .map_or(String::new(), |number| number.to_string());
     let new = line
         .new_line
+        .filter(|_| !continuation)
         .map_or(String::new(), |number| number.to_string());
     let (marker, marker_style) = marker_for(line.kind, theme);
     let mut spans = vec![

@@ -54,6 +54,7 @@ impl App {
                 }
             }
             PaletteCommand::ToggleDiffLayout => self.toggle_diff_layout(),
+            PaletteCommand::ToggleCodeWrap => self.toggle_code_wrap(),
             PaletteCommand::ToggleAllFiles => self.toggle_all_preview_files(effects),
             PaletteCommand::ShowChanges => self.switch_view(View::Changes, effects),
             PaletteCommand::ShowHistory => self.switch_view(View::History, effects),

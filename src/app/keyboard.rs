@@ -81,6 +81,9 @@ impl App {
             KeyCode::Char('/') => {
                 self.open_list_search();
             }
+            KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::ALT) => {
+                self.toggle_code_wrap();
+            }
             KeyCode::Char('0') => self.horizontal_scroll = 0,
             KeyCode::Char('v') => self.toggle_diff_layout(),
             KeyCode::Char('e' | 'E') if self.check_log_visible() => {

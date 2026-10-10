@@ -54,18 +54,25 @@ pub(super) fn draw_content(
         },
         |progress| format!("  · {}%", progress.percent()),
     );
+    let wrap_label = if app.wrap_code {
+        "  [Alt+z Unwrap]"
+    } else {
+        "  [Alt+z Wrap]"
+    };
     let title_width = (area.width as usize)
+        .saturating_sub(wrap_label.width())
         .saturating_sub(loading.width())
         .saturating_sub(file_action.width())
         .saturating_sub(review_action.width())
         .saturating_sub(jump_control_reserve())
         .saturating_sub(4);
     let title = format!(
-        " {}{}{}{} ",
+        " {}{}{}{}{} ",
         truncate_middle(&app.document.title, title_width),
         loading,
         file_action,
         review_action,
+        wrap_label,
     );
     let block = panel_block(
         title,
@@ -86,8 +93,15 @@ pub(super) fn draw_content(
         0
     };
     let side_by_side = app.diff_layout == DiffLayout::SideBySide && inner.width >= 72;
-    let rows_key = (app.document_layout_generation, side_by_side);
+    let rows_key = (
+        app.document_layout_generation,
+        side_by_side,
+        inner.width,
+        app.diff_split_percent,
+        app.wrap_code,
+    );
     if app.diff_rows_key != Some(rows_key) {
+        app.diff_restore_scroll |= app.wrap_code && app.diff_rows_key.is_some();
         if side_by_side {
             app.side_by_side_diff_rows = side_by_side_rows(&app.document, app);
             app.unified_diff_rows = Vec::new();
@@ -95,6 +109,7 @@ pub(super) fn draw_content(
             app.unified_diff_rows = unified_row_indices(&app.document, app);
             app.side_by_side_diff_rows = Vec::new();
         }
+        diff_wrapping::wrap_diff_rows(app, side_by_side, inner.width.saturating_sub(1));
         app.diff_rows_key = Some(rows_key);
     }
     let diff_rows = if side_by_side {
@@ -115,6 +130,7 @@ pub(super) fn draw_content(
     {
         app.content_scroll = details_rows.saturating_add(row).saturating_add(*offset);
     }
+    diff_wrapping::restore_scroll(app, side_by_side, details_rows);
     let visual_length = details_rows + diff_rows;
     let max_scroll = visual_length.saturating_sub(inner.height as usize);
     app.content_scroll = app.content_scroll.min(max_scroll);
@@ -171,6 +187,11 @@ pub(super) fn draw_content(
         diff_area.width.saturating_sub(1),
         diff_area.height,
     );
+    if app.content_scroll >= details_rows {
+        diff_wrapping::remember_scroll(app, side_by_side, diff_scroll);
+    } else {
+        app.diff_scroll_anchor = None;
+    }
     diff_scrolling::update_diff_scroll(app, render_area, side_by_side, diff_scroll);
     let mut content_review_hits = Vec::new();
     let (divider, content_file_hits) = if render_area.width < 2 || render_area.height == 0 {
@@ -202,9 +223,6 @@ pub(super) fn draw_content(
     (divider, content_file_hits, Vec::new(), content_review_hits)
 }
 
-#[doc = " Clickable shortcuts to either end of whatever the content pane holds, each"]
-#[doc = " shown on the border it points at whenever the reader is not already there."]
-#[doc = " On a huge diff or conversation they replace paging through thousands of rows."]
 pub(super) fn anchored_diff_row(app: &App, side_by_side: bool, anchor: &Path) -> Option<usize> {
     let matches_anchor = |index: &usize| {
         app.document
@@ -313,14 +331,6 @@ fn draw_jump_control(
         area,
     );
     ScmActionHit { area, action }
-}
-
-pub(super) fn commit_details_row_count(available_height: u16) -> usize {
-    7.min(available_height.saturating_sub(3)) as usize
-}
-
-pub(super) fn pull_request_details_row_count(available_height: u16) -> usize {
-    12.min(available_height.saturating_sub(3)) as usize
 }
 
 #[expect(

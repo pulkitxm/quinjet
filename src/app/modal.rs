@@ -414,6 +414,7 @@ pub(crate) enum PaletteCommand {
     CompareBranch,
     RenameCurrentBranch,
     ToggleDiffLayout,
+    ToggleCodeWrap,
     ToggleAllFiles,
     ShowChanges,
     ShowHistory,
@@ -425,7 +426,7 @@ pub(crate) enum PaletteCommand {
 }
 
 impl PaletteCommand {
-    pub(crate) const ALL: [Self; 28] = [
+    pub(crate) const ALL: [Self; 29] = [
         Self::Refresh,
         Self::StageAll,
         Self::UnstageAll,
@@ -446,6 +447,7 @@ impl PaletteCommand {
         Self::CompareBranch,
         Self::RenameCurrentBranch,
         Self::ToggleDiffLayout,
+        Self::ToggleCodeWrap,
         Self::ToggleAllFiles,
         Self::ShowChanges,
         Self::ShowHistory,
@@ -478,6 +480,7 @@ impl PaletteCommand {
             Self::CompareBranch => "Compare Current Branch With…",
             Self::RenameCurrentBranch => "Rename Current Branch…",
             Self::ToggleDiffLayout => "Toggle Unified / Side-by-Side Diff",
+            Self::ToggleCodeWrap => "Toggle Code Wrap",
             Self::ToggleAllFiles => "Collapse / Expand All Files",
             Self::ShowChanges => "Show Changes",
             Self::ShowHistory => "Show Commit History",

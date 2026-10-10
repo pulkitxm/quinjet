@@ -347,6 +347,14 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
         description: "Fetch / pull / push / sync",
     },
     HelpRow::Shortcut {
+        keys: "Alt+z",
+        description: "Toggle code wrapping in either diff layout",
+    },
+    HelpRow::Shortcut {
+        keys: "0",
+        description: "Reset horizontal scrolling",
+    },
+    HelpRow::Shortcut {
         keys: "v",
         description: "Toggle unified / side-by-side diff",
     },

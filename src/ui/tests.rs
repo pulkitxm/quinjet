@@ -105,6 +105,7 @@ fn rendered_text(buffer: &Buffer) -> String {
         .collect()
 }
 
+mod code_wrap;
 mod controls;
 mod diff;
 mod file_labels;

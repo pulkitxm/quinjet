@@ -66,6 +66,9 @@ fn line_overflow(app: &App, index: Option<usize>, width: u16) -> usize {
     index
         .and_then(|index| app.document.lines.get(index))
         .map_or(0, |line| {
+            if app.wrap_code && diff_wrapping::code_line(line) {
+                return 0;
+            }
             if matches!(
                 line.kind,
                 DiffLineKind::FileHeader | DiffLineKind::FileFooter | DiffLineKind::Image

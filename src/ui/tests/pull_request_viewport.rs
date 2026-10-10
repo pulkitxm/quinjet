@@ -100,6 +100,7 @@ fn large_pr_rendering_loads_only_the_content_viewport_in_both_layouts() {
 fn a_viewport_inside_a_large_file_tracks_its_sticky_header() {
     for layout in [DiffLayout::Unified, DiffLayout::SideBySide] {
         let mut app = indexed_app(4_262, layout);
+        app.wrap_code = true;
         deliver_file(&mut app, "file-0000.txt", 1_000);
         app.content_scroll = 900;
         let mut terminal = Terminal::new(TestBackend::new(180, 48)).unwrap();

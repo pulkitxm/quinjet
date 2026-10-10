@@ -98,6 +98,8 @@ impl App {
 
     pub(crate) fn set_document(&mut self, document: DiffDocument) {
         self.document = document;
+        self.diff_scroll_anchor = None;
+        self.diff_restore_scroll = false;
         self.invalidate_diff_rows();
     }
 

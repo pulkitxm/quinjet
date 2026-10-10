@@ -36,6 +36,7 @@ pub(super) fn draw_diff_side(
     line: Option<&DiffLine>,
     old_side: bool,
     horizontal_scroll: usize,
+    continuation: bool,
     emphasis: Option<&Range<usize>>,
     selected: bool,
     theme: &Theme,
@@ -66,7 +67,9 @@ pub(super) fn draw_diff_side(
     } else {
         line.new_line
     };
-    let number = number.map_or(String::new(), |number| number.to_string());
+    let number = number
+        .filter(|_| !continuation)
+        .map_or(String::new(), |number| number.to_string());
     let (marker, marker_style) = marker_for(line.kind, theme);
     let mut spans = vec![
         Span::styled(format!("{number:>4} "), Style::default().fg(theme.muted)),
@@ -204,9 +207,14 @@ pub(super) fn push_highlight_piece(
             _ => style,
         };
     }
+    let clipped = text_width.saturating_sub(*skip) > *remaining;
     let sliced = slice_width(text, *skip, *remaining);
     *skip = 0;
-    *remaining = remaining.saturating_sub(sliced.width());
+    *remaining = if clipped {
+        0
+    } else {
+        remaining.saturating_sub(sliced.width())
+    };
     output.push(Span::styled(sliced, style));
 }
 
@@ -391,4 +399,12 @@ pub(super) fn draw_footer(
             ),
         area,
     );
+}
+
+pub(super) fn commit_details_row_count(available_height: u16) -> usize {
+    7.min(available_height.saturating_sub(3)) as usize
+}
+
+pub(super) fn pull_request_details_row_count(available_height: u16) -> usize {
+    12.min(available_height.saturating_sub(3)) as usize
 }
