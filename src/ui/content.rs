@@ -193,6 +193,12 @@ pub(super) fn draw_content(
         app.diff_scroll_anchor = None;
     }
     diff_scrolling::update_diff_scroll(app, render_area, side_by_side, diff_scroll);
+    app.geometry.diff_viewport = Some(hover::diff_viewport(
+        app,
+        render_area,
+        diff_scroll,
+        side_by_side,
+    ));
     let mut content_review_hits = Vec::new();
     let (divider, content_file_hits) = if render_area.width < 2 || render_area.height == 0 {
         (None, Vec::new())

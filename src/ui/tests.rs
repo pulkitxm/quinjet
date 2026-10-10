@@ -110,6 +110,7 @@ mod controls;
 mod diff;
 mod file_labels;
 mod horizontal_scrollbars;
+mod hover;
 mod layout;
 mod logs;
 mod modals;

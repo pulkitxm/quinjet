@@ -45,6 +45,7 @@ mod diff_wrapping;
 mod feedback;
 mod help;
 mod horizontal_scrollbar;
+mod hover;
 mod image_diff;
 mod layout;
 mod modal_branches;

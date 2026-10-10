@@ -177,6 +177,13 @@ pub(crate) enum ChangeTarget {
     Change(usize),
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DiffViewport {
+    pub area: Rect,
+    pub scroll: usize,
+    pub side_by_side: bool,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct UiGeometry {
     pub repository_tab_hits: Vec<RepositoryTabHit>,
@@ -192,6 +199,7 @@ pub(crate) struct UiGeometry {
     pub sidebar_divider: Rect,
     pub content: Rect,
     pub diff_divider: Option<Rect>,
+    pub diff_viewport: Option<DiffViewport>,
     pub horizontal_scrollbar: Option<Scrollbar>,
     pub sidebar_scrollbar: Option<Scrollbar>,
     pub content_scrollbar: Option<Scrollbar>,
