@@ -8,9 +8,9 @@ impl App {
     )]
     pub(crate) fn handle_mouse(&mut self, event: MouseEvent, now: Instant) -> Vec<AppEffect> {
         let mut effects = Vec::new();
-        if !self.accept_mouse_scroll(event, now) {
+        let Some(event) = self.route_mouse_scroll(event, now) else {
             return effects;
-        }
+        };
         self.mouse_hover =
             (event.kind == MouseEventKind::Moved).then_some((event.column, event.row));
         if self.handle_scrollbar_mouse(event, &mut effects) {
