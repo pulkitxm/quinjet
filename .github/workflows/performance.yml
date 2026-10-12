@@ -137,6 +137,8 @@ jobs:
                   if version is None or tuple(map(int, version.groups())) < (1, 93):
                       raise RuntimeError("packed musl relocations require Rust 1.93 or newer")
                   flags = "-C link-arg=-Wl,-z,pack-relative-relocs"
+              if revision == "candidate" and os.environ["TARGET"] == "x86_64-pc-windows-msvc":
+                  flags = "-C target-feature=+crt-static"
               environment = dict(os.environ, RUSTFLAGS=flags)
               started = time.monotonic()
               subprocess.run(report["recipe"], cwd=revision, env=environment, check=True)

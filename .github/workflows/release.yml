@@ -168,6 +168,9 @@ jobs:
             fi
             export RUSTFLAGS='-C link-arg=-Wl,-z,pack-relative-relocs'
           fi
+          if [ "${TARGET}" = x86_64-pc-windows-msvc ]; then
+            export RUSTFLAGS='-C target-feature=+crt-static'
+          fi
           cargo auditable build --release --locked --target "${TARGET}"
       - name: Prepare artifact (Unix)
         if: runner.os != 'Windows'
