@@ -5,7 +5,7 @@ Prints a pull request's patch, or one path's patch out of it.
 Usage:
 
 ```bash
-quinjet pr diff <number> [<path>] [--repo <owner/name>] [--refresh] [-C <DIR>] [--json]
+quinjet pr diff <number> [<path>] [--commit <hash>] [--repo <owner/name>] [--refresh] [-C <DIR>] [--json]
 ```
 
 Arguments:

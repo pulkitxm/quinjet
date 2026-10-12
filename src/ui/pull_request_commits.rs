@@ -248,3 +248,60 @@ pub(super) fn commit_ci_rows(app: &App, theme: &Theme) -> Vec<ContentRow> {
     ));
     rows
 }
+
+pub(super) fn commit_browser_rows(app: &App, theme: &Theme) -> Vec<ContentRow> {
+    let Some(commit) = app.pr_commits.snapshot.commits.get(app.pr_commits.cursor) else {
+        let message = app.pr_commits.error.clone().unwrap_or_else(|| {
+            if app.pr_commits.loading {
+                "Loading commits…".to_owned()
+            } else {
+                "No commits reported".to_owned()
+            }
+        });
+        return vec![ContentRow::text(message, Style::default().fg(theme.muted))];
+    };
+    vec![
+        ContentRow::text(
+            commit.subject.clone(),
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+        ),
+        ContentRow::blank(),
+        ContentRow::plain(detail_line("Commit", commit.oid.clone(), theme)),
+        ContentRow::plain(detail_line("Author", commit.author.clone(), theme)),
+        ContentRow::plain(detail_line(
+            "Authored",
+            format_relative_timestamp(&commit.authored_at),
+            theme,
+        )),
+        ContentRow::plain(detail_line(
+            "Committed",
+            format_relative_timestamp(&commit.committed_at),
+            theme,
+        )),
+        ContentRow::blank(),
+        ContentRow::text(
+            "Enter or click a commit to inspect its files and CI checks.",
+            Style::default().fg(theme.text),
+        ),
+        ContentRow::text(
+            "Files compare the selected commit with its first parent.",
+            Style::default().fg(theme.muted),
+        ),
+        ContentRow::text(
+            "Shift+F: Files · Shift+P: CI · Shift+A: All commits",
+            Style::default().fg(theme.muted),
+        ),
+    ]
+}
+
+pub(super) fn commit_person(name: &str, email: &str, timestamp: &str) -> String {
+    let date = format_relative_timestamp(timestamp);
+    if name.is_empty() {
+        return date;
+    }
+    if email.is_empty() {
+        format!("{name}  ·  {date}")
+    } else {
+        format!("{name} <{email}>  ·  {date}")
+    }
+}

@@ -1,6 +1,5 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
-
 use crate::git::github::{PullRequestCommit, PullRequestCommits};
 
 #[derive(Debug, Default)]
@@ -181,28 +180,7 @@ impl App {
         self.show_pr_commit_summary();
     }
 
-    pub(super) fn show_pr_commit_summary(&mut self) {
-        let document = if let Some(commit) =
-            self.pr_commits.snapshot.commits.get(self.pr_commits.cursor)
-        {
-            let mut document = DiffDocument::empty(
-                format!("Commit {}", commit.abbreviated_oid),
-                "Press Enter or click a commit to inspect its files and CI checks. Shift+F: Files · Shift+P: CI · Shift+A: All commits",
-            );
-            document.commit_details = Some(pr_commit_details(commit));
-            document
-        } else {
-            DiffDocument::empty(
-                "Pull Request Commits",
-                self.pr_commits.error.clone().unwrap_or_else(|| {
-                    if self.pr_commits.loading {
-                        "Loading commits…".to_owned()
-                    } else {
-                        "No commits reported".to_owned()
-                    }
-                }),
-            )
-        };
-        self.set_document(document);
+    pub(super) const fn show_pr_commit_summary(&mut self) {
+        self.invalidate_pull_request_content_rows();
     }
 }

@@ -1,7 +1,7 @@
+use serde::Deserialize;
+
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
-
-use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct CheckPage {

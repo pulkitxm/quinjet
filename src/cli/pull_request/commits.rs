@@ -1,6 +1,7 @@
+use anyhow::{Context, bail};
+
 use super::{Command, Emitter, PrArgs, Result, Session, lookup, render};
 use crate::git::github::PullRequest;
-use anyhow::{Context, bail};
 
 pub(super) fn commits(session: &mut Session, out: &Emitter, args: &PrArgs) -> Result<u8> {
     let pull_request = lookup(session, out, args)?;

@@ -1,9 +1,11 @@
-use super::*;
-use crate::git::github::PullRequestCommit;
+use std::time::Instant;
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-use std::time::Instant;
+
+use super::*;
+use crate::git::github::PullRequestCommit;
 
 fn commits_app() -> App {
     let mut app = overview_app();
@@ -42,6 +44,8 @@ fn commit_rows_are_clickable_and_open_a_hash_scoped_file_view() {
     let text = rendered_text(terminal.backend().buffer());
     assert!(text.contains("Commits"));
     assert!(text.contains("aaaaaaa"));
+    assert!(!text.contains("0 files changed"));
+    assert!(!text.contains("<>"));
     let hit = app
         .geometry
         .sidebar_hits

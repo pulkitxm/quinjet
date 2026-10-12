@@ -85,7 +85,12 @@ fn remote_commit_older_than_the_initial_fetch_window_is_fetched_exactly() {
     let source = initialized_repository();
     let base = source.git(&["rev-parse", "HEAD"]);
     let remote = test_directory("commit-remote.git");
-    source.git(&["init", "--bare", remote.0.to_str().unwrap()]);
+    source.git(&[
+        "init",
+        "--bare",
+        "--initial-branch=main",
+        remote.0.to_str().unwrap(),
+    ]);
     source.git(&["remote", "add", "test-origin", remote.0.to_str().unwrap()]);
     source.git(&["push", "test-origin", "main:main"]);
     source.git(&["switch", "-c", "feature/rocket"]);
@@ -126,7 +131,7 @@ fn remote_commit_older_than_the_initial_fetch_window_is_fetched_exactly() {
         7,
     );
     request.base_oid = base;
-    request.head_oid = head;
+    request.head_oid = head.clone();
     let prepared = repository
         .prepare_pull_request_commit_diff(&request, &selected, |_| {})
         .unwrap();
@@ -134,4 +139,26 @@ fn remote_commit_older_than_the_initial_fetch_window_is_fetched_exactly() {
     assert_eq!(prepared.index.files.len(), 1);
     assert_eq!(prepared.index.files[0].path, Path::new("selected.txt"));
     assert_eq!(opened.git(&["show-ref"]), before);
+
+    source.git(&["push", "test-origin", "HEAD:refs/heads/feature/rocket"]);
+    let shallow = test_directory("commit-shallow-head");
+    source.git(&[
+        "clone",
+        "--depth=1",
+        "--branch=feature/rocket",
+        &format!("file://{}", remote.0.display()),
+        shallow.0.to_str().unwrap(),
+    ]);
+    let repository = Repository {
+        root: shallow.0.clone(),
+        github_cli: None,
+        diff_highlighting: true,
+    };
+    assert!(repository.has_commit(&head));
+    let prepared = repository
+        .prepare_pull_request_commit_diff(&request, &head, |_| {})
+        .unwrap();
+    assert_eq!(prepared.head, head);
+    assert_eq!(prepared.index.files.len(), 1);
+    assert_eq!(prepared.index.files[0].path, Path::new("later.txt"));
 }

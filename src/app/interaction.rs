@@ -163,6 +163,15 @@ impl App {
                 .map(|member| member.url.as_str())
                 .filter(|url| !url.is_empty());
         }
+        if self.pull_request_section == PullRequestSection::Commits {
+            return self
+                .pr_commits
+                .snapshot
+                .commits
+                .get(self.pr_commits.cursor)
+                .map(|commit| commit.url.as_str())
+                .filter(|url| !url.is_empty());
+        }
         let check = self
             .selected_pull_request_check()
             .map(|check| check.link.as_str())

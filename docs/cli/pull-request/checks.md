@@ -5,7 +5,7 @@ Lists a pull request's check runs, and optionally blocks until they settle.
 Usage:
 
 ```bash
-quinjet pr checks <number> [--repo <owner/name>] [--refresh] [--watch] [--interval <seconds>] [--exit-code] [-C <DIR>] [--json]
+quinjet pr checks <number> [--commit <hash>] [--repo <owner/name>] [--refresh] [--watch] [--interval <seconds>] [--exit-code] [-C <DIR>] [--json]
 ```
 
 Arguments:

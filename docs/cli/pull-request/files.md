@@ -5,7 +5,7 @@ Lists the files a pull request changes, with each file's status and line counts.
 Usage:
 
 ```bash
-quinjet pr files <number> [--repo <owner/name>] [--refresh] [-C <DIR>] [--json]
+quinjet pr files <number> [--commit <hash>] [--repo <owner/name>] [--refresh] [-C <DIR>] [--json]
 ```
 
 Arguments:

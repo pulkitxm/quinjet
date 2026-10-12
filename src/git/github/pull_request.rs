@@ -72,8 +72,13 @@ impl Repository {
             bail!("A full commit hash is required");
         }
         let parent = if self.has_commit(oid) {
-            let output = self.checked(["rev-parse", &format!("{oid}^1")])?;
-            text(trim_ascii(&output))
+            let output = self.checked(["cat-file", "commit", oid])?;
+            output
+                .split(|byte| *byte == b'\n')
+                .take_while(|line| !line.is_empty())
+                .find_map(|line| line.strip_prefix(b"parent "))
+                .map(text)
+                .context("The selected commit has no first parent")?
         } else {
             let output = self.run_gh(vec![
                 OsString::from("api"),

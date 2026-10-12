@@ -17,7 +17,12 @@ pub(super) fn draw_content(
     Vec<ContentStepHit>,
     Vec<ContentReviewHit>,
 ) {
-    if app.view == View::PullRequests && app.pull_request_section == PullRequestSection::Overview {
+    if app.view == View::PullRequests
+        && matches!(
+            app.pull_request_section,
+            PullRequestSection::Overview | PullRequestSection::Commits
+        )
+    {
         let step_hits = draw_pull_request_overview(frame, area, app, theme, link_hits);
         return (None, Vec::new(), step_hits, Vec::new());
     }
@@ -407,21 +412,19 @@ pub(super) fn draw_commit_details_scrolled(
         subject,
         detail_line(
             "Author",
-            format!(
-                "{} <{}>  ·  {}",
-                details.author,
-                details.author_email,
-                format_relative_timestamp(&details.authored_at)
-            ),
+            commit_person(&details.author, &details.author_email, &details.authored_at),
             theme,
         ),
         detail_line(
-            "Committer",
-            format!(
-                "{} <{}>  ·  {}",
-                details.committer,
-                details.committer_email,
-                format_relative_timestamp(&details.committed_at)
+            if details.committer.is_empty() {
+                "Committed"
+            } else {
+                "Committer"
+            },
+            commit_person(
+                &details.committer,
+                &details.committer_email,
+                &details.committed_at,
             ),
             theme,
         ),

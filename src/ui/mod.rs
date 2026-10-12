@@ -113,7 +113,9 @@ use project_picker::*;
 use prose::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use pull_request_checks::*;
-use pull_request_commits::{commit_ci_rows, draw_pr_navigation};
+use pull_request_commits::{
+    commit_browser_rows, commit_ci_rows, commit_person, draw_pr_navigation,
+};
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use pull_request_conversation::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]

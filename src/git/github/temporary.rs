@@ -52,6 +52,9 @@ impl TemporaryBareRepository {
         let Ok(common) = repository.git_common_dir() else {
             return;
         };
+        if common.join("shallow").is_file() {
+            return;
+        }
         let objects = common.join("objects");
         if !objects.is_dir() {
             return;

@@ -6,7 +6,7 @@ to the step that produced it.
 Usage:
 
 ```bash
-quinjet pr logs <number> <check> [--repo <owner/name>] [--refresh] [--watch] [--interval <seconds>] [-C <DIR>] [--json]
+quinjet pr logs <number> <check> [--commit <hash>] [--repo <owner/name>] [--refresh] [--watch] [--interval <seconds>] [-C <DIR>] [--json]
 ```
 
 Arguments:
