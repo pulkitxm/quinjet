@@ -290,6 +290,14 @@ jobs:
       id-token: write
       attestations: write
     steps:
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.PUKBOT_CLIENT_ID }}
+          private-key: ${{ secrets.PUKBOT_PRIVATE_KEY }}
+          owner: pulkitxm
+          repositories: quinjet
+          permission-contents: write
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ needs.version.outputs.tag }}
@@ -340,24 +348,12 @@ jobs:
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
         with:
           subject-path: dist/quinjet-*
-      - name: Publish the verified release assets
-        env:
-          TAG: ${{ needs.version.outputs.tag }}
-        run: |
-          set -euo pipefail
-          existing=$(gh api "repos/${GITHUB_REPOSITORY}/releases" --jq ".[] | select(.tag_name == \"${TAG}\") | .id")
-          if [ -z "${existing}" ]; then
-            pukbot release create "${TAG}" --repo "${GITHUB_REPOSITORY}" --draft --generate-notes --json
-          fi
-          release=$(gh api "repos/${GITHUB_REPOSITORY}/releases" --jq ".[] | select(.tag_name == \"${TAG}\") | .id")
-          for asset in dist/*; do
-            name=$(basename "${asset}")
-            uploaded=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release}/assets" --jq ".[] | select(.name == \"${name}\") | .id")
-            if [ -z "${uploaded}" ]; then
-              pukbot release upload-asset "${release}" "${asset}" --repo "${GITHUB_REPOSITORY}" --json
-            fi
-          done
-          pukbot release edit "${release}" --repo "${GITHUB_REPOSITORY}" --draft false --make-latest true --json
+      - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          tag_name: ${{ needs.version.outputs.tag }}
+          generate_release_notes: true
+          files: dist/*
       - name: Render the Homebrew formula
         env:
           VERSION: ${{ needs.version.outputs.version }}
