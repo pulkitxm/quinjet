@@ -341,7 +341,11 @@ fn stack_commit_rows(app: &App, theme: &Theme) -> (Vec<ContentRow>, Vec<ContentL
     }
     if commits.truncated {
         rows.push(ContentRow::text(
-            format!(" Showing 500 of {} commits", commits.total_commits),
+            format!(
+                " Showing {} of {} commits",
+                commits.commits.len(),
+                commits.total_commits
+            ),
             Style::default().fg(theme.muted),
         ));
     }

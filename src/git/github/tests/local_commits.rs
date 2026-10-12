@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use super::*;
 
 fn local_request(source: &TestDirectory, base: String) -> (Repository, PullRequest) {
@@ -121,27 +123,41 @@ fn shallow_history_outside_the_comparison_does_not_force_a_cloud_read() {
 }
 
 #[test]
-fn large_local_ranges_retain_the_newest_500_commits_and_exact_count() {
+fn large_local_ranges_return_every_commit_without_github() {
     let source = initialized_repository();
     let base = source.git(&["rev-parse", "HEAD"]);
-    let tree = source.git(&["show", "-s", "--format=%T", "HEAD"]);
-    let mut head = base.clone();
-    for index in 0..501 {
-        head = source.git(&[
-            "commit-tree",
-            &tree,
-            "-p",
-            &head,
-            "-m",
-            &format!("commit {index}"),
-        ]);
+    let mut input = String::new();
+    for index in 0..16_385 {
+        let subject = format!("commit {index}");
+        writeln!(input, "commit refs/heads/large\nmark :{}", index + 1).unwrap();
+        writeln!(
+            input,
+            "committer Quinjet Test <quinjet@example.test> 1700000000 +0000"
+        )
+        .unwrap();
+        writeln!(input, "data {}\n{subject}", subject.len()).unwrap();
+        if index == 0 {
+            writeln!(input, "from {base}\n").unwrap();
+        } else {
+            writeln!(input, "from :{index}\n").unwrap();
+        }
     }
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(&source.0)
+        .args(["fast-import", "--quiet"]);
+    let output =
+        process::run_bounded_command_with_input(&mut command, input.as_bytes(), 1024, 1024)
+            .unwrap();
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let head = source.git(&["rev-parse", "refs/heads/large"]);
     source.git(&["update-ref", "refs/heads/main", &head]);
     let (repository, request) = local_request(&source, base);
     let result = repository.pull_request_commits(&request).unwrap();
-    assert_eq!(result.total_commits, 501);
-    assert_eq!(result.commits.len(), 500);
-    assert_eq!(result.commits[0].subject, "commit 1");
-    assert_eq!(result.commits[499].oid, head);
-    assert!(result.truncated);
+    assert_eq!(result.total_commits, 16_385);
+    assert_eq!(result.commits.len(), 16_385);
+    assert_eq!(result.commits[0].subject, "commit 0");
+    assert_eq!(result.commits[16_384].oid, head);
+    assert!(!result.truncated);
 }

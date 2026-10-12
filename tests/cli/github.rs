@@ -4,6 +4,8 @@ use super::*;
 
 #[path = "github/commit_views.rs"]
 mod commit_views;
+#[path = "github/large_commits.rs"]
+mod large_commits;
 #[path = "github/open.rs"]
 mod open;
 

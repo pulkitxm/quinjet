@@ -2,9 +2,8 @@
 use super::*;
 
 mod local;
+mod local_process;
 
-const MAX_PULL_REQUEST_COMMITS: usize = 500;
-const MAX_COMMIT_PAGES: usize = 5;
 const MAX_COMMITS_PER_PAGE: usize = 100;
 const MAX_COMMIT_SUBJECT_BYTES: usize = 1024;
 const PULL_REQUEST_COMMITS_QUERY: &str = "query($owner:String!,$name:String!,$number:Int!,$before:String){repository(owner:$owner,name:$name){pullRequest(number:$number){baseRefOid headRefOid commits(last:100,before:$before){totalCount nodes{commit{oid abbreviatedOid messageHeadline authoredDate committedDate url author{name user{login}} committer{name user{login}}}} pageInfo{hasPreviousPage startCursor}}}}}";
@@ -37,7 +36,7 @@ impl Repository {
         let mut pages = Vec::new();
         let mut before = None;
         let mut cursors = BTreeSet::new();
-        for _ in 0..MAX_COMMIT_PAGES {
+        loop {
             let page = self.pull_request_commit_page(pull_request, before.as_deref())?;
             let previous = page.page_info.has_previous_page;
             let cursor = page.page_info.start_cursor.clone();
@@ -91,7 +90,7 @@ fn validate_pull_request_oids(pull_request: &PullRequest) -> Result<()> {
 
 fn pull_request_commits_cache_key(pull_request: &PullRequest) -> String {
     format!(
-        "pull-request-commits-v1\n{}\n{}\n{}\n{}",
+        "pull-request-commits-v2\n{}\n{}\n{}\n{}",
         pull_request.base_repository.url.trim_end_matches('/'),
         pull_request.number,
         pull_request.base_oid,
@@ -161,9 +160,6 @@ fn validate_commit_page(
 }
 
 fn validate_commit_pagination(pages: &[PullRequestCommitPage], total_commits: usize) -> Result<()> {
-    if pages.len() > MAX_COMMIT_PAGES {
-        bail!("GitHub returned too many pull-request commit pages");
-    }
     for page in pages.iter().take(pages.len().saturating_sub(1)) {
         if !page.page_info.has_previous_page {
             bail!("GitHub ended pull-request commit pagination before the final page");
@@ -173,11 +169,7 @@ fn validate_commit_pagination(pages: &[PullRequestCommitPage], total_commits: us
     let has_older = pages
         .last()
         .is_some_and(|page| page.page_info.has_previous_page);
-    if has_older {
-        if pages.len() != MAX_COMMIT_PAGES || fetched >= total_commits {
-            bail!("GitHub returned inconsistent pull-request commit pagination");
-        }
-    } else if fetched != total_commits {
+    if has_older || fetched != total_commits {
         bail!("GitHub returned an incomplete pull-request commit list");
     }
     Ok(())
@@ -189,9 +181,8 @@ fn validate_pull_request_commits(
 ) -> Result<()> {
     if commits.base_oid != pull_request.base_oid
         || commits.head_oid != pull_request.head_oid
-        || commits.commits.len() > MAX_PULL_REQUEST_COMMITS
-        || commits.total_commits < commits.commits.len()
-        || commits.truncated != (commits.total_commits > commits.commits.len())
+        || commits.total_commits != commits.commits.len()
+        || commits.truncated
     {
         bail!("pull-request commit snapshot is inconsistent with its metadata");
     }
@@ -352,6 +343,44 @@ mod tests {
             ["a", "b", "c", "d"]
         );
         assert!(!result.truncated);
+    }
+
+    #[test]
+    fn pagination_returns_all_commits_beyond_five_pages() {
+        let mut request = pull_request("a", "b");
+        request.head_oid = format!("{:040x}", 600);
+        let mut pages = Vec::new();
+        for start in (0..601).step_by(100).rev() {
+            let mut page = page(&request, 601, &[]);
+            page.commits = (start..(start + 100).min(601))
+                .map(|index| PullRequestCommit {
+                    oid: format!("{index:040x}"),
+                    abbreviated_oid: format!("{index:x}"),
+                    ..PullRequestCommit::default()
+                })
+                .collect();
+            page.page_info.has_previous_page = start != 0;
+            pages.push(page);
+        }
+        let result = finish_commit_pages(&request, pages).unwrap();
+        assert_eq!(result.commits.len(), 601);
+        assert_eq!(result.total_commits, 601);
+        assert_eq!(result.commits[0].oid, format!("{:040x}", 0));
+        assert_eq!(result.commits[600].oid, request.head_oid);
+        assert!(!result.truncated);
+    }
+
+    #[test]
+    fn partial_snapshots_are_rejected_even_when_the_head_matches() {
+        let request = pull_request("a", "b");
+        let mut result =
+            finish_commit_pages(&request, vec![page(&request, 2, &["a", "b"])]).unwrap();
+        drop(result.commits.remove(0));
+        result.truncated = true;
+        drop(validate_pull_request_commits(&request, &result).unwrap_err());
+        let mut incomplete = page(&request, 2, &["b"]);
+        incomplete.page_info.has_previous_page = true;
+        drop(finish_commit_pages(&request, vec![incomplete]).unwrap_err());
     }
 
     #[test]

@@ -30,12 +30,12 @@ Quinjet first reads `git rev-list` and `git log` over `base..head` in the
 opened repository. Commit hashes, subjects, authors, and timestamps come from
 local Git objects, including objects shared by linked worktrees. No GitHub
 commit request or network fetch runs when that history is complete locally.
-The bounded ancestry scan also checks shallow boundaries so incomplete history
+The streamed ancestry scan also checks shallow boundaries so incomplete history
 is never presented as a complete commit list. Local results omit `authorLogin`,
 which is a GitHub account identity rather than Git commit metadata.
 
-If the exact commits or required ancestry are missing, or the range exceeds
-the 16,384-commit local scan limit, Quinjet uses a cached GitHub result or reads
+If the exact commits or required ancestry are missing, Quinjet uses a cached
+GitHub result or reads
 GitHub's pull-request commit connection newest-page first:
 
 ```text
@@ -49,10 +49,10 @@ repository(owner: $owner, name: $name) {
 ```
 
 Each page is capped by the normal 2 MiB GitHub response limit. Quinjet follows
-at most five backward cursors, retaining at most 500 commits, then reverses the
-pages so the answer reads from oldest to newest. If the pull request has more
-than 500 commits, `truncated` is true and the text form names how many of the
-newest commits are shown.
+every backward cursor until the complete history is loaded, then reverses the
+pages so the answer reads from oldest to newest. There is no commit-count limit.
+Local reads stream one record at a time rather than buffering the entire Git
+output. Each record retains the normal 2 MiB safety limit.
 
 Every page must report the base OID, head OID, and total count from the original
 metadata snapshot. The newest retained commit must be that head OID, cursors
@@ -61,7 +61,7 @@ therefore fails visibly with a request to retry instead of returning a mixed
 history.
 
 The completed GitHub result is cached forever under
-`pull-request-commits-v1\n<repository url>\n<number>\n<base oid>\n<head oid>`.
+`pull-request-commits-v2\n<repository url>\n<number>\n<base oid>\n<head oid>`.
 Local results use the same key prefixed with `local-`.
 Both boundary commits are part of the key, so a force push or base change asks a
 different question. `--refresh` bypasses the five-minute metadata cache; it
