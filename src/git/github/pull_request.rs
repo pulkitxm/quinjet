@@ -59,6 +59,51 @@ impl Repository {
         self.prepare_pull_request_comparison(pull_request, false, progress)
     }
 
+    pub(crate) fn prepare_pull_request_commit_diff<F>(
+        &self,
+        pull_request: &PullRequest,
+        oid: &str,
+        progress: F,
+    ) -> Result<PreparedPullRequest>
+    where
+        F: FnMut(PullRequestProgress),
+    {
+        if !is_commit_oid(oid) {
+            bail!("A full commit hash is required");
+        }
+        let parent = if self.has_commit(oid) {
+            let output = self.checked(["rev-parse", &format!("{oid}^1")])?;
+            text(trim_ascii(&output))
+        } else {
+            let output = self.run_gh(vec![
+                OsString::from("api"),
+                OsString::from("--hostname"),
+                OsString::from(pull_request.base_repository.host()),
+                OsString::from(format!(
+                    "repos/{}/commits/{oid}",
+                    pull_request.base_repository.name_with_owner
+                )),
+                OsString::from("--jq"),
+                OsString::from(".parents[0].sha // empty"),
+            ]);
+            let output = output?;
+            if !output.status.success() || output.stdout_truncated {
+                bail!(
+                    "{}",
+                    bounded_command_error("unable to resolve commit parent", &output)
+                );
+            }
+            text(trim_ascii(&output.stdout))
+        };
+        if !is_commit_oid(&parent) {
+            bail!("The selected commit has no parent to compare");
+        }
+        let mut comparison = pull_request.clone();
+        comparison.base_oid = parent;
+        oid.clone_into(&mut comparison.head_oid);
+        self.prepare_pull_request_comparison(&comparison, true, progress)
+    }
+
     pub(crate) fn prepare_pull_request_stack_diff<F>(
         &self,
         stack: &PullRequestStack,

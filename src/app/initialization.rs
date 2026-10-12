@@ -70,6 +70,7 @@ impl App {
             pull_request_file_cursor: 0,
             pull_request_tree_cursor: 0,
             collapsed_pull_request_directories: HashSet::new(),
+            pr_commits: pull_request_commits::CommitBrowser::default(),
             pull_request_checks: Vec::new(),
             pull_request_check_cursor: None,
             selected_check_section: None,

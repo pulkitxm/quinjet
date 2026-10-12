@@ -59,6 +59,11 @@ impl App {
                     self.schedule_preview(now);
                 }
             }
+            SidebarHit::PullRequestCommits => {
+                self.select_pull_request_section(PullRequestSection::Commits, effects);
+            }
+            SidebarHit::PullRequestCommit(index) => self.inspect_pr_commit(Some(index), effects),
+            SidebarHit::PullRequestAllCommits => self.inspect_pr_commit(None, effects),
             SidebarHit::PullRequestFiles => {
                 self.select_pull_request_section(PullRequestSection::Files, effects);
             }

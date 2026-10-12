@@ -52,6 +52,7 @@ pub(crate) enum Command {
         refresh: bool,
     },
     PreparePullRequest {
+        commit: Option<String>,
         workspace: u64,
         pull_request: Box<PullRequest>,
     },
@@ -70,6 +71,7 @@ pub(crate) enum Command {
         paths: Vec<PathBuf>,
     },
     PullRequestChecks {
+        commit: Option<String>,
         pull_request: Box<PullRequest>,
         refresh: bool,
     },

@@ -2,6 +2,7 @@
 use super::*;
 
 mod commits;
+use commits::selected_commit;
 mod monitor;
 pub(super) use monitor::select_check;
 use monitor::{checks, logs, watch_conversation, watch_pull_request};
@@ -24,15 +25,23 @@ pub(super) fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb
             Ok(0)
         }
         PrVerb::Files(args) => {
-            let request = lookup(session, out, &args)?;
-            let index = prepare(session, out, &request)?;
+            let request = lookup(session, out, &args.pull_request)?;
+            let commit = selected_commit(session, out, &request, args.commit.as_deref())?;
+            let index = prepare_commit(session, out, &request, commit)?;
             out.emit(&index, || render::pull_request_files(&index))?;
             Ok(0)
         }
         PrVerb::Commits(args) => commits::commits(session, out, &args),
         PrVerb::Diff(args) => {
             let request = lookup(session, out, &args.pull_request)?;
-            let document = pull_request_diff(session, out, &request, args.path.as_deref())?;
+            let commit = selected_commit(session, out, &request, args.commit.as_deref())?;
+            let index = prepare_commit(session, out, &request, commit.clone())?;
+            let title = commit.map_or_else(
+                || format!("PR #{}", request.number),
+                |oid| format!("Commit {oid}"),
+            );
+            let document =
+                prepared_pull_request_diff(session, out, &index, title, args.path.as_deref())?;
             out.diff(&document)?;
             Ok(0)
         }
@@ -63,6 +72,7 @@ pub(super) fn pull_request(session: &mut Session, out: &Emitter, command: PrVerb
                         .execute(
                             session,
                             Command::PullRequestChecks {
+                                commit: None,
                                 pull_request: Box::new(request),
                                 refresh: args.pull_request.refresh,
                             },
@@ -399,30 +409,24 @@ pub(super) fn prepare(
     out: &Emitter,
     request: &PullRequest,
 ) -> Result<PullRequestDiffIndex> {
+    prepare_commit(session, out, request, None)
+}
+
+fn prepare_commit(
+    session: &mut Session,
+    out: &Emitter,
+    request: &PullRequest,
+    commit: Option<String>,
+) -> Result<PullRequestDiffIndex> {
     out.execute(
         session,
         Command::PreparePullRequest {
+            commit,
             workspace: 0,
             pull_request: Box::new(request.clone()),
         },
     )?
     .pull_request_index()
-}
-
-pub(super) fn pull_request_diff(
-    session: &mut Session,
-    out: &Emitter,
-    request: &PullRequest,
-    path: Option<&Path>,
-) -> Result<DiffDocument> {
-    let index = prepare(session, out, request)?;
-    prepared_pull_request_diff(
-        session,
-        out,
-        &index,
-        format!("PR #{}", request.number),
-        path,
-    )
 }
 
 pub(super) fn prepared_pull_request_diff(

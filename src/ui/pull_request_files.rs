@@ -400,11 +400,19 @@ pub(super) fn draw_check_list_conversation(
         Paragraph::new(Line::from(vec![
             marker,
             Span::styled(
-                "Conversation",
+                if app.selected_pr_commit().is_some() {
+                    "Commit checks"
+                } else {
+                    "Conversation"
+                },
                 Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                conversation_row_suffix(app),
+                if app.selected_pr_commit().is_some() {
+                    String::new()
+                } else {
+                    conversation_row_suffix(app)
+                },
                 Style::default().fg(theme.muted),
             ),
         ]))

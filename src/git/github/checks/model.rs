@@ -1,7 +1,7 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum PullRequestCheckStatus {
     Pending,
@@ -31,7 +31,7 @@ impl PullRequestCheckStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PullRequestCheck {
     pub name: String,
@@ -71,7 +71,7 @@ impl PullRequestCheck {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum CheckLogSeverity {
     Normal,
@@ -81,7 +81,7 @@ pub(crate) enum CheckLogSeverity {
     Error,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CheckLogLine {
     pub timestamp: String,
@@ -89,7 +89,7 @@ pub(crate) struct CheckLogLine {
     pub severity: CheckLogSeverity,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CheckStep {
     pub number: usize,
@@ -130,14 +130,14 @@ pub(crate) fn unix_now() -> i64 {
 
 #[doc = " A check list plus where it came from, so the view can say whether it is"]
 #[doc = " showing a cached answer or one just read from GitHub."]
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PullRequestChecks {
     pub checks: Vec<PullRequestCheck>,
     pub from_cache: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CheckRunLog {
     pub steps: Vec<CheckStep>,

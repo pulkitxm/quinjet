@@ -338,6 +338,7 @@ impl App {
                         self.move_check_cursor(amount);
                         self.schedule_preview(now);
                     }
+                    PullRequestSection::Commits => self.move_pr_commit_cursor(amount),
                     PullRequestSection::Stack => {
                         let _ = self.move_pull_request_stack_cursor(amount, false, now);
                     }
@@ -410,6 +411,14 @@ impl App {
                         };
                         self.select_check_list_target(target);
                         self.schedule_preview(now);
+                    }
+                    PullRequestSection::Commits => {
+                        self.pr_commits.cursor = if end {
+                            self.pr_commits.snapshot.commits.len().saturating_sub(1)
+                        } else {
+                            0
+                        };
+                        self.show_pr_commit_summary();
                     }
                     PullRequestSection::Stack => {
                         let _ = self.move_pull_request_stack_to_edge(end, now);

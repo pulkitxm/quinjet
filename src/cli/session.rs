@@ -108,12 +108,20 @@ impl Session {
                 self.repository.pull_request_stack(&pull_request, refresh)?,
             ))),
             Command::PreparePullRequest {
+                commit,
                 workspace,
                 pull_request,
             } => {
-                let prepared = self
-                    .repository
-                    .prepare_pull_request_diff(&pull_request, progress)?;
+                let prepared = if let Some(oid) = commit {
+                    self.repository.prepare_pull_request_commit_diff(
+                        &pull_request,
+                        &oid,
+                        progress,
+                    )?
+                } else {
+                    self.repository
+                        .prepare_pull_request_diff(&pull_request, progress)?
+                };
                 let index = prepared.index();
                 self.pull_request_diff = Some((workspace, prepared));
                 Ok(Outcome::PullRequestIndex(Box::new(index)))
@@ -140,12 +148,16 @@ impl Session {
                 ))
             }
             Command::PullRequestChecks {
+                commit,
                 pull_request,
                 refresh,
-            } => Ok(Outcome::Checks(Box::new(
+            } => Ok(Outcome::Checks(Box::new(if let Some(oid) = commit {
                 self.repository
-                    .pull_request_checks(&pull_request, refresh)?,
-            ))),
+                    .commit_checks(&pull_request, &oid, refresh)?
+            } else {
+                self.repository
+                    .pull_request_checks(&pull_request, refresh)?
+            }))),
             Command::PullRequestConversation { pull_request } => Ok(Outcome::Conversation(
                 Box::new(self.repository.pull_request_conversation(&pull_request)?),
             )),

@@ -22,6 +22,7 @@ impl App {
         }
         effects.push(AppEffect::Git(Box::new(
             WorkerCommand::LoadPullRequestChecks {
+                commit: self.selected_pr_commit().map(|commit| commit.oid.clone()),
                 generation: self.pull_request_checks_generation,
                 pull_request: Box::new(pull_request),
                 refresh,

@@ -2,7 +2,7 @@ use std::ffi::OsString;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{
     BoundedOutput, CacheLife, PullRequest, Repository, bounded_command_error, parse_tsv_record,
@@ -21,6 +21,7 @@ const STEP_TSV_FIELDS: usize = 6;
 const CHECK_TSV_JQ: &str = r#".[] | [.name, .workflow, .state, .bucket, (.description // ""), (.link // ""), (.startedAt // ""), (.completedAt // "")] | @tsv"#;
 const JOB_STEPS_TSV_JQ: &str = r#".steps[]? | [((.number // 0)|tostring), (.name // ""), (.status // ""), (.conclusion // ""), (.started_at // ""), (.completed_at // "")] | @tsv"#;
 
+mod commit;
 mod model;
 mod parsing;
 mod repository;

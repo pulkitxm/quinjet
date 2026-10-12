@@ -155,6 +155,7 @@ mod preview_layout;
 mod projects;
 mod pull_request_actions;
 mod pull_request_checks;
+mod pull_request_commits;
 mod pull_request_diff;
 mod pull_request_prefetch;
 mod pull_request_review;
@@ -266,6 +267,7 @@ pub(crate) struct App {
     pub pull_request_file_cursor: usize,
     pub pull_request_tree_cursor: usize,
     pub collapsed_pull_request_directories: HashSet<PathBuf>,
+    pub pr_commits: pull_request_commits::CommitBrowser,
     pub pull_request_checks: Vec<PullRequestCheck>,
     #[doc = " `None` keeps the content pane on the pull request itself; selecting a"]
     #[doc = " check replaces it with that run's steps and log."]

@@ -299,3 +299,8 @@ died during provisioning has all of its output there and nothing under any step.
 - [Conventions and contracts](../conventions.md) for exit code 4 and the
   `--watch` exception to the one-document rule
 - [All `quinjet` commands](../README.md)
+
+Use `--commit HASH` to inspect a commit from this pull request. A hash prefix
+must contain at least seven characters and uniquely match a loaded PR commit.
+Files and patches compare that commit with its first parent. Checks and logs
+use that exact commit rather than the latest PR head.

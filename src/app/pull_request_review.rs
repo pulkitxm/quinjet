@@ -110,6 +110,7 @@ impl App {
 
     fn review_document_active(&self) -> bool {
         self.view == View::PullRequests
+            && self.selected_pr_commit().is_none()
             && (self.pull_request_section == PullRequestSection::Files
                 || (self.pull_request_section == PullRequestSection::Stack
                     && self.stack_inspector.section == StackMemberSection::Files

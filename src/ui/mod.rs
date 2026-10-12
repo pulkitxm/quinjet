@@ -59,6 +59,7 @@ pub(crate) mod pickers;
 mod project_picker;
 mod prose;
 mod pull_request_checks;
+mod pull_request_commits;
 mod pull_request_conversation;
 mod pull_request_details;
 mod pull_request_files;
@@ -112,6 +113,7 @@ use project_picker::*;
 use prose::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use pull_request_checks::*;
+use pull_request_commits::{commit_ci_rows, draw_pr_navigation};
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use pull_request_conversation::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]

@@ -314,6 +314,9 @@ impl App {
                     }
                 }
             }
+            WorkerEvent::PullRequestCommits { generation, result } => {
+                self.apply_pr_commits(generation, result, &mut effects);
+            }
             WorkerEvent::PullRequestChecks { generation, result } => {
                 if generation != self.pull_request_checks_generation {
                     return effects;

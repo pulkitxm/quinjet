@@ -1,7 +1,6 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
-#[expect(clippy::integer_division, reason = "layout maths works in whole cells")]
 #[expect(
     clippy::too_many_lines,
     reason = "the draw pass reads better as one top-to-bottom pass"
@@ -73,88 +72,7 @@ pub(super) fn draw_pull_requests_sidebar(
     let mut hits = Vec::new();
     let mut action_hits = Vec::new();
     if app.pull_request.is_some() && body_area.height > 0 {
-        let has_stack = app.pull_request_stack.is_some();
-        let overview_width = if has_stack {
-            body_area.width / 3
-        } else {
-            body_area.width.saturating_mul(3) / 5
-        };
-        let files_width = if has_stack {
-            body_area.width / 3
-        } else {
-            body_area.width.saturating_sub(overview_width)
-        };
-        let overview_tab = Rect::new(body_area.x, body_area.y, overview_width, 1);
-        let files_tab = Rect::new(overview_tab.right(), body_area.y, files_width, 1);
-        let stack_tab = has_stack.then(|| {
-            Rect::new(
-                files_tab.right(),
-                body_area.y,
-                body_area
-                    .width
-                    .saturating_sub(overview_width)
-                    .saturating_sub(files_width),
-                1,
-            )
-        });
-        let overview_label = "PR".to_owned();
-        draw_pull_request_section_tab(
-            frame,
-            overview_tab,
-            overview_label,
-            app.pull_request_section == PullRequestSection::Overview,
-            theme,
-        );
-        if let (Some(stack), Some(tab)) = (app.pull_request_stack.as_ref(), stack_tab) {
-            draw_pull_request_section_tab(
-                frame,
-                tab,
-                format!("Stack {}", stack.size),
-                app.pull_request_section == PullRequestSection::Stack,
-                theme,
-            );
-        }
-        draw_pull_request_section_tab(
-            frame,
-            files_tab,
-            format!(
-                "Files {}{}",
-                app.pull_request_total_files,
-                app.search_title_suffix()
-            ),
-            app.pull_request_section == PullRequestSection::Files,
-            theme,
-        );
-        hits.push(SidebarHitArea {
-            area: overview_tab,
-            target: SidebarHit::PullRequestOverview,
-        });
-        hits.push(SidebarHitArea {
-            area: files_tab,
-            target: SidebarHit::PullRequestFiles,
-        });
-        if let Some(tab) = stack_tab {
-            hits.push(SidebarHitArea {
-                area: tab,
-                target: SidebarHit::PullRequestStack,
-            });
-        }
-
-        let list_area = Rect::new(
-            body_area.x,
-            body_area.y + 1,
-            body_area.width,
-            body_area.height.saturating_sub(1),
-        );
-        match app.pull_request_section {
-            PullRequestSection::Files => {
-                hits.extend(draw_pull_request_file_tree(frame, list_area, app, theme));
-            }
-            PullRequestSection::Overview => {
-                hits.extend(draw_pull_request_check_list(frame, list_area, app, theme));
-            }
-            PullRequestSection::Stack => {}
-        }
+        hits.extend(draw_pr_navigation(frame, body_area, app, theme));
     } else if app.pull_request_loading {
         let skeleton_count = body_area.height.min(6);
         for offset in 0..skeleton_count {

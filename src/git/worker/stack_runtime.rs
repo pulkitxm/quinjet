@@ -95,6 +95,7 @@ fn load_checks(
     answer(
         session
             .execute(Command::PullRequestChecks {
+                commit: None,
                 pull_request,
                 refresh,
             })

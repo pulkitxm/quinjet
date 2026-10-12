@@ -267,6 +267,21 @@ impl App {
             KeyCode::Char('F') if self.view == View::PullRequests => {
                 self.select_pull_request_section(PullRequestSection::Files, &mut effects);
             }
+            KeyCode::Char('C') if self.view == View::PullRequests => {
+                self.select_pull_request_section(PullRequestSection::Commits, &mut effects);
+            }
+            KeyCode::Char('A')
+                if self.view == View::PullRequests && self.selected_pr_commit().is_some() =>
+            {
+                self.inspect_pr_commit(None, &mut effects);
+            }
+            KeyCode::Enter
+                if self.view == View::PullRequests
+                    && self.pull_request_section == PullRequestSection::Commits
+                    && self.focus == Focus::Sidebar =>
+            {
+                self.inspect_pr_commit(Some(self.pr_commits.cursor), &mut effects);
+            }
             KeyCode::Char('S') if self.view == View::PullRequests => {
                 self.select_pull_request_section(PullRequestSection::Stack, &mut effects);
             }

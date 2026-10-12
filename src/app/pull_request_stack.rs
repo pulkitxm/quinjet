@@ -18,9 +18,15 @@ impl App {
 
     pub(super) fn pull_request_diff_source_for_section(&self) -> Option<PullRequestDiffSource> {
         match self.pull_request_section {
-            PullRequestSection::Overview | PullRequestSection::Files => {
-                Some(PullRequestDiffSource::PullRequest)
-            }
+            PullRequestSection::Overview
+            | PullRequestSection::Files
+            | PullRequestSection::Commits => Some(
+                self.pr_commits
+                    .selected
+                    .map_or(PullRequestDiffSource::PullRequest, |index| {
+                        PullRequestDiffSource::Commit { index }
+                    }),
+            ),
             PullRequestSection::Stack => self
                 .pull_request_stack_range()
                 .map(|(from, to)| PullRequestDiffSource::Stack { from, to }),
@@ -33,6 +39,13 @@ impl App {
     ) -> Option<PullRequest> {
         match source {
             PullRequestDiffSource::PullRequest => self.pull_request.clone(),
+            PullRequestDiffSource::Commit { index } => {
+                let mut request = self.pull_request.clone()?;
+                request
+                    .head_oid
+                    .clone_from(&self.pr_commits.snapshot.commits.get(index)?.oid);
+                Some(request)
+            }
             PullRequestDiffSource::Stack { from, to } => {
                 self.pull_request_stack.as_ref()?.comparison(from, to).ok()
             }

@@ -82,12 +82,17 @@ pub(crate) enum WorkerCommand {
         generation: u64,
         pull_request: Box<PullRequest>,
     },
+    LoadPullRequestCommits {
+        generation: u64,
+        pull_request: Box<PullRequest>,
+    },
     LoadPullRequestStackMemberCommits {
         identity: PullRequestStackMemberIdentity,
         generation: u64,
         pull_request: Box<PullRequest>,
     },
     PreparePullRequest {
+        commit: Option<String>,
         generation: u64,
         pull_request: Box<PullRequest>,
     },
@@ -111,6 +116,7 @@ pub(crate) enum WorkerCommand {
         paths: Vec<PathBuf>,
     },
     LoadPullRequestChecks {
+        commit: Option<String>,
         generation: u64,
         pull_request: Box<PullRequest>,
         refresh: bool,
@@ -253,6 +259,10 @@ pub(crate) enum WorkerEvent {
         workspace_generation: u64,
         result: Result<Vec<(PathBuf, DiffDocument)>, String>,
     },
+    PullRequestCommits {
+        generation: u64,
+        result: Result<PullRequestCommits, String>,
+    },
     PullRequestChecks {
         generation: u64,
         result: Result<PullRequestChecks, String>,
@@ -377,7 +387,8 @@ impl Mailbox {
             command @ WorkerCommand::LoadPullRequestStackMemberConversation { .. } => {
                 self.stack_member_conversation = Some(command);
             }
-            command @ WorkerCommand::LoadPullRequestStackMemberCommits { .. } => {
+            command @ (WorkerCommand::LoadPullRequestCommits { .. }
+            | WorkerCommand::LoadPullRequestStackMemberCommits { .. }) => {
                 self.stack_member_commits = Some(command);
             }
             command @ WorkerCommand::LoadPullRequestReview { .. } => self.review = Some(command),
@@ -451,7 +462,8 @@ const fn worker_lane(command: &WorkerCommand) -> WorkerLane {
         | WorkerCommand::LoadCheckRunLog { .. } => WorkerLane::GitHubMetadata,
         WorkerCommand::LoadPullRequestConversation { .. }
         | WorkerCommand::LoadPullRequestStackMemberConversation { .. }
-        | WorkerCommand::LoadPullRequestStackMemberCommits { .. } => WorkerLane::Conversation,
+        | WorkerCommand::LoadPullRequestStackMemberCommits { .. }
+        | WorkerCommand::LoadPullRequestCommits { .. } => WorkerLane::Conversation,
         WorkerCommand::LoadPullRequestReview { .. }
         | WorkerCommand::OperatePullRequestReview { .. } => WorkerLane::Review,
         WorkerCommand::PrefetchCheckRunLogs { .. } => WorkerLane::Warm,

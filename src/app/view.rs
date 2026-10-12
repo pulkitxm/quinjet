@@ -66,12 +66,14 @@ pub(crate) enum DiffLayout {
 pub(crate) enum PullRequestSection {
     Overview,
     Files,
+    Commits,
     Stack,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PullRequestDiffSource {
     PullRequest,
+    Commit { index: usize },
     Stack { from: usize, to: usize },
 }
 

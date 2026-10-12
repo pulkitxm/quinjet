@@ -148,6 +148,13 @@ impl App {
                         if !same {
                             self.reset_pull_request_runtime();
                         } else if head_moved {
+                            if self.selected_pr_commit().is_some() {
+                                self.clear_pr_commit_checks();
+                            }
+                            self.pr_commits.reset();
+                            if self.pull_request_section == PullRequestSection::Commits {
+                                self.request_pr_commits(&mut effects);
+                            }
                             self.reset_pull_request_diff_runtime();
                         }
                         self.pull_request_progress = None;

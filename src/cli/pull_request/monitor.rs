@@ -44,10 +44,12 @@ pub(super) fn watch_conversation(
 
 pub(super) fn checks(session: &mut Session, out: &Emitter, args: &PrChecksArgs) -> Result<u8> {
     let request = lookup(session, out, &args.pull_request)?;
+    let commit = selected_commit(session, out, &request, args.commit.as_deref())?;
     if args.watch {
         return watch::run(interval(args.interval, CHECK_WATCH_FLOOR), out.json, || {
             let checks = session
                 .execute(Command::PullRequestChecks {
+                    commit: commit.clone(),
                     pull_request: Box::new(request.clone()),
                     refresh: true,
                 })?
@@ -65,6 +67,7 @@ pub(super) fn checks(session: &mut Session, out: &Emitter, args: &PrChecksArgs) 
         .execute(
             session,
             Command::PullRequestChecks {
+                commit,
                 pull_request: Box::new(request),
                 refresh: args.pull_request.refresh,
             },
@@ -80,10 +83,12 @@ pub(super) fn checks(session: &mut Session, out: &Emitter, args: &PrChecksArgs) 
 
 pub(super) fn logs(session: &mut Session, out: &Emitter, args: &PrLogsArgs) -> Result<u8> {
     let request = lookup(session, out, &args.pull_request)?;
+    let commit = selected_commit(session, out, &request, args.commit.as_deref())?;
     let listing = out
         .execute(
             session,
             Command::PullRequestChecks {
+                commit: commit.clone(),
                 pull_request: Box::new(request.clone()),
                 refresh: args.pull_request.refresh,
             },
@@ -95,6 +100,7 @@ pub(super) fn logs(session: &mut Session, out: &Emitter, args: &PrLogsArgs) -> R
         return watch::run(interval(args.interval, LOG_WATCH_FLOOR), out.json, || {
             let listing = session
                 .execute(Command::PullRequestChecks {
+                    commit: commit.clone(),
                     pull_request: Box::new(request.clone()),
                     refresh: true,
                 })?

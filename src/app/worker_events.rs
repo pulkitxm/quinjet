@@ -21,6 +21,7 @@ impl App {
             | WorkerEvent::PullRequestIndex { .. }
             | WorkerEvent::PullRequestDiff { .. }
             | WorkerEvent::PullRequestDiffBatch { .. }
+            | WorkerEvent::PullRequestCommits { .. }
             | WorkerEvent::PullRequestChecks { .. }
             | WorkerEvent::CheckRunLog { .. }
             | WorkerEvent::PullRequestConversation { .. }

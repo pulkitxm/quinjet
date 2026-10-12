@@ -54,6 +54,7 @@ fn every_coalesced_slot_keeps_only_its_latest_command() {
     assert_latest(
         vec![
             WorkerCommand::PreparePullRequest {
+                commit: None,
                 generation: 1,
                 pull_request: pull_request(),
             },
@@ -81,6 +82,7 @@ fn every_coalesced_slot_keeps_only_its_latest_command() {
     assert_latest(
         vec![
             WorkerCommand::PreparePullRequest {
+                commit: None,
                 generation: 1,
                 pull_request: pull_request(),
             },
@@ -266,6 +268,7 @@ fn lane_scenarios() -> Vec<(WorkerCommand, WorkerLane)> {
         (stack_member_commits(29), WorkerLane::Conversation),
         (
             WorkerCommand::PreparePullRequest {
+                commit: None,
                 generation: 8,
                 pull_request: pull_request(),
             },
@@ -384,6 +387,7 @@ fn batch(generation: u64) -> WorkerCommand {
 
 fn checks(generation: u64) -> WorkerCommand {
     WorkerCommand::LoadPullRequestChecks {
+        commit: None,
         generation,
         pull_request: pull_request(),
         refresh: false,
@@ -495,6 +499,7 @@ fn identity(command: &WorkerCommand) -> (&'static str, u64) {
         WorkerCommand::Operate { id, .. } => ("operate", *id),
         WorkerCommand::OperatePullRequest { id, .. } => ("operate-pr", *id),
         WorkerCommand::Search { generation, .. } => ("search", *generation),
+        WorkerCommand::LoadPullRequestCommits { generation, .. } => ("commits", *generation),
         WorkerCommand::Shutdown => ("shutdown", 0),
     }
 }

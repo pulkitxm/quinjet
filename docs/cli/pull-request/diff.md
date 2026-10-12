@@ -179,3 +179,8 @@ need a patch to apply.
   verb prepares
 - [`quinjet pr files`](./files.md) for the paths this verb accepts
 - [All `quinjet` commands](../README.md)
+
+Use `--commit HASH` to inspect a commit from this pull request. A hash prefix
+must contain at least seven characters and uniquely match a loaded PR commit.
+Files and patches compare that commit with its first parent. Checks and logs
+use that exact commit rather than the latest PR head.

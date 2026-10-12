@@ -22,6 +22,7 @@ impl App {
 
     pub(super) fn reset_pull_request_runtime(&mut self) {
         self.reset_pull_request_diff_runtime();
+        self.pr_commits.reset();
         self.reset_pull_request_review();
         self.pull_request_stack = None;
         self.pull_request_stack_loading = false;
@@ -116,12 +117,18 @@ impl App {
                 "PR #{} : All Files · {} changed",
                 pull_request.number, self.pull_request_total_files
             ),
+            PullRequestDiffSource::Commit { .. } => format!(
+                "Commit {} · {} changed",
+                self.selected_pr_commit()
+                    .map_or("", |commit| commit.abbreviated_oid.as_str()),
+                self.pull_request_total_files
+            ),
             PullRequestDiffSource::Stack { from, to } => format!(
                 "Stack · {from}..{to} · {} changed",
                 self.pull_request_total_files
             ),
         };
-        if matches!(source, PullRequestDiffSource::Stack { .. }) {
+        if !matches!(source, PullRequestDiffSource::PullRequest) {
             pull_request.changed_files = self.pull_request_total_files;
             pull_request.additions = self
                 .pull_request_files
@@ -172,7 +179,11 @@ impl App {
         let visible = self.visible_preview_paths(&paths);
         let mut document = index
             .document_with_visibility(&self.pull_request_documents, |path| visible.contains(path));
-        document.pull_request_details = Some(pull_request_details(&pull_request));
+        if let Some(commit) = self.selected_pr_commit() {
+            document.commit_details = Some(pull_request_commits::pr_commit_details(commit));
+        } else {
+            document.pull_request_details = Some(pull_request_details(&pull_request));
+        }
         self.pull_request_restore_scroll = self.pull_request_scroll_anchor.is_some();
         self.set_document(document);
     }
@@ -269,7 +280,9 @@ impl App {
                 self.content_scroll = 0;
                 self.horizontal_scroll = 0;
                 self.request_pull_request_checks(false, effects);
-                self.request_pull_request_conversation(false, effects);
+                if self.selected_pr_commit().is_none() {
+                    self.request_pull_request_conversation(false, effects);
+                }
                 self.request_pull_request_review(false, effects);
                 self.request_check_run_log(false, effects);
             }
@@ -287,6 +300,15 @@ impl App {
                 self.show_pull_request_all_files();
                 self.request_pull_request_review(false, effects);
                 self.request_preview(effects);
+            }
+            PullRequestSection::Commits => {
+                self.invalidate_preview();
+                self.pull_request_section = section;
+                self.reset_sidebar_scroll();
+                self.content_scroll = 0;
+                self.horizontal_scroll = 0;
+                self.request_pr_commits(effects);
+                self.show_pr_commit_summary();
             }
             PullRequestSection::Stack => {
                 if self.pull_request_stack.is_none() || self.pull_request_section == section {
