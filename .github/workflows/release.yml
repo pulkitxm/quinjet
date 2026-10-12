@@ -198,6 +198,12 @@ jobs:
         env:
           ARTIFACT: ${{ matrix.artifact }}
         run: '& "./$env:ARTIFACT" --version'
+      - name: Verify the portable Windows release
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          ARTIFACT: ${{ matrix.artifact }}
+        run: ./scripts/check_windows_release.ps1 -Binary $env:ARTIFACT
       - name: Build Debian package
         if: runner.os == 'Linux'
         env:
