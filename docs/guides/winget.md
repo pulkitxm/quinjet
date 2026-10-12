@@ -56,6 +56,10 @@ winget uninstall --id Pulkitxm.Quinjet --exact
 
 ## Releasing
 
+The Windows release statically links its C runtime so it runs without a separate
+Visual C++ Redistributable installation. CI and the release workflow inspect its
+DLL imports and run both portable command names before publishing.
+
 The release workflow packages the Windows binary twice inside
 `quinjet-windows-x86_64.zip`, once as `quinjet.exe` and once as `q.exe`. The
 multi-file manifest maps those files to the two portable command aliases,
@@ -71,7 +75,8 @@ The **Publish to WinGet** workflow submits each published stable release to
 `microsoft/winget-pkgs`. It verifies the manifest bundle and Windows archive
 against that release's `SHA256SUMS`, checks their version and installer metadata,
 and opens one pull request for that version. Repeated runs reuse an open
-submission or stop when the version is already merged. Microsoft validates and
+submission, update an older pending submission to the new release, or stop when
+the version is already merged. Microsoft validates and
 merges the submission before it appears in the WinGet catalog.
 
 ### Publishing credential

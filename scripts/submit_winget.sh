@@ -58,10 +58,25 @@ if [[ -d "${manifest_path}" ]]; then
     printf 'WinGet already contains Pulkitxm.Quinjet %s\n' "${version}"
     exit 0
 fi
-existing=$(gh api "repos/${upstream}/pulls?head=pulkitxm:${branch}&state=open" --jq '.[0].html_url // empty')
+submission=$(gh pr list --repo "${upstream}" --author pulkitxm --state open \
+    --search 'Pulkitxm.Quinjet in:title' --json number,headRefName \
+    --jq '[.[] | select(.headRefName | startswith("new-pulkitxm-quinjet-"))]')
+count=$(jq length <<<"${submission}")
+test "${count}" -le 1
+existing=$(jq -r '.[0].number // empty' <<<"${submission}")
+previous_version=
 if [[ -n "${existing}" ]]; then
-    printf 'WinGet submission already open: %s\n' "${existing}"
-    exit 0
+    branch=$(jq -r '.[0].headRefName' <<<"${submission}")
+    previous_version=$(gh api "repos/${upstream}/pulls/${existing}/files" \
+        --jq '[.[] | select(.status != "removed" and (.filename | endswith("/Pulkitxm.Quinjet.installer.yaml"))) | .filename | split("/") | .[-2]] | unique | if length == 1 then .[0] else error("expected one pending package version") end')
+    if [[ "${previous_version}" = "${version}" ]]; then
+        printf 'WinGet submission already open: https://github.com/%s/pull/%s\n' "${upstream}" "${existing}"
+        exit 0
+    fi
+    if [[ ! ${previous_version} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        printf 'unexpected pending WinGet branch: %s\n' "${branch}" >&2
+        exit 1
+    fi
 fi
 
 git remote set-url origin "https://github.com/${fork}.git"
@@ -80,6 +95,14 @@ else
     fi
     git switch --quiet -c "${branch}"
 fi
+if [[ -n "${previous_version}" ]]; then
+    previous_path="manifests/p/Pulkitxm/Quinjet/${previous_version}"
+    if [[ ! -d "${previous_path}" ]]; then
+        printf 'pending manifest directory is missing: %s\n' "${previous_path}" >&2
+        exit 1
+    fi
+    git rm -r "${previous_path}"
+fi
 mkdir -p "${manifest_path}"
 cp "${work}/manifests/"*.yaml "${manifest_path}/"
 git add "${manifest_path}"
@@ -88,8 +111,12 @@ if ! git diff --cached --quiet; then
     if [[ "${mode}" = --dry-run ]]; then arguments+=(--dry-run); fi
     pukbot "${arguments[@]}"
 fi
-arguments=(pr create --repo "${upstream}" --head "pulkitxm:${branch}" --base master
-    --title "Update: Pulkitxm.Quinjet to ${version}"
+if [[ -n "${existing}" ]]; then
+    arguments=(pr edit "${existing}" --repo "${upstream}")
+else
+    arguments=(pr create --repo "${upstream}" --head "pulkitxm:${branch}" --base master)
+fi
+arguments+=(--title "Update: Pulkitxm.Quinjet to ${version}"
     --body "Updates Quinjet to ${version} using its released manifests and checksum-verified Windows archive." --json)
 if [[ "${mode}" = --dry-run ]]; then arguments+=(--dry-run); fi
 pukbot "${arguments[@]}"
