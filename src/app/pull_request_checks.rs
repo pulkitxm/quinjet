@@ -105,10 +105,7 @@ impl App {
         {
             document.commit_details = Some(pull_request_commits::pr_commit_details(commit));
             document.pull_request_details = None;
-            document.title = format!(
-                "Commit {} · {} files",
-                commit.abbreviated_oid, self.pull_request_total_files
-            );
+            document.title = format!("Commit {} · Files", commit.abbreviated_oid);
         }
         self.document = document;
         self.diff_scroll_anchor = None;
