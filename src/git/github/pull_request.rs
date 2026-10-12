@@ -172,6 +172,9 @@ impl Repository {
                     api_counts,
                 )
             };
+        if exact_base && (merge_base != pull_request.base_oid || head != pull_request.head_oid) {
+            bail!("The requested commit comparison could not be fetched exactly");
+        }
         progress(PullRequestProgress::EnumeratingFiles);
         let (files, truncated) =
             changed_files_in_repository(repository.path(), &merge_base, &head, api_counts)?;

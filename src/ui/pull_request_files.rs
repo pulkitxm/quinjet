@@ -485,17 +485,3 @@ pub(super) fn conversation_row_suffix(app: &App) -> String {
     }
     suffix
 }
-
-pub(super) const fn pull_request_check_icon(
-    status: PullRequestCheckStatus,
-    theme: &Theme,
-) -> (&'static str, Color) {
-    match status {
-        PullRequestCheckStatus::Passed => ("✓", theme.success),
-        PullRequestCheckStatus::Failed => ("×", theme.error),
-        PullRequestCheckStatus::Pending => ("◌", theme.accent),
-        PullRequestCheckStatus::Skipped => ("−", theme.muted),
-        PullRequestCheckStatus::Cancelled => ("■", theme.removed),
-        PullRequestCheckStatus::Unknown => ("?", theme.muted),
-    }
-}

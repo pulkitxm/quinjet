@@ -5,6 +5,7 @@ use crate::git::github::{PullRequestCommit, PullRequestCommits};
 
 #[derive(Debug, Default)]
 pub(crate) struct CommitBrowser {
+    pub owner: Option<PullRequest>,
     pub snapshot: PullRequestCommits,
     pub loaded: bool,
     pub loading: bool,
@@ -36,6 +37,23 @@ pub(super) fn pr_commit_details(commit: &PullRequestCommit) -> crate::git::diff:
 }
 
 impl App {
+    pub(super) fn pr_commit_prepare_command(
+        &self,
+        index: usize,
+        pull_request: &PullRequest,
+    ) -> WorkerCommand {
+        WorkerCommand::PreparePullRequest {
+            commit: self
+                .pr_commits
+                .snapshot
+                .commits
+                .get(index)
+                .map(|commit| commit.oid.clone()),
+            generation: self.diff_generation,
+            pull_request: Box::new(pull_request.clone()),
+        }
+    }
+
     pub(crate) fn selected_pr_commit(&self) -> Option<&PullRequestCommit> {
         self.pr_commits
             .snapshot
@@ -47,7 +65,7 @@ impl App {
         if self.pr_commits.loading || self.pr_commits.loaded {
             return;
         }
-        let Some(request) = self.pull_request.clone() else {
+        let Some(request) = self.selected_pull_request().cloned() else {
             return;
         };
         self.pr_commits.generation = self.pr_commits.generation.wrapping_add(1);
@@ -73,7 +91,7 @@ impl App {
         self.pr_commits.loading = false;
         match result {
             Ok(mut snapshot) => {
-                if self.pull_request.as_ref().is_none_or(|request| {
+                if self.selected_pull_request().is_none_or(|request| {
                     request.base_oid != snapshot.base_oid || request.head_oid != snapshot.head_oid
                 }) {
                     return;
@@ -107,6 +125,24 @@ impl App {
         self.pull_request_checks_read_at = None;
         self.invalidate_check_run_log();
         self.invalidate_pull_request_content_rows();
+    }
+
+    pub(super) fn inspect_stack_commit(&mut self, index: usize, effects: &mut Vec<AppEffect>) {
+        let Some(owner) = self.selected_pull_request().cloned() else {
+            return;
+        };
+        let snapshot = &self.stack_inspector.commits;
+        if snapshot.commits.get(index).is_none() {
+            return;
+        }
+        let selected = snapshot.commits.len().saturating_sub(index + 1);
+        let mut snapshot = snapshot.clone();
+        snapshot.commits.reverse();
+        self.pr_commits.reset();
+        self.pr_commits.owner = Some(owner);
+        self.pr_commits.snapshot = snapshot;
+        self.pr_commits.loaded = true;
+        self.inspect_pr_commit(Some(selected), effects);
     }
 
     pub(super) fn inspect_pr_commit(&mut self, index: Option<usize>, effects: &mut Vec<AppEffect>) {

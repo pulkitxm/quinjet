@@ -301,7 +301,7 @@ fn stack_commit_rows(app: &App, theme: &Theme) -> (Vec<ContentRow>, Vec<ContentL
             Style::default().fg(theme.muted),
         ),
     ]))];
-    let mut links = Vec::new();
+    let links = Vec::new();
     if let Some(error) = app.stack_inspector.commits_error.as_deref() {
         rows.push(ContentRow::text(
             format!(" {error}"),
@@ -322,7 +322,6 @@ fn stack_commit_rows(app: &App, theme: &Theme) -> (Vec<ContentRow>, Vec<ContentL
         return (rows, links);
     }
     for commit in &commits.commits {
-        let row = rows.len();
         let prefix = format!(" {} ", commit.abbreviated_oid);
         rows.push(ContentRow::wide(Line::from(vec![
             Span::styled(prefix, Link::style(theme)),
@@ -339,18 +338,6 @@ fn stack_commit_rows(app: &App, theme: &Theme) -> (Vec<ContentRow>, Vec<ContentL
                 Style::default().fg(theme.muted),
             ),
         ])));
-        if !commit.url.is_empty() {
-            links.push(ContentLink {
-                row,
-                start: 1,
-                width: commit
-                    .abbreviated_oid
-                    .width()
-                    .saturating_add(1)
-                    .saturating_add(commit.subject.width()),
-                target: OpenTarget::Browser(commit.url.clone()),
-            });
-        }
     }
     if commits.truncated {
         rows.push(ContentRow::text(

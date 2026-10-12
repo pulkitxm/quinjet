@@ -403,7 +403,6 @@ pub(super) fn report_warnings(out: &Emitter, snapshot: &PullRequestSnapshot) {
         out.note(&format!("warning: {warning}"));
     }
 }
-
 pub(super) fn prepare(
     session: &mut Session,
     out: &Emitter,

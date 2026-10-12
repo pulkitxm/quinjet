@@ -96,6 +96,7 @@ pub(super) fn draw_stack_member_detail(
     {
         let source_row = app.content_scroll.saturating_add(offset);
         let row_area = Rect::new(body.x, body.y.saturating_add(cells(offset)), body.width, 1);
+        register_stack_commit_hit(app, source_row, row_area, stack_hits);
         if row.wide && row.line.width() > width {
             app.horizontal_scroll_regions.push(row_area);
         }
@@ -391,5 +392,26 @@ const fn stack_member_state_color(state: &str, theme: &Theme) -> Color {
         b"MERGED" => theme.accent,
         b"CLOSED" => theme.removed,
         _ => theme.modified,
+    }
+}
+
+fn register_stack_commit_hit(
+    app: &App,
+    source_row: usize,
+    area: Rect,
+    hits: &mut Vec<StackInspectorHitArea>,
+) {
+    if app.stack_inspector.section != StackMemberSection::Commits {
+        return;
+    }
+    let prefix = usize::from(app.stack_inspector.commits_error.is_some()) + 1;
+    if let Some(index) = source_row
+        .checked_sub(prefix)
+        .filter(|index| *index < app.stack_inspector.commits.commits.len())
+    {
+        hits.push(StackInspectorHitArea {
+            area,
+            target: StackInspectorHit::Commit(cells(index)),
+        });
     }
 }

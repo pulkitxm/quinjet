@@ -238,3 +238,17 @@ pub(super) fn section_rule(label: &str, width: usize, theme: &Theme) -> Line<'st
 pub(super) fn short_oid(value: &str) -> String {
     value.chars().take(7).collect()
 }
+
+pub(super) const fn pull_request_check_icon(
+    status: PullRequestCheckStatus,
+    theme: &Theme,
+) -> (&'static str, Color) {
+    match status {
+        PullRequestCheckStatus::Passed => ("✓", theme.success),
+        PullRequestCheckStatus::Failed => ("×", theme.error),
+        PullRequestCheckStatus::Pending => ("◌", theme.accent),
+        PullRequestCheckStatus::Skipped => ("−", theme.muted),
+        PullRequestCheckStatus::Cancelled => ("■", theme.removed),
+        PullRequestCheckStatus::Unknown => ("?", theme.muted),
+    }
+}

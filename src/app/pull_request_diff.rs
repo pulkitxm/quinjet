@@ -266,7 +266,13 @@ impl App {
         section: PullRequestSection,
         effects: &mut Vec<AppEffect>,
     ) {
-        if self.pull_request_stack.is_some() && section != PullRequestSection::Stack {
+        if self.pull_request_stack.is_some()
+            && self.pr_commits.owner.is_none()
+            && !matches!(
+                section,
+                PullRequestSection::Stack | PullRequestSection::Commits
+            )
+        {
             return;
         }
         match section {
@@ -302,6 +308,11 @@ impl App {
                 self.request_preview(effects);
             }
             PullRequestSection::Commits => {
+                if self.pull_request_section == PullRequestSection::Stack {
+                    let owner = self.selected_pull_request().cloned();
+                    self.pr_commits.reset();
+                    self.pr_commits.owner = owner;
+                }
                 self.invalidate_preview();
                 self.pull_request_section = section;
                 self.reset_sidebar_scroll();
@@ -315,6 +326,11 @@ impl App {
                     return;
                 }
                 self.invalidate_preview();
+                if self.pr_commits.owner.is_some() {
+                    self.pr_commits.reset();
+                    self.clear_pr_commit_checks();
+                    self.reset_pull_request_diff_runtime();
+                }
                 self.pull_request_section = section;
                 self.pull_request_file_view = PullRequestFileView::AllFiles;
                 self.reset_sidebar_scroll();

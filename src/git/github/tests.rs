@@ -87,6 +87,7 @@ pub(super) fn pull_request(base: GitHubRepository, number: u64) -> PullRequest {
     }
 }
 
+mod commit_diff;
 mod comparison_cache;
 mod operations;
 mod parsing;

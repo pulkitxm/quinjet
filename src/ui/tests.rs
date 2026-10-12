@@ -116,6 +116,7 @@ mod logs;
 mod modals;
 mod overview;
 mod performance;
+mod pr_commits;
 mod preview_layout;
 mod pull_request_viewport;
 mod rendering;

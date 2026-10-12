@@ -12,7 +12,7 @@ impl App {
         if self.pull_request_checks_loading || (!refresh && !self.pull_request_checks.is_empty()) {
             return;
         }
-        let Some(pull_request) = self.pull_request.clone() else {
+        let Some(pull_request) = self.selected_pull_request().cloned() else {
             return;
         };
         self.pull_request_checks_generation = self.pull_request_checks_generation.wrapping_add(1);
@@ -98,7 +98,18 @@ impl App {
         self.sidebar_last_cursor = None;
     }
 
-    pub(crate) fn set_document(&mut self, document: DiffDocument) {
+    pub(crate) fn set_document(&mut self, mut document: DiffDocument) {
+        if self.view == View::PullRequests
+            && self.pull_request_section == PullRequestSection::Files
+            && let Some(commit) = self.selected_pr_commit()
+        {
+            document.commit_details = Some(pull_request_commits::pr_commit_details(commit));
+            document.pull_request_details = None;
+            document.title = format!(
+                "Commit {} · {} files",
+                commit.abbreviated_oid, self.pull_request_total_files
+            );
+        }
         self.document = document;
         self.diff_scroll_anchor = None;
         self.diff_restore_scroll = false;
@@ -208,7 +219,7 @@ impl App {
     #[doc = " it, so redrawing or re-entering the section costs nothing."]
     pub(super) fn request_check_run_log(&mut self, refresh: bool, effects: &mut Vec<AppEffect>) {
         let (Some(pull_request), Some(check)) = (
-            self.pull_request.clone(),
+            self.selected_pull_request().cloned(),
             self.selected_pull_request_check().cloned(),
         ) else {
             self.pull_request_check_log = None;
@@ -253,7 +264,7 @@ impl App {
     #[doc = " then costs a disk read rather than a round trip, which is the difference"]
     #[doc = " between the list being browsable and being a series of waits."]
     pub(super) fn request_check_log_prefetch(&mut self, effects: &mut Vec<AppEffect>) {
-        let Some(pull_request) = self.pull_request.clone() else {
+        let Some(pull_request) = self.selected_pull_request().cloned() else {
             return;
         };
         let settled: Vec<PullRequestCheck> = self
@@ -294,7 +305,7 @@ impl App {
         if !refresh && !self.pull_request_conversation.entries.is_empty() {
             return;
         }
-        let Some(pull_request) = self.pull_request.clone() else {
+        let Some(pull_request) = self.selected_pull_request().cloned() else {
             return;
         };
         self.pull_request_conversation_generation =

@@ -7,13 +7,18 @@ pub(super) fn draw_pr_navigation(
     app: &mut App,
     theme: &Theme,
 ) -> Vec<SidebarHitArea> {
-    let third = area.width.div_euclid(3);
+    let has_stack = app.pull_request_stack.is_some();
+    let third = area.width.div_euclid(if has_stack { 4 } else { 3 });
     let first = Rect::new(area.x, area.y, third, 1);
     let second = Rect::new(first.right(), area.y, third, 1);
     let third_tab = Rect::new(
         second.right(),
         area.y,
-        area.width.saturating_sub(third.saturating_mul(2)),
+        if has_stack {
+            third
+        } else {
+            area.width.saturating_sub(third.saturating_mul(2))
+        },
         1,
     );
     let overview = if app.selected_pr_commit().is_some() {
@@ -39,20 +44,13 @@ pub(super) fn draw_pr_navigation(
         app.pull_request_section == PullRequestSection::Files,
         theme,
     );
-    let (label, selected, target) = if let Some(stack) = app.pull_request_stack.as_ref() {
-        (
-            format!("Stack {}", stack.size),
-            app.pull_request_section == PullRequestSection::Stack,
-            SidebarHit::PullRequestStack,
-        )
-    } else {
-        (
-            "Commits".to_owned(),
-            app.pull_request_section == PullRequestSection::Commits,
-            SidebarHit::PullRequestCommits,
-        )
-    };
-    draw_pull_request_section_tab(frame, third_tab, label, selected, theme);
+    draw_pull_request_section_tab(
+        frame,
+        third_tab,
+        "Commits".to_owned(),
+        app.pull_request_section == PullRequestSection::Commits,
+        theme,
+    );
     let mut hits = vec![
         SidebarHitArea {
             area: first,
@@ -64,9 +62,28 @@ pub(super) fn draw_pr_navigation(
         },
         SidebarHitArea {
             area: third_tab,
-            target,
+            target: SidebarHit::PullRequestCommits,
         },
     ];
+    if let Some(stack) = &app.pull_request_stack {
+        let stack_tab = Rect::new(
+            third_tab.right(),
+            area.y,
+            area.width.saturating_sub(third.saturating_mul(3)),
+            1,
+        );
+        draw_pull_request_section_tab(
+            frame,
+            stack_tab,
+            format!("Stack {}", stack.size),
+            app.pull_request_section == PullRequestSection::Stack,
+            theme,
+        );
+        hits.push(SidebarHitArea {
+            area: stack_tab,
+            target: SidebarHit::PullRequestStack,
+        });
+    }
     let scoped = app.selected_pr_commit().is_some();
     if scoped && area.height > 1 {
         let scope = Rect::new(area.x, area.y.saturating_add(1), area.width, 1);

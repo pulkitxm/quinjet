@@ -154,6 +154,12 @@ pub(super) fn fetch_pull_request(
     if let Some(hint) = merge_base_hint {
         let hint_refspec = format!("+{hint}:refs/quinjet/merge-base");
         if fetch_ref(temporary, "origin", &hint_refspec, 1).is_ok() {
+            if preferred_fetched_commit(temporary, &pull_request.head_oid, "refs/quinjet/head")?
+                != pull_request.head_oid
+            {
+                let selected_refspec = format!("+{}:refs/quinjet/selected", pull_request.head_oid);
+                fetch_ref(temporary, "origin", &selected_refspec, 1)?;
+            }
             let head =
                 preferred_fetched_commit(temporary, &pull_request.head_oid, "refs/quinjet/head")?;
             if head == pull_request.head_oid {

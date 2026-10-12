@@ -7,7 +7,10 @@ impl App {
         key: KeyEvent,
         now: Instant,
     ) -> Option<Vec<AppEffect>> {
-        if self.view != View::PullRequests || self.pull_request_stack.is_none() {
+        if self.view != View::PullRequests
+            || self.pull_request_stack.is_none()
+            || self.pull_request_section != PullRequestSection::Stack
+        {
             return None;
         }
         let mut effects = Vec::new();

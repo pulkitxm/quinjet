@@ -193,12 +193,16 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
         description: "Discover or choose the base repository",
     },
     HelpRow::Shortcut {
-        keys: "Shift+P/F/S · Stack p/n, 1..5, r/d",
+        keys: "Shift+P/F/C/S · Stack p/n, 1..5, r/d",
         description: "PR sections; stack navigation, member tabs, review, and range comparison",
     },
     HelpRow::Shortcut {
         keys: "j / k",
-        description: "Select the conversation, a check, a file, or a folder",
+        description: "Select a check, file, folder, or commit; Enter inspects a commit",
+    },
+    HelpRow::Shortcut {
+        keys: "Shift+A",
+        description: "Return from one PR commit to all commits",
     },
     HelpRow::Shortcut {
         keys: "j / k in a file",

@@ -380,16 +380,9 @@ impl App {
                 generation: self.diff_generation,
                 pull_request: Box::new(pull_request.clone()),
             },
-            PullRequestDiffSource::Commit { index } => WorkerCommand::PreparePullRequest {
-                commit: self
-                    .pr_commits
-                    .snapshot
-                    .commits
-                    .get(index)
-                    .map(|commit| commit.oid.clone()),
-                generation: self.diff_generation,
-                pull_request: Box::new(pull_request.clone()),
-            },
+            PullRequestDiffSource::Commit { index } => {
+                self.pr_commit_prepare_command(index, pull_request)
+            }
             PullRequestDiffSource::Stack { from, to } => {
                 let Some(stack) = self.pull_request_stack.clone() else {
                     self.document_loading = false;

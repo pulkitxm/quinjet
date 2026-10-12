@@ -32,6 +32,7 @@ pub(crate) struct SidebarHitArea {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StackInspectorHit {
     Section(StackMemberSection),
+    Commit(u16),
     TipChecks,
     Diff,
     Review,

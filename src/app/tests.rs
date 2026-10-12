@@ -306,6 +306,7 @@ mod interaction;
 mod links;
 mod modal_mouse;
 mod mouse_scroll;
+mod pr_commits;
 mod prefetch;
 mod prefetch_viewport;
 mod projects;

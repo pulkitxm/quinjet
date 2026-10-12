@@ -50,7 +50,9 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App, theme: &Theme) {
     let (changes_tab, history_tab, pull_requests_tab, mut link_hits, projects_hit) =
         draw_tabs(frame, tabs, app, theme);
     let mut project_hits: Vec<Rect> = projects_hit.into_iter().collect();
-    let stack_workspace = app.view == View::PullRequests && app.pull_request_stack.is_some();
+    let stack_workspace = app.view == View::PullRequests
+        && app.pull_request_stack.is_some()
+        && app.pull_request_section == PullRequestSection::Stack;
     let (workspace, mut scm_action_hits) = if stack_workspace {
         (
             pull_request_stack::draw_pull_request_stack_workspace(

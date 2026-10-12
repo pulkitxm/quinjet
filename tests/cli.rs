@@ -227,6 +227,7 @@ fn command_in(directory: Option<&Path>, args: &[&str], environment: &Path) -> Pr
         command.arg("-C").arg(directory);
     }
     command.args(args);
+    let _ = command.env_remove("CMUX_SOCKET_PATH");
     isolate_git(&mut command);
     isolate_quinjet(&mut command, environment);
     command

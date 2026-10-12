@@ -38,9 +38,9 @@ impl App {
         source: PullRequestDiffSource,
     ) -> Option<PullRequest> {
         match source {
-            PullRequestDiffSource::PullRequest => self.pull_request.clone(),
+            PullRequestDiffSource::PullRequest => self.selected_pull_request().cloned(),
             PullRequestDiffSource::Commit { index } => {
-                let mut request = self.pull_request.clone()?;
+                let mut request = self.selected_pull_request()?.clone();
                 request
                     .head_oid
                     .clone_from(&self.pr_commits.snapshot.commits.get(index)?.oid);
@@ -87,7 +87,9 @@ impl App {
             self.reset_view_sidebar_scroll(View::PullRequests);
             self.request_pull_request_stack_prefetch(effects);
         }
-        if self.pull_request_stack.is_some() {
+        if self.pull_request_stack.is_some()
+            && (workspace_changed || self.pr_commits.owner.is_none())
+        {
             self.pull_request_section = PullRequestSection::Stack;
             self.sidebar_hidden = false;
             self.pull_request_lookup_active = false;

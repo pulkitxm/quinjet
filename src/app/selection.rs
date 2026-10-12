@@ -83,7 +83,10 @@ impl App {
                 .or(self.stack_inspector.selected_locator.as_ref())
                 .or(self.pull_request.as_ref());
         }
-        self.pull_request.as_ref()
+        self.pr_commits
+            .owner
+            .as_ref()
+            .or(self.pull_request.as_ref())
     }
 
     pub(super) fn move_recent_pull_request_cursor(&mut self, delta: isize) {
