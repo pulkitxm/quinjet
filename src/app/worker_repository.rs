@@ -133,8 +133,10 @@ impl App {
                                     .url
                                     .eq_ignore_ascii_case(&current.base_repository.url)
                         });
-                        let head_moved =
-                            previous.is_some_and(|previous| previous.head_oid != current.head_oid);
+                        let comparison_changed = previous.is_some_and(|previous| {
+                            previous.head_oid != current.head_oid
+                                || previous.base_oid != current.base_oid
+                        });
                         if newly_opened {
                             self.recent_pull_requests =
                                 updated_recent_pull_requests(&self.recent_pull_requests, &current);
@@ -147,7 +149,7 @@ impl App {
                         self.pull_request_from_cache = snapshot.from_cache;
                         if !same {
                             self.reset_pull_request_runtime();
-                        } else if head_moved {
+                        } else if comparison_changed && self.pr_commits.owner.is_none() {
                             if self.selected_pr_commit().is_some() {
                                 self.clear_pr_commit_checks();
                             }
@@ -168,7 +170,7 @@ impl App {
                             self.request_pull_request_checks(true, &mut effects);
                             self.request_pull_request_conversation(true, &mut effects);
                         }
-                        if !same || head_moved {
+                        if !same || comparison_changed {
                             if self.view == View::PullRequests && self.pull_request_stack.is_none()
                             {
                                 self.preview_due = None;

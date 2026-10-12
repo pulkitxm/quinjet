@@ -138,3 +138,77 @@ fn stack_commit_selection_uses_its_member_instead_of_the_root_pr() {
     assert!(app.selected_pr_commit().is_none());
     assert!(app.pr_commits.owner.is_none());
 }
+
+#[test]
+fn changed_pr_boundaries_reload_the_visible_commit_list() {
+    for change_base in [false, true] {
+        let mut app = commit_app();
+        app.pull_request_section = PullRequestSection::Commits;
+        let mut current = app.pull_request.clone().unwrap();
+        if change_base {
+            current.base_oid = "new-base".to_owned();
+        } else {
+            current.head_oid = "new-head".to_owned();
+        }
+        let old_generation = app.pr_commits.generation;
+        let effects = app.handle_worker_event(
+            WorkerEvent::PullRequestLookup {
+                generation: app.pull_request_generation,
+                result: Ok(crate::git::github::PullRequestSnapshot {
+                    repositories: Vec::new(),
+                    selected_repository: None,
+                    pull_request: current.clone(),
+                    warnings: Vec::new(),
+                    exact_number: Some(current.number),
+                    from_cache: false,
+                }),
+            },
+            Instant::now(),
+        );
+        assert!(!app.pr_commits.loaded);
+        assert!(app.pr_commits.generation > old_generation);
+        assert!(effects.iter().any(|effect| matches!(effect, AppEffect::Git(command) if matches!(command.as_ref(), WorkerCommand::LoadPullRequestCommits { pull_request, .. } if pull_request.base_oid == current.base_oid && pull_request.head_oid == current.head_oid))));
+    }
+}
+
+#[test]
+fn refreshed_stack_boundaries_replace_the_commit_owner_and_reject_old_history() {
+    let mut app = commit_app();
+    app.pull_request_stack = Some(pull_request_stack(2));
+    app.pull_request_stack_cursor = Some(1);
+    app.pull_request_section = PullRequestSection::Stack;
+    app.reconcile_stack_inspector();
+    app.stack_inspector.commits = app.pr_commits.snapshot.clone();
+    let mut effects = Vec::new();
+    app.inspect_stack_commit(1, &mut effects);
+    app.pull_request_section = PullRequestSection::Commits;
+    let stale_generation = app.pr_commits.generation;
+    let stale_snapshot = app.pr_commits.snapshot.clone();
+    let mut stack = app.pull_request_stack.clone().unwrap();
+    stack.members[0].head_oid = "new-member-head".to_owned();
+    effects.clear();
+    app.apply_pull_request_stack_snapshot(Some(stack), &mut effects);
+    assert_eq!(app.selected_pull_request().unwrap().number, 41);
+    assert_eq!(
+        app.selected_pull_request().unwrap().head_oid,
+        "new-member-head"
+    );
+    assert!(!app.pr_commits.loaded);
+    assert!(app.selected_pr_commit().is_none());
+    assert!(effects.iter().any(|effect| matches!(effect, AppEffect::Git(command) if matches!(command.as_ref(), WorkerCommand::LoadPullRequestCommits { pull_request, .. } if pull_request.number == 41 && pull_request.head_oid == "new-member-head"))));
+    app.apply_pr_commits(stale_generation, Ok(stale_snapshot), &mut effects);
+    assert!(!app.pr_commits.loaded);
+}
+
+#[test]
+fn running_commit_checks_in_a_stack_keep_the_fast_poll_interval() {
+    let mut app = commit_app();
+    app.pull_request_stack = Some(pull_request_stack(2));
+    app.pr_commits.owner = app.pull_request.clone();
+    app.pull_request_checks = vec![check("commit build", PullRequestCheckStatus::Pending)];
+    assert_eq!(app.pull_request_poll_interval(), PULL_REQUEST_ACTIVE_POLL);
+    app.pull_request_checks[0].status = PullRequestCheckStatus::Passed;
+    assert_eq!(app.pull_request_poll_interval(), PULL_REQUEST_IDLE_POLL);
+    app.pr_commits.loading = true;
+    assert!(app.pull_request_refreshing());
+}

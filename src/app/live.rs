@@ -84,6 +84,7 @@ impl App {
     #[doc = " not which of four endpoints is answering."]
     pub(crate) const fn pull_request_refreshing(&self) -> bool {
         self.pull_request_loading
+            || self.pr_commits.loading
             || self.pull_request_stack_loading
             || self.pull_request_checks_loading
             || self.pull_request_conversation_loading
@@ -127,7 +128,7 @@ impl App {
             .checks
             .iter()
             .any(|check| check.status.is_running());
-        let root_running = self.pull_request_stack.is_none()
+        let root_running = (self.pull_request_stack.is_none() || self.pr_commits.owner.is_some())
             && self
                 .pull_request_checks
                 .iter()

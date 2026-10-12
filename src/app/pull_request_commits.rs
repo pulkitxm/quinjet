@@ -78,6 +78,42 @@ impl App {
         )));
     }
 
+    pub(super) fn reconcile_pr_commit_owner(&mut self, effects: &mut Vec<AppEffect>) {
+        let Some(owner) = self.pr_commits.owner.as_ref() else {
+            return;
+        };
+        let current = self.pull_request_stack.as_ref().and_then(|stack| {
+            if !stack
+                .repository
+                .url
+                .eq_ignore_ascii_case(&owner.base_repository.url)
+            {
+                return None;
+            }
+            let member = stack
+                .members
+                .iter()
+                .find(|member| member.number == owner.number)?;
+            stack.member_pull_request(member.position)
+        });
+        if current.as_ref().is_some_and(|current| {
+            current.base_oid == owner.base_oid && current.head_oid == owner.head_oid
+        }) {
+            self.pr_commits.owner = current;
+            return;
+        }
+        self.pr_commits.reset();
+        self.pr_commits.owner = current;
+        self.clear_pr_commit_checks();
+        self.invalidate_preview();
+        self.reset_pull_request_diff_runtime();
+        if self.pull_request_section == PullRequestSection::Commits {
+            self.request_pr_commits(effects);
+        }
+        self.request_preview(effects);
+        self.request_pull_request_checks(true, effects);
+    }
+
     pub(super) fn apply_pr_commits(
         &mut self,
         generation: u64,

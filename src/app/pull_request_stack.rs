@@ -63,6 +63,7 @@ impl App {
         let previous = self.pull_request_stack.take();
         let changed = previous.as_ref() != stack.as_ref();
         self.pull_request_stack = stack;
+        self.reconcile_pr_commit_owner(effects);
         let workspace_changed = previous.as_ref().map(|stack| &stack.node_id)
             != self.pull_request_stack.as_ref().map(|stack| &stack.node_id);
         let selection = self.pull_request_stack.as_ref().map(|current| {
