@@ -26,7 +26,17 @@ Options:
 | `-h, --help` | flag | off | Prints this verb's help on stdout and exits 0. |
 
 After the standard pull-request lookup supplies the exact base and head OIDs,
-Quinjet reads GitHub's pull-request commit connection newest-page first:
+Quinjet first reads `git rev-list` and `git log` over `base..head` in the
+opened repository. Commit hashes, subjects, authors, and timestamps come from
+local Git objects, including objects shared by linked worktrees. No GitHub
+commit request or network fetch runs when that history is complete locally.
+The bounded ancestry scan also checks shallow boundaries so incomplete history
+is never presented as a complete commit list. Local results omit `authorLogin`,
+which is a GitHub account identity rather than Git commit metadata.
+
+If the exact commits or required ancestry are missing, or the range exceeds
+the 16,384-commit local scan limit, Quinjet uses a cached GitHub result or reads
+GitHub's pull-request commit connection newest-page first:
 
 ```text
 repository(owner: $owner, name: $name) {
@@ -50,8 +60,9 @@ must not repeat, and commit OIDs must be unique. A force push during pagination
 therefore fails visibly with a request to retry instead of returning a mixed
 history.
 
-The completed result is cached forever under
+The completed GitHub result is cached forever under
 `pull-request-commits-v1\n<repository url>\n<number>\n<base oid>\n<head oid>`.
+Local results use the same key prefixed with `local-`.
 Both boundary commits are part of the key, so a force push or base change asks a
 different question. `--refresh` bypasses the five-minute metadata cache; it
 does not discard an immutable commit list for an unchanged snapshot.
@@ -75,7 +86,7 @@ af8d97525585  2026-08-21 08:42:09  Pulkit               fix: preserve exact rang
       "abbreviatedOid": "af8d97525585",
       "subject": "fix: preserve exact range heads",
       "author": "Pulkit",
-      "authorLogin": "pulkitxm",
+      "authorLogin": null,
       "authoredAt": "2026-08-21T08:42:09Z",
       "committedAt": "2026-08-21T08:42:09Z",
       "url": "https://github.com/pulkitxm/quinjet/commit/af8d975255850f0e8026339abdd75533e21ed40c"

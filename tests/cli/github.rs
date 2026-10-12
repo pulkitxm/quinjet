@@ -261,7 +261,9 @@ fn pull_request_files_uses_real_local_commits_in_plain_and_json() -> Result<()> 
 
 #[test]
 fn pull_request_commits_paginate_cache_and_render_in_both_modes() -> Result<()> {
-    let fixture = GitHubFixture::new()?;
+    let mut fixture = GitHubFixture::new()?;
+    fixture.base_oid = "a".repeat(40);
+    fixture.head_oid = "b".repeat(40);
 
     let plain = fixture.read(&["pr", "commits", "42"])?.success()?;
 

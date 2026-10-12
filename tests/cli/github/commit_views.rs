@@ -74,3 +74,21 @@ fn commit_inspection_rejects_unknown_and_short_hashes() -> Result<()> {
     ensure!(short.stderr.contains("at least seven"));
     Ok(())
 }
+
+#[test]
+fn pull_request_commits_use_local_history_before_github() -> Result<()> {
+    let fixture = GitHubFixture::new()?;
+    let plain = fixture.read(&["pr", "commits", "42"])?.success()?;
+    ensure!(plain.stdout.contains("feature"));
+    ensure!(!plain.stdout.contains("build the base"));
+    let json = fixture
+        .read(&["pr", "commits", "42", "--refresh", "--json"])?
+        .success()?
+        .json()?;
+    ensure!(json["totalCommits"] == 1);
+    ensure!(json["commits"][0]["oid"] == fixture.head_oid);
+    ensure!(json["commits"][0]["subject"] == "feature");
+    ensure!(json["commits"][0]["authorLogin"].is_null());
+    ensure!(!fixture.gh_calls()?.contains("commits(last:100,before:"));
+    Ok(())
+}

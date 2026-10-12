@@ -1,6 +1,8 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
+mod local;
+
 const MAX_PULL_REQUEST_COMMITS: usize = 500;
 const MAX_COMMIT_PAGES: usize = 5;
 const MAX_COMMITS_PER_PAGE: usize = 100;
@@ -13,6 +15,9 @@ impl Repository {
         pull_request: &PullRequest,
     ) -> Result<PullRequestCommits> {
         validate_pull_request_oids(pull_request)?;
+        if let Some(commits) = self.local_pull_request_commits(pull_request)? {
+            return Ok(commits);
+        }
         let key = pull_request_commits_cache_key(pull_request);
         if let Some(cached) = cached_pull_request_commits(&key, pull_request) {
             return Ok(cached);
