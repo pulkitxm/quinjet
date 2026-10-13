@@ -150,9 +150,12 @@ jobs:
         with:
           tool: cargo-auditable@0.7.7
       - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && runner.arch == 'X64'
         with:
           tool: cargo-deb@3.7.0
+      - name: Build cargo-deb from source
+        if: runner.os == 'Linux' && runner.arch == 'ARM64'
+        run: cargo install cargo-deb@3.7.0 --locked
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
       - name: Build with an embedded dependency list
         shell: bash
