@@ -36,12 +36,16 @@ jobs:
         with:
           go-version: stable
           cache: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+        with:
+          version: 0.12.18
+          enable-cache: false
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
       - name: Install the remaining checkers
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
-          pipx install yamllint==1.38.0
-          pipx install ruff==0.16.9
+          uv tool install yamllint==1.38.0
+          uv tool install ruff==0.16.9
           npm ci --ignore-scripts --prefix .github/tools
           echo "${GITHUB_WORKSPACE}/.github/tools/node_modules/.bin" >>"${GITHUB_PATH}"
       - name: make ci
