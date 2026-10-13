@@ -55,6 +55,40 @@ fn scroll_to_end(app: &mut App, terminal: &mut Terminal<TestBackend>, sidebar: b
 }
 
 #[test]
+fn pull_request_commit_scrollbar_reaches_the_oldest_commit_without_opening_it() {
+    let mut app = overview_app();
+    app.pull_request_section = PullRequestSection::Commits;
+    app.pr_commits.loaded = true;
+    app.pr_commits.snapshot.commits = (0..1908)
+        .map(|index| crate::git::github::PullRequestCommit {
+            oid: format!("{index:040x}"),
+            abbreviated_oid: format!("{index:08x}"),
+            subject: format!("Commit {index:04}"),
+            author: "Casey".to_owned(),
+            ..crate::git::github::PullRequestCommit::default()
+        })
+        .collect();
+    app.pr_commits.snapshot.total_commits = 1908;
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    scroll_to_end(&mut app, &mut terminal, true);
+    assert_eq!(app.pr_commits.cursor, 0);
+    assert!(app.selected_pr_commit().is_none());
+    assert_eq!(app.pull_request_section, PullRequestSection::Commits);
+    let scrollbar = app.geometry.sidebar_scrollbar.unwrap();
+    assert_eq!(scrollbar.max_offset, 3816 - scrollbar.viewport);
+    assert_eq!(scrollbar.thumb.bottom(), scrollbar.track.bottom());
+    assert!(rendered_text(terminal.backend().buffer()).contains("Commit 1907"));
+    assert!(app.geometry.sidebar_hits.iter().all(|hit| {
+        !matches!(hit.target, SidebarHit::PullRequestCommit(_))
+            || hit.area.right() <= scrollbar.track.x
+    }));
+    app.pr_commits.snapshot.commits.truncate(2);
+    app.pr_commits.snapshot.total_commits = 2;
+    render(&mut app, &mut terminal);
+    assert!(app.geometry.sidebar_scrollbar.is_none());
+}
+
+#[test]
 fn pull_request_file_tree_scrollbar_preserves_the_selected_file() {
     let mut app = overview_app();
     app.pull_request_section = PullRequestSection::Files;

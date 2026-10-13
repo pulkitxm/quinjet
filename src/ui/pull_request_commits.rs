@@ -172,6 +172,16 @@ fn draw_pr_commit_list(
         usize::from(height),
         app.pr_commits.snapshot.commits.len().saturating_mul(2),
     );
+    let list = Rect::new(area.x, area.y.saturating_add(1), area.width, height);
+    app.geometry.sidebar_scrollbar = crate::app::Scrollbar::new(
+        list,
+        app.sidebar_offset,
+        app.pr_commits.snapshot.commits.len().saturating_mul(2),
+        usize::from(height),
+    );
+    let width = area
+        .width
+        .saturating_sub(u16::from(app.geometry.sidebar_scrollbar.is_some()));
     let mut hits = Vec::new();
     for offset in 0..usize::from(height) {
         let row_index = app.sidebar_offset.saturating_add(offset);
@@ -183,7 +193,7 @@ fn draw_pr_commit_list(
         let row = Rect::new(
             area.x,
             area.y.saturating_add(1).saturating_add(cells(offset)),
-            area.width,
+            width,
             1,
         );
         let text = if row_index.is_multiple_of(2) {
@@ -192,7 +202,7 @@ fn draw_pr_commit_list(
             format!("   {} · {}", commit.abbreviated_oid, commit.author)
         };
         frame.render_widget(
-            Paragraph::new(truncate_end(&text, usize::from(area.width))).style(
+            Paragraph::new(truncate_end(&text, usize::from(width))).style(
                 Style::default()
                     .fg(if row_index.is_multiple_of(2) {
                         theme.text
@@ -212,6 +222,7 @@ fn draw_pr_commit_list(
             target: SidebarHit::PullRequestCommit(index),
         });
     }
+    draw_scrollbar(frame, app.geometry.sidebar_scrollbar, theme);
     hits
 }
 
