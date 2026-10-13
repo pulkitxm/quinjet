@@ -20,7 +20,7 @@ concurrency:
 jobs:
   sync:
     name: Publish the wiki
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     environment: pukbot-production
     steps:

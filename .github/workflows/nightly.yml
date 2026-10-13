@@ -19,7 +19,7 @@ env:
 jobs:
   full-check:
     name: Full check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -57,7 +57,7 @@ jobs:
       fail-fast: false
       matrix:
         toolchain: [beta, nightly]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -72,7 +72,7 @@ jobs:
 
   links:
     name: Links
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -84,7 +84,7 @@ jobs:
 
   fuzz:
     name: Fuzz webhook parsing
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -99,7 +99,7 @@ jobs:
     name: Report
     if: always() && contains(needs.*.result, 'failure')
     needs: [full-check, future-toolchain, links, fuzz]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment: pukbot-production
     steps:
       - id: app-token

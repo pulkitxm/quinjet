@@ -19,7 +19,7 @@ concurrency:
 jobs:
   audit:
     name: Advisories
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -35,7 +35,7 @@ jobs:
       fail-fast: false
       matrix:
         check: [advisories, bans, licenses, sources]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -50,7 +50,7 @@ jobs:
 
   unused-dependencies:
     name: Unused dependencies
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -64,7 +64,7 @@ jobs:
 
   osv:
     name: OSV scanner
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -76,7 +76,7 @@ jobs:
 
   gitleaks:
     name: Gitleaks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -88,7 +88,7 @@ jobs:
 
   semgrep:
     name: Semgrep
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -102,7 +102,7 @@ jobs:
 
   trivy:
     name: Trivy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -117,7 +117,7 @@ jobs:
 
   sbom:
     name: SBOM
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -136,7 +136,7 @@ jobs:
   supply-chain:
     name: Dependency review
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       pull-requests: write
@@ -152,7 +152,7 @@ jobs:
   codeql:
     name: CodeQL
     if: github.event_name != 'merge_group'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       security-events: write
@@ -171,7 +171,7 @@ jobs:
   scorecard:
     name: OpenSSF Scorecard
     if: github.event_name == 'schedule' || github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       id-token: write

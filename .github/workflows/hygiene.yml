@@ -17,7 +17,7 @@ concurrency:
 jobs:
   repo:
     name: Repository rules
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -83,7 +83,7 @@ jobs:
 
   typos:
     name: Spelling
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -92,7 +92,7 @@ jobs:
 
   editorconfig:
     name: EditorConfig
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -104,7 +104,7 @@ jobs:
 
   toml:
     name: TOML
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -119,7 +119,7 @@ jobs:
 
   doc-comments:
     name: Doc comment spelling
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -132,7 +132,7 @@ jobs:
 
   yaml:
     name: YAML
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -146,7 +146,7 @@ jobs:
 
   markdown:
     name: Markdown
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -157,7 +157,7 @@ jobs:
 
   shell:
     name: Shell
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -186,7 +186,7 @@ jobs:
 
   python:
     name: Python scripts
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -201,7 +201,7 @@ jobs:
 
   actions:
     name: Workflows
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -221,7 +221,7 @@ jobs:
   links:
     name: Links
     if: github.event_name != 'merge_group'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -233,7 +233,7 @@ jobs:
 
   wiki:
     name: Wiki
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -260,7 +260,7 @@ jobs:
       - actions
       - links
       - wiki
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Fail if any check failed
         if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')

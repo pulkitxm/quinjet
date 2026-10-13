@@ -21,7 +21,7 @@ jobs:
   submit:
     name: Submit release manifests
     if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     environment: pukbot-production
     steps:

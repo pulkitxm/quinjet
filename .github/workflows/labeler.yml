@@ -12,7 +12,7 @@ concurrency:
 jobs:
   area:
     name: Area labels
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment: pukbot-production
     steps:
       - id: app-token
@@ -31,7 +31,7 @@ jobs:
 
   size:
     name: Size label
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment: pukbot-production
     steps:
       - id: app-token
