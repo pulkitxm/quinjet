@@ -181,6 +181,6 @@ need a patch to apply.
 - [All `quinjet` commands](../README.md)
 
 Use `--commit HASH` to inspect a commit from this pull request. A hash prefix
-must contain at least seven characters and uniquely match a loaded PR commit.
+must contain at least seven characters and uniquely match a commit reachable from the PR head.
 Files and patches compare that commit with its first parent. Checks and logs
 use that exact commit rather than the latest PR head.

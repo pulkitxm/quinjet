@@ -212,4 +212,26 @@ fn unavailable_head_history_is_fetched_through_git_without_mutating_the_opened_r
     assert_eq!(result.commits[1].oid, request.head_oid);
     assert_eq!(opened.git(&["show-ref"]), before);
     assert!(!repository.has_commit(&request.head_oid));
+    let shallow = test_directory("full-history-shallow");
+    source.git(&[
+        "clone",
+        "--depth=1",
+        &format!("file://{}", source.0.display()),
+        shallow.0.to_str().unwrap(),
+    ]);
+    let repository = Repository {
+        root: shallow.0.clone(),
+        github_cli: None,
+        diff_highlighting: true,
+    };
+    let before = fs::read(shallow.0.join(".git/shallow")).unwrap();
+    request.number += 1;
+    assert_eq!(
+        repository
+            .pull_request_history(&request)
+            .unwrap()
+            .total_commits,
+        2
+    );
+    assert_eq!(fs::read(shallow.0.join(".git/shallow")).unwrap(), before);
 }

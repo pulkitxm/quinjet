@@ -162,3 +162,39 @@ fn remote_commit_older_than_the_initial_fetch_window_is_fetched_exactly() {
     assert_eq!(prepared.index.files.len(), 1);
     assert_eq!(prepared.index.files[0].path, Path::new("later.txt"));
 }
+
+#[test]
+fn an_initial_commit_in_a_shallow_repository_uses_local_objects_without_mutation() {
+    let source = initialized_repository();
+    let root = source.git(&["rev-parse", "HEAD"]);
+    let shallow_path = source.0.join(".git/shallow");
+    fs::write(&shallow_path, format!("{root}\n")).unwrap();
+    let repository = Repository {
+        root: source.0.clone(),
+        github_cli: Some(source.0.join("unavailable-gh")),
+        diff_highlighting: true,
+    };
+    let request = PullRequest {
+        base_oid: root.clone(),
+        head_oid: root.clone(),
+        ..PullRequest::default()
+    };
+    let before = source.git(&["show-ref"]);
+    let prepared = repository
+        .prepare_pull_request_commit_diff(&request, &root, |_| {})
+        .unwrap();
+    assert_eq!(prepared.index.files[0].path, Path::new("README.md"));
+    assert_eq!(prepared.index.files[0].counts.unwrap().additions, 1);
+    let document = prepared.diff_file(Path::new("README.md")).unwrap();
+    assert!(
+        document
+            .lines
+            .iter()
+            .any(|line| line.text().contains("base"))
+    );
+    assert_eq!(source.git(&["show-ref"]), before);
+    assert_eq!(
+        fs::read_to_string(shallow_path).unwrap(),
+        format!("{root}\n")
+    );
+}

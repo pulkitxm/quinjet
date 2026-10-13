@@ -9,7 +9,17 @@ impl Repository {
     ) -> Result<PreparedPullRequest> {
         let temporary = TemporaryBareRepository::new()?;
         temporary.borrow_local_objects(self);
-        if !self.has_commit(oid) {
+        let root_repository = Self {
+            root: temporary.path.clone(),
+            github_cli: None,
+            diff_highlighting: self.diff_highlighting,
+        };
+        if !root_repository.has_commit(oid) {
+            let remote = if self.has_commit(oid) {
+                self.root().as_os_str().to_owned()
+            } else {
+                OsString::from(pull_request.base_repository.selector())
+            };
             drop(checked_temp_git(
                 &temporary.path,
                 &[
@@ -17,7 +27,7 @@ impl Repository {
                     OsString::from("--quiet"),
                     OsString::from("--no-tags"),
                     OsString::from("--depth=1"),
-                    OsString::from(pull_request.base_repository.selector()),
+                    remote,
                     OsString::from(oid),
                 ],
                 "unable to fetch the initial commit",

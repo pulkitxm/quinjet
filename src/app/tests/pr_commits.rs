@@ -212,3 +212,34 @@ fn running_commit_checks_in_a_stack_keep_the_fast_poll_interval() {
     app.pr_commits.loading = true;
     assert!(app.pull_request_refreshing());
 }
+
+#[test]
+fn switching_from_stack_commits_loads_full_history_without_changing_the_selected_hash() {
+    let mut app = commit_app();
+    app.pr_commits.introduced_only = true;
+    app.pr_commits.selected = Some(1);
+    let selected = app.selected_pr_commit().unwrap().oid.clone();
+    let mut effects = Vec::new();
+    app.request_pr_commits(&mut effects);
+    assert!(app.pr_commits.loading);
+    assert!(effects.iter().any(|effect| matches!(effect, AppEffect::Git(command) if matches!(command.as_ref(), WorkerCommand::LoadPullRequestCommits { .. }))));
+    let request = app.pull_request.as_ref().unwrap();
+    let mut commits = app.pr_commits.snapshot.commits.clone();
+    commits.insert(
+        0,
+        PullRequestCommit {
+            oid: "c".repeat(40),
+            ..PullRequestCommit::default()
+        },
+    );
+    let snapshot = PullRequestCommits {
+        commits,
+        total_commits: 3,
+        base_oid: request.base_oid.clone(),
+        head_oid: request.head_oid.clone(),
+        ..PullRequestCommits::default()
+    };
+    app.apply_pr_commits(app.pr_commits.generation, Ok(snapshot), &mut effects);
+    assert!(!app.pr_commits.introduced_only);
+    assert_eq!(app.selected_pr_commit().unwrap().oid, selected);
+}

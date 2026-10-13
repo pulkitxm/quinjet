@@ -352,7 +352,7 @@ pub(super) fn content_row_text(row: &ContentRow) -> String {
 
 pub(super) fn overview_title(app: &App, showing_check: bool) -> String {
     if app.pull_request_section == PullRequestSection::Commits {
-        return " Pull Request Commits ".to_owned();
+        return " PR Head History ".to_owned();
     }
     if let Some(commit) = app.selected_pr_commit() {
         let label = app
