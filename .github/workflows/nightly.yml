@@ -50,6 +50,9 @@ jobs:
           echo "${GITHUB_WORKSPACE}/.github/tools/node_modules/.bin" >>"${GITHUB_PATH}"
       - name: make ci
         run: make ci
+      - name: Remove the packaged crate before the cache saves
+        if: always()
+        run: rm -rf target/package
 
   future-toolchain:
     name: Rust ${{ matrix.toolchain }}
