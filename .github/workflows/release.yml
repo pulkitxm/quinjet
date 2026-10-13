@@ -27,7 +27,7 @@ jobs:
   version:
     name: Bump version and tag
     if: "github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'chore: release v')"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment: pukbot-production
     env:
       GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
@@ -112,7 +112,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-26.04
             target: x86_64-unknown-linux-musl
             artifact: quinjet-linux-x86_64
             binary: quinjet
@@ -254,7 +254,7 @@ jobs:
   publish-crate:
     name: Publish crate
     needs: [version, build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment: crates-io
     permissions:
       contents: read
@@ -281,7 +281,7 @@ jobs:
   release:
     name: Publish GitHub release
     needs: [version, build, publish-crate]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment: pukbot-production
     env:
       GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
