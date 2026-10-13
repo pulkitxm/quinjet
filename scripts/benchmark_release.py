@@ -237,6 +237,7 @@ def comparison_output(name, output):
     if name in {"first_use_version", "version"}:
         pattern = rb"\A(quinjet )[0-9]+\.[0-9]+\.[0-9]+(\r?\n)\Z"
     elif name == "capabilities":
+        output = re.sub(rb"(?m)^(quinjet(?: [a-z0-9-]+)*)  [^\r\n]*", rb"\1", output)
         pattern = rb"\A(Quinjet )[0-9]+\.[0-9]+\.[0-9]+( command capabilities)"
     else:
         return output
