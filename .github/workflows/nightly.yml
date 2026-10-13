@@ -29,7 +29,9 @@ jobs:
           components: rustfmt, clippy
       - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe
         with:
-          tool: cargo-deny,cargo-audit,cargo-machete,cargo-hack,cargo-llvm-cov,shellcheck,shfmt,taplo-cli,typos,zizmor,editorconfig-checker
+          tool: >-
+            cargo-deny,cargo-audit,cargo-machete,cargo-shear,cargo-hack,cargo-llvm-cov,cargo-sort,cargo-spellcheck,
+            osv-scanner,shellcheck,shfmt,taplo-cli,typos,zizmor,editorconfig-checker
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version: stable
@@ -39,6 +41,7 @@ jobs:
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
           pipx install yamllint==1.38.0
+          pipx install ruff==0.16.9
           npm ci --ignore-scripts --prefix .github/tools
           echo "${GITHUB_WORKSPACE}/.github/tools/node_modules/.bin" >>"${GITHUB_PATH}"
       - name: make ci
