@@ -230,6 +230,7 @@ jobs:
         with:
           args: --config lychee.toml './**/*.md'
           fail: true
+          jobSummary: false
 
   wiki:
     name: Wiki
