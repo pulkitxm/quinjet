@@ -280,7 +280,7 @@ pub(super) fn commit_browser_rows(app: &App, theme: &Theme) -> Vec<ContentRow> {
         )),
         ContentRow::blank(),
         ContentRow::text(
-            "Enter or click a commit to inspect its files and CI checks.",
+            "Complete pushed history up to the PR head. Enter or click a commit for files and CI checks.",
             Style::default().fg(theme.text),
         ),
         ContentRow::text(

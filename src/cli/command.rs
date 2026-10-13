@@ -79,6 +79,7 @@ pub(crate) enum Command {
         pull_request: Box<PullRequest>,
     },
     PullRequestCommits {
+        introduced_only: bool,
         pull_request: Box<PullRequest>,
     },
     PullRequestReview {

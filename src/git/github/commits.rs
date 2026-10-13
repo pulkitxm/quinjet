@@ -1,6 +1,7 @@
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
 
+mod history;
 mod local;
 mod local_process;
 
@@ -95,6 +96,13 @@ fn pull_request_commits_cache_key(pull_request: &PullRequest) -> String {
         pull_request.number,
         pull_request.base_oid,
         pull_request.head_oid
+    )
+}
+
+fn head_history_cache_key(pull_request: &PullRequest) -> String {
+    format!(
+        "head-history-v1\n{}",
+        pull_request_commits_cache_key(pull_request)
     )
 }
 

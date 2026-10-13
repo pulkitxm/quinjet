@@ -161,9 +161,14 @@ impl Session {
             Command::PullRequestConversation { pull_request } => Ok(Outcome::Conversation(
                 Box::new(self.repository.pull_request_conversation(&pull_request)?),
             )),
-            Command::PullRequestCommits { pull_request } => Ok(Outcome::Commits(Box::new(
-                self.repository.pull_request_commits(&pull_request)?,
-            ))),
+            Command::PullRequestCommits {
+                introduced_only,
+                pull_request,
+            } => Ok(Outcome::Commits(Box::new(if introduced_only {
+                self.repository.pull_request_commits(&pull_request)?
+            } else {
+                self.repository.pull_request_history(&pull_request)?
+            }))),
             Command::PullRequestReview { pull_request } => Ok(Outcome::Review(Box::new(
                 self.repository.pull_request_review(&pull_request)?,
             ))),

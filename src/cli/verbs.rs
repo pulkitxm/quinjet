@@ -154,6 +154,15 @@ pub(super) struct PrArgs {
 }
 
 #[derive(Debug, Args)]
+pub(super) struct PrCommitsArgs {
+    #[command(flatten)]
+    pub(super) pull_request: PrArgs,
+    #[doc = " Show only commits introduced by the pull request"]
+    #[arg(long)]
+    pub(super) introduced_only: bool,
+}
+
+#[derive(Debug, Args)]
 pub(super) struct PrWatchArgs {
     #[command(flatten)]
     pub(super) pull_request: PrArgs,

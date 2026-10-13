@@ -81,7 +81,10 @@ pub(super) fn load_stack_member_commits(
         generation,
         result: answer(
             session
-                .execute(Command::PullRequestCommits { pull_request })
+                .execute(Command::PullRequestCommits {
+                    introduced_only: true,
+                    pull_request,
+                })
                 .and_then(Outcome::commits),
         ),
     }

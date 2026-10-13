@@ -6,7 +6,19 @@ impl Repository {
         &self,
         pull_request: &PullRequest,
     ) -> Result<Option<PullRequestCommits>> {
-        let range = format!("{}..{}", pull_request.base_oid, pull_request.head_oid);
+        self.local_commit_snapshot(pull_request, true)
+    }
+
+    pub(super) fn local_commit_snapshot(
+        &self,
+        pull_request: &PullRequest,
+        introduced_only: bool,
+    ) -> Result<Option<PullRequestCommits>> {
+        let range = if introduced_only {
+            format!("{}..{}", pull_request.base_oid, pull_request.head_oid)
+        } else {
+            pull_request.head_oid.clone()
+        };
         let shallow = self.git_common_dir()?.join("shallow");
         let shallow = if shallow.is_file() {
             fs::read_to_string(shallow)?
@@ -31,7 +43,11 @@ impl Repository {
         if !complete || incomplete {
             return Ok(None);
         }
-        let key = format!("local-{}", pull_request_commits_cache_key(pull_request));
+        let key = if introduced_only {
+            format!("local-{}", pull_request_commits_cache_key(pull_request))
+        } else {
+            head_history_cache_key(pull_request)
+        };
         if let Some(cached) = cached_pull_request_commits(&key, pull_request) {
             return Ok(Some(cached));
         }

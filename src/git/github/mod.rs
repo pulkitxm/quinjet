@@ -77,6 +77,7 @@ mod prepared;
 mod process;
 mod pull_request;
 mod review;
+mod root_commit;
 mod stack;
 mod temporary;
 

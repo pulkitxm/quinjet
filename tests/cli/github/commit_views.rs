@@ -85,10 +85,48 @@ fn pull_request_commits_use_local_history_before_github() -> Result<()> {
         .read(&["pr", "commits", "42", "--refresh", "--json"])?
         .success()?
         .json()?;
-    ensure!(json["totalCommits"] == 1);
-    ensure!(json["commits"][0]["oid"] == fixture.head_oid);
-    ensure!(json["commits"][0]["subject"] == "feature");
+    ensure!(json["totalCommits"] == 2);
+    ensure!(json["commits"][0]["oid"] == fixture.base_oid);
+    ensure!(json["commits"][1]["subject"] == "feature");
     ensure!(json["commits"][0]["authorLogin"].is_null());
     ensure!(!fixture.gh_calls()?.contains("commits(last:100,before:"));
+    Ok(())
+}
+
+#[test]
+fn ancestor_and_initial_commits_support_files_diff_and_checks() -> Result<()> {
+    let fixture = GitHubFixture::new()?;
+    let files = fixture
+        .read(&["pr", "files", "42", "--commit", &fixture.base_oid, "--json"])?
+        .success()?
+        .json()?;
+    ensure!(files["files"][0]["path"] == "README.md");
+    ensure!(files["files"][0]["status"] == "added");
+    let diff = fixture
+        .read(&["pr", "diff", "42", "--commit", &fixture.base_oid])?
+        .success()?;
+    ensure!(diff.stdout.contains("README.md"));
+    ensure!(!diff.stdout.contains("local worktree change"));
+    let checks = fixture
+        .read(&[
+            "pr",
+            "checks",
+            "42",
+            "--commit",
+            &fixture.base_oid,
+            "--json",
+        ])?
+        .success()?
+        .json()?;
+    ensure!(
+        checks["checks"]
+            .as_array()
+            .is_some_and(|checks| checks.len() == 2)
+    );
+    ensure!(
+        fixture
+            .gh_calls()?
+            .contains(&format!("commits/{}/check-runs?", fixture.base_oid))
+    );
     Ok(())
 }

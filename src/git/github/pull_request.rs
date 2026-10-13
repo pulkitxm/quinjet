@@ -78,7 +78,7 @@ impl Repository {
                 .take_while(|line| !line.is_empty())
                 .find_map(|line| line.strip_prefix(b"parent "))
                 .map(text)
-                .context("The selected commit has no first parent")?
+                .unwrap_or_default()
         } else {
             let output = self.run_gh(vec![
                 OsString::from("api"),
@@ -100,8 +100,11 @@ impl Repository {
             }
             text(trim_ascii(&output.stdout))
         };
+        if parent.is_empty() {
+            return self.prepare_root_commit_diff(pull_request, oid);
+        }
         if !is_commit_oid(&parent) {
-            bail!("The selected commit has no parent to compare");
+            bail!("The selected commit has an invalid parent");
         }
         let mut comparison = pull_request.clone();
         comparison.base_oid = parent;

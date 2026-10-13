@@ -209,7 +209,10 @@ pub(super) fn run_worker(
                 generation,
                 result: answer(
                     session
-                        .execute(Command::PullRequestCommits { pull_request })
+                        .execute(Command::PullRequestCommits {
+                            introduced_only: false,
+                            pull_request,
+                        })
                         .and_then(Outcome::commits),
                 ),
             },

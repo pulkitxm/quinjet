@@ -70,7 +70,7 @@ esac
     );
     executable(&fixture.bin.join("gh"), &script)?;
     let result = fixture
-        .read(&["pr", "commits", "42", "--json"])?
+        .read(&["pr", "commits", "42", "--introduced-only", "--json"])?
         .success()?
         .json()?;
     ensure!(result["totalCommits"] == 601);
@@ -91,7 +91,7 @@ esac
             == 7
     );
     let cached = fixture
-        .read(&["pr", "commits", "42", "--json"])?
+        .read(&["pr", "commits", "42", "--introduced-only", "--json"])?
         .success()?
         .json()?;
     ensure!(cached["fromCache"] == true);

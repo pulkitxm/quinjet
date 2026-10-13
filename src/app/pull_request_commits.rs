@@ -7,6 +7,7 @@ pub(crate) struct CommitBrowser {
     pub owner: Option<PullRequest>,
     pub snapshot: PullRequestCommits,
     pub loaded: bool,
+    pub introduced_only: bool,
     pub loading: bool,
     pub error: Option<String>,
     pub generation: u64,
@@ -61,7 +62,7 @@ impl App {
     }
 
     pub(super) fn request_pr_commits(&mut self, effects: &mut Vec<AppEffect>) {
-        if self.pr_commits.loading || self.pr_commits.loaded {
+        if self.pr_commits.loading || (self.pr_commits.loaded && !self.pr_commits.introduced_only) {
             return;
         }
         let Some(request) = self.selected_pull_request().cloned() else {
@@ -131,7 +132,18 @@ impl App {
                 }) {
                     return;
                 }
+                let selected_oid = self.selected_pr_commit().map(|commit| commit.oid.clone());
                 snapshot.commits.reverse();
+                if let Some(selected_oid) = selected_oid {
+                    self.pr_commits.selected = snapshot
+                        .commits
+                        .iter()
+                        .position(|commit| commit.oid == selected_oid);
+                    if let Some(index) = self.pr_commits.selected {
+                        self.pr_commits.cursor = index;
+                    }
+                }
+                self.pr_commits.introduced_only = false;
                 self.pr_commits.snapshot = snapshot;
                 self.pr_commits.loaded = true;
                 self.pr_commits.error = None;
@@ -177,6 +189,7 @@ impl App {
         self.pr_commits.owner = Some(owner);
         self.pr_commits.snapshot = snapshot;
         self.pr_commits.loaded = true;
+        self.pr_commits.introduced_only = true;
         self.inspect_pr_commit(Some(selected), effects);
     }
 

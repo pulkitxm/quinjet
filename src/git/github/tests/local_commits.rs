@@ -161,3 +161,55 @@ fn large_local_ranges_return_every_commit_without_github() {
     assert_eq!(result.commits[16_384].oid, head);
     assert!(!result.truncated);
 }
+
+#[test]
+fn full_history_includes_ancestors_and_stops_at_the_pushed_head() {
+    let source = initialized_repository();
+    let root = source.git(&["rev-parse", "HEAD"]);
+    source.git(&["commit", "--allow-empty", "--message=shared ancestor"]);
+    let base = source.git(&["rev-parse", "HEAD"]);
+    source.git(&["commit", "--allow-empty", "--message=pushed feature"]);
+    let (repository, request) = local_request(&source, base);
+    source.git(&["commit", "--allow-empty", "--message=unpushed change"]);
+    let before = source.git(&["show-ref"]);
+    let result = repository.pull_request_history(&request).unwrap();
+    assert_eq!(result.total_commits, 3);
+    assert_eq!(result.commits[0].oid, root);
+    assert_eq!(result.commits[1].subject, "shared ancestor");
+    assert_eq!(result.commits[2].oid, request.head_oid);
+    assert!(
+        !result
+            .commits
+            .iter()
+            .any(|commit| commit.subject == "unpushed change")
+    );
+    assert_eq!(source.git(&["show-ref"]), before);
+    assert_eq!(
+        repository
+            .pull_request_commits(&request)
+            .unwrap()
+            .total_commits,
+        1
+    );
+}
+
+#[test]
+fn unavailable_head_history_is_fetched_through_git_without_mutating_the_opened_repository() {
+    let source = initialized_repository();
+    let base = source.git(&["rev-parse", "HEAD"]);
+    source.git(&["commit", "--allow-empty", "--message=remote pushed history"]);
+    let (_, mut request) = local_request(&source, base);
+    request.base_repository.url = format!("file://{}", source.0.display());
+    let opened = initialized_repository();
+    let repository = Repository {
+        root: opened.0.clone(),
+        github_cli: Some(opened.0.join("unavailable-gh")),
+        diff_highlighting: true,
+    };
+    let before = opened.git(&["show-ref"]);
+    let result = repository.pull_request_history(&request).unwrap();
+    assert_eq!(result.total_commits, 2);
+    assert_eq!(result.commits[1].oid, request.head_oid);
+    assert_eq!(opened.git(&["show-ref"]), before);
+    assert!(!repository.has_commit(&request.head_oid));
+}

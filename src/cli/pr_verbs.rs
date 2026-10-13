@@ -8,7 +8,7 @@ pub(super) enum PrVerb {
     #[doc = " List the files a pull request changes"]
     Files(PrFilesArgs),
     #[doc = " List a pull request's commits"]
-    Commits(PrArgs),
+    Commits(PrCommitsArgs),
     #[doc = " Print a pull request's patch"]
     Diff(PrDiffArgs),
     #[doc = " Print a pull request's timeline and review comments"]

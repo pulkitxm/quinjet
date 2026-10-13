@@ -267,7 +267,9 @@ fn pull_request_commits_paginate_cache_and_render_in_both_modes() -> Result<()> 
     fixture.base_oid = "a".repeat(40);
     fixture.head_oid = "b".repeat(40);
 
-    let plain = fixture.read(&["pr", "commits", "42"])?.success()?;
+    let plain = fixture
+        .read(&["pr", "commits", "42", "--introduced-only"])?
+        .success()?;
 
     ensure!(plain.stderr.is_empty(), "{}", plain.stderr);
     let base = plain
@@ -281,7 +283,7 @@ fn pull_request_commits_paginate_cache_and_render_in_both_modes() -> Result<()> 
     ensure!(base < feature, "{}", plain.stdout);
 
     let json = fixture
-        .read(&["pr", "commits", "42", "--json"])?
+        .read(&["pr", "commits", "42", "--introduced-only", "--json"])?
         .success()?
         .json()?;
     ensure!(
