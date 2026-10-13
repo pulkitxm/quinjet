@@ -93,8 +93,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7
+        with:
+          version: 0.12.18
+          enable-cache: false
       - name: Scan
-        run: pipx run semgrep scan --error --config p/rust --config p/secrets --config p/github-actions .
+        run: uvx semgrep scan --error --config p/rust --config p/secrets --config p/github-actions .
 
   trivy:
     name: Trivy
