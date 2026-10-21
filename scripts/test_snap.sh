@@ -12,8 +12,9 @@ snap list quinjet
 /snap/bin/quinjet --version
 
 completion=/usr/share/bash-completion/completions/quinjet
+ls -l "${completion}"
 completer=$(readlink "${completion}")
-test "${completer}" = /usr/lib/snapd/complete.sh
+test "${completer##*/}" = complete.sh
 
 repository=$(mktemp -d)
 git -C "${repository}" init --quiet

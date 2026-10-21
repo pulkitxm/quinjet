@@ -14,6 +14,7 @@ license: MIT
 website: https://quinjet.pulkit.page
 source-code: https://github.com/pulkitxm/quinjet
 issues: https://github.com/pulkitxm/quinjet/issues
+contact: https://github.com/pulkitxm/quinjet/issues
 grade: stable
 confinement: classic
 
