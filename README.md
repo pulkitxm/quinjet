@@ -126,9 +126,10 @@ replacing anything, and refreshes the installed shell completions with the new
 executable. It leaves a completion or `q` shortcut alone when you removed it
 after the first installation.
 
-Homebrew, apt, and Winget installations stay under their package manager.
-`quinjet update` runs `brew upgrade quinjet` for a Homebrew installation. Apt
-and Winget installations keep printing their matching package-manager command.
+Homebrew, apt, Snap, and Winget installations stay under their package
+manager. `quinjet update` runs `brew upgrade quinjet` for a Homebrew
+installation. Apt, Snap, and Winget installations keep printing their matching
+package-manager command.
 `quinjet update --check` remains available everywhere.
 
 ### Cargo
