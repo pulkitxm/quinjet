@@ -27,7 +27,7 @@ jobs:
       - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe
         with:
           tool: cargo-audit
-      - run: cargo audit --deny warnings --ignore RUSTSEC-2025-0141 --ignore RUSTSEC-2026-0370 --ignore RUSTSEC-2026-0371 --ignore RUSTSEC-2026-0372
+      - run: cargo audit --deny warnings
 
   deny:
     name: cargo-deny (${{ matrix.check }})

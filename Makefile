@@ -89,7 +89,7 @@ deny:
 	$(call preserve-lockfiles,$(CARGO) deny --all-features check)
 
 audit:
-	$(CARGO) audit --deny warnings --ignore RUSTSEC-2025-0141 --ignore RUSTSEC-2026-0370 --ignore RUSTSEC-2026-0371 --ignore RUSTSEC-2026-0372
+	$(CARGO) audit --deny warnings
 
 unused:
 	$(call preserve-lockfiles,$(CARGO) machete --with-metadata && $(CARGO) shear)
