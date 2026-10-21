@@ -15,7 +15,7 @@ sudo snap install --dangerous --classic "$1"
 snap list quinjet
 /snap/bin/quinjet --version
 
-completion=/usr/share/bash-completion/completions/quinjet
+completion=/var/lib/snapd/desktop/bash-completion/completions/quinjet
 ls -l "${completion}"
 completer=$(readlink "${completion}")
 test "${completer##*/}" = complete.sh
