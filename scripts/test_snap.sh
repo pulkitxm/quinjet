@@ -7,6 +7,10 @@ if [ "$#" -ne 1 ]; then
     exit 2
 fi
 
+if [ ! -f /usr/share/bash-completion/bash_completion ]; then
+    sudo apt-get update
+    sudo apt-get install --yes bash-completion
+fi
 sudo snap install --dangerous --classic "$1"
 snap list quinjet
 /snap/bin/quinjet --version
