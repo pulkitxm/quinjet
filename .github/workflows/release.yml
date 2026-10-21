@@ -13,6 +13,9 @@ on:
       - 'scripts/homebrew_formula.py'
       - 'scripts/update_homebrew_tap.sh'
       - 'scripts/winget_manifest.py'
+      - 'packaging/snap/**'
+      - 'scripts/stage_snap.sh'
+      - 'scripts/test_snap.sh'
       - '.github/workflows/release.yml'
   workflow_dispatch:
 
@@ -377,3 +380,51 @@ jobs:
             || { echo "release blocked: the tap did not take ${TAG}" >&2; exit 1; }
       - name: Deploy package repositories
         run: pukbot repository dispatch apt-release --repo "${GITHUB_REPOSITORY}" --json
+
+  snap:
+    name: Snap ${{ matrix.arch }}
+    needs: [version, build, release]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            arch: amd64
+            artifact: quinjet-linux-x86_64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+            artifact: quinjet-linux-aarch64
+    runs-on: ${{ matrix.os }}
+    environment: snap-store
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist
+      - name: Stage the snap payload
+        env:
+          ARTIFACT: ${{ matrix.artifact }}
+        run: sh scripts/stage_snap.sh "dist/${ARTIFACT}" packaging/snap/payload
+      - name: Install Snapcraft
+        run: sudo snap install snapcraft --classic
+      - name: Pack the snap
+        working-directory: packaging/snap
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: sudo snapcraft pack --destructive-mode --build-for "${ARCH}" --output quinjet.snap
+      - name: Install and smoke test the snap
+        run: sh scripts/test_snap.sh packaging/snap/quinjet.snap
+      - name: Upload to the Snap Store
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SNAPCRAFT_STORE_CREDENTIALS}" ]; then
+            echo "::notice::SNAPCRAFT_STORE_CREDENTIALS is not set, so the snap was built and tested but not uploaded"
+            exit 0
+          fi
+          snapcraft upload --release=stable packaging/snap/quinjet.snap

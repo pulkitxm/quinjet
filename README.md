@@ -57,6 +57,19 @@ The repository publishes x86-64 and ARM64 packages. Upgrade with
 `sudo apt update && sudo apt install --only-upgrade quinjet`. See the
 [apt guide](docs/guides/apt.md) for package contents, verification, and removal.
 
+### Snap
+
+On Ubuntu, or any Linux distribution with snapd:
+
+```bash
+sudo snap install quinjet --classic
+```
+
+Snapd keeps Quinjet up to date in the background. Classic confinement lets
+Quinjet use your own Git, configuration, credentials, and hooks. Run
+`sudo snap alias quinjet q` to add the `q` shortcut. See the
+[Snap guide](docs/guides/snap.md) for updates, inspection, and removal.
+
 ### Winget
 
 On Windows:
@@ -126,9 +139,10 @@ replacing anything, and refreshes the installed shell completions with the new
 executable. It leaves a completion or `q` shortcut alone when you removed it
 after the first installation.
 
-Homebrew, apt, and Winget installations stay under their package manager.
-`quinjet update` runs `brew upgrade quinjet` for a Homebrew installation. Apt
-and Winget installations keep printing their matching package-manager command.
+Homebrew, apt, Snap, and Winget installations stay under their package
+manager. `quinjet update` runs `brew upgrade quinjet` for a Homebrew
+installation. Apt, Snap, and Winget installations keep printing their matching
+package-manager command.
 `quinjet update --check` remains available everywhere.
 
 ### Cargo
