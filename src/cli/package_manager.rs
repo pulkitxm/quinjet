@@ -14,6 +14,7 @@ pub(super) struct Manager {
 pub(super) enum ManagerKind {
     Apt,
     Homebrew,
+    Snap,
     Winget,
 }
 
@@ -26,6 +27,11 @@ const HOMEBREW: Manager = Manager {
     kind: ManagerKind::Homebrew,
     name: "Homebrew",
     upgrade: "brew upgrade quinjet",
+};
+const SNAP: Manager = Manager {
+    kind: ManagerKind::Snap,
+    name: "Snap",
+    upgrade: "sudo snap refresh quinjet",
 };
 const WINGET: Manager = Manager {
     kind: ManagerKind::Winget,
@@ -56,6 +62,9 @@ fn path_manager(path: &Path) -> Option<Manager> {
     {
         return Some(HOMEBREW);
     }
+    if snap_mounts(path) {
+        return Some(SNAP);
+    }
     if names.windows(4).any(|parts| {
         parts
             .first()
@@ -73,6 +82,12 @@ fn path_manager(path: &Path) -> Option<Manager> {
         return Some(WINGET);
     }
     None
+}
+
+fn snap_mounts(path: &Path) -> bool {
+    ["/snap", "/var/lib/snapd/snap"]
+        .into_iter()
+        .any(|mount| path.starts_with(Path::new(mount).join(PROGRAM)))
 }
 
 fn apt_manages(path: &Path) -> bool {
@@ -112,6 +127,17 @@ mod tests {
     }
 
     #[test]
+    fn snap_mounts_are_managed() {
+        for path in [
+            "/snap/quinjet/42/bin/quinjet",
+            "/snap/quinjet/x1/bin/quinjet",
+            "/var/lib/snapd/snap/quinjet/42/bin/quinjet",
+        ] {
+            assert_eq!(path_manager(Path::new(path)), Some(SNAP));
+        }
+    }
+
+    #[test]
     fn winget_package_directory_is_managed() {
         let path = Path::new(
             r"C:\Users\pat\AppData\Local\Microsoft\WinGet\Packages\Pulkitxm.Quinjet_Microsoft.Winget.Source_8wekyb3d8bbwe\quinjet.exe",
@@ -134,6 +160,9 @@ mod tests {
             "/home/pat/.cargo/bin/quinjet",
             "/opt/homebrew/Cellar/git/2.51.0/bin/git",
             "/home/pat/Cellar/downloads/quinjet",
+            "/home/pat/snap/quinjet/common/quinjet",
+            "/snap/bin/quinjet",
+            "/snap/quinjet-beta/42/bin/quinjet",
             r"C:\Users\pat\.cargo\bin\quinjet.exe",
         ] {
             assert_eq!(path_manager(Path::new(path)), None);
