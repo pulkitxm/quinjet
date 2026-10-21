@@ -165,8 +165,12 @@ jobs:
       - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe
         with:
           tool: shellcheck,shfmt
-      - run: shellcheck --severity=style --enable=all install.sh tests/install.sh scripts/submit_winget.sh
-      - run: shfmt --diff --indent 4 --case-indent install.sh tests/install.sh scripts/submit_winget.sh
+      - run: >-
+          shellcheck --severity=style --enable=all install.sh tests/install.sh
+          scripts/submit_winget.sh scripts/stage_snap.sh scripts/test_snap.sh
+      - run: >-
+          shfmt --diff --indent 4 --case-indent install.sh tests/install.sh
+          scripts/submit_winget.sh scripts/stage_snap.sh scripts/test_snap.sh
 
   powershell:
     name: PowerShell
