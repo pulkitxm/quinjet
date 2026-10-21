@@ -41,6 +41,21 @@ fn truncate(text: &str, width: usize) -> String {
     format!("{kept}…")
 }
 
+pub(crate) fn accounts(accounts: &crate::git::accounts::Accounts) -> String {
+    let mut text = format!(
+        "Repository account: {}\nCommit identity: {} <{}>\n",
+        accounts.selected.as_deref().unwrap_or("not pinned"),
+        accounts.name,
+        accounts.email
+    );
+    for login in &accounts.logins {
+        text.push_str("  ");
+        text.push_str(login);
+        text.push('\n');
+    }
+    text
+}
+
 mod github;
 mod repository;
 

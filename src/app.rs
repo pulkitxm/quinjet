@@ -127,6 +127,7 @@ fn updated_recent_pull_requests(
     recent_pull_requests_for(recent, &pull_request.base_repository)
 }
 
+pub(crate) mod account_picker;
 mod changes;
 mod dialogs;
 mod geometry;

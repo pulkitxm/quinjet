@@ -380,6 +380,14 @@ pub(super) fn run_worker(
             },
             WorkerCommand::PrefetchCheckRunLogs { .. }
             | WorkerCommand::PrefetchPullRequestStackMembers { .. } => continue,
+            WorkerCommand::LoadAccounts { generation } => WorkerEvent::Accounts {
+                generation,
+                result: answer(
+                    session
+                        .execute(Command::Accounts)
+                        .and_then(Outcome::accounts),
+                ),
+            },
             WorkerCommand::LoadBranches { generation } => WorkerEvent::Branches {
                 generation,
                 result: answer(

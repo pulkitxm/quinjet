@@ -18,6 +18,7 @@ use crate::search::{SearchHits, SearchRequest};
 
 #[derive(Debug)]
 pub(crate) enum Command {
+    Accounts,
     Status,
     History {
         revision: String,
@@ -111,6 +112,7 @@ pub(crate) enum Command {
 impl Command {
     pub(crate) const fn progress_label(&self) -> &'static str {
         match self {
+            Self::Accounts => "Reading GitHub accounts",
             Self::Status => "Reading repository status",
             Self::History { .. } => "Reading commit history",
             Self::Branches | Self::HistoryBranches => "Reading branches",
@@ -145,6 +147,7 @@ impl Command {
 
 #[derive(Debug)]
 pub(crate) enum Outcome {
+    Accounts(crate::git::accounts::Accounts),
     Status(Box<RepoStatus>),
     History(Vec<Commit>),
     Branches(Vec<Branch>),
@@ -197,6 +200,7 @@ macro_rules! answers {
 }
 
 answers! {
+    accounts, Accounts -> crate::git::accounts::Accounts, |value| value;
     status, Status -> RepoStatus, |value: Box<RepoStatus>| *value;
     history, History -> Vec<Commit>, |value| value;
     branches, Branches -> Vec<Branch>, |value| value;

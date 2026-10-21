@@ -244,6 +244,55 @@ def comparison_output(name, output):
     return re.sub(pattern, rb"\g<1><version>\g<2>", output, count=1)
 
 
+def help_sections(output):
+    header, separator, remainder = output.partition(b"\nCommands:\n")
+    if not separator:
+        return None
+    commands, separator, options = remainder.partition(b"\nOptions:\n")
+    if not separator:
+        return None
+    entries = []
+    for line in commands.splitlines():
+        if not line.strip():
+            continue
+        match = re.fullmatch(rb"  ([a-z0-9-]+) +(.+)", line)
+        if not match:
+            return None
+        entries.append(match.groups())
+    if len(dict(entries)) != len(entries):
+        return None
+    return header, options, dict(entries)
+
+
+def compatible_output(name, baseline, candidate):
+    baseline = comparison_output(name, baseline)
+    candidate = comparison_output(name, candidate)
+    if baseline == candidate:
+        return True
+    if name == "help":
+        old = help_sections(baseline)
+        new = help_sections(candidate)
+        return (
+            old is not None
+            and new is not None
+            and old[:2] == new[:2]
+            and all(new[2].get(command) == description for command, description in old[2].items())
+        )
+    if name == "capabilities":
+        old = baseline.split(b"\n\n", 2)
+        new = candidate.split(b"\n\n", 2)
+        if len(old) != 3 or len(new) != 3 or old[::2] != new[::2]:
+            return False
+        original_paths = old[1].splitlines()
+        paths = new[1].splitlines()
+        return (
+            len(set(paths)) == len(paths)
+            and all(re.fullmatch(rb"quinjet(?: [a-z0-9-]+)*", path) for path in paths)
+            and [path for path in paths if path in set(original_paths)] == original_paths
+        )
+    return False
+
+
 def measure_trial(trial, binaries, results, root, *, terminal):
     order = binaries if trial % 2 == 0 else list(reversed(binaries))
     repository = root / "repository"
@@ -270,9 +319,7 @@ def measure_trial(trial, binaries, results, root, *, terminal):
                 elapsed = first_frame(binary, repository, env, case=case)
                 results[label]["timings"][case].append(elapsed)
     for name in ("first_use_version", *COMMANDS):
-        baseline = comparison_output(name, outputs["baseline", name])
-        candidate = comparison_output(name, outputs["candidate", name])
-        if baseline != candidate:
+        if not compatible_output(name, outputs["baseline", name], outputs["candidate", name]):
             msg = f"{name} output differs between the baseline and candidate"
             raise RuntimeError(msg)
 
@@ -325,7 +372,8 @@ def benchmark(args):
             "alternating order; warm OS cache; fresh process; identical executable names; "
             "isolated homes and executable directories first on PATH; synthetic Bash integration; "
             "fresh home and adjacent shortcut for first use; completion and shortcut verified; "
-            "only leading CLI version labels normalized for cross-release output comparison; "
+            "leading CLI versions normalized; additive help commands and capabilities allowed; "
+            "existing command entries and other outputs must match; "
             "p95 nearest rank"
         ),
         "first_use_integration_verified": True,

@@ -154,6 +154,7 @@ fn help_catalog_covers_sections_and_previously_missing_bindings() {
         "m",
         "*",
         "Ctrl+D / Ctrl+U",
+        "Ctrl+G",
         "Space / ← / →",
         "gg / Home",
         "Ctrl+N",

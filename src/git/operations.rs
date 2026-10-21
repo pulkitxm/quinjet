@@ -16,6 +16,7 @@ impl Repository {
                     "changes staged",
                 ))
             }
+            GitOperation::SwitchAccount(login) => self.switch_account(login),
             GitOperation::StageAll => {
                 drop(self.checked(strings(["add", "-A"]))?);
                 Ok("All changes staged".to_owned())
@@ -45,6 +46,7 @@ impl Repository {
                 Ok(plural_message(removed, "file removed", "files removed"))
             }
             GitOperation::Commit { message, amend } => {
+                self.verify_commit_account(*amend)?;
                 if message.trim().is_empty() {
                     bail!("Commit message cannot be empty");
                 }

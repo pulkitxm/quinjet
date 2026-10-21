@@ -72,6 +72,11 @@ The palettes are `quinjet`, `catppuccin`, `dracula`, `everforest`, `gruvbox`,
 `nord`, `one`, `rose-pine`, `solarized`, `tokyo-night`, `ayu`, `monokai`, and
 `github`. The last is labeled `GitHub` in the picker. The default is `quinjet`.
 
+System appearance detection uses the desktop portal utilities (`gdbus` or
+`dbus-send`) with a `gsettings` fallback on Linux, `defaults` on macOS, and
+`reg.exe` on Windows. Queries have time limits; unavailable settings retain the
+dark fallback. Explicit light and dark appearance flags do not query the system.
+
 Inside the interface, open the command palette with `:` or `Ctrl+P`. `Change
 Theme…` opens all thirteen palettes and `Change Appearance…` opens the system,
 light, and dark choices. Moving through the theme list previews each palette
@@ -435,6 +440,7 @@ The verbs in the right-hand column are documented in their groups:
 | Remove Checked Files in the dropdown, then `y` or Enter | `quinjet remove <paths> --yes` |
 | Revert Unstaged Changes / Revert All Changes in the dropdown, then `y` or Enter | `quinjet discard <paths> --yes` |
 | `x` on a conflict | opens the conflict resolution modal, matching `quinjet resolve <path> --ours`, `--theirs`, or `--stage`; conflict discard is not an operation |
+| `Ctrl+G`, then `↑` / `↓` and `Enter` | `quinjet account switch <login>` |
 | `c`, then `Ctrl+Enter` | `quinjet commit -m "<message>"` |
 | Amend in the command palette | `quinjet commit -m "<message>" --amend` |
 | `o` in the conflict modal | `quinjet resolve <path> --ours` |

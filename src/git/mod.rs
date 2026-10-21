@@ -1,3 +1,4 @@
+pub(crate) mod accounts;
 pub(crate) mod diff;
 pub(crate) mod github;
 pub(crate) mod history;
@@ -179,6 +180,7 @@ pub(crate) enum ConflictChoice {
 pub(crate) enum GitOperation {
     Stage(Vec<PathBuf>),
     StageAll,
+    SwitchAccount(String),
     Unstage(Vec<PathBuf>),
     UnstageAll,
     Discard(Vec<Change>),
@@ -224,6 +226,7 @@ impl GitOperation {
     pub(crate) const fn label(&self) -> &'static str {
         match self {
             Self::Stage(_) => "Staging change",
+            Self::SwitchAccount(_) => "Switching repository account",
             Self::StageAll => "Staging all changes",
             Self::Unstage(_) => "Unstaging change",
             Self::UnstageAll => "Unstaging all changes",

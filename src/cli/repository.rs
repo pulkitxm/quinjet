@@ -26,6 +26,7 @@ pub(super) fn run(session: &mut Session, out: &Emitter, verb: Verb) -> Result<u8
             "metadata commands run before a repository is opened",
         )
         .into()),
+        Verb::Account { command } => account::run(session, out, command),
         Verb::Status(args) => status(session, out, &args),
         Verb::Diff(args) => working_diff(session, out, &args),
         Verb::Stage(args) => {

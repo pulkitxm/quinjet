@@ -9,22 +9,15 @@ fn explicit_appearance_does_not_depend_on_the_system() {
 #[test]
 fn unavailable_or_unspecified_system_appearance_falls_back_to_dark() {
     assert_eq!(system_appearance(None), Appearance::Dark);
-    assert_eq!(
-        system_appearance(Some(dark_light::Mode::Unspecified)),
-        Appearance::Dark
-    );
 }
 
 #[test]
 fn system_appearance_maps_light_and_dark() {
     assert_eq!(
-        system_appearance(Some(dark_light::Mode::Light)),
+        system_appearance(Some(Appearance::Light)),
         Appearance::Light
     );
-    assert_eq!(
-        system_appearance(Some(dark_light::Mode::Dark)),
-        Appearance::Dark
-    );
+    assert_eq!(system_appearance(Some(Appearance::Dark)), Appearance::Dark);
 }
 
 #[test]

@@ -418,7 +418,7 @@ fn a_session_answers_a_status_command_with_the_working_tree() {
             .changes
             .iter()
             .any(|change| change.path == Path::new("added.txt")),
-        "the untracked file belongs in the answer: {status:?}"
+        "the untracked file belongs in the status answer"
     );
 }
 

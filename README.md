@@ -292,6 +292,7 @@ The UI intentionally stays uncluttered; press `?` for the complete shortcut refe
 | `r` | Refresh status; refetch the opened PR and checks in the PR view |
 | `/` | Filter changes/history, or focus the numeric PR field |
 | `[` / `]` | Previous/next diff hunk |
+| `Ctrl+G` | Switch GitHub account for this repository |
 | `:` or `Ctrl+P` | Command palette |
 | `?` | Shortcut help |
 | `q` | Close current tab, quit on the last tab |
@@ -356,3 +357,22 @@ QUINJET=$PWD/target/release/quinjet .venv/bin/python scripts/drive.py switch /pa
 ## License
 
 Quinjet is available under the [MIT License](LICENSE).
+
+## Separate company and personal accounts
+
+Log in to each GitHub account with `gh auth login`, then choose an identity
+once per repository:
+
+```bash
+quinjet account switch agayushh
+quinjet -C ~/code/company-project account switch ayushflickly
+quinjet account list
+```
+
+In the interface, press `Ctrl+G` to open the account switcher directly, or
+press `Ctrl+P` and choose **Switch GitHub Account for This Repository…**.
+Press `↑` / `↓` to choose a saved login from the account list and `Enter` to use it. Each repository
+remembers its own commit identity and HTTPS credentials. GitHub API operations use the same selected account.
+
+See [account switching](docs/cli/account/README.md) for SSH, signing, linked
+worktree and author-preservation behavior.

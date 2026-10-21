@@ -1,3 +1,4 @@
+mod account;
 pub(crate) mod command;
 mod completion;
 mod package_manager;
@@ -9,6 +10,7 @@ mod search;
 mod session;
 mod stack;
 mod stack_verbs;
+pub(crate) mod system_appearance;
 pub(crate) mod terminal_query;
 mod tui_args;
 mod update;
@@ -167,6 +169,11 @@ enum Verb {
     Tui(TuiArgs),
     #[doc = " Show the working tree, the index and the branch"]
     Status(WatchableArgs),
+    #[doc = " List or switch repository GitHub identities"]
+    Account {
+        #[command(subcommand)]
+        command: account::AccountVerb,
+    },
     #[doc = " Print the working-tree diff"]
     Diff(DiffArgs),
     #[doc = " Stage paths, or everything"]
@@ -258,6 +265,7 @@ impl Verb {
             | Self::Man(_)
             | Self::Capabilities => None,
             Self::Status(args) if args.watch => None,
+            Self::Account { .. } => Some("Reading GitHub accounts"),
             Self::Status(_) => Some("Reading repository status"),
             Self::Diff(_) => Some("Loading the working-tree diff"),
             Self::Stage(_) => Some("Staging changes"),

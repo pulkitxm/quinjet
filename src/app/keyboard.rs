@@ -20,6 +20,13 @@ impl App {
         }
         self.modal_scroll = 0;
         self.modal_free_scroll = false;
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(key.code, KeyCode::Char('g' | 'G'))
+        {
+            let mut effects = Vec::new();
+            self.execute_palette(PaletteCommand::SwitchAccount, &mut effects, now);
+            return effects;
+        }
         if self.pull_request_lookup_active {
             return self.handle_pull_request_lookup_key(key, now);
         }

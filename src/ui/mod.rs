@@ -48,6 +48,7 @@ mod horizontal_scrollbar;
 mod hover;
 mod image_diff;
 mod layout;
+mod modal_accounts;
 mod modal_branches;
 mod modal_choices;
 mod modal_conflict;
@@ -94,6 +95,7 @@ use image_diff::{ImageDrawState, draw_image_line, image_side, selected_image_pro
 use layout::draw_main_divider;
 #[cfg(test)]
 use layout::draw_text_selection;
+use modal_accounts::draw_accounts;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use modal_branches::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]

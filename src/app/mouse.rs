@@ -409,6 +409,7 @@ impl App {
 
     fn select_modal_row(&mut self, index: usize) {
         match self.modal.as_mut() {
+            Some(Modal::Accounts(picker)) => picker.selected = index,
             Some(
                 Modal::PullRequestReviewThreadActions { selected, .. }
                 | Modal::PullRequestActions { selected, .. }

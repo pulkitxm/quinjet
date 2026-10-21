@@ -44,6 +44,7 @@ impl Session {
         wanted: &dyn Fn() -> bool,
     ) -> Result<Outcome> {
         match command {
+            Command::Accounts => Ok(Outcome::Accounts(self.repository.accounts()?)),
             Command::Status => Ok(Outcome::Status(Box::new(self.repository.status()?))),
             Command::History {
                 revision,

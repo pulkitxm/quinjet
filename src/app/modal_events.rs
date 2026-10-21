@@ -9,6 +9,7 @@ impl App {
         now: Instant,
     ) -> Vec<AppEffect> {
         match modal {
+            Modal::Accounts(picker) => self.handle_account_key(picker, key),
             modal @ (Modal::PullRequestReviewComment { .. }
             | Modal::PullRequestReviewThreadActions { .. }
             | Modal::PullRequestReviewSubmit { .. }) => {

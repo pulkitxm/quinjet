@@ -45,6 +45,7 @@ pub(super) fn identity(command: &WorkerCommand) -> (&'static str, u64) {
         WorkerCommand::PrefetchPullRequestStackMembers { generation, .. } => {
             ("stack-warm", *generation)
         }
+        WorkerCommand::LoadAccounts { generation } => ("accounts", *generation),
         WorkerCommand::LoadBranches { generation } => ("branches", *generation),
         WorkerCommand::LoadHistoryBranches { generation } => ("history-branches", *generation),
         WorkerCommand::LoadStashes { generation } => ("stashes", *generation),

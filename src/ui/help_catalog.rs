@@ -363,6 +363,10 @@ pub(crate) const HELP_ROWS: &[HelpRow] = &[
         description: "Toggle unified / side-by-side diff",
     },
     HelpRow::Shortcut {
+        keys: "Ctrl+G",
+        description: "Switch GitHub account for this repository",
+    },
+    HelpRow::Shortcut {
         keys: ": / Ctrl+P",
         description: "Open command palette",
     },

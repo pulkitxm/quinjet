@@ -310,15 +310,14 @@ pub(super) fn draw_scrollbar(
     clippy::option_if_let_else,
     reason = "the branch is one arm of a longer chain that map_or_else cannot express"
 )]
-pub(super) fn draw_footer(
-    frame: &mut Frame<'_>,
+fn footer_content<'a>(
     area: Rect,
-    app: &App,
+    app: &'a App,
     theme: &Theme,
     link_hits: &mut Vec<LinkHit>,
     project_hits: &mut Vec<Rect>,
-) {
-    let left = if let Some(busy) = app.busy.as_deref() {
+) -> Line<'a> {
+    if let Some(busy) = app.busy.as_deref() {
         Line::from(vec![
             Span::styled(
                 format!(" {} ", app.operation_spinner()),
@@ -406,7 +405,37 @@ pub(super) fn draw_footer(
                 Style::default().fg(theme.muted),
             ),
         ])
+    }
+}
+
+pub(super) fn draw_footer(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &App,
+    theme: &Theme,
+    link_hits: &mut Vec<LinkHit>,
+    project_hits: &mut Vec<Rect>,
+) {
+    let full_area = area;
+    let account = app
+        .status
+        .account
+        .as_deref()
+        .map_or_else(|| "Account unset".to_owned(), |login| format!("@{login}"));
+    let account_label = format!(" {account} ");
+    let account_width = cells(account_label.width()).min(area.width);
+    let area = Rect {
+        width: area.width.saturating_sub(account_width),
+        ..area
     };
+    frame.render_widget(
+        Block::default()
+            .style(Style::default().bg(theme.panel_alt))
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(theme.border)),
+        full_area,
+    );
+    let left = footer_content(area, app, theme, link_hits, project_hits);
     frame.render_widget(
         Paragraph::new(left)
             .style(Style::default().bg(theme.panel_alt))
@@ -416,6 +445,21 @@ pub(super) fn draw_footer(
                     .border_style(Style::default().fg(theme.border)),
             ),
         area,
+    );
+    let account_area = Rect::new(
+        area.right(),
+        full_area.y.saturating_add(1),
+        account_width,
+        full_area.height.saturating_sub(1).min(1),
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            account_label,
+            Style::default().fg(theme.accent),
+        )))
+        .alignment(Alignment::Right)
+        .style(Style::default().bg(theme.panel_alt)),
+        account_area,
     );
 }
 

@@ -56,7 +56,9 @@ impl Repository {
             OsString::from("--untracked-files=all"),
             OsString::from("--ignore-submodules=none"),
         ])?;
-        Ok(parse_porcelain_v2(&output))
+        let mut status = parse_porcelain_v2(&output);
+        status.account = self.account_config("quinjet.account")?;
+        Ok(status)
     }
 
     pub(crate) fn resolve_revision(&self, revision: &str) -> Result<String> {

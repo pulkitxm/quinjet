@@ -45,6 +45,8 @@ quinjet update --check           check the latest stable release
 | [`quinjet worktree list`](./worktree/README.md) | Linked checkouts of the same repository |
 | [`quinjet project list`](./project/README.md) | Recently opened repositories grouped with their linked worktrees |
 
+Account switching: [`quinjet account list`, `account switch`](./account/README.md).
+
 ## Changing a repository
 
 | Page | What it covers |

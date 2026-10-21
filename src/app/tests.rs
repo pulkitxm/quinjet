@@ -260,6 +260,7 @@ fn pull_request_action_pickers_route_review_and_edit_flows() {
 fn app_with_changes() -> App {
     let mut app = App::new("/tmp/repo", "repo");
     app.status = RepoStatus {
+        account: None,
         branch: BranchState::default(),
         changes: vec![
             Change {

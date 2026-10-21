@@ -26,6 +26,7 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
     );
     match app.modal.as_ref() {
         None | Some(Modal::Help { .. }) => {}
+        Some(Modal::Accounts(picker)) => draw_accounts(frame, picker, &mut list, theme),
         Some(Modal::Commit { input, amend }) => {
             let (input, amend) = (input.clone(), *amend);
             draw_commit(

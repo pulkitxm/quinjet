@@ -106,6 +106,8 @@ pub(crate) struct BranchState {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RepoStatus {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
     pub branch: BranchState,
     pub changes: Vec<Change>,
 }

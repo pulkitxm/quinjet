@@ -299,6 +299,7 @@ pub(crate) enum ModalAction {
 
 #[derive(Debug, Clone)]
 pub(crate) enum Modal {
+    Accounts(account_picker::AccountPicker),
     Help {
         selected: usize,
         scroll: usize,
@@ -394,6 +395,7 @@ pub(crate) enum Modal {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PaletteCommand {
+    SwitchAccount,
     Refresh,
     StageAll,
     UnstageAll,
@@ -426,7 +428,8 @@ pub(crate) enum PaletteCommand {
 }
 
 impl PaletteCommand {
-    pub(crate) const ALL: [Self; 29] = [
+    pub(crate) const ALL: [Self; 30] = [
+        Self::SwitchAccount,
         Self::Refresh,
         Self::StageAll,
         Self::UnstageAll,
@@ -460,6 +463,7 @@ impl PaletteCommand {
 
     pub(crate) const fn label(self) -> &'static str {
         match self {
+            Self::SwitchAccount => "Switch GitHub Account for This Repository…",
             Self::Refresh => "Refresh Repository",
             Self::StageAll => "Stage All Changes",
             Self::UnstageAll => "Unstage All Changes",

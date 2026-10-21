@@ -51,6 +51,7 @@ fn check(name: &str, status: PullRequestCheckStatus) -> PullRequestCheck {
 #[test]
 fn status_groups_changes_the_way_the_changes_view_does() {
     let snapshot = RepoStatus {
+        account: None,
         branch: BranchState {
             head: "main".to_owned(),
             oid: Some("abc".to_owned()),
@@ -98,6 +99,7 @@ fn a_clean_tree_says_so_instead_of_printing_an_empty_list() {
 #[test]
 fn a_detached_head_is_named_as_detached() {
     let snapshot = RepoStatus {
+        account: None,
         branch: BranchState {
             head: "9f3c1d7e".to_owned(),
             detached: true,

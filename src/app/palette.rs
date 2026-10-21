@@ -9,6 +9,13 @@ impl App {
         now: Instant,
     ) {
         match command {
+            PaletteCommand::SwitchAccount => {
+                self.branch_generation = self.branch_generation.wrapping_add(1);
+                self.modal = Some(Modal::Accounts(account_picker::AccountPicker::default()));
+                effects.push(AppEffect::Git(Box::new(WorkerCommand::LoadAccounts {
+                    generation: self.branch_generation,
+                })));
+            }
             PaletteCommand::Refresh => self.request_active_refresh(effects),
             PaletteCommand::StageAll => self.queue_operation(GitOperation::StageAll, effects),
             PaletteCommand::UnstageAll => {

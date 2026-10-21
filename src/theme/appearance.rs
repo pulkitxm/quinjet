@@ -38,20 +38,24 @@ pub(crate) enum Appearance {
     Dark,
 }
 
-fn detect_system_appearance() -> Option<dark_light::Mode> {
+fn detect_system_appearance() -> Option<Appearance> {
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
     drop(
         std::thread::Builder::new()
             .name("system-appearance".to_owned())
-            .spawn(move || sender.send(dark_light::detect().ok()).unwrap_or_else(drop))
+            .spawn(move || {
+                sender
+                    .send(crate::cli::system_appearance::detect())
+                    .unwrap_or_else(drop);
+            })
             .ok()?,
     );
     receiver.recv_timeout(SYSTEM_APPEARANCE_TIMEOUT).ok()?
 }
 
-pub(super) const fn system_appearance(mode: Option<dark_light::Mode>) -> Appearance {
+pub(super) const fn system_appearance(mode: Option<Appearance>) -> Appearance {
     match mode {
-        Some(dark_light::Mode::Light) => Appearance::Light,
-        Some(dark_light::Mode::Dark | dark_light::Mode::Unspecified) | None => Appearance::Dark,
+        Some(Appearance::Light) => Appearance::Light,
+        Some(Appearance::Dark) | None => Appearance::Dark,
     }
 }
