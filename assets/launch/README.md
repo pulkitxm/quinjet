@@ -12,6 +12,7 @@ frame is the real binary running.
 | `03-ci-log.png` | One check run's steps folded open, with each step's log and duration | This repository, PR #142 |
 | `04-history.png` | Branch-scoped history with commit details and a lazily loaded patch | Synthetic repository |
 | `05-unified.png` | Unified diff mode over index-first collapsed file headers | Synthetic repository |
+| `landing-page.png` | The whole of quinjet.pulkit.page as it deploys | Rendered from `site/` |
 
 ## The synthetic repository
 
