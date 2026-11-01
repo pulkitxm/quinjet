@@ -37,8 +37,11 @@ DIRECTIVES = (
 
 HASH_SUFFIXES = {".ps1", ".psd1", ".rb", ".sh", ".toml", ".yaml", ".yml"}
 HASH_NAMES = {".editorconfig", ".gitignore", "CODEOWNERS", "Cargo.lock", "Makefile"}
+MARKUP_SUFFIXES = {".html", ".svg"}
 PLAIN_SUFFIXES = {".asc"}
 PLAIN_NAMES = {"CNAME", "LICENSE"}
+
+EMBEDDED_SOURCE = re.compile(r"<(style|script)\b[^>]*>(.*?)</\1\s*>", re.DOTALL | re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -314,6 +317,24 @@ def html_comments(source: str) -> list[Comment]:
     return found
 
 
+def markup_comments(source: str) -> list[Comment]:
+    """Find comments in markup and in the CSS and script it embeds."""
+    found = html_comments(source)
+    for match in EMBEDDED_SOURCE.finditer(source):
+        offset = match.start(2)
+        preceding = source.count("\n", 0, offset)
+        found.extend(
+            Comment(
+                embedded.start + offset,
+                embedded.stop + offset,
+                embedded.line + preceding,
+                embedded.text,
+            )
+            for embedded in c_comments(match.group(2), preserve_rust_docs=False)
+        )
+    return sorted(found, key=lambda comment: comment.start)
+
+
 def comments_for(path: Path, source: str) -> list[Comment]:
     """Select the strict scanner for a tracked file."""
     suffix = path.suffix
@@ -340,6 +361,8 @@ def comments_for(path: Path, source: str) -> list[Comment]:
         if suffix == ".rb":
             found.extend(ruby_blocks(source))
         return sorted(found, key=lambda comment: comment.start)
+    if suffix in MARKUP_SUFFIXES:
+        return markup_comments(source)
     if suffix in PLAIN_SUFFIXES or path.name in PLAIN_NAMES:
         return []
     message = f"unclassified tracked text file: {path}"

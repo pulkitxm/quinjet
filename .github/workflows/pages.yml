@@ -1,4 +1,4 @@
-name: Deploy installers to Pages
+name: Deploy site and installers to Pages
 
 on:
   push:
@@ -6,6 +6,8 @@ on:
     paths:
       - 'install.sh'
       - 'install.ps1'
+      - 'site/**'
+      - 'assets/quinjet-mark.svg'
       - 'packaging/apt/**'
       - 'scripts/build_apt_repository.sh'
       - '.github/workflows/pages.yml'
@@ -81,6 +83,8 @@ jobs:
         run: |
           mkdir _site
           cp install.sh install.ps1 _site/
+          cp -R site/. _site/
+          cp assets/quinjet-mark.svg _site/
       - name: Build apt repository
         if: steps.packages.outputs.count != '0'
         env:
