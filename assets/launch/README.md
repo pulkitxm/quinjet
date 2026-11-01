@@ -6,7 +6,6 @@ frame is the real binary running.
 
 | File | What it shows | Where it was recorded |
 | --- | --- | --- |
-| `demo-local.gif` | Opening a repository, expanding a diff, switching unified and side by side, toggling a file's staging, and moving to history | Synthetic repository |
 | `01-changes.png` | Changes view with a side-by-side syntax-highlighted diff | Synthetic repository |
 | `02-pr-checks.png` | A pull request's metadata, description and conversation beside all 72 check runs | This repository, PR #142 |
 | `03-ci-log.png` | One check run's steps folded open, with each step's log and duration | This repository, PR #142 |
@@ -40,3 +39,12 @@ frames are exact rather than photographed from a terminal:
 
 A Nerd Font is required. Without one the file icons render as replacement
 boxes.
+
+## The recording
+
+There is also a screen recording of the same workflow, which is deliberately
+not tracked: it is two megabytes, and the repository rejects tracked files over
+five hundred kilobytes. Compressing it far enough to fit destroys the legibility
+of terminal text, which is the only thing it exists to show. It is regenerated
+from a VHS tape rather than kept, and a local copy lives under `extras/`,
+which this repository ignores.
