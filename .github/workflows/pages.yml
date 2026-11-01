@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'CNAME'
       - 'install.sh'
       - 'install.ps1'
       - 'site/**'
@@ -82,7 +83,7 @@ jobs:
       - name: Prepare Pages artifact
         run: |
           mkdir _site
-          cp install.sh install.ps1 _site/
+          cp CNAME install.sh install.ps1 _site/
           cp -R site/. _site/
           cp assets/quinjet-mark.svg _site/
       - name: Build apt repository
