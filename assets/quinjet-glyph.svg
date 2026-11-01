@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="60 48 164 160" width="164" height="160" role="img" aria-label="Quinjet">
+  <defs>
+    <linearGradient id="quinjet-glyph-wing" x1="70" y1="196" x2="170" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#56d4dd"/>
+      <stop offset="1" stop-color="#58a6ff"/>
+    </linearGradient>
+  </defs>
+  <path d="M68 62 Q68 52 78 58 L156 120 Q163 128 156 136 L78 198 Q68 204 68 194 L68 172 Q68 166 73 162 L118 128 L73 94 Q68 90 68 84 Z" fill="url(#quinjet-glyph-wing)"/>
+  <rect x="172" y="112" width="44" height="32" rx="8" fill="#3fb950"/>
+</svg>

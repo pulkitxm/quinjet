@@ -126,7 +126,7 @@ jobs:
             target: x86_64-apple-darwin
             artifact: quinjet-macos-x86_64
             binary: quinjet
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
             artifact: quinjet-macos-aarch64
             binary: quinjet

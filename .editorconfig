@@ -14,6 +14,9 @@ indent_size = unset
 [*.{yml,yaml,json,toml,md}]
 indent_size = 2
 
+[*.{html,svg}]
+indent_size = 2
+
 [*.{sh,ps1}]
 indent_size = 4
 

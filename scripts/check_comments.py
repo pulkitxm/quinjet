@@ -40,6 +40,8 @@ HASH_NAMES = {".editorconfig", ".gitignore", "CODEOWNERS", "Cargo.lock", "Makefi
 PLAIN_SUFFIXES = {".asc"}
 PLAIN_NAMES = {"CNAME", "LICENSE"}
 
+EMBEDDED_SOURCE = re.compile(r"<(style|script)\b[^>]*>(.*?)</\1\s*>", re.DOTALL | re.IGNORECASE)
+
 
 @dataclass(frozen=True)
 class Comment:
@@ -314,33 +316,70 @@ def html_comments(source: str) -> list[Comment]:
     return found
 
 
+def markup_comments(source: str) -> list[Comment]:
+    """Find comments in markup and in the CSS and script it embeds."""
+    found = html_comments(source)
+    for match in EMBEDDED_SOURCE.finditer(source):
+        offset = match.start(2)
+        preceding = source.count("\n", 0, offset)
+        found.extend(
+            Comment(
+                embedded.start + offset,
+                embedded.stop + offset,
+                embedded.line + preceding,
+                embedded.text,
+            )
+            for embedded in c_comments(match.group(2), preserve_rust_docs=False)
+        )
+    return sorted(found, key=lambda comment: comment.start)
+
+
+def rust_comments(source: str) -> list[Comment]:
+    """Find Rust comments while preserving documentation attributes."""
+    return c_comments(source, preserve_rust_docs=True)
+
+
+def json_comments(source: str) -> list[Comment]:
+    """Find comments in JSON with C syntax."""
+    return c_comments(source, preserve_rust_docs=False)
+
+
+def hash_family_comments(path: Path, source: str) -> list[Comment]:
+    """Find comments in a format whose line comments start with a hash."""
+    found = hash_comments(source)
+    if path.name == ".editorconfig":
+        found.extend(semicolon_comments(source))
+    if path.suffix in {".ps1", ".psd1"}:
+        blocks = powershell_blocks(source)
+        found = [
+            comment
+            for comment in found
+            if not any(block.start <= comment.start < block.stop for block in blocks)
+        ]
+        found.extend(blocks)
+    if path.suffix == ".rb":
+        found.extend(ruby_blocks(source))
+    return sorted(found, key=lambda comment: comment.start)
+
+
+SUFFIX_SCANNERS = {
+    ".rs": rust_comments,
+    ".py": python_comments,
+    ".json": json_comments,
+    ".md": html_comments,
+    ".html": markup_comments,
+    ".svg": markup_comments,
+}
+
+
 def comments_for(path: Path, source: str) -> list[Comment]:
     """Select the strict scanner for a tracked file."""
-    suffix = path.suffix
-    if suffix == ".rs":
-        return c_comments(source, preserve_rust_docs=True)
-    if suffix == ".py":
-        return python_comments(source)
-    if suffix == ".json":
-        return c_comments(source, preserve_rust_docs=False)
-    if suffix == ".md":
-        return html_comments(source)
-    if suffix in HASH_SUFFIXES or path.name in HASH_NAMES:
-        found = hash_comments(source)
-        if path.name == ".editorconfig":
-            found.extend(semicolon_comments(source))
-        if suffix in {".ps1", ".psd1"}:
-            blocks = powershell_blocks(source)
-            found = [
-                comment
-                for comment in found
-                if not any(block.start <= comment.start < block.stop for block in blocks)
-            ]
-            found.extend(blocks)
-        if suffix == ".rb":
-            found.extend(ruby_blocks(source))
-        return sorted(found, key=lambda comment: comment.start)
-    if suffix in PLAIN_SUFFIXES or path.name in PLAIN_NAMES:
+    scanner = SUFFIX_SCANNERS.get(path.suffix)
+    if scanner is not None:
+        return scanner(source)
+    if path.suffix in HASH_SUFFIXES or path.name in HASH_NAMES:
+        return hash_family_comments(path, source)
+    if path.suffix in PLAIN_SUFFIXES or path.name in PLAIN_NAMES:
         return []
     message = f"unclassified tracked text file: {path}"
     raise ValueError(message)
