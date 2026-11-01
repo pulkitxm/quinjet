@@ -32,7 +32,7 @@ jobs:
             target: x86_64-apple-darwin
             binary: quinjet
             budget: 6_400_000
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
             binary: quinjet
             budget: 5_500_000
