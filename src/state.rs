@@ -8,11 +8,16 @@ use serde::{Deserialize, Serialize};
 #[cfg(test)]
 use crate::git::Repository;
 
+mod preferences;
 mod project_picker;
 mod projects;
 mod remote;
 pub(crate) mod session;
 
+#[cfg(not(test))]
+pub(crate) use preferences::load_code_wrap;
+#[cfg(not(test))]
+pub(crate) use preferences::record_code_wrap;
 pub(crate) use project_picker::load_collapsed_project_groups;
 #[cfg(not(test))]
 pub(crate) use project_picker::record_collapsed_project_groups;

@@ -81,7 +81,13 @@ impl App {
     }
 
     pub(super) fn toggle_code_wrap(&mut self) {
-        self.wrap_code = !self.wrap_code;
+        self.set_code_wrap(!self.wrap_code);
+        #[cfg(not(test))]
+        crate::state::record_code_wrap(self.wrap_code);
+    }
+
+    pub(crate) fn set_code_wrap(&mut self, wrap_code: bool) {
+        self.wrap_code = wrap_code;
         self.horizontal_scroll = 0;
         self.diff_restore_scroll = self.diff_scroll_anchor.is_some();
         self.invalidate_diff_rows();
