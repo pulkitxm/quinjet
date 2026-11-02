@@ -331,6 +331,25 @@ jobs:
           test -s "${prefix}/share/fish/vendor_completions.d/quinjet.fish"
           test -s "${prefix}/share/man/man1/quinjet.1"
 
+  ppa:
+    name: PPA source package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283
+        with:
+          tool: cargo-vendor-filterer@0.5.18
+      - name: Build the source packages
+        run: |
+          set -euo pipefail
+          version=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[0].version')
+          sh scripts/build_ppa_sources.sh "${version}" "${RUNNER_TEMP}/ppa"
+      - name: Build, install, and smoke test the noble package offline
+        run: sh scripts/test_ppa_package.sh "${RUNNER_TEMP}"/ppa/*~ubuntu24.04.dsc
+
   ci:
     name: CI
     if: always()
@@ -346,6 +365,7 @@ jobs:
       - package
       - installers
       - homebrew
+      - ppa
     runs-on: ubuntu-26.04
     steps:
       - name: Fail if any required job failed
