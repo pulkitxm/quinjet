@@ -29,6 +29,16 @@ git -C "${root}" archive --format=tar --prefix="quinjet-${version}/" HEAD | tar 
     --platform=x86_64-unknown-linux-gnu \
     --platform=aarch64-unknown-linux-gnu \
     "${source_dir}/vendor" >/dev/null)
+python3 - "${source_dir}/vendor" <<'PYTHON'
+import json
+import sys
+from pathlib import Path
+
+for checksum in Path(sys.argv[1]).glob("*/.cargo-checksum.json"):
+    data = json.loads(checksum.read_text())
+    data["files"] = {}
+    checksum.write_text(json.dumps(data))
+PYTHON
 tar -C "${work}" --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
     -cf - "quinjet-${version}" | xz -9 -T1 >"${work}/${orig}"
 
