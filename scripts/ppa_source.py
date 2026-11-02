@@ -49,10 +49,7 @@ Architecture: amd64 arm64
 Depends: ${{shlibs:Depends}}, ${{misc:Depends}}, git
 Suggests: gh
 Description: fast, live, keyboard-first Git source-control interface
- Quinjet is a live, keyboard-first Git source-control interface for the
- terminal. It combines repository status, syntax-highlighted diffs, commit
- history, branches, stashes, and pull requests in one executable.
-"""
+{description}"""
 
 RULES = """\
 #!/usr/bin/make -f
@@ -102,9 +99,9 @@ override_dh_dwz:
 CHANGELOG = """\
 quinjet ({version}) {series}; urgency=medium
 
-  * Release {upstream}.
+{entry}
 
- -- {maintainer}  {date}
+{trailer}
 """
 
 COPYRIGHT = """\
@@ -119,9 +116,7 @@ License: MIT
 Files: vendor/*
 Copyright: The authors of each vendored crate
 License: various
- Each vendored crate carries its own license in its directory and
- Cargo.toml.
-
+{vendored}
 License: MIT
 {license}"""
 
@@ -131,8 +126,20 @@ def package_version(upstream: str, series: str) -> str:
     return f"{upstream}-1~ubuntu{SERIES[series][0]}"
 
 
+DESCRIPTION = """\
+Quinjet is a live, keyboard-first Git source-control interface for the
+terminal. It combines repository status, syntax-highlighted diffs, commit
+history, branches, stashes, and pull requests in one executable.
+"""
+
+VENDORED = """\
+Each vendored crate carries its own license in its directory and
+Cargo.toml.
+"""
+
+
 def indented(text: str) -> str:
-    """Fold a plain-text license into a Debian copyright paragraph."""
+    """Fold plain text into a Debian continuation paragraph."""
     lines = [f" {line}" if line.strip() else " ." for line in text.strip().splitlines()]
     return "\n".join(lines) + "\n"
 
@@ -145,16 +152,19 @@ def render(upstream: str, series: str, date: datetime) -> tuple[dict[str, str], 
         return {}, f"unknown series {series}; known: {', '.join(SERIES)}"
     rust = SERIES[series][1]
     files = {
-        "control": CONTROL.format(maintainer=MAINTAINER, rust=rust),
+        "control": CONTROL.format(
+            maintainer=MAINTAINER, rust=rust, description=indented(DESCRIPTION)
+        ),
         "rules": RULES.format(rust=rust),
         "changelog": CHANGELOG.format(
             version=package_version(upstream, series),
             series=series,
-            upstream=upstream,
-            maintainer=MAINTAINER,
-            date=format_datetime(date),
+            entry=f"{' ' * 2}* Release {upstream}.",
+            trailer=f" -- {MAINTAINER}{' ' * 2}{format_datetime(date)}",
         ),
-        "copyright": COPYRIGHT.format(license=indented(LICENSE.read_text())),
+        "copyright": COPYRIGHT.format(
+            license=indented(LICENSE.read_text()), vendored=indented(VENDORED)
+        ),
         "source/format": "3.0 (quilt)\n",
     }
     return files, None
