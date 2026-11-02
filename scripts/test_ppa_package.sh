@@ -23,7 +23,7 @@ q --version
 test -s /usr/share/bash-completion/completions/quinjet
 test -s /usr/share/fish/vendor_completions.d/quinjet.fish
 test -s /usr/share/zsh/vendor-completions/_quinjet
-test -s /usr/share/man/man1/quinjet.1
+test -s /usr/share/man/man1/quinjet.1.gz
 
 repository=$(mktemp -d)
 git -C "${repository}" init --quiet
