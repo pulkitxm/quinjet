@@ -167,12 +167,63 @@ impl Repository {
             };
             drop(updates.insert(text(head), (text(updated_at), updated_unix)));
         }
-        for worktree in worktrees {
+        for worktree in worktrees.iter_mut() {
             if let Some((updated_at, updated_unix)) = updates.get(&worktree.head) {
                 worktree.updated_at = Some(updated_at.clone());
                 worktree.updated_unix = Some(*updated_unix);
             }
         }
+        for worktree in worktrees.iter_mut().filter(|worktree| !worktree.bare) {
+            let Some(modified) = self.latest_uncommitted_change(&worktree.path) else {
+                continue;
+            };
+            if worktree
+                .updated_unix
+                .is_none_or(|committed| modified > committed)
+                && let Some(updated_at) = time::OffsetDateTime::from_unix_timestamp(modified)
+                    .ok()
+                    .and_then(|timestamp| {
+                        timestamp
+                            .format(&time::format_description::well_known::Rfc3339)
+                            .ok()
+                    })
+            {
+                worktree.updated_at = Some(updated_at);
+                worktree.updated_unix = Some(modified);
+            }
+        }
+    }
+
+    fn latest_uncommitted_change(&self, worktree: &Path) -> Option<i64> {
+        let output = self
+            .checked([
+                OsString::from("-C"),
+                worktree.as_os_str().to_owned(),
+                OsString::from("status"),
+                OsString::from("--porcelain=v1"),
+                OsString::from("-z"),
+                OsString::from("--untracked-files=all"),
+            ])
+            .ok()?;
+        let mut entries = output
+            .split(|byte| *byte == 0)
+            .filter(|entry| !entry.is_empty());
+        let mut latest = None;
+        while let Some(entry) = entries.next() {
+            let (Some(state), Some(path)) = (entry.get(..2), entry.get(3..)) else {
+                continue;
+            };
+            if matches!(state.first(), Some(b'R' | b'C')) {
+                let _ = entries.next();
+            }
+            let modified = fs::symlink_metadata(worktree.join(text(path)))
+                .and_then(|metadata| metadata.modified())
+                .ok()
+                .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+                .and_then(|duration| i64::try_from(duration.as_secs()).ok());
+            latest = latest.max(modified);
+        }
+        latest
     }
 
     pub(crate) fn git_common_dir(&self) -> Result<PathBuf> {

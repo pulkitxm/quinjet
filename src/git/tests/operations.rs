@@ -345,3 +345,28 @@ fn missing_worktree_heads_do_not_hide_valid_update_times() {
     assert!(worktrees[1].updated_at.is_none());
     assert!(worktrees[1].updated_unix.is_none());
 }
+
+#[test]
+fn uncommitted_file_changes_advance_worktree_update_times() {
+    let test_repository = TestRepository::new();
+    let repository = test_repository.repository();
+    let committed = repository.worktrees().unwrap()[0].updated_unix.unwrap();
+    let edited = committed + 86_400;
+    let file = fs::File::create(test_repository.path.join("draft.txt")).unwrap();
+    file.set_modified(
+        std::time::UNIX_EPOCH + std::time::Duration::from_secs(u64::try_from(edited).unwrap()),
+    )
+    .unwrap();
+
+    let worktrees = repository.worktrees().unwrap();
+
+    assert_eq!(worktrees[0].updated_unix, Some(edited));
+    assert_eq!(
+        worktrees[0].updated_at.as_deref().map(|value| {
+            time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
+                .unwrap()
+                .unix_timestamp()
+        }),
+        Some(edited)
+    );
+}
