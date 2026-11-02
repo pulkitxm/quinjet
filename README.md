@@ -49,6 +49,19 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 
 ## Installation
 
+### Ubuntu PPA
+
+On Ubuntu 22.04 or newer:
+
+```bash
+sudo add-apt-repository ppa:pulkitxm/quinjet
+sudo apt install quinjet
+```
+
+Launchpad builds x86-64 and ARM64 packages for every supported Ubuntu release,
+and upgrades arrive through `apt upgrade`. See the
+[PPA guide](docs/guides/ppa.md) for package contents and removal.
+
 ### apt
 
 On Debian or Ubuntu, add the signed Quinjet repository once:
