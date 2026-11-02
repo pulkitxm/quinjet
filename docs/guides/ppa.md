@@ -29,8 +29,8 @@ sudo apt install --only-upgrade quinjet
 ```
 
 `quinjet update` refuses to replace an apt-owned executable and prints that
-command instead. New releases appear once Launchpad finishes building them,
-usually within an hour of the GitHub release.
+command instead. New releases appear once Launchpad finishes building them
+after the GitHub release.
 
 ## Remove
 
