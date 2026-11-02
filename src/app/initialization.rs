@@ -14,7 +14,16 @@ impl App {
             view_states: ViewStates::default(),
             focus: Focus::Sidebar,
             diff_layout: DiffLayout::SideBySide,
-            wrap_code: false,
+            wrap_code: {
+                #[cfg(test)]
+                {
+                    false
+                }
+                #[cfg(not(test))]
+                {
+                    crate::state::load_code_wrap()
+                }
+            },
             theme: Theme::default(),
             theme_selection: ThemeName::default().into(),
             appearance_choice: AppearanceChoice::default(),

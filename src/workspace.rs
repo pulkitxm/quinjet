@@ -328,7 +328,11 @@ impl RepositoryWorkspace {
         let theme = source.app.theme_selection;
         let appearance = source.app.appearance_choice;
         let mouse = source.app.mouse_capture_preference;
+        let wrap_code = source.app.wrap_code;
         for (_, runtime) in self.tabs.iter_mut() {
+            if runtime.app.wrap_code != wrap_code {
+                runtime.app.set_code_wrap(wrap_code);
+            }
             if runtime.app.theme_selection != theme || runtime.app.appearance_choice != appearance {
                 runtime.app.set_theme_selection(theme, appearance);
             }
