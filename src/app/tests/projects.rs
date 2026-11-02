@@ -411,3 +411,34 @@ fn machine_shortcut_skips_unavailable_machines() {
     assert!(effects.is_empty());
     assert!(matches!(app.modal, Some(Modal::Projects { .. })));
 }
+
+#[test]
+fn project_filter_accepts_navigation_letters() {
+    let mut app = App::new("/tmp/repo", "repo");
+    app.modal = Some(Modal::Projects {
+        groups: vec![ProjectGroup {
+            name: "repo".to_owned(),
+            common_dir: PathBuf::from("/tmp/repo/.git"),
+            worktrees: vec![sample_worktree("/tmp/repo", "main", true)],
+        }],
+        selected: 0,
+        query: TextBuffer::default(),
+        collapsed: HashSet::new(),
+        loading: false,
+        opening: None,
+        mode: ProjectOpenMode::CurrentTab,
+    });
+    let now = Instant::now();
+
+    for letter in ['h', 'j', 'k', 'l'] {
+        drop(app.handle_key(
+            KeyEvent::new(KeyCode::Char(letter), KeyModifiers::NONE),
+            now,
+        ));
+    }
+
+    let Some(Modal::Projects { query, .. }) = &app.modal else {
+        panic!("project picker closed");
+    };
+    assert_eq!(query.value, "hjkl");
+}

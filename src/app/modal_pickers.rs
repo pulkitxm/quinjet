@@ -68,13 +68,13 @@ impl App {
                     }
                 });
                 match key.code {
-                    KeyCode::Up | KeyCode::Char('k') => {
+                    KeyCode::Up => {
                         *selected = previous_list_index(*selected, visible.len());
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
+                    KeyCode::Down => {
                         *selected = next_list_index(*selected, visible.len());
                     }
-                    KeyCode::Left | KeyCode::Char('h') => {
+                    KeyCode::Left => {
                         if let Some(group) = selected_group
                             && !collapsed.contains(&group.common_dir)
                         {
@@ -93,7 +93,7 @@ impl App {
                             self.remember_collapsed_project_groups(collapsed);
                         }
                     }
-                    KeyCode::Right | KeyCode::Char('l') => {
+                    KeyCode::Right => {
                         if let Some(group) = selected_group
                             && collapsed.remove(&group.common_dir)
                         {
@@ -157,10 +157,10 @@ impl App {
                 }
                 let visible = Self::filtered_github_repositories(items, &query.value);
                 match key.code {
-                    KeyCode::Up | KeyCode::Char('k') => {
+                    KeyCode::Up => {
                         *selected = previous_list_index(*selected, visible.len());
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
+                    KeyCode::Down => {
                         *selected = next_list_index(*selected, visible.len());
                     }
                     KeyCode::Enter if !*loading => {
