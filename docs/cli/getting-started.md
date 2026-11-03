@@ -57,6 +57,15 @@ sudo apt install quinjet
 See the [apt guide](../guides/apt.md) for upgrades, package contents, and
 repository verification.
 
+On Ubuntu, or any Linux distribution with snapd, the Snap Store installs
+Quinjet in one command and keeps it up to date:
+
+```bash
+sudo snap install quinjet --classic
+```
+
+See the [Snap guide](../guides/snap.md) for the `q` alias and removal.
+
 On Windows, Winget installs Quinjet and its Git dependency:
 
 ```text

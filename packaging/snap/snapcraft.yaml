@@ -1,0 +1,36 @@
+name: quinjet
+title: Quinjet
+base: core24
+adopt-info: quinjet
+summary: A fast, live, keyboard-first Git source-control interface for the terminal
+description: |
+  Quinjet is a live, keyboard-first Git source-control interface for the
+  terminal. It combines repository status, syntax-highlighted diffs, commit
+  history, branches, stashes, and pull requests in one executable.
+
+  Quinjet drives your own Git installation, so it honors your configuration,
+  credentials, SSH keys, hooks, editor, and the GitHub CLI exactly as they are.
+license: MIT
+website: https://quinjet.pulkit.page
+source-code: https://github.com/pulkitxm/quinjet
+issues: https://github.com/pulkitxm/quinjet/issues
+contact: https://github.com/pulkitxm/quinjet/issues
+grade: stable
+confinement: classic
+
+platforms:
+  amd64:
+  arm64:
+
+apps:
+  quinjet:
+    command: bin/quinjet
+    completer: share/bash-completion/completions/quinjet
+
+parts:
+  quinjet:
+    plugin: dump
+    source: payload
+    override-build: |
+      craftctl default
+      craftctl set version="$("${CRAFT_PART_INSTALL}/bin/quinjet" --version | cut -d ' ' -f 2)"

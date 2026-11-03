@@ -21,7 +21,8 @@ Options:
 Package-manager installations stay under their manager. A resolved executable
 inside a Homebrew Cellar makes `quinjet update` run `brew upgrade quinjet` and
 print a warning that the same command can be run directly. An apt-owned
-`/usr/bin/quinjet` or a Winget package directory still prints the matching
+`/usr/bin/quinjet`, an executable under a snap mount such as
+`/snap/quinjet/`, or a Winget package directory still prints the matching
 upgrade command and exits 4 without a network request. Replacing those files
 directly would leave the manager's records describing a version that is no
 longer installed. `update --check` is unaffected and still reports whether a

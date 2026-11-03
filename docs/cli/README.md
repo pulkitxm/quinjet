@@ -74,6 +74,7 @@ Account switching: [`quinjet account list`, `account switch`](./account/README.m
 | Page | What it covers |
 | --- | --- |
 | [Installing with apt](../guides/apt.md) | Signed Debian and Ubuntu repository setup, upgrades, package contents, and removal |
+| [Installing with Snap](../guides/snap.md) | Snap Store installation on Ubuntu and other Linux distributions, the `q` alias, updates, and removal |
 | [Installing with Winget](../guides/winget.md) | Windows installation, upgrades, package inspection, and removal |
 | [Installing with Homebrew](../guides/homebrew.md) | Tap installation on macOS and Linux, upgrades, package contents, and removal |
 | [Watching CI from a script](../guides/watching-ci.md) | Blocking on checks, reading the verdict from an exit code, and pulling a failing job's log out with `jq` |

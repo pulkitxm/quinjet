@@ -23,3 +23,6 @@ lcov.info
 mutants.out/
 mutants.out.old/
 *.cdx.json
+
+/packaging/snap/payload/
+*.snap
