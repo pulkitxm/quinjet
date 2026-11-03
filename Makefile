@@ -11,11 +11,11 @@ define preserve-lockfiles
 endef
 
 .PHONY: ci ci-fast deep fmt fmt-check lint lint-nightly test doc msrv build package \
-	install-check comments rust-sizes secrets homebrew winget typos spellcheck deny audit osv sbom unused sort hack wiki \
+	install-check comments rust-sizes secrets homebrew winget ppa typos spellcheck deny audit osv sbom unused sort hack wiki \
 	coverage shell actions yaml markdown toml editorconfig ruff miri careful sanitize mutants \
 	minimal-versions udeps bloat optimization-docs tools tools-deep
 
-ci: fmt-check lint test doc comments rust-sizes secrets homebrew winget typos spellcheck deny audit osv unused sort hack \
+ci: fmt-check lint test doc comments rust-sizes secrets homebrew winget ppa typos spellcheck deny audit osv unused sort hack \
 	shell actions yaml markdown toml editorconfig ruff wiki package
 
 ci-fast: fmt-check lint test comments rust-sizes secrets
@@ -69,6 +69,9 @@ homebrew:
 
 winget:
 	python3 scripts/winget_manifest.py --selftest
+
+ppa:
+	python3 scripts/ppa_source.py --selftest
 
 comments:
 	python3 scripts/check_comments.py --selftest
@@ -137,8 +140,8 @@ coverage:
 	$(CARGO) llvm-cov --all-features --locked --fail-under-lines $(COVERAGE_MIN)
 
 shell:
-	shellcheck --severity=style --enable=all install.sh tests/install.sh scripts/build_apt_repository.sh scripts/update_homebrew_tap.sh scripts/submit_winget.sh
-	shfmt --diff --indent 4 --case-indent install.sh tests/install.sh scripts/build_apt_repository.sh scripts/update_homebrew_tap.sh scripts/submit_winget.sh
+	shellcheck --severity=style --enable=all install.sh tests/install.sh scripts/build_apt_repository.sh scripts/update_homebrew_tap.sh scripts/submit_winget.sh scripts/build_ppa_sources.sh scripts/test_ppa_package.sh
+	shfmt --diff --indent 4 --case-indent install.sh tests/install.sh scripts/build_apt_repository.sh scripts/update_homebrew_tap.sh scripts/submit_winget.sh scripts/build_ppa_sources.sh scripts/test_ppa_package.sh
 
 actions:
 	actionlint

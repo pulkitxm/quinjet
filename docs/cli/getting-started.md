@@ -44,7 +44,17 @@ than repeating them.
 
 ## Installing
 
-On Debian or Ubuntu, add the signed apt repository and install the package:
+On Ubuntu 22.04 or newer, the Launchpad PPA installs Quinjet in two commands:
+
+```bash
+sudo add-apt-repository ppa:pulkitxm/quinjet
+sudo apt install quinjet
+```
+
+See the [PPA guide](../guides/ppa.md) for upgrades and removal.
+
+On Debian, or on Ubuntu without the PPA, add the signed apt repository and
+install the package:
 
 ```bash
 sudo install -d -m 0755 /etc/apt/keyrings

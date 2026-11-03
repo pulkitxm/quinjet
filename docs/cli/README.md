@@ -73,6 +73,7 @@ Account switching: [`quinjet account list`, `account switch`](./account/README.m
 
 | Page | What it covers |
 | --- | --- |
+| [Installing from the Ubuntu PPA](../guides/ppa.md) | Launchpad PPA setup on Ubuntu, upgrades, package contents, and removal |
 | [Installing with apt](../guides/apt.md) | Signed Debian and Ubuntu repository setup, upgrades, package contents, and removal |
 | [Installing with Winget](../guides/winget.md) | Windows installation, upgrades, package inspection, and removal |
 | [Installing with Homebrew](../guides/homebrew.md) | Tap installation on macOS and Linux, upgrades, package contents, and removal |

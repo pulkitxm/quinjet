@@ -13,6 +13,8 @@ on:
       - 'scripts/homebrew_formula.py'
       - 'scripts/update_homebrew_tap.sh'
       - 'scripts/winget_manifest.py'
+      - 'scripts/ppa_source.py'
+      - 'scripts/build_ppa_sources.sh'
       - '.github/workflows/release.yml'
   workflow_dispatch:
 
@@ -377,3 +379,41 @@ jobs:
             || { echo "release blocked: the tap did not take ${TAG}" >&2; exit 1; }
       - name: Deploy package repositories
         run: pukbot repository dispatch apt-release --repo "${GITHUB_REPOSITORY}" --json
+
+  ppa:
+    name: Launchpad PPA
+    needs: [version, release]
+    runs-on: ubuntu-24.04
+    environment: launchpad
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283
+        with:
+          tool: cargo-vendor-filterer@0.5.18
+      - name: Build the source packages
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: sh scripts/build_ppa_sources.sh "${VERSION}" "${RUNNER_TEMP}/ppa"
+      - name: Sign and upload to the PPA
+        env:
+          LAUNCHPAD_SIGNING_KEY: ${{ secrets.LAUNCHPAD_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${LAUNCHPAD_SIGNING_KEY}" ]; then
+            echo "::notice::LAUNCHPAD_SIGNING_KEY is not set, so the PPA sources were built but not uploaded"
+            exit 0
+          fi
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends devscripts dput
+          export GNUPGHOME="${RUNNER_TEMP}/launchpad-gpg"
+          install -d -m 0700 "${GNUPGHOME}"
+          printf '%s' "${LAUNCHPAD_SIGNING_KEY}" | gpg --batch --import
+          fingerprint=$(gpg --batch --with-colons --list-secret-keys | awk -F: '/^fpr/ { print $10; exit }')
+          for changes in "${RUNNER_TEMP}"/ppa/*_source.changes; do
+            debsign --no-re-sign -k"${fingerprint}" "${changes}"
+            dput ppa:pulkitxm/quinjet "${changes}"
+          done
