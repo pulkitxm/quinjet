@@ -80,7 +80,7 @@ image = { version = "0.25", default-features = false, features = [
   "qoi",
 ] }
 indicatif = "0.18.3"
-lopdf = { version = "0.46.0", default-features = false }
+lopdf = { version = "0.47.0", default-features = false }
 notify = "8.0"
 rand = "0.8"
 ratatui = { version = "0.30", default-features = false, features = [
