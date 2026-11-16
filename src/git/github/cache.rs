@@ -246,7 +246,7 @@ pub(super) fn repository_from_pull_request_url(url: &str, number: u64) -> Option
     })
 }
 
-pub(super) fn cache_root() -> Option<PathBuf> {
+pub(crate) fn cache_root() -> Option<PathBuf> {
     if let Some(path) = env::var_os("QUINJET_CACHE_DIR").filter(|path| !path.is_empty()) {
         return Some(PathBuf::from(path));
     }

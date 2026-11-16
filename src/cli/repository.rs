@@ -18,6 +18,7 @@ pub(super) fn run(session: &mut Session, out: &Emitter, verb: Verb) -> Result<u8
         .into()),
         Verb::Remote { .. }
         | Verb::Project { .. }
+        | Verb::Graft(_)
         | Verb::Completions(_)
         | Verb::Man(_)
         | Verb::Capabilities

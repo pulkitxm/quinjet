@@ -2,6 +2,19 @@
 use super::*;
 
 impl Repository {
+    pub(crate) fn patch_text(&self, staged: bool, limit: usize) -> Result<String> {
+        let mut args = vec!["diff", "--no-color", "--no-ext-diff"];
+        if staged {
+            args.push("--cached");
+        }
+        let (bytes, truncated) = self.checked_bounded(args, limit)?;
+        let mut text = String::from_utf8_lossy(&bytes).into_owned();
+        if truncated {
+            text.push_str("\n[truncated by Quinjet]\n");
+        }
+        Ok(text)
+    }
+
     pub(crate) fn has_commit(&self, oid: &str) -> bool {
         is_full_oid(oid)
             && self

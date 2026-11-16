@@ -1,6 +1,7 @@
 mod account;
 pub(crate) mod command;
 mod completion;
+mod graft;
 mod package_manager;
 mod pr_verbs;
 mod remote;
@@ -244,6 +245,8 @@ enum Verb {
         #[command(subcommand)]
         command: StackVerb,
     },
+    #[doc = " Graft Quinjet onto Graftcode gateways and call their tools"]
+    Graft(graft::GraftArgs),
     #[doc = " Print or install shell completions"]
     #[command(visible_alias = "completion")]
     Completions(CompletionsArgs),
@@ -263,6 +266,7 @@ impl Verb {
             | Self::Project { .. }
             | Self::Completions(_)
             | Self::Man(_)
+            | Self::Graft(_)
             | Self::Capabilities => None,
             Self::Status(args) if args.watch => None,
             Self::Account { .. } => Some("Reading GitHub accounts"),

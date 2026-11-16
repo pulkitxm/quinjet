@@ -4,10 +4,10 @@ use super::*;
 mod commits;
 use commits::selected_commit;
 mod monitor;
-pub(super) use monitor::select_check;
-use monitor::{checks, logs, watch_conversation, watch_pull_request};
 #[cfg(test)]
-pub(super) use monitor::{ensure_log_available, exit_for};
+pub(super) use monitor::exit_for;
+use monitor::{checks, logs, watch_conversation, watch_pull_request};
+pub(super) use monitor::{ensure_log_available, select_check};
 
 #[expect(
     clippy::too_many_lines,

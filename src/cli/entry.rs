@@ -59,6 +59,9 @@ pub(crate) fn dispatch() -> Result<Launch> {
         Some(Verb::Remote { command }) => {
             return remote::manage(&out, command).map(Launch::Finished);
         }
+        Some(Verb::Graft(args)) => {
+            return graft::run(&mut out, &cli.repository, args.command).map(Launch::Finished);
+        }
         Some(Verb::Project { command }) => {
             return projects(&out, command).map(Launch::Finished);
         }

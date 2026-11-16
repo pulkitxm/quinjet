@@ -77,7 +77,7 @@ fn recent_projects_path() -> Option<PathBuf> {
     Some(state_root()?.join(RECENT_PROJECTS_FILE))
 }
 
-fn state_root() -> Option<PathBuf> {
+pub(crate) fn state_root() -> Option<PathBuf> {
     #[cfg(test)]
     {
         let override_root = STATE_ROOT_OVERRIDE.with(|cell| cell.borrow().clone());
