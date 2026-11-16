@@ -19,9 +19,8 @@ use super::{
     Branch, GitOperation, HistoryBranch, LocalDiffRequest, ProjectGroup, Repository, Stash,
     Worktree,
 };
-use crate::cli::ServiceDocument;
 use crate::cli::ai::{AiAnswer, AiTask};
-use crate::cli::{Command, Outcome, Session};
+use crate::cli::{Command, Outcome, ServiceDocument, Session};
 use crate::graft::call::{GatewayTools, GraftCall, GraftReply};
 use crate::search::{SearchHits, SearchRequest, SearchTarget};
 

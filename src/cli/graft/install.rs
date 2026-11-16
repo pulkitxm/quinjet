@@ -1,7 +1,6 @@
-use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::{fs, io};
 
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
