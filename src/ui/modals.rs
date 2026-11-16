@@ -217,7 +217,14 @@ pub(super) fn draw_commit(
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.border_focus)),
+                    .border_style(Style::default().fg(theme.border_focus))
+                    .title_bottom(
+                        Line::from(Span::styled(
+                            " Ctrl+G draft with Claude ",
+                            Style::default().fg(theme.muted),
+                        ))
+                        .right_aligned(),
+                    ),
             ),
         input_area,
     );

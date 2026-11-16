@@ -153,3 +153,18 @@ fn modal_free_scroll_keeps_selection_independent_from_the_viewport() {
         Some(Modal::CommandPalette { selected: 0, .. })
     ));
 }
+
+#[test]
+fn the_commit_editor_offers_a_claude_draft() {
+    let mut app = App::new("/tmp/repo", "repo");
+    app.modal = Some(Modal::Commit {
+        input: crate::app::TextBuffer::default(),
+        amend: false,
+    });
+    let mut terminal = Terminal::new(TestBackend::new(120, 36)).unwrap();
+    terminal
+        .draw(|frame| draw(frame, &mut app, &Theme::default()))
+        .unwrap();
+    let rendered = rendered_text(terminal.backend().buffer());
+    assert!(rendered.contains("Ctrl+G draft with Claude"));
+}
