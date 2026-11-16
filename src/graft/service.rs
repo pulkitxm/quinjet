@@ -163,7 +163,13 @@ impl ServicePaths {
             .map(|entries| {
                 entries
                     .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-                    .filter(|path| fresh(path))
+                    .filter(|path| {
+                        let alive = fresh(path);
+                        if !alive {
+                            drop(fs::remove_file(path));
+                        }
+                        alive
+                    })
                     .count()
             })
             .unwrap_or_default();

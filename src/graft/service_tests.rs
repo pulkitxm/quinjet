@@ -61,6 +61,13 @@ fn leases_and_calls_keep_the_gateway_alive_until_they_go_quiet() {
     );
     drop(lease);
     assert_eq!(paths.live_clients(SystemTime::now()), 1);
+    let abandoned = paths.leases().join("99999-dead");
+    fs::write(&abandoned, b"").unwrap();
+    assert_eq!(
+        paths.live_clients(SystemTime::now() + Duration::from_secs(120)),
+        0
+    );
+    assert!(!abandoned.exists());
 }
 
 #[test]
