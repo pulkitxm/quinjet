@@ -110,11 +110,20 @@ pub(super) fn draw_graft_tools(
 }
 
 pub(super) fn draw_graft_result(frame: &mut Frame<'_>, view: &GraftResult, theme: &Theme) {
-    let area = centered_rect(
-        frame.area().width.saturating_sub(4).min(110),
-        frame.area().height.saturating_sub(4).min(36),
-        frame.area(),
-    );
+    let width = frame.area().width.saturating_sub(4).min(110);
+    let wrapped: usize = view
+        .text
+        .lines()
+        .map(|line| {
+            UnicodeWidthStr::width(line)
+                .div_ceil(usize::from(width.saturating_sub(2)).max(1))
+                .max(1)
+        })
+        .sum();
+    let height = cells(wrapped)
+        .saturating_add(5)
+        .clamp(8, frame.area().height.saturating_sub(4).clamp(1, 36));
+    let area = centered_rect(width, height, frame.area());
     frame.render_widget(Clear, area);
     let block = modal_block(&format!(" {} ", view.title), theme);
     let inner = block.inner(area);

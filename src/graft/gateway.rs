@@ -1,10 +1,8 @@
-use std::env;
 use std::ffi::OsString;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::thread;
 use std::time::{Duration, Instant};
+use std::{env, fs, thread};
 
 use anyhow::{Context, Result, bail};
 use ureq::Agent;
