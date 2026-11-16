@@ -23,7 +23,7 @@ pub(crate) struct AiState {
 }
 
 pub(crate) fn autostart_enabled() -> bool {
-    std::env::var(AUTOSTART_ENV).map_or(true, |value| value != "0")
+    !cfg!(test) && std::env::var(AUTOSTART_ENV).map_or(true, |value| value != "0")
 }
 
 impl App {

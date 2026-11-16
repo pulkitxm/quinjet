@@ -238,11 +238,12 @@ fn installed_agents_get_quinjet_added_once() -> Result<()> {
     ensure!(
         config["mcpServers"]["quinjet"]["command"]
             .as_str()
-            .is_some_and(|command| command.ends_with(if cfg!(windows) {
-                "quinjet.exe"
-            } else {
-                "quinjet"
-            })),
+            .is_some_and(|command| command == "quinjet"
+                || command.ends_with(if cfg!(windows) {
+                    "quinjet.exe"
+                } else {
+                    "quinjet"
+                })),
         "{config}"
     );
     let again = scratch

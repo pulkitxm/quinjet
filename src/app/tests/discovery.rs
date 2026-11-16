@@ -47,13 +47,11 @@ fn startup_does_not_fetch_any_pull_request_data() {
             AppEffect::Git(history),
             AppEffect::Git(branches),
             AppEffect::Git(repository),
-            AppEffect::Git(gateway),
         ] if matches!(refresh.as_ref(), WorkerCommand::Refresh { .. })
             && matches!(worktrees.as_ref(), WorkerCommand::LoadWorktrees { .. })
             && matches!(history.as_ref(), WorkerCommand::LoadHistory { .. })
             && matches!(branches.as_ref(), WorkerCommand::LoadHistoryBranches { .. })
             && matches!(repository.as_ref(), WorkerCommand::LoadLocalGitHubRepository)
-            && matches!(gateway.as_ref(), WorkerCommand::EnsureGateway)
     ));
     assert!(!app.pull_request_loading);
     assert!(app.pull_request.is_none());
