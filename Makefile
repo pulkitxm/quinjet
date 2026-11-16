@@ -12,11 +12,11 @@ endef
 
 .PHONY: ci ci-fast deep fmt fmt-check lint lint-nightly test doc msrv build package \
 	install-check comments rust-sizes secrets homebrew winget ppa typos spellcheck deny audit osv sbom unused sort hack wiki \
-	coverage shell actions yaml markdown toml editorconfig ruff agent miri careful sanitize mutants \
+	coverage shell actions yaml markdown toml editorconfig ruff miri careful sanitize mutants \
 	minimal-versions udeps bloat optimization-docs tools tools-deep
 
 ci: fmt-check lint test doc comments rust-sizes secrets homebrew winget ppa typos spellcheck deny audit osv unused sort hack \
-	shell actions yaml markdown toml editorconfig ruff agent wiki package
+	shell actions yaml markdown toml editorconfig ruff wiki package
 
 ci-fast: fmt-check lint test comments rust-sizes secrets
 
@@ -161,11 +161,8 @@ editorconfig:
 	editorconfig-checker
 
 ruff:
-	ruff check scripts graftcode
-	ruff format --check scripts graftcode
-
-agent:
-	uv run --project graftcode/agent --locked pytest graftcode/agent
+	ruff check scripts
+	ruff format --check scripts
 
 optimization-docs:
 	python3 scripts/check_optimization_docs.py --check

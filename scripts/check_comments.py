@@ -36,7 +36,7 @@ DIRECTIVES = (
 )
 
 HASH_SUFFIXES = {".ps1", ".psd1", ".rb", ".sh", ".toml", ".yaml", ".yml"}
-HASH_NAMES = {".editorconfig", ".gitignore", "CODEOWNERS", "Cargo.lock", "Makefile", "uv.lock"}
+HASH_NAMES = {".editorconfig", ".gitignore", "CODEOWNERS", "Cargo.lock", "Makefile"}
 PLAIN_SUFFIXES = {".asc"}
 PLAIN_NAMES = {"CNAME", "LICENSE"}
 

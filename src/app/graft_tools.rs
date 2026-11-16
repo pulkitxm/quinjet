@@ -462,6 +462,20 @@ mod tests {
     }
 
     #[test]
+    fn quinjet_s_own_gateway_is_left_out_of_the_picker() {
+        let (mut app, generation) = opened();
+        app.receive_graft_tools(
+            generation,
+            Ok(listing(&[("status", &[]), ("prChecks", &["number"])])),
+        );
+        let Some(Modal::Graft(picker)) = &app.modal else {
+            panic!("the picker closed");
+        };
+        assert!(picker.rows.is_empty());
+        assert!(picker.notes[0].starts_with("No other gateways."));
+    }
+
+    #[test]
     fn commit_message_tools_are_recognized_in_any_case_style() {
         assert!(drafts_commit_message("draft_commit_message"));
         assert!(drafts_commit_message("draftCommitMessage"));

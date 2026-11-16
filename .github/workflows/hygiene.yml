@@ -199,19 +199,13 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/ruff-action@278981a28ce3188b1e39527901f38254bf3aac89
         with:
-          args: check scripts graftcode
+          args: check scripts
       - name: Format
         uses: astral-sh/ruff-action@278981a28ce3188b1e39527901f38254bf3aac89
         with:
-          args: format --check scripts graftcode
+          args: format --check scripts
       - name: Benchmark compatibility tests
         run: python3 -m unittest discover -s scripts -p test_benchmark_release.py
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
-        with:
-          version: 0.12.18
-          enable-cache: false
-      - name: Graftcode agent tests
-        run: uv run --project graftcode/agent --locked pytest graftcode/agent
 
   actions:
     name: Workflows
