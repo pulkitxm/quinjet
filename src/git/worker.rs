@@ -20,6 +20,7 @@ use super::{
     Worktree,
 };
 use crate::cli::{Command, Outcome, Session};
+use crate::graft::call::{GatewayTools, GraftCall, GraftReply};
 use crate::search::{SearchHits, SearchRequest, SearchTarget};
 
 #[derive(Debug)]
@@ -181,6 +182,13 @@ pub(crate) enum WorkerCommand {
         generation: u64,
         request: Box<SearchRequest>,
     },
+    LoadGraftTools {
+        generation: u64,
+    },
+    CallGraft {
+        generation: u64,
+        call: Box<GraftCall>,
+    },
     Shutdown,
 }
 
@@ -310,6 +318,14 @@ pub(crate) enum WorkerEvent {
         generation: u64,
         result: Result<SearchHits, String>,
     },
+    GraftTools {
+        generation: u64,
+        result: Result<Vec<GatewayTools>, String>,
+    },
+    GraftReply {
+        generation: u64,
+        result: Result<GraftReply, String>,
+    },
     OperationFinished {
         id: u64,
         label: String,
@@ -342,6 +358,7 @@ struct Mailbox {
     warm: Option<WorkerCommand>,
     stack_warm: Option<WorkerCommand>,
     search: Option<WorkerCommand>,
+    graft: Option<WorkerCommand>,
     shutdown: bool,
 }
 
@@ -360,6 +377,7 @@ enum WorkerLane {
     Review,
     Warm,
     StackWarm,
+    Graft,
 }
 
 const fn worker_lane(command: &WorkerCommand) -> WorkerLane {
@@ -387,6 +405,7 @@ const fn worker_lane(command: &WorkerCommand) -> WorkerLane {
         | WorkerCommand::PreparePullRequestStack { .. }
         | WorkerCommand::LoadPullRequestFile { .. }
         | WorkerCommand::LoadPullRequestFileBatch { .. } => WorkerLane::PullRequestPreview,
+        WorkerCommand::LoadGraftTools { .. } | WorkerCommand::CallGraft { .. } => WorkerLane::Graft,
         WorkerCommand::Search { request, .. } => match request.target {
             SearchTarget::PullRequest { .. } => WorkerLane::PullRequestPreview,
             SearchTarget::Changes { .. } | SearchTarget::History { .. } => WorkerLane::Background,
@@ -395,12 +414,15 @@ const fn worker_lane(command: &WorkerCommand) -> WorkerLane {
     }
 }
 
+mod graft_runtime;
 mod lifecycle;
 mod mailbox;
 mod runtime;
 mod stack_runtime;
 
+use graft_runtime::run_graft_worker;
 pub(crate) use lifecycle::GitWorker;
+use mailbox::{answer, next_command};
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use runtime::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]

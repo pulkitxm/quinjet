@@ -28,6 +28,14 @@ impl App {
             | WorkerEvent::PullRequestReview { .. }) => {
                 self.handle_content_worker_event(event, now)
             }
+            WorkerEvent::GraftTools { generation, result } => {
+                self.receive_graft_tools(generation, result);
+                Vec::new()
+            }
+            WorkerEvent::GraftReply { generation, result } => {
+                self.receive_graft_reply(generation, result, now);
+                Vec::new()
+            }
             event => self.handle_repository_worker_event(event, now),
         }
     }

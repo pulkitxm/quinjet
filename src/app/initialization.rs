@@ -220,6 +220,7 @@ impl App {
             local_diff_pending_paths: VecDeque::new(),
             local_diff_single_loaded: false,
             branch_generation: 0,
+            graft_generation: 0,
             history_branch_generation: 0,
             stash_generation: 0,
             worktree_generation: 0,

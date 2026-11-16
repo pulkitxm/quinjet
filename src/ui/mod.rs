@@ -52,6 +52,7 @@ mod modal_accounts;
 mod modal_branches;
 mod modal_choices;
 mod modal_conflict;
+mod modal_graft;
 mod modal_list;
 pub(crate) mod modal_ssh;
 mod modal_stashes;
@@ -101,6 +102,7 @@ use modal_branches::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use modal_choices::*;
 use modal_conflict::draw_conflict;
+use modal_graft::{draw_graft_result, draw_graft_tools};
 pub(crate) use modal_list::ModalList;
 use modal_ssh::draw_ssh_project_modal;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]

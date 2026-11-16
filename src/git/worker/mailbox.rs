@@ -64,6 +64,9 @@ impl Mailbox {
                 self.stack_warm = Some(command);
             }
             command @ WorkerCommand::Search { .. } => self.search = Some(command),
+            command @ (WorkerCommand::LoadGraftTools { .. } | WorkerCommand::CallGraft { .. }) => {
+                self.graft = Some(command);
+            }
             WorkerCommand::Shutdown => self.shutdown = true,
         }
     }
@@ -91,5 +94,23 @@ impl Mailbox {
             .or_else(|| self.prefetch.take())
             .or_else(|| self.warm.take())
             .or_else(|| self.stack_warm.take())
+            .or_else(|| self.graft.take())
     }
+}
+
+pub(super) fn next_command(mailbox: &SharedMailbox) -> Option<WorkerCommand> {
+    let mut state = mailbox.state.lock().ok()?;
+    loop {
+        if state.shutdown {
+            return None;
+        }
+        if let Some(command) = state.pop() {
+            return Some(command);
+        }
+        state = mailbox.ready.wait(state).ok()?;
+    }
+}
+
+pub(super) fn answer<T>(result: anyhow::Result<T>) -> Result<T, String> {
+    result.map_err(|error| format!("{error:#}"))
 }

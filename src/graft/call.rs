@@ -42,8 +42,20 @@ pub(crate) struct GraftReply {
 pub(crate) struct GatewayTools {
     pub gateway: String,
     pub url: String,
+    #[serde(skip)]
+    pub token_env: Option<String>,
     pub tools: Vec<Tool>,
     pub error: Option<String>,
+}
+
+impl GatewayTools {
+    pub(crate) fn source(&self) -> Gateway {
+        Gateway {
+            name: self.gateway.clone(),
+            url: self.url.clone(),
+            token_env: self.token_env.clone(),
+        }
+    }
 }
 
 pub(crate) fn list_tools(gateways: &[Gateway]) -> Vec<GatewayTools> {
@@ -59,6 +71,7 @@ pub(crate) fn list_tools(gateways: &[Gateway]) -> Vec<GatewayTools> {
             GatewayTools {
                 gateway: gateway.name.clone(),
                 url: gateway.url.clone(),
+                token_env: gateway.token_env.clone(),
                 tools,
                 error,
             }

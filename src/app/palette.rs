@@ -85,6 +85,7 @@ impl App {
                     original_appearance: self.appearance,
                 });
             }
+            PaletteCommand::GraftTools => self.open_graft_tools(effects),
             PaletteCommand::Help => {
                 self.modal = Some(Modal::Help {
                     selected: 0,

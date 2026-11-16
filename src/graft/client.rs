@@ -282,10 +282,19 @@ pub(crate) fn parse_reply(result: &Value) -> ToolReply {
     }
 }
 
+fn is_gateway_frame(line: &str) -> bool {
+    line.split_once("() in ").is_some_and(|(call, location)| {
+        !call.contains(' ')
+            && location
+                .rsplit_once(" line ")
+                .is_some_and(|(_, number)| number.chars().all(|digit| digit.is_ascii_digit()))
+    })
+}
+
 fn clean_error(text: &str) -> String {
     let mut lines: Vec<&str> = text
         .lines()
-        .filter(|line| !(line.starts_with("unknown.") && line.contains("() in ")))
+        .filter(|line| !is_gateway_frame(line))
         .collect();
     if let Some(first) = lines.first_mut() {
         while let Some(rest) = first.strip_prefix("Error: ") {
@@ -366,7 +375,7 @@ mod tests {
         assert_eq!(reply.text, "a\nb");
         assert!(!reply.is_error);
         let reply = parse_reply(&json!({
-            "content": [{"type": "text", "text": "Error: Error: refused\n  detail\nunknown.invoke() in /x/index.js line 63\n"}],
+            "content": [{"type": "text", "text": "Error: Error: refused\n  detail\nunknown.invoke() in /x/index.js line 63\nagent._require() in /tmp/agent.py line 13\n"}],
             "isError": true
         }));
         assert_eq!(reply.text, "refused\n  detail");

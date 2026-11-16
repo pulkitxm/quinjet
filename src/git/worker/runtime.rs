@@ -379,7 +379,9 @@ pub(super) fn run_worker(
                 ),
             },
             WorkerCommand::PrefetchCheckRunLogs { .. }
-            | WorkerCommand::PrefetchPullRequestStackMembers { .. } => continue,
+            | WorkerCommand::PrefetchPullRequestStackMembers { .. }
+            | WorkerCommand::LoadGraftTools { .. }
+            | WorkerCommand::CallGraft { .. } => continue,
             WorkerCommand::LoadAccounts { generation } => WorkerEvent::Accounts {
                 generation,
                 result: answer(
@@ -480,21 +482,4 @@ pub(super) fn run_worker(
             break;
         }
     }
-}
-
-pub(super) fn next_command(mailbox: &SharedMailbox) -> Option<WorkerCommand> {
-    let mut state = mailbox.state.lock().ok()?;
-    loop {
-        if state.shutdown {
-            return None;
-        }
-        if let Some(command) = state.pop() {
-            return Some(command);
-        }
-        state = mailbox.ready.wait(state).ok()?;
-    }
-}
-
-pub(super) fn answer<T>(result: anyhow::Result<T>) -> Result<T, String> {
-    result.map_err(|error| format!("{error:#}"))
 }

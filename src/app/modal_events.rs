@@ -10,6 +10,8 @@ impl App {
     ) -> Vec<AppEffect> {
         match modal {
             Modal::Accounts(picker) => self.handle_account_key(picker, key),
+            Modal::Graft(picker) => self.handle_graft_key(picker, key),
+            Modal::GraftResult(view) => self.handle_graft_result_key(view, key),
             modal @ (Modal::PullRequestReviewComment { .. }
             | Modal::PullRequestReviewThreadActions { .. }
             | Modal::PullRequestReviewSubmit { .. }) => {
