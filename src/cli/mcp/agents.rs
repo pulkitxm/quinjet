@@ -416,17 +416,28 @@ pub(crate) fn render(connections: &[Connection]) -> String {
             Outcome::NotInstalled => "not installed",
             Outcome::Failed => "failed",
         };
-        let line = format!("{:<12} {status}", connection.agent.label());
+        let line = format!("{:<12} {status:<17}", connection.agent.label());
         lines.push(if connection.location.is_empty() {
-            line
+            line.trim_end().to_owned()
         } else {
-            format!("{line}  {}", connection.location)
+            format!("{line}  {}", tilde(&connection.location))
         });
         if let Some(detail) = &connection.detail {
             lines.push(format!("             {detail}"));
         }
     }
     lines.join("\n") + "\n"
+}
+
+fn tilde(location: &str) -> String {
+    home_dir()
+        .and_then(|home| {
+            Path::new(location)
+                .strip_prefix(&home)
+                .ok()
+                .map(|rest| format!("~/{}", rest.display()))
+        })
+        .unwrap_or_else(|| location.to_owned())
 }
 
 #[cfg(test)]
