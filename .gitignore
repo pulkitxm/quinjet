@@ -25,3 +25,4 @@ mutants.out.old/
 *.cdx.json
 .pytest_cache/
 *.egg-info/
+.graftcode/

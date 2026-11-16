@@ -46,6 +46,8 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 - Keyboard-first filtering, command palette, modal text editing, and accessibility help
 - Persistent collapse/expand preference while moving among changes, commits, PRs, and views
 - Coalesced background Git work, stale-result rejection, bounded output, and a private metadata cache
+- [Graftcode](https://graftcode.com) in both directions: `quinjet graft serve` turns every read command into an MCP tool and a typed npm, PyPI, NuGet, Maven, or RubyGems client, and `quinjet graft call` or the command palette runs any gateway's tools with the staged patch, branch, pull request, and failing check log filled in
+- A Python agent gateway that drafts commit messages, reviews patches, explains failed checks, and triages pull requests by calling Quinjet's own grafted tools
 
 ## Installation
 
@@ -274,6 +276,23 @@ Quinjet supports fork setups such as `origin` pointing to your fork and `upstrea
 Anything whose key already identifies it is cached permanently and can never go stale: a finished run's steps and log by job, the changed-file listing and each file's patch by the two commits they describe, the conversation by the stamp GitHub moves whenever the thread changes. A new commit or a new comment asks a different question instead of invalidating an old answer. Only genuinely time-varying reads keep a clock: repository identity for a day, PR metadata for five minutes, the check list for thirty seconds. A run still in progress is never cached, since re-reading it is what tails it. Opening a PR also warms every settled run's log in the background, so selecting any check is a disk read. The panel shows `⟳` while anything is refreshing and `cached` when what you see came from disk.
 
 The cache is bounded to 128 MiB / 2,048 entries, pruned oldest first, and never stores credentials. It lives under `$XDG_CACHE_HOME/quinjet/github` (or `~/.cache/quinjet/github`), `~/Library/Caches/quinjet/github` on macOS, and `%LOCALAPPDATA%\quinjet\cache\github` on Windows. Set `QUINJET_CACHE_DIR` to choose a different root. Cache directories/files use private permissions where supported; `r` bypasses fresh cache entries, while a stale entry can keep the view useful during a transient `gh` failure.
+
+### Graftcode gateways
+
+```bash
+quinjet graft serve --register quinjet
+graftcode/agent/serve.sh
+quinjet graft add agent http://localhost:7390
+quinjet graft call agent draft_commit_message
+quinjet graft call agent investigate_pull_request --pr 42
+```
+
+`graft serve` hosts the repository's read commands on a Graftcode gateway, so
+any MCP client can use them at `http://localhost:7381/mcp` and any language can
+install a typed client with `--publish`. `graft call` and **Run a Graftcode
+Gateway Tool…** in the command palette call other gateways and fill their
+parameters from the repository. A drafted commit message opens in the commit
+editor. See the [Graftcode guide](docs/guides/graftcode.md).
 
 Branch rename is local and deliberately does not delete or create remote branches. Open the checkout branch picker with `b` outside History (or `B` anywhere), select a branch, and press `F2` or `Ctrl+R`; its existing upstream configuration is preserved by Git.
 

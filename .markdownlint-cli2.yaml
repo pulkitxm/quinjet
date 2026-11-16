@@ -16,3 +16,5 @@ ignores:
   - target/**
   - extras/**
   - "**/node_modules/**"
+  - "**/.venv/**"
+  - "**/.graftcode/**"

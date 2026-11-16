@@ -32,6 +32,11 @@ argv
                         │
       filesystem watcher, webhook listener
 
+graft verb ──► Graftcode gateway (gg) ◄──► MCP clients, typed Grafts
+                │                ▲
+                ▼                │ cli::Command::GraftCall
+      generated receiver ──► quinjet <verb> --json
+
 metadata verb ──► generated references / verified updater ──► text or JSON
 
 --remote ──► SSH terminal or command relay ──► remote Quinjet process
@@ -57,6 +62,7 @@ metadata verb ──► generated references / verified updater ──► text o
 - `src/watch.rs`: repository watcher, extra watch on the Git common directory so linked worktrees refresh, and event-storm coalescing.
 - `src/state.rs`: recently opened project paths, keyed by Git common directory and ordered by the newest worktree commit.
 - `src/webhook.rs`: optional loopback listener that turns a forwarded GitHub delivery into a refresh signal.
+- `src/graft/`: the Graftcode receiver generated from the clap tree, the `gg` launcher, the gateway registry, a streamable-HTTP MCP client, and repository context for tool parameters.
 - `src/ui/`: viewport-only rendering, diff layouts, and mouse hit map.
 
 ## Responsiveness Invariants
@@ -72,7 +78,7 @@ the wiki section is the deep operational record.
 1c. Recent-project enumeration and SSH reachability probes never block the first terminal render. The project picker renders skeleton rows until its background result arrives. Machine probes publish accessibility into the current workspace context without replacing its shared tab order, active tab, or pending new-project tab.
 1d. File icons are static glyphs resolved by allocation-free, compile-time sorted hash catalogs in the render layer. Rendering never reads SVGs, font files, configuration, or the filesystem, and unknown paths use one generic glyph.
 2. Every preview, status, history, branch, and pull-request request carries a generation; stale replies are ignored.
-3. Fixed coalescing mailboxes isolate status/history, GitHub metadata (lookup, checks, check logs), paginated conversations, local change/commit/branch/stash previews, worktree and recent-project listings, and potentially network-bound PR previews. Background diff prefetch and stack-member cache warming use dedicated lanes, so neither can displace a read the user is waiting for. Key repeat remains constant-space, a large conversation cannot block interactive check logs, slow GitHub work cannot block tab switches, and ordered user mutations are serialized by app state. No GitHub command is queued at startup or merely by opening the PR tab.
+3. Fixed coalescing mailboxes isolate status/history, GitHub metadata (lookup, checks, check logs), paginated conversations, local change/commit/branch/stash previews, worktree and recent-project listings, and potentially network-bound PR previews. Background diff prefetch and stack-member cache warming use dedicated lanes, so neither can displace a read the user is waiting for. Graftcode gateway calls, which can wait minutes on a model, run on their own lane too. Key repeat remains constant-space, a large conversation cannot block interactive check logs, slow GitHub work cannot block tab switches, and ordered user mutations are serialized by app state. No GitHub command is queued at startup or merely by opening the PR tab.
 4. Watcher signals are lossy by design: events settle for 250 milliseconds before one full status snapshot subsumes the burst, and scheduling the snapshot does not repaint the terminal.
 5. Git/PR patch output is capped at 8 MiB per read. Exact PR/check metadata is capped at 2 MiB, pull-request head history read in full through streamed local records with bounded per-record output, while introduced-only lists use complete GitHub pagination when local objects are missing, changed-file indexes at 8 MiB / 16,384 entries, conversations at 500 entries fetched newest-first in bounded pages (review comments descending, the timeline from its last Link page) so the cap can only ever drop the oldest activity, check logs at 8 MiB / 200,000 lines, repository discovery at 16 identities, and adaptive selected-PR history fetches at 16,384 commits. PR patch loading follows the content viewport with one screen of forward overscan. Only expanded files near the reader are requested, in batches of at most 32 paths under a 6 MiB estimated-byte budget. There is no lifetime file limit: evicted documents can be loaded again from the immutable disk cache or Git. Arrived patches backfill counts when GitHub could not report them.
 6. Potentially large local and PR subprocess output is read through capped pipes. Crossing a cap kills the child rather than first allocating all output and truncating afterward. Syntax grammar parsing stops at 512 KiB per patch or 32 KiB per row, parsed PR patches use a 32 MiB in-memory budget that evicts offscreen files first, and collapsed cached patches are not cloned into the combined document, so post-processing remains bounded after Git returns.

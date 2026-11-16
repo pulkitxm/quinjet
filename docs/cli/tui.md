@@ -86,6 +86,12 @@ closes the picker and restores the theme or appearance that was active when it
 opened. Picker lists wrap between their first and last entries. Use the launch
 flags to choose the initial settings for a later run.
 
+`Run a Graftcode Gateway Tool…` lists the tools of every gateway registered with
+[`quinjet graft add`](./graft/add.md) and runs the selected one the way
+[`quinjet graft call`](./graft/call.md) does, adding the pull request on screen
+and the log of the open check. A drafted commit message opens in the commit
+editor with `Enter`; `c` copies any answer.
+
 `--appearance system` asks the operating system for its current preference once
 after Quinjet verifies that it owns an interactive terminal, and again when
 `System` is explicitly selected in the appearance picker. It does not watch for
