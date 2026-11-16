@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 use std::{env, fs, thread};
 
 use anyhow::{Context, Result, bail};
-use ureq::Agent;
 
 use super::receiver::Receiver;
 
@@ -115,11 +114,6 @@ pub(crate) fn wait_until_ready(
     log: &Path,
     limit: Duration,
 ) -> Result<()> {
-    let agent: Agent = Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(2)))
-        .http_status_as_error(false)
-        .build()
-        .into();
     let url = format!("http://127.0.0.1:{port}/status");
     let started = Instant::now();
     loop {
@@ -129,10 +123,8 @@ pub(crate) fn wait_until_ready(
                 log_tail(log)
             );
         }
-        if agent
-            .get(&url)
-            .call()
-            .is_ok_and(|response| response.status().is_success())
+        if super::http::request("GET", &url, &[], &[], Duration::from_secs(2), 4096)
+            .is_ok_and(|response| (200..300).contains(&response.status))
         {
             return Ok(());
         }

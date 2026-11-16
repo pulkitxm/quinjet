@@ -3,12 +3,12 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
-use ureq::Agent;
+
+use super::http;
 
 pub(crate) const PROTOCOL_VERSION: &str = "2025-06-18";
 const SESSION_HEADER: &str = "mcp-session-id";
-const RESPONSE_LIMIT: u64 = 32 * 1024 * 1024;
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const RESPONSE_LIMIT: usize = 32 * 1024 * 1024;
 const MAX_TOOL_PAGES: usize = 32;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -37,7 +37,7 @@ pub(crate) struct ToolReply {
 }
 
 pub(crate) struct McpSession {
-    agent: Agent,
+    timeout: Duration,
     url: String,
     token: Option<String>,
     session: Option<String>,
@@ -46,14 +46,8 @@ pub(crate) struct McpSession {
 
 impl McpSession {
     pub(crate) fn connect(url: &str, token: Option<String>, timeout: Duration) -> Result<Self> {
-        let agent: Agent = Agent::config_builder()
-            .timeout_connect(Some(CONNECT_TIMEOUT))
-            .timeout_global(Some(timeout))
-            .http_status_as_error(false)
-            .build()
-            .into();
         let mut session = Self {
-            agent,
+            timeout,
             url: url.to_owned(),
             token,
             session: None,
@@ -133,35 +127,32 @@ impl McpSession {
     }
 
     fn post(&mut self, body: &Value) -> Result<Option<String>> {
-        let mut request = self
-            .agent
-            .post(&self.url)
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json, text/event-stream")
-            .header("MCP-Protocol-Version", PROTOCOL_VERSION);
+        let bearer = self.token.as_ref().map(|token| format!("Bearer {token}"));
+        let mut headers = vec![
+            ("Content-Type", "application/json"),
+            ("Accept", "application/json, text/event-stream"),
+            ("MCP-Protocol-Version", PROTOCOL_VERSION),
+        ];
         if let Some(session) = &self.session {
-            request = request.header(SESSION_HEADER, session.as_str());
+            headers.push((SESSION_HEADER, session.as_str()));
         }
-        if let Some(token) = &self.token {
-            request = request.header("Authorization", format!("Bearer {token}"));
+        if let Some(bearer) = &bearer {
+            headers.push(("Authorization", bearer.as_str()));
         }
-        let mut response = request
-            .send(serde_json::to_string(body)?.as_str())
-            .with_context(|| format!("could not reach the gateway at {}", self.url))?;
-        if let Some(session) = response
-            .headers()
-            .get(SESSION_HEADER)
-            .and_then(|value| value.to_str().ok())
-        {
+        let response = http::request(
+            "POST",
+            &self.url,
+            &headers,
+            serde_json::to_string(body)?.as_bytes(),
+            self.timeout,
+            RESPONSE_LIMIT,
+        )
+        .with_context(|| format!("could not reach the gateway at {}", self.url))?;
+        if let Some(session) = response.header(SESSION_HEADER) {
             self.session = Some(session.to_owned());
         }
-        let status = response.status().as_u16();
-        let text = response
-            .body_mut()
-            .with_config()
-            .limit(RESPONSE_LIMIT)
-            .read_to_string()
-            .unwrap_or_default();
+        let status = response.status;
+        let text = String::from_utf8_lossy(&response.body).into_owned();
         if !(200..300).contains(&status) {
             let detail = text.trim();
             bail!(
