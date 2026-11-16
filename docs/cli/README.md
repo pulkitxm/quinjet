@@ -65,7 +65,9 @@ Account switching: [`quinjet account list`, `account switch`](./account/README.m
 
 | Page | What it covers |
 | --- | --- |
-| [`quinjet graft`](./graft/README.md) | Serving Quinjet on a Graftcode gateway, registering gateways, and calling their tools with repository context |
+| [`quinjet mcp`](./mcp/README.md) | The MCP server agents start themselves, and connecting the agents on this machine |
+| [`quinjet ai`](./ai/README.md) | Claude commit messages, reviews, failing-check explanations, and pull-request triage |
+| [`quinjet graft`](./graft/README.md) | The shared gateway, serving one repository for typed Grafts, and calling other gateways with repository context |
 
 ## About Quinjet itself
 
@@ -85,7 +87,7 @@ Account switching: [`quinjet account list`, `account switch`](./account/README.m
 | [Installing with Homebrew](../guides/homebrew.md) | Tap installation on macOS and Linux, upgrades, package contents, and removal |
 | [Watching CI from a script](../guides/watching-ci.md) | Blocking on checks, reading the verdict from an exit code, and pulling a failing job's log out with `jq` |
 | [Automating Quinjet](../guides/automation.md) | Capability discovery, JSON contracts, non-interactive behavior, and completion setup |
-| [Quinjet and Graftcode](../guides/graftcode.md) | MCP tools and typed Grafts from `graft serve`, gateway calls with repository context, and the agent |
+| [Quinjet and Graftcode](../guides/graftcode.md) | Connecting agents once, the shared gateway, Claude in Quinjet, and typed Grafts |
 
 ## The short version
 

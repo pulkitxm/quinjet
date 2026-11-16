@@ -32,10 +32,12 @@ argv
                         │
       filesystem watcher, webhook listener
 
-graft verb ──► Graftcode gateway (gg) ◄──► MCP clients, typed Grafts
-                │                ▲
-                ▼                │ cli::Command::GraftCall
-      generated receiver ──► quinjet <verb> --json
+agent ──► quinjet mcp (stdio) ──► shared Graftcode gateway (gg) ◄── terminal, typed Grafts
+                                          │                ▲
+                                          ▼                │ cli::Command::GraftCall
+                                generated receiver ──► quinjet <verb> --json
+
+ai verb ──► repository context ──► Anthropic Messages API (curl) ──► text or JSON
 
 metadata verb ──► generated references / verified updater ──► text or JSON
 
@@ -62,7 +64,9 @@ metadata verb ──► generated references / verified updater ──► text o
 - `src/watch.rs`: repository watcher, extra watch on the Git common directory so linked worktrees refresh, and event-storm coalescing.
 - `src/state.rs`: recently opened project paths, keyed by Git common directory and ordered by the newest worktree commit.
 - `src/webhook.rs`: optional loopback listener that turns a forwarded GitHub delivery into a refresh signal.
-- `src/graft/`: the Graftcode receiver generated from the clap tree, the `gg` launcher, the gateway registry, a streamable-HTTP MCP client, and repository context for tool parameters.
+- `src/graft/`: the Graftcode receiver and its Node module generated from the clap tree, tool schemas, the shared-gateway service (state, start lock, leases, idle shutdown), the `gg` launcher, the gateway registry, a streamable-HTTP MCP client, and repository context for tool parameters.
+- `src/cli/mcp.rs`: the stdio MCP server agents launch, which forwards every call through the shared gateway, and `mcp install`, which adds it to the agents on the machine.
+- `src/cli/ai/`: the Claude features, a curl transport for the Messages API, and the read-only tool loop behind `ai investigate`.
 - `src/ui/`: viewport-only rendering, diff layouts, and mouse hit map.
 
 ## Responsiveness Invariants

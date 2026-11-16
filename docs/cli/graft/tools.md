@@ -4,13 +4,13 @@ Lists the tools that registered gateways expose.
 
 ```bash
 quinjet graft tools
-quinjet graft tools agent --json
+quinjet graft tools review --json
 ```
 
 ```text
-agent  http://localhost:7390/mcp
-  draft_commit_message(branch*, recent_commits*, staged_diff*)  Draft a commit message for the staged change.
-  explain_check_failure(check_log*, pull_request*)  Explain why a pull request's continuous integration check failed.
+review  http://localhost:7400/mcp
+  summarize_diff(branch*, diff*)  Summarize a patch for a reviewer.
+  triage(check_log*, pull_request*, focus?)  Explain a failing check and what to do next.
 ```
 
 A `*` marks a parameter `graft call` fills from the repository, and the output

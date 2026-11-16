@@ -46,8 +46,9 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 - Keyboard-first filtering, command palette, modal text editing, and accessibility help
 - Persistent collapse/expand preference while moving among changes, commits, PRs, and views
 - Coalesced background Git work, stale-result rejection, bounded output, and a private metadata cache
-- [Graftcode](https://graftcode.com) in both directions: `quinjet graft serve` turns every read command into an MCP tool and a typed npm, PyPI, NuGet, Maven, or RubyGems client, and `quinjet graft call` or the command palette runs any gateway's tools with the staged patch, branch, pull request, and failing check log filled in
-- A Python agent gateway that drafts commit messages, reviews patches, explains failed checks, and triages pull requests by calling Quinjet's own grafted tools
+- Every AI agent on the machine can use Quinjet through [Graftcode](https://graftcode.com): `quinjet mcp install` connects Claude Code, Codex, Cursor, VS Code, Windsurf, and Gemini CLI once, and from then on they start Quinjet themselves, with a shared gateway that downloads, starts, and stops on its own
+- Claude inside Quinjet: commit messages (`Ctrl+G` in the commit editor), reviews, failing-check explanations, and pull-request triage from the palette or `quinjet ai`
+- Typed npm, PyPI, NuGet, Maven, and RubyGems clients for Quinjet with `quinjet graft serve --publish`, and calls to other Graftcode gateways with repository context filled in
 
 ## Installation
 
@@ -280,19 +281,19 @@ The cache is bounded to 128 MiB / 2,048 entries, pruned oldest first, and never 
 ### Graftcode gateways
 
 ```bash
-quinjet graft serve --register quinjet
-graftcode/agent/serve.sh
-quinjet graft add agent http://localhost:7390
-quinjet graft call agent draft_commit_message
-quinjet graft call agent investigate_pull_request --pr 42
+quinjet mcp install
+quinjet ai key < key.txt
+quinjet ai commit-message
+quinjet ai investigate 42
 ```
 
-`graft serve` hosts the repository's read commands on a Graftcode gateway, so
-any MCP client can use them at `http://localhost:7381/mcp` and any language can
-install a typed client with `--publish`. `graft call` and **Run a Graftcode
-Gateway Tool…** in the command palette call other gateways and fill their
-parameters from the repository. A drafted commit message opens in the commit
-editor. See the [Graftcode guide](docs/guides/graftcode.md).
+`mcp install` adds `quinjet mcp` to the AI agents on this machine, or choose
+**Connect AI Agents to Quinjet** in the command palette. Agents then start it
+themselves in whatever repository they work in, and it serves 27 tools (status,
+diffs, history, pull requests, checks and logs, and the Claude features)
+through one shared Graftcode gateway that Quinjet downloads, starts, and stops
+on its own. The palette's Claude entries and `Ctrl+G` in the commit editor use
+the same features. See the [Graftcode guide](docs/guides/graftcode.md).
 
 Branch rename is local and deliberately does not delete or create remote branches. Open the checkout branch picker with `b` outside History (or `B` anywhere), select a branch, and press `F2` or `Ctrl+R`; its existing upstream configuration is preserved by Git.
 

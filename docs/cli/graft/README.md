@@ -1,23 +1,24 @@
 # Graftcode gateways
 
-`quinjet graft` connects Quinjet to [Graftcode](https://graftcode.com)
-gateways in both directions. It serves Quinjet's read commands as gateway
-methods for MCP clients and typed Grafts, and it calls other gateways' tools
-with repository context filled in. The
-[Graftcode guide](../../guides/graftcode.md) walks through the whole setup.
+`quinjet graft` runs Quinjet on [Graftcode](https://graftcode.com) gateways and
+calls other gateways' tools with repository context filled in. Most people
+never type it: agents start [`quinjet mcp`](../mcp/README.md), which starts the
+shared gateway on its own. The [Graftcode guide](../../guides/graftcode.md)
+walks through the whole picture.
 
 ```bash
-quinjet graft serve --register quinjet
-quinjet graft add agent http://localhost:7390
-quinjet graft tools
-quinjet graft call agent draft_commit_message
+quinjet graft status
+quinjet graft serve --publish
+quinjet graft add review http://localhost:7400
+quinjet graft call review summarize --pr 42
 ```
 
 | Page | What it covers |
 | --- | --- |
-| [`quinjet graft serve`](./serve.md) | Host this repository's commands on a gateway |
+| [`quinjet graft start`, `status`, `stop`, `install`](./start.md) | The shared gateway behind `quinjet mcp` and the terminal interface |
+| [`quinjet graft serve`](./serve.md) | A foreground gateway for one repository, for typed Grafts and other hosts |
 | [`quinjet graft module`](./module.md) | Write the receiver module without starting a gateway |
-| [`quinjet graft add`](./add.md) | Register a gateway under a short name |
+| [`quinjet graft add`](./add.md) | Register another gateway under a short name |
 | [`quinjet graft list`](./list.md) | List registered gateways |
 | [`quinjet graft remove`](./remove.md) | Forget a registered gateway |
 | [`quinjet graft tools`](./tools.md) | List the tools registered gateways expose |
