@@ -152,7 +152,9 @@ mod tests {
         }
         endpoint("ws://localhost:7381").unwrap_err();
         endpoint("https://").unwrap_err();
-        let remote = endpoint("https://gateway.example/mcp").unwrap_err().to_string();
+        let remote = endpoint("https://gateway.example/mcp")
+            .unwrap_err()
+            .to_string();
         assert!(remote.contains("ssh -L 7390:localhost:7390"), "{remote}");
         endpoint("localhost:7381").unwrap_err();
     }

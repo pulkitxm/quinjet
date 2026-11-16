@@ -215,6 +215,7 @@ mod tests {
 
     #[test]
     fn the_gateway_hosts_only_the_generated_class_and_stays_local_by_default() {
+        let module = plan(false).module_file().to_string_lossy().into_owned();
         let arguments: Vec<String> = plan(false)
             .arguments()
             .iter()
@@ -226,7 +227,7 @@ mod tests {
                 "--runtime",
                 "nodejs",
                 "--modules",
-                "/cache/graft/1-read/index.js",
+                module.as_str(),
                 "--types",
                 "Quinjet",
                 "--port",
