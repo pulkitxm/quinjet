@@ -1,25 +1,27 @@
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::{Args, CommandFactory, Subcommand, ValueHint};
 use serde::Serialize;
-use serde_json::Map;
 
 use super::{
     Cli, Command, EXIT_FAILURE, EXIT_NOT_FOUND, EXIT_UNAVAILABLE, Emitter, Failure, PrArgs,
     Session, ensure_log_available, lookup, render, select_check,
 };
 use crate::git::Repository;
-use crate::git::github::PullRequestCheckStatus;
-use crate::graft::call::{CALL_TIMEOUT, GatewayTools, GraftCall, GraftReply};
-use crate::graft::context::{self, ContextKey};
-use crate::graft::gateway::{self, DEFAULT_PORT, GatewayProcess, INSTALL_HINT, ServePlan};
+use crate::graft::call::{CALL_TIMEOUT, GatewayTools, GraftReply};
+use crate::graft::gateway::{self, DEFAULT_PORT, INSTALL_HINT, ServePlan};
 use crate::graft::receiver::{Access, Receiver, ToolSummary};
 use crate::graft::registry::{self, Gateway};
 
+mod calls;
+mod install;
 mod render_graft;
 mod serve;
+mod service;
+
+pub(super) use calls::check_log;
+pub(crate) use service::{ServiceDocument, ensure_shared_gateway};
 
 #[derive(Debug, Args)]
 pub(super) struct GraftArgs {
@@ -44,6 +46,23 @@ pub(super) enum GraftVerb {
     Tools(ToolsArgs),
     #[doc = " Call a gateway tool, filling the repository context it asks for"]
     Call(CallArgs),
+    #[doc = " Start the shared gateway that `quinjet mcp` and the terminal interface use"]
+    Start(GatewayArgs),
+    #[doc = " Show whether the shared gateway is running"]
+    Status,
+    #[doc = " Stop the shared gateway"]
+    Stop,
+    #[doc = " Download the Graftcode gateway into Quinjet's cache"]
+    Install,
+    #[command(hide = true)]
+    Daemon(GatewayArgs),
+}
+
+#[derive(Debug, Args)]
+pub(super) struct GatewayArgs {
+    #[doc = " Path to the Graftcode gateway executable"]
+    #[arg(long, value_name = "PATH", value_hint = ValueHint::ExecutablePath)]
+    gateway: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -137,12 +156,17 @@ pub(super) fn run(out: &mut Emitter, repository: &Path, command: GraftVerb) -> R
         GraftVerb::Add(args) => add(out, args),
         GraftVerb::List => list(out),
         GraftVerb::Remove(args) => remove(out, &args.name),
-        GraftVerb::Tools(args) => tools(out, repository, args.name.as_deref()),
-        GraftVerb::Call(args) => call(out, repository, args),
+        GraftVerb::Tools(args) => calls::tools(out, repository, args.name.as_deref()),
+        GraftVerb::Call(args) => calls::call(out, repository, args),
+        GraftVerb::Start(args) => service::start(out, args.gateway.as_deref()),
+        GraftVerb::Status => service::status(out),
+        GraftVerb::Stop => service::stop(out),
+        GraftVerb::Install => service::install_command(out),
+        GraftVerb::Daemon(args) => service::daemon(args.gateway.as_deref()),
     }
 }
 
-pub(super) fn receiver(writes: bool) -> Receiver {
+pub(crate) fn receiver(writes: bool) -> Receiver {
     Receiver::from_command(&Cli::command(), writes)
 }
 
@@ -197,7 +221,7 @@ fn remove(out: &Emitter, name: &str) -> Result<u8> {
     Ok(0)
 }
 
-fn selected_gateways(name: Option<&str>) -> Result<Vec<Gateway>> {
+pub(super) fn selected_gateways(name: Option<&str>) -> Result<Vec<Gateway>> {
     let gateways = registry::load(&registry::registry_path()?)?;
     match name {
         Some(name) => Ok(vec![
@@ -215,158 +239,8 @@ fn selected_gateways(name: Option<&str>) -> Result<Vec<Gateway>> {
     }
 }
 
-fn session(repository: &Path) -> Result<Session> {
+pub(super) fn session(repository: &Path) -> Result<Session> {
     Ok(Session::new(Repository::discover(repository)?))
-}
-
-fn tools(out: &mut Emitter, repository: &Path, name: Option<&str>) -> Result<u8> {
-    let gateways = selected_gateways(name)?;
-    out.start_progress("Listing gateway tools")?;
-    let listed = list_with_session(out, repository, gateways)?;
-    out.emit(&listed, || render_graft::tools(&listed))?;
-    let failed = listed.iter().any(|gateway| gateway.error.is_some());
-    Ok(if failed { EXIT_UNAVAILABLE } else { 0 })
-}
-
-fn list_with_session(
-    out: &Emitter,
-    repository: &Path,
-    gateways: Vec<Gateway>,
-) -> Result<Vec<GatewayTools>> {
-    match Repository::discover(repository) {
-        Ok(found) => out
-            .execute(&mut Session::new(found), Command::GraftTools(gateways))?
-            .graft_tools(),
-        Err(_) => Ok(crate::graft::call::list_tools(&gateways)),
-    }
-}
-
-fn call(out: &mut Emitter, repository: &Path, args: CallArgs) -> Result<u8> {
-    let gateway = selected_gateways(Some(&args.gateway))?
-        .into_iter()
-        .next()
-        .context("the gateway list was empty")?;
-    let mut arguments = Map::new();
-    for assignment in &args.arguments {
-        let (name, value) = context::parse_assignment(assignment)
-            .map_err(|error| Failure::new(EXIT_FAILURE, format!("{error:#}")))?;
-        drop(arguments.insert(name, value));
-    }
-    out.start_progress("Calling gateway tool")?;
-    let mut session = session(repository)?;
-    let check_log = match args.pull_request {
-        Some(number)
-            if !args.no_context
-                && wants_check_log(out, &mut session, &gateway, &args, &arguments)? =>
-        {
-            Some(check_log(&mut session, out, number, args.check.as_deref())?)
-        }
-        _ => None,
-    };
-    let reply = out
-        .execute(
-            &mut session,
-            Command::GraftCall(Box::new(GraftCall {
-                gateway,
-                tool: args.tool,
-                arguments,
-                fill_context: !args.no_context,
-                pull_request: args.pull_request,
-                check_log,
-                timeout: Duration::from_secs(args.timeout.max(1)),
-            })),
-        )?
-        .graft_reply()?;
-    if reply.is_error && !out.json {
-        return Err(Failure::new(
-            EXIT_FAILURE,
-            format!("{}.{} failed: {}", reply.gateway, reply.tool, reply.text),
-        )
-        .into());
-    }
-    out.emit(&reply, || render_graft::reply(&reply))?;
-    Ok(if reply.is_error { EXIT_FAILURE } else { 0 })
-}
-
-fn wants_check_log(
-    out: &Emitter,
-    session: &mut Session,
-    gateway: &Gateway,
-    args: &CallArgs,
-    arguments: &Map<String, serde_json::Value>,
-) -> Result<bool> {
-    let listed = out
-        .execute(session, Command::GraftTools(vec![gateway.clone()]))?
-        .graft_tools()?;
-    Ok(listed
-        .iter()
-        .flat_map(|gateway| &gateway.tools)
-        .filter(|tool| tool.name == args.tool || fold(&tool.name) == fold(&args.tool))
-        .flat_map(|tool| &tool.params)
-        .any(|param| {
-            !arguments.contains_key(&param.name)
-                && context::context_key(&param.name) == Some(ContextKey::CheckLog)
-        }))
-}
-
-fn fold(name: &str) -> String {
-    name.chars()
-        .filter(char::is_ascii_alphanumeric)
-        .map(|character| character.to_ascii_lowercase())
-        .collect()
-}
-
-fn check_log(
-    session: &mut Session,
-    out: &Emitter,
-    number: u64,
-    wanted: Option<&str>,
-) -> Result<String> {
-    let request = lookup(
-        session,
-        out,
-        &PrArgs {
-            number,
-            repo: None,
-            refresh: false,
-        },
-    )?;
-    let listing = out
-        .execute(
-            session,
-            Command::PullRequestChecks {
-                commit: None,
-                pull_request: Box::new(request.clone()),
-                refresh: false,
-            },
-        )?
-        .checks()?;
-    let check = match wanted {
-        Some(name) => select_check(&listing.checks, name)?,
-        None => listing
-            .checks
-            .iter()
-            .find(|check| check.status == PullRequestCheckStatus::Failed)
-            .cloned()
-            .ok_or_else(|| {
-                Failure::new(
-                    EXIT_NOT_FOUND,
-                    format!("no check has failed on pull request #{number}"),
-                )
-                .hint("name one with --check")
-            })?,
-    };
-    let log = out
-        .execute(
-            session,
-            Command::CheckRunLog {
-                pull_request: Box::new(request),
-                check: Box::new(check.clone()),
-            },
-        )?
-        .check_log()?;
-    ensure_log_available(&log)?;
-    Ok(render::check_log(&check, &log))
 }
 
 #[derive(Serialize)]
@@ -392,34 +266,30 @@ pub(super) struct ServeDocument {
 }
 
 pub(super) fn plan(args: &ServeArgs, repository: &Repository) -> Result<ServePlan> {
-    let gateway = gateway::locate_gateway(args.gateway.as_deref())
-        .map_err(|error| Failure::new(EXIT_FAILURE, format!("{error:#}")).hint(INSTALL_HINT))?;
+    let gateway = match gateway::locate_gateway(args.gateway.as_deref()) {
+        Ok(path) => path,
+        Err(_) if !gateway::gateway_configured(args.gateway.as_deref()) => {
+            install::install(&mut |line: &str| super::note(line))?
+        }
+        Err(error) => {
+            return Err(Failure::new(EXIT_FAILURE, format!("{error:#}"))
+                .hint(INSTALL_HINT)
+                .into());
+        }
+    };
     Ok(ServePlan {
         gateway,
         module_dir: gateway::module_dir(args.allow_writes)?,
-        repository: repository.root().to_path_buf(),
+        repository: Some(repository.root().to_path_buf()),
         // nosemgrep: rust.lang.security.current-exe.current-exe
         quinjet: std::env::current_exe()
             .context("could not find the running Quinjet executable")?,
         port: args.port,
         publish: args.publish,
+        token: None,
+        activity: None,
+        log: gateway::log_file(&gateway::module_dir(args.allow_writes)?),
     })
-}
-
-pub(super) fn spawn(plan: &ServePlan) -> Result<GatewayProcess> {
-    let log = std::fs::File::create(plan.log_file())
-        .with_context(|| format!("failed to create {}", plan.log_file().display()))?;
-    let child = std::process::Command::new(&plan.gateway)
-        .args(plan.arguments())
-        .current_dir(&plan.module_dir)
-        .env("QUINJET_GRAFT_BIN", &plan.quinjet)
-        .env("QUINJET_GRAFT_REPO", &plan.repository)
-        .stdin(std::process::Stdio::null())
-        .stdout(log.try_clone().context("failed to share the gateway log")?)
-        .stderr(log)
-        .spawn()
-        .with_context(|| format!("failed to start {}", plan.gateway.display()))?;
-    Ok(GatewayProcess(child))
 }
 
 #[cfg(test)]

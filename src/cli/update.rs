@@ -18,8 +18,7 @@ const RELEASES_URL: &str = "https://github.com/pulkitxm/quinjet/releases";
 const API_LIMIT: usize = 1024 * 1024;
 const CHECKSUM_LIMIT: usize = 64 * 1024;
 const BINARY_LIMIT: usize = 32 * 1024 * 1024;
-#[cfg(not(windows))]
-const NETWORK_TIMEOUT_SECONDS: &str = "30";
+const NETWORK_TIMEOUT_SECONDS: u64 = 30;
 const USER_AGENT: &str = concat!("quinjet/", env!("CARGO_PKG_VERSION"));
 
 pub(super) fn run(out: &Emitter, check_only: bool) -> Result<u8> {
@@ -280,7 +279,7 @@ fn perform_update(
 }
 
 #[derive(Clone, Copy)]
-enum Downloader {
+pub(super) enum Downloader {
     #[cfg(not(windows))]
     Curl,
     #[cfg(not(windows))]
@@ -290,7 +289,7 @@ enum Downloader {
 }
 
 impl Downloader {
-    fn detect() -> Result<Self> {
+    pub(super) fn detect() -> Result<Self> {
         #[cfg(windows)]
         {
             if command_available("powershell", &["-NoProfile", "-Command", "exit 0"]) {
@@ -310,10 +309,22 @@ impl Downloader {
         }
     }
 
-    fn fetch(self, url: &str, limit: usize) -> Result<Vec<u8>> {
+    pub(super) fn fetch(self, url: &str, limit: usize) -> Result<Vec<u8>> {
         let destination = tempfile::NamedTempFile::new()
             .context("failed to create a temporary download")?
             .into_temp_path();
+        self.download(url, &destination, limit, NETWORK_TIMEOUT_SECONDS)?;
+        fs::read(&destination).with_context(|| format!("failed to read the download from {url}"))
+    }
+
+    pub(super) fn download(
+        self,
+        url: &str,
+        destination: &Path,
+        limit: usize,
+        timeout_seconds: u64,
+    ) -> Result<()> {
+        let timeout = timeout_seconds.to_string();
         let output = match self {
             #[cfg(not(windows))]
             Self::Curl => Command::new("curl")
@@ -326,7 +337,7 @@ impl Downloader {
                     "--show-error",
                     "--location",
                     "--max-time",
-                    NETWORK_TIMEOUT_SECONDS,
+                    &timeout,
                     "--max-filesize",
                     &limit.to_string(),
                     "--user-agent",
@@ -342,7 +353,7 @@ impl Downloader {
                     "--quiet",
                     "--https-only",
                     "--timeout",
-                    NETWORK_TIMEOUT_SECONDS,
+                    &timeout,
                     "--tries",
                     "1",
                     "--user-agent",
@@ -359,11 +370,12 @@ impl Downloader {
                     "-NoProfile",
                     "-NonInteractive",
                     "-Command",
-                    "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; Invoke-WebRequest -UseBasicParsing -Uri $args[0] -OutFile $args[1] -TimeoutSec 30 -Headers @{'User-Agent'=$args[2]}",
+                    "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; Invoke-WebRequest -UseBasicParsing -Uri $args[0] -OutFile $args[1] -TimeoutSec $args[3] -Headers @{'User-Agent'=$args[2]}",
                 ])
                 .arg(url)
                 .arg(destination.as_os_str())
                 .arg(USER_AGENT)
+                .arg(&timeout)
                 .output(),
         }
         .with_context(|| format!("failed to start a downloader for {url}"))?;
@@ -372,14 +384,14 @@ impl Downloader {
             "failed to download {url}: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         );
-        let length = fs::metadata(&destination)
+        let length = fs::metadata(destination)
             .with_context(|| format!("failed to inspect the download from {url}"))?
             .len();
         ensure!(
             length <= u64::try_from(limit).context("the download limit does not fit in 64 bits")?,
             "download from {url} exceeded {limit} bytes"
         );
-        fs::read(&destination).with_context(|| format!("failed to read the download from {url}"))
+        Ok(())
     }
 }
 
@@ -448,7 +460,7 @@ fn release_checksum(document: &str, asset: &str) -> Result<String> {
     Ok(checksum.to_ascii_lowercase())
 }
 
-fn sha256(bytes: &[u8]) -> String {
+pub(super) fn sha256(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
 

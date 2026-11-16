@@ -42,6 +42,31 @@ pub(crate) struct GraftResult {
     pub is_error: bool,
     pub scroll: usize,
     pub commit_message: bool,
+    pub pending: bool,
+}
+
+impl GraftResult {
+    pub(crate) fn pending(title: &str, text: &str) -> Self {
+        Self {
+            title: title.to_owned(),
+            text: text.to_owned(),
+            is_error: false,
+            scroll: 0,
+            commit_message: false,
+            pending: true,
+        }
+    }
+
+    pub(crate) fn finished(title: &str, text: String, is_error: bool) -> Self {
+        Self {
+            title: title.to_owned(),
+            text,
+            is_error,
+            scroll: 0,
+            commit_message: false,
+            pending: false,
+        }
+    }
 }
 
 pub(crate) fn drafts_commit_message(tool: &str) -> bool {
@@ -76,7 +101,17 @@ impl App {
         picker.ready = true;
         match result {
             Ok(listed) => {
+                let own: Vec<String> = crate::cli::graft_receiver(true)
+                    .methods
+                    .into_iter()
+                    .map(|method| method.name)
+                    .collect();
                 for gateway in listed {
+                    if !gateway.tools.is_empty()
+                        && gateway.tools.iter().all(|tool| own.contains(&tool.name))
+                    {
+                        continue;
+                    }
                     if let Some(error) = &gateway.error {
                         picker
                             .notes
@@ -92,7 +127,7 @@ impl App {
                 }
                 if picker.rows.is_empty() && picker.notes.is_empty() {
                     picker.notes.push(
-                        "No gateway tools. Register one with quinjet graft add <name> <url>."
+                        "No other gateways. Quinjet's own actions are in the palette; register another with quinjet graft add <name> <url>."
                             .to_owned(),
                     );
                 }
@@ -178,14 +213,9 @@ impl App {
                 is_error: reply.is_error,
                 text: reply.text,
                 scroll: 0,
+                pending: false,
             },
-            Err(error) => GraftResult {
-                title,
-                text: error,
-                is_error: true,
-                scroll: 0,
-                commit_message: false,
-            },
+            Err(error) => GraftResult::finished(&title, error, true),
         };
         if matches!(self.modal, None | Some(Modal::Graft(_))) {
             self.modal = Some(Modal::GraftResult(view));
@@ -205,6 +235,14 @@ impl App {
         key: KeyEvent,
     ) -> Vec<AppEffect> {
         let mut effects = Vec::new();
+        if view.pending {
+            if matches!(key.code, KeyCode::Esc | KeyCode::Char('q')) {
+                self.cancel_pending_ai();
+            } else {
+                self.modal = Some(Modal::GraftResult(view));
+            }
+            return effects;
+        }
         match key.code {
             KeyCode::Enter if view.commit_message => {
                 self.modal = Some(Modal::Commit {
@@ -331,7 +369,7 @@ mod tests {
         let (mut app, generation) = opened();
         app.receive_graft_tools(generation, Ok(Vec::new()));
         assert!(matches!(&app.modal, Some(Modal::Graft(picker))
-            if picker.notes == ["No gateway tools. Register one with quinjet graft add <name> <url>."]));
+            if picker.notes == ["No other gateways. Quinjet's own actions are in the palette; register another with quinjet graft add <name> <url>."]));
         assert!(
             app.handle_key(key(KeyCode::Enter), Instant::now())
                 .is_empty()

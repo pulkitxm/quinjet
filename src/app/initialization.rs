@@ -221,6 +221,7 @@ impl App {
             local_diff_single_loaded: false,
             branch_generation: 0,
             graft_generation: 0,
+            ai: ai_actions::AiState::default(),
             history_branch_generation: 0,
             stash_generation: 0,
             worktree_generation: 0,
@@ -280,6 +281,7 @@ impl App {
         effects.push(AppEffect::Git(Box::new(
             WorkerCommand::LoadLocalGitHubRepository,
         )));
+        Self::gateway_startup(&mut effects);
         effects
     }
 }

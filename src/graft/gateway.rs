@@ -10,7 +10,7 @@ use super::receiver::Receiver;
 
 pub(crate) const DEFAULT_PORT: u16 = 7381;
 pub(crate) const GATEWAY_ENV: &str = "QUINJET_GRAFTCODE_GATEWAY";
-pub(crate) const INSTALL_HINT: &str = "install the Graftcode gateway with `curl -fsSL https://grft.dev/get | sh` (Windows: `iwr grft.dev/get | iex`), or download `gg` from https://github.com/grft-dev/graftcode-gateway/releases and pass --gateway";
+pub(crate) const INSTALL_HINT: &str = "run `quinjet graft install` to download it, or pass --gateway with the path of a `gg` you already have";
 const LOG_FILE: &str = "gateway.log";
 const LOG_TAIL_BYTES: usize = 4096;
 const POLL_INTERVAL: Duration = Duration::from_millis(400);
@@ -19,19 +19,18 @@ const POLL_INTERVAL: Duration = Duration::from_millis(400);
 pub(crate) struct ServePlan {
     pub gateway: PathBuf,
     pub module_dir: PathBuf,
-    pub repository: PathBuf,
+    pub repository: Option<PathBuf>,
     pub quinjet: PathBuf,
     pub port: u16,
     pub publish: bool,
+    pub token: Option<String>,
+    pub activity: Option<PathBuf>,
+    pub log: PathBuf,
 }
 
 impl ServePlan {
     pub(crate) fn module_file(&self) -> PathBuf {
         self.module_dir.join("index.js")
-    }
-
-    pub(crate) fn log_file(&self) -> PathBuf {
-        self.module_dir.join(LOG_FILE)
     }
 
     pub(crate) fn arguments(&self) -> Vec<OsString> {
@@ -68,21 +67,66 @@ pub(crate) fn module_dir(writes: bool) -> Result<PathBuf> {
     )))
 }
 
+pub(crate) fn log_file(module_dir: &Path) -> PathBuf {
+    module_dir.join(LOG_FILE)
+}
+
+pub(crate) fn module_digest(receiver: &Receiver) -> Result<String> {
+    use sha2::Digest as _;
+    Ok(hex::encode(sha2::Sha256::digest(
+        super::module::index_js(receiver)?.as_bytes(),
+    )))
+}
+
 pub(crate) fn write_module(directory: &Path, receiver: &Receiver) -> Result<()> {
     fs::create_dir_all(directory)
         .with_context(|| format!("failed to create {}", directory.display()))?;
     for (name, contents) in [
         (
             "package.json",
-            Receiver::package_json(env!("CARGO_PKG_VERSION"))?,
+            super::module::package_json(env!("CARGO_PKG_VERSION"))?,
         ),
-        ("index.js", receiver.index_js()?),
+        ("index.js", super::module::index_js(receiver)?),
     ] {
         let path = directory.join(name);
         fs::write(&path, contents)
             .with_context(|| format!("failed to write {}", path.display()))?;
     }
     Ok(())
+}
+
+pub(crate) const fn gateway_names() -> &'static [&'static str] {
+    if cfg!(windows) {
+        &["gg.exe", "gg"]
+    } else {
+        &["gg"]
+    }
+}
+
+pub(crate) fn installed_root() -> Result<PathBuf> {
+    Ok(crate::git::github::cache_root()
+        .context("could not find a cache directory; set QUINJET_CACHE_DIR")?
+        .join("graft")
+        .join("gateway"))
+}
+
+pub(crate) fn installed_gateway(root: &Path) -> Option<PathBuf> {
+    let mut versions: Vec<PathBuf> = fs::read_dir(root)
+        .ok()?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.is_dir())
+        .collect();
+    versions.sort();
+    versions.iter().rev().find_map(|version| {
+        gateway_names()
+            .iter()
+            .map(|name| version.join(name))
+            .find(|candidate| candidate.is_file())
+    })
+}
+
+pub(crate) fn gateway_configured(explicit: Option<&Path>) -> bool {
+    explicit.is_some() || env::var_os(GATEWAY_ENV).is_some_and(|path| !path.is_empty())
 }
 
 pub(crate) fn locate_gateway(explicit: Option<&Path>) -> Result<PathBuf> {
@@ -95,17 +139,17 @@ pub(crate) fn locate_gateway(explicit: Option<&Path>) -> Result<PathBuf> {
     if let Some(path) = env::var_os(GATEWAY_ENV).filter(|path| !path.is_empty()) {
         return locate_gateway(Some(Path::new(&path)));
     }
-    let names: &[&str] = if cfg!(windows) {
-        &["gg.exe", "gg"]
-    } else {
-        &["gg"]
-    };
     env::var_os("PATH")
         .iter()
         .flat_map(env::split_paths)
-        .flat_map(|directory| names.iter().map(move |name| directory.join(name)))
+        .flat_map(|directory| gateway_names().iter().map(move |name| directory.join(name)))
         .find(|candidate| candidate.is_file())
-        .context("the Graftcode gateway `gg` is not on PATH")
+        .or_else(|| {
+            installed_root()
+                .ok()
+                .and_then(|root| installed_gateway(&root))
+        })
+        .context("the Graftcode gateway `gg` is not installed")
 }
 
 pub(crate) fn wait_until_ready(
@@ -198,10 +242,13 @@ mod tests {
         ServePlan {
             gateway: PathBuf::from("/opt/gg"),
             module_dir: PathBuf::from("/cache/graft/1-read"),
-            repository: PathBuf::from("/work/repo"),
+            repository: Some(PathBuf::from("/work/repo")),
             quinjet: PathBuf::from("/bin/quinjet"),
             port: 7381,
             publish,
+            token: None,
+            activity: None,
+            log: PathBuf::from("/cache/graft/1-read/gateway.log"),
         }
     }
 
@@ -248,6 +295,21 @@ mod tests {
         .unwrap();
         assert_eq!(log_tail(&path), "[Info] Starting\n[Error] broken\n");
         assert_eq!(log_tail(&directory.path().join("missing")), "");
+    }
+
+    #[test]
+    fn the_newest_installed_gateway_wins() {
+        let directory = tempfile::tempdir().unwrap();
+        assert_eq!(installed_gateway(directory.path()), None);
+        for version in ["v1.4.0", "v1.5.0"] {
+            let folder = directory.path().join(version);
+            fs::create_dir_all(&folder).unwrap();
+            fs::write(folder.join(gateway_names()[0]), b"").unwrap();
+        }
+        assert_eq!(
+            installed_gateway(directory.path()),
+            Some(directory.path().join("v1.5.0").join(gateway_names()[0]))
+        );
     }
 
     #[test]

@@ -64,7 +64,11 @@ impl Mailbox {
                 self.stack_warm = Some(command);
             }
             command @ WorkerCommand::Search { .. } => self.search = Some(command),
-            command @ (WorkerCommand::LoadGraftTools { .. } | WorkerCommand::CallGraft { .. }) => {
+            command @ (WorkerCommand::LoadGraftTools { .. }
+            | WorkerCommand::CallGraft { .. }
+            | WorkerCommand::EnsureGateway
+            | WorkerCommand::RunAi { .. }
+            | WorkerCommand::ConnectAgents { .. }) => {
                 self.graft = Some(command);
             }
             WorkerCommand::Shutdown => self.shutdown = true,

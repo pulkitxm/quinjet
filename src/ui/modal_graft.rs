@@ -136,6 +136,8 @@ pub(super) fn draw_graft_result(frame: &mut Frame<'_>, view: &GraftResult, theme
     );
     let color = if view.is_error {
         theme.error
+    } else if view.pending {
+        theme.muted
     } else {
         theme.text
     };
@@ -146,7 +148,9 @@ pub(super) fn draw_graft_result(frame: &mut Frame<'_>, view: &GraftResult, theme
             .scroll((u16::try_from(view.scroll).unwrap_or(u16::MAX), 0)),
         body,
     );
-    let hint = if view.commit_message {
+    let hint = if view.pending {
+        "Esc cancel"
+    } else if view.commit_message {
         "Enter commit with this message  c copy  ↑/↓ scroll  Esc close"
     } else {
         "c copy  ↑/↓ PgUp/PgDn scroll  Esc close"
@@ -238,10 +242,16 @@ mod tests {
             is_error: false,
             scroll: 0,
             commit_message: true,
+            pending: false,
         };
         let text = screen(|frame, _| draw_graft_result(frame, &result, &Theme::default()));
         assert!(text.contains(" agent › draft_commit_message "));
         assert!(text.contains("fix: keep the cursor in view"));
         assert!(text.contains("Enter commit with this message"));
+        let waiting = GraftResult::pending("Review Changes", "Asking Claude…");
+        let text = screen(|frame, _| draw_graft_result(frame, &waiting, &Theme::default()));
+        assert!(text.contains(" Review Changes "));
+        assert!(text.contains("Asking Claude…"));
+        assert!(text.contains("Esc cancel"));
     }
 }

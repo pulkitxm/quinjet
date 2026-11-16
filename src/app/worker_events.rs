@@ -36,6 +36,18 @@ impl App {
                 self.receive_graft_reply(generation, result, now);
                 Vec::new()
             }
+            WorkerEvent::GatewayReady { result } => {
+                self.receive_gateway(result);
+                Vec::new()
+            }
+            WorkerEvent::AiAnswer { generation, result } => {
+                self.receive_ai_answer(generation, result, now);
+                Vec::new()
+            }
+            WorkerEvent::AgentsConnected { generation, result } => {
+                self.receive_agents_connected(generation, result, now);
+                Vec::new()
+            }
             event => self.handle_repository_worker_event(event, now),
         }
     }

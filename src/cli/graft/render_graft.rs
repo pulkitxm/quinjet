@@ -1,4 +1,4 @@
-use super::{GatewayTools, GraftReply, ModuleDocument, ServeDocument};
+use super::{GatewayTools, GraftReply, ModuleDocument, ServeDocument, ServiceDocument};
 use crate::graft::context::{ContextKey, context_key};
 use crate::graft::receiver::Access;
 use crate::graft::registry::Gateway;
@@ -60,6 +60,32 @@ pub(super) fn serving(document: &ServeDocument) -> String {
         "The gateway listens on every interface. Press Ctrl-C to stop it.".to_owned(),
     ]);
     joined(&lines)
+}
+
+pub(super) fn service(document: &ServiceDocument) -> String {
+    let (Some(mcp), Some(vision), Some(websocket)) = (
+        document.mcp.as_deref(),
+        document.vision.as_deref(),
+        document.websocket.as_deref(),
+    ) else {
+        return joined(&[
+            "The shared Graftcode gateway is not running".to_owned(),
+            "  It starts by itself when an agent runs `quinjet mcp` or Quinjet opens".to_owned(),
+        ]);
+    };
+    joined(&[
+        "The shared Graftcode gateway is running".to_owned(),
+        String::new(),
+        format!("  MCP        {mcp} (through `quinjet mcp`)"),
+        format!("  Vision     {vision}"),
+        format!("  WebSocket  {websocket}"),
+        format!("  Tools      {}", document.tools),
+        format!("  Clients    {}", document.clients),
+        format!(
+            "  Log        {}",
+            document.log.as_deref().unwrap_or_default()
+        ),
+    ])
 }
 
 pub(super) fn gateways(gateways: &[Gateway]) -> String {

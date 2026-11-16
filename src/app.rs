@@ -128,6 +128,7 @@ fn updated_recent_pull_requests(
 }
 
 pub(crate) mod account_picker;
+pub(crate) mod ai_actions;
 mod changes;
 mod dialogs;
 mod geometry;
@@ -434,6 +435,7 @@ pub(crate) struct App {
     pub local_diff_single_loaded: bool,
     pub branch_generation: u64,
     pub graft_generation: u64,
+    pub ai: ai_actions::AiState,
     pub history_branch_generation: u64,
     pub stash_generation: u64,
     pub worktree_generation: u64,

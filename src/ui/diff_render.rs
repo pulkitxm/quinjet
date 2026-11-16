@@ -422,7 +422,10 @@ pub(super) fn draw_footer(
         .account
         .as_deref()
         .map_or_else(|| "Account unset".to_owned(), |login| format!("@{login}"));
-    let account_label = format!(" {account} ");
+    let account_label = app.gateway_label().map_or_else(
+        || format!(" {account} "),
+        |gateway| format!(" {gateway}   {account} "),
+    );
     let account_width = cells(account_label.width()).min(area.width);
     let area = Rect {
         width: area.width.saturating_sub(account_width),

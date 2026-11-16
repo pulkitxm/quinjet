@@ -19,6 +19,8 @@ use super::{
     Branch, GitOperation, HistoryBranch, LocalDiffRequest, ProjectGroup, Repository, Stash,
     Worktree,
 };
+use crate::cli::ServiceDocument;
+use crate::cli::ai::{AiAnswer, AiTask};
 use crate::cli::{Command, Outcome, Session};
 use crate::graft::call::{GatewayTools, GraftCall, GraftReply};
 use crate::search::{SearchHits, SearchRequest, SearchTarget};
@@ -189,6 +191,14 @@ pub(crate) enum WorkerCommand {
         generation: u64,
         call: Box<GraftCall>,
     },
+    EnsureGateway,
+    RunAi {
+        generation: u64,
+        task: Box<AiTask>,
+    },
+    ConnectAgents {
+        generation: u64,
+    },
     Shutdown,
 }
 
@@ -326,6 +336,17 @@ pub(crate) enum WorkerEvent {
         generation: u64,
         result: Result<GraftReply, String>,
     },
+    GatewayReady {
+        result: Result<Box<ServiceDocument>, String>,
+    },
+    AiAnswer {
+        generation: u64,
+        result: Result<AiAnswer, String>,
+    },
+    AgentsConnected {
+        generation: u64,
+        result: Result<String, String>,
+    },
     OperationFinished {
         id: u64,
         label: String,
@@ -405,7 +426,11 @@ const fn worker_lane(command: &WorkerCommand) -> WorkerLane {
         | WorkerCommand::PreparePullRequestStack { .. }
         | WorkerCommand::LoadPullRequestFile { .. }
         | WorkerCommand::LoadPullRequestFileBatch { .. } => WorkerLane::PullRequestPreview,
-        WorkerCommand::LoadGraftTools { .. } | WorkerCommand::CallGraft { .. } => WorkerLane::Graft,
+        WorkerCommand::LoadGraftTools { .. }
+        | WorkerCommand::CallGraft { .. }
+        | WorkerCommand::EnsureGateway
+        | WorkerCommand::RunAi { .. }
+        | WorkerCommand::ConnectAgents { .. } => WorkerLane::Graft,
         WorkerCommand::Search { request, .. } => match request.target {
             SearchTarget::PullRequest { .. } => WorkerLane::PullRequestPreview,
             SearchTarget::Changes { .. } | SearchTarget::History { .. } => WorkerLane::Background,

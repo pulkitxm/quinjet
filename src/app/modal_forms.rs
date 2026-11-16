@@ -1,6 +1,8 @@
+use super::ai_actions::AiTarget;
 use super::modal_help::handle_help_key;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use super::*;
+use crate::cli::ai::AiTask;
 
 impl App {
     #[expect(
@@ -30,6 +32,16 @@ impl App {
                 if key.code == KeyCode::Tab {
                     *amend = !*amend;
                     self.modal = Some(modal);
+                    return effects;
+                }
+                if key.code == KeyCode::Char('g') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                    self.modal = Some(modal);
+                    self.start_ai(
+                        AiTask::CommitMessage,
+                        AiTarget::CommitEditor,
+                        &mut effects,
+                        now,
+                    );
                     return effects;
                 }
                 if key.code == KeyCode::Enter

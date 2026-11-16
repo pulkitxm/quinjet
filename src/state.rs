@@ -107,6 +107,14 @@ pub(crate) fn state_root() -> Option<PathBuf> {
 }
 
 #[cfg(test)]
+pub(crate) fn with_state_root<T>(root: &Path, run: impl FnOnce() -> T) -> T {
+    let previous = STATE_ROOT_OVERRIDE.with(|cell| cell.replace(Some(root.to_path_buf())));
+    let result = run();
+    drop(STATE_ROOT_OVERRIDE.with(|cell| cell.replace(previous)));
+    result
+}
+
+#[cfg(test)]
 mod tests {
     use std::process::Command;
 

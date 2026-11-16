@@ -381,7 +381,10 @@ pub(super) fn run_worker(
             WorkerCommand::PrefetchCheckRunLogs { .. }
             | WorkerCommand::PrefetchPullRequestStackMembers { .. }
             | WorkerCommand::LoadGraftTools { .. }
-            | WorkerCommand::CallGraft { .. } => continue,
+            | WorkerCommand::CallGraft { .. }
+            | WorkerCommand::EnsureGateway
+            | WorkerCommand::RunAi { .. }
+            | WorkerCommand::ConnectAgents { .. } => continue,
             WorkerCommand::LoadAccounts { generation } => WorkerEvent::Accounts {
                 generation,
                 result: answer(

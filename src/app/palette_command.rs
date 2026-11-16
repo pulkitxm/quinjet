@@ -28,13 +28,19 @@ pub(crate) enum PaletteCommand {
     ShowPullRequests,
     ChangeTheme,
     ChangeAppearance,
+    AiCommitMessage,
+    AiReview,
+    AiExplainCheck,
+    AiInvestigate,
+    ConnectAgents,
+    GraftGateway,
     GraftTools,
     Help,
     Quit,
 }
 
 impl PaletteCommand {
-    pub(crate) const ALL: [Self; 31] = [
+    pub(crate) const ALL: [Self; 37] = [
         Self::SwitchAccount,
         Self::Refresh,
         Self::StageAll,
@@ -63,6 +69,12 @@ impl PaletteCommand {
         Self::ShowPullRequests,
         Self::ChangeTheme,
         Self::ChangeAppearance,
+        Self::AiCommitMessage,
+        Self::AiReview,
+        Self::AiExplainCheck,
+        Self::AiInvestigate,
+        Self::ConnectAgents,
+        Self::GraftGateway,
         Self::GraftTools,
         Self::Help,
         Self::Quit,
@@ -98,7 +110,13 @@ impl PaletteCommand {
             Self::ShowPullRequests => "Show Pull Requests",
             Self::ChangeTheme => "Change Theme…",
             Self::ChangeAppearance => "Change Appearance…",
-            Self::GraftTools => "Run a Graftcode Gateway Tool…",
+            Self::AiCommitMessage => "Draft Commit Message with Claude",
+            Self::AiReview => "Review Changes with Claude",
+            Self::AiExplainCheck => "Explain Failing Check with Claude",
+            Self::AiInvestigate => "Investigate Pull Request with Claude",
+            Self::ConnectAgents => "Connect AI Agents to Quinjet",
+            Self::GraftGateway => "Show Graftcode Gateway",
+            Self::GraftTools => "Run a Tool from Another Graftcode Gateway…",
             Self::Help => "Keyboard Shortcuts",
             Self::Quit => "Quit Quinjet",
         }

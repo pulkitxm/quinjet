@@ -26,11 +26,20 @@ fn the_receiver_exposes_reads_by_default_and_writes_on_request() -> Result<()> {
         .json()?;
     let tools = read["tools"].as_array().context("tools were not listed")?;
     ensure!(
-        tools.len() == 23,
+        tools.len() == 27,
         "unexpected read tool count {}",
         tools.len()
     );
     ensure!(tools.iter().all(|tool| tool["access"] == "read"));
+    ensure!(
+        tools
+            .iter()
+            .filter(|tool| tool["name"]
+                .as_str()
+                .is_some_and(|name| name.starts_with("ai")))
+            .count()
+            == 4
+    );
     let names: Vec<&str> = tools
         .iter()
         .filter_map(|tool| tool["name"].as_str())
@@ -40,9 +49,14 @@ fn the_receiver_exposes_reads_by_default_and_writes_on_request() -> Result<()> {
     }
     let source = fs::read_to_string(read_dir.join("index.js"))?;
     ensure!(source.contains("class Quinjet {"));
-    ensure!(source.contains("static prChecks(number, commit, repo, refresh) {"));
+    ensure!(
+        source.contains(
+            "static async prChecks(number, commit, repo, refresh, repoPath, accessToken) {"
+        )
+    );
     ensure!(source.contains("@param {string} number Pull-request number. Required"));
-    ensure!(!source.contains("static commit("));
+    ensure!(!source.contains("static async commit("));
+    ensure!(!source.contains("aiKey"));
     let package: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(read_dir.join("package.json"))?)?;
     ensure!(package["main"] == "index.js");
@@ -73,6 +87,7 @@ fn the_receiver_exposes_reads_by_default_and_writes_on_request() -> Result<()> {
     );
     ensure!(!tools.iter().any(|tool| tool["name"] == "prOpen"));
     ensure!(!tools.iter().any(|tool| tool["name"] == "graftServe"));
+    ensure!(!tools.iter().any(|tool| tool["name"] == "mcpInstall"));
     Ok(())
 }
 
@@ -90,11 +105,17 @@ fn generated_methods_run_quinjet_against_the_bound_repository() -> Result<()> {
         .quinjet(&["graft", "module", "--out", &module_path])?
         .success()?;
     let script = "const { Quinjet } = require(process.argv[1]); \
-        const commits = JSON.parse(Quinjet.log(\"\", \"\", \"1\")); \
-        const status = JSON.parse(Quinjet.status()); \
+        (async () => { \
+        const commits = JSON.parse(await Quinjet.log(\"\", \"\", \"1\")); \
+        const status = JSON.parse(await Quinjet.status()); \
         let refused = ''; \
-        try { Quinjet.show('no-such-revision', false); } catch (error) { refused = error.message; } \
-        process.stdout.write(JSON.stringify({ subject: commits[0].subject, count: commits.length, head: status.branch.head, refused }));";
+        try { await Quinjet.show('no-such-revision', false); } catch (error) { refused = error.message; } \
+        let locked = ''; \
+        process.env.QUINJET_GRAFT_TOKEN = 'secret'; \
+        try { await Quinjet.status('', 'wrong'); } catch (error) { locked = error.message; } \
+        const opened = JSON.parse(await Quinjet.status('', 'secret')); \
+        process.stdout.write(JSON.stringify({ subject: commits[0].subject, count: commits.length, head: status.branch.head, refused, locked, opened: opened.branch.head })); \
+        })();";
     let mut command = ProcessCommand::new("node");
     command
         .arg("-e")
@@ -111,6 +132,9 @@ fn generated_methods_run_quinjet_against_the_bound_repository() -> Result<()> {
     ensure!(answer["head"] == "main", "{answer}");
     let refused = answer["refused"].as_str().unwrap_or_default();
     ensure!(refused.contains("quinjet show exited 3"), "{refused}");
+    let locked = answer["locked"].as_str().unwrap_or_default();
+    ensure!(locked.contains("connect through `quinjet mcp`"), "{locked}");
+    ensure!(answer["opened"] == "main", "{answer}");
     Ok(())
 }
 
@@ -294,7 +318,8 @@ fn serving_without_a_gateway_explains_how_to_install_one() -> Result<()> {
         run.stderr
     );
     ensure!(
-        run.stderr.contains("hint: install the Graftcode gateway"),
+        run.stderr
+            .contains("hint: run `quinjet graft install` to download it"),
         "{}",
         run.stderr
     );

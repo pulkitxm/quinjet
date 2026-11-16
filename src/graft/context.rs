@@ -75,7 +75,9 @@ pub(crate) fn context_key(name: &str) -> Option<ContextKey> {
         }
         "diff" | "patch" => Some(ContextKey::Diff),
         "recentcommits" | "commithistory" | "recenthistory" => Some(ContextKey::RecentCommits),
-        "pullrequest" | "pullrequestnumber" | "prnumber" => Some(ContextKey::PullRequest),
+        "pullrequest" | "pullrequestnumber" | "prnumber" | "number" => {
+            Some(ContextKey::PullRequest)
+        }
         "checklog" | "cilog" | "failurelog" | "steplog" | "joblog" => Some(ContextKey::CheckLog),
         _ => None,
     }
@@ -180,7 +182,7 @@ mod tests {
         assert_eq!(context_key("check-log"), Some(ContextKey::CheckLog));
         assert_eq!(context_key("pullRequest"), Some(ContextKey::PullRequest));
         assert_eq!(context_key("repo"), None);
-        assert_eq!(context_key("number"), None);
+        assert_eq!(context_key("number"), Some(ContextKey::PullRequest));
         for key in ContextKey::ALL {
             assert_eq!(context_key(key.canonical()), Some(key));
         }

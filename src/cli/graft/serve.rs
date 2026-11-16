@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
-use super::{Emitter, ServeArgs, ServeDocument, plan, receiver, render_graft, spawn};
+use super::service::spawn;
+use super::{Emitter, ServeArgs, ServeDocument, plan, receiver, render_graft};
 use crate::git::Repository;
 use crate::graft::call::LIST_TIMEOUT;
 use crate::graft::client::McpSession;
@@ -29,7 +30,7 @@ pub(super) fn serve(out: &mut Emitter, repository: &Path, args: &ServeArgs) -> R
     gateway::wait_until_ready(
         plan.port,
         &mut process.0,
-        &plan.log_file(),
+        &plan.log,
         Duration::from_secs(args.startup_timeout.max(1)),
     )?;
     let base = plan.base_url();
@@ -61,7 +62,7 @@ pub(super) fn serve(out: &mut Emitter, repository: &Path, args: &ServeArgs) -> R
         registry::save(&path, &gateways)?;
     }
     let document = ServeDocument {
-        repository: plan.repository.display().to_string(),
+        repository: repository.root().display().to_string(),
         gateway: plan.gateway.display().to_string(),
         mcp,
         vision: format!("{base}/GV"),
@@ -74,7 +75,7 @@ pub(super) fn serve(out: &mut Emitter, repository: &Path, args: &ServeArgs) -> R
         published: plan.publish,
         registered: args.register.clone(),
         tools,
-        log: plan.log_file().display().to_string(),
+        log: plan.log.display().to_string(),
     };
     let stop = stop_signal()?;
     out.emit(&document, || render_graft::serving(&document))?;
@@ -99,7 +100,7 @@ pub(super) fn serve(out: &mut Emitter, repository: &Path, args: &ServeArgs) -> R
 }
 
 #[cfg(unix)]
-fn stop_signal() -> Result<Arc<AtomicBool>> {
+pub(super) fn stop_signal() -> Result<Arc<AtomicBool>> {
     let stop = Arc::new(AtomicBool::new(false));
     let _registered = [
         signal_hook::consts::SIGINT,
@@ -114,6 +115,6 @@ fn stop_signal() -> Result<Arc<AtomicBool>> {
 }
 
 #[cfg(not(unix))]
-fn stop_signal() -> Result<Arc<AtomicBool>> {
+pub(super) fn stop_signal() -> Result<Arc<AtomicBool>> {
     Ok(Arc::new(AtomicBool::new(false)))
 }

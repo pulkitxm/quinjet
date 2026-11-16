@@ -53,7 +53,15 @@ fn isolate_git(command: &mut ProcessCommand) {
 }
 
 fn isolate_quinjet(command: &mut ProcessCommand, root: &Path) {
-    for variable in ["SSH_CLIENT", "SSH_CONNECTION", "SSH_TTY"] {
+    for variable in [
+        "SSH_CLIENT",
+        "SSH_CONNECTION",
+        "SSH_TTY",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "QUINJET_AI_MODEL",
+        "QUINJET_AI_EFFORT",
+    ] {
         command.env_remove(variable);
     }
     command
@@ -65,7 +73,8 @@ fn isolate_quinjet(command: &mut ProcessCommand, root: &Path) {
         .env("XDG_DATA_HOME", root.join("data"))
         .env("XDG_STATE_HOME", root.join("state"))
         .env("QUINJET_CACHE_DIR", root.join("quinjet-cache"))
-        .env("QUINJET_STATE_DIR", root.join("state/quinjet"));
+        .env("QUINJET_STATE_DIR", root.join("state/quinjet"))
+        .env("QUINJET_GRAFT_AUTOSTART", "0");
 }
 
 #[cfg(not(windows))]
@@ -233,8 +242,12 @@ fn command_in(directory: Option<&Path>, args: &[&str], environment: &Path) -> Pr
     command
 }
 
+#[path = "cli/agents.rs"]
+mod agents;
 #[path = "cli/capabilities.rs"]
 mod capabilities;
+#[path = "cli/fake_claude.rs"]
+mod fake_claude;
 #[path = "cli/fake_gateway.rs"]
 mod fake_gateway;
 #[cfg(unix)]

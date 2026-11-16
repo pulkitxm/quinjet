@@ -275,7 +275,7 @@ pub(crate) fn parse_reply(result: &Value) -> ToolReply {
 
 fn is_gateway_frame(line: &str) -> bool {
     line.split_once("() in ").is_some_and(|(call, location)| {
-        !call.contains(' ')
+        !call.trim_start_matches("async ").contains(' ')
             && location
                 .rsplit_once(" line ")
                 .is_some_and(|(_, number)| number.chars().all(|digit| digit.is_ascii_digit()))
@@ -366,7 +366,7 @@ mod tests {
         assert_eq!(reply.text, "a\nb");
         assert!(!reply.is_error);
         let reply = parse_reply(&json!({
-            "content": [{"type": "text", "text": "Error: Error: refused\n  detail\nunknown.invoke() in /x/index.js line 63\nagent._require() in /tmp/agent.py line 13\n"}],
+            "content": [{"type": "text", "text": "Error: Error: refused\n  detail\nunknown.invoke() in /x/index.js line 63\nagent._require() in /tmp/agent.py line 13\nasync Receiver.sendCommand() in /x/Binaries/Nodejs/receiver.js line 9\n"}],
             "isError": true
         }));
         assert_eq!(reply.text, "refused\n  detail");

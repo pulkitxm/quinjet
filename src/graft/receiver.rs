@@ -1,6 +1,3 @@
-use std::fmt::Write as _;
-
-use anyhow::Result;
 use clap::ArgAction;
 use serde::Serialize;
 
@@ -43,9 +40,20 @@ pub(crate) const HOST_ONLY_PATHS: &[&str] = &[
     "man",
     "capabilities",
     "update",
+    "ai key",
 ];
 
-pub(crate) const HOST_ONLY_GROUPS: &[&str] = &["graft"];
+pub(crate) const AI_PATHS: &[&str] = &[
+    "ai commit-message",
+    "ai review",
+    "ai explain-check",
+    "ai investigate",
+];
+
+pub(crate) const HOST_ONLY_GROUPS: &[&str] = &["graft", "mcp"];
+
+pub(crate) const REPO_PARAM: &str = "repoPath";
+pub(crate) const TOKEN_PARAM: &str = "accessToken";
 
 const SKIPPED_ARGUMENTS: &[&str] = &[
     "help",
@@ -60,74 +68,6 @@ const SKIPPED_ARGUMENTS: &[&str] = &[
     "interval",
     "exit_code",
 ];
-
-const RUNTIME: &str = r#""use strict";
-
-const { spawnSync } = require("node:child_process");
-
-const OUTPUT_LIMIT = 64 * 1024 * 1024;
-
-function present(value) {
-  return value !== undefined && value !== null && value !== "" && value !== false;
-}
-
-function enabled(value) {
-  return value === true || value === 1 || value === "1" || value === "true" || value === "yes";
-}
-
-function items(value, list) {
-  if (!list) {
-    return [String(value)];
-  }
-  const values = Array.isArray(value) ? value : String(value).split(/\s+/);
-  return values.map(String).filter((item) => item.length > 0);
-}
-
-function argv(spec, values) {
-  const options = [];
-  const positionals = [];
-  spec.params.forEach((param, index) => {
-    const value = values[index];
-    if (!present(value)) {
-      return;
-    }
-    if (param.kind === "switch") {
-      if (enabled(value)) {
-        options.push(param.flag);
-      }
-      return;
-    }
-    for (const item of items(value, param.list)) {
-      if (param.kind === "option") {
-        options.push(param.flag, item);
-      } else {
-        positionals.push(item);
-      }
-    }
-  });
-  const tail = positionals.length > 0 ? ["--", ...positionals] : [];
-  return [...spec.path, ...options, "--json", ...tail];
-}
-
-function invoke(name, values) {
-  const spec = SPECS[name];
-  const binary = process.env.QUINJET_GRAFT_BIN || "quinjet";
-  const repository = process.env.QUINJET_GRAFT_REPO || process.cwd();
-  const result = spawnSync(binary, ["-C", repository, ...argv(spec, values)], {
-    encoding: "utf8",
-    maxBuffer: OUTPUT_LIMIT,
-    env: { ...process.env, NO_COLOR: "1" },
-  });
-  if (result.error) {
-    throw result.error;
-  }
-  if (result.status !== 0) {
-    const detail = (result.stderr || "").trim();
-    throw new Error(`quinjet ${spec.path.join(" ")} exited ${result.status}: ${detail}`);
-  }
-  return result.stdout;
-}
-"#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -191,7 +131,7 @@ pub(crate) fn access(path: &str) -> Option<Access> {
     let group = path.split(' ').next().unwrap_or_default();
     if HOST_ONLY_PATHS.contains(&path) || HOST_ONLY_GROUPS.contains(&group) {
         None
-    } else if READ_PATHS.contains(&path) {
+    } else if READ_PATHS.contains(&path) || AI_PATHS.contains(&path) {
         Some(Access::Read)
     } else {
         Some(Access::Write)
@@ -256,36 +196,14 @@ impl Receiver {
             .collect()
     }
 
-    pub(crate) fn package_json(version: &str) -> Result<String> {
-        let document = serde_json::json!({
-            "name": "quinjet-graft",
-            "version": version,
-            "private": true,
-            "description": "Quinjet's Git and GitHub commands as Graftcode methods",
-            "main": "index.js",
-        });
-        Ok(serde_json::to_string_pretty(&document)? + "\n")
+    pub(crate) fn investigation_methods(&self) -> impl Iterator<Item = &Method> {
+        self.methods
+            .iter()
+            .filter(|method| method.access == Access::Read && !method.is_ai())
     }
 
-    pub(crate) fn index_js(&self) -> Result<String> {
-        let specs: serde_json::Map<String, serde_json::Value> = self
-            .methods
-            .iter()
-            .map(|method| Ok((method.name.clone(), serde_json::to_value(method)?)))
-            .collect::<Result<_>>()?;
-        let mut source = String::from(RUNTIME);
-        source.push_str("\nconst SPECS = ");
-        source.push_str(&serde_json::to_string_pretty(&specs)?);
-        source.push_str(";\n\nclass ");
-        source.push_str(CLASS_NAME);
-        source.push_str(" {\n");
-        for method in &self.methods {
-            write_method(&mut source, method)?;
-        }
-        source.push_str("}\n\nmodule.exports = { ");
-        source.push_str(CLASS_NAME);
-        source.push_str(" };\n");
-        Ok(source)
+    pub(crate) fn find(&self, name: &str) -> Option<&Method> {
+        self.methods.iter().find(|method| method.name == name)
     }
 }
 
@@ -355,74 +273,44 @@ fn param(argument: &clap::Arg) -> Param {
     }
 }
 
-fn write_method(source: &mut String, method: &Method) -> Result<()> {
-    source.push_str("  /**\n   * ");
-    source.push_str(&doc_text(&method.about));
-    source.push('\n');
-    for param in &method.params {
-        writeln!(
-            source,
-            "   * @param {{{}}} {} {}",
-            if param.kind == Kind::Switch {
-                "boolean"
-            } else {
-                "string"
-            },
-            param.name,
-            doc_text(&param_description(param))
-        )?;
-    }
-    source.push_str("   * @returns {string} Quinjet's JSON answer\n   */\n  static ");
-    let names: Vec<&str> = method
-        .params
-        .iter()
-        .map(|param| param.name.as_str())
-        .collect();
-    let list = names.join(", ");
-    writeln!(
-        source,
-        "{}({list}) {{\n    return invoke(\"{}\", [{list}]);\n  }}\n",
-        method.name, method.name
-    )?;
-    Ok(())
-}
-
-fn param_description(param: &Param) -> String {
-    let mut text = if param.help.is_empty() {
-        param.name.clone()
-    } else {
-        param.help.clone()
-    };
-    if param.kind == Kind::Switch {
-        text.push_str(". true or false");
-    }
-    if !param.choices.is_empty() {
-        text.push_str(". One of: ");
-        text.push_str(&param.choices.join(", "));
-    }
-    if param.list {
-        text.push_str(". Several values are separated by spaces");
-    }
-    if param.required {
-        text.push_str(". Required");
-    } else {
-        match &param.default {
-            Some(default) if param.kind != Kind::Switch => {
-                text.push_str(". Optional, pass \"\" for the default ");
-                text.push_str(default);
-            }
-            _ if param.kind == Kind::Switch => text.push_str(". Optional, false by default"),
-            _ => text.push_str(". Optional, pass \"\" to leave it out"),
+impl Param {
+    pub(crate) fn description(&self) -> String {
+        let param = self;
+        let mut text = if param.help.is_empty() {
+            param.name.clone()
+        } else {
+            param.help.clone()
+        };
+        if param.kind == Kind::Switch {
+            text.push_str(". true or false");
         }
+        if !param.choices.is_empty() {
+            text.push_str(". One of: ");
+            text.push_str(&param.choices.join(", "));
+        }
+        if param.list {
+            text.push_str(". Several values are separated by spaces");
+        }
+        if param.required {
+            text.push_str(". Required");
+        } else {
+            match &param.default {
+                Some(default) if param.kind != Kind::Switch => {
+                    text.push_str(". Optional, pass \"\" for the default ");
+                    text.push_str(default);
+                }
+                _ if param.kind == Kind::Switch => text.push_str(". Optional, false by default"),
+                _ => text.push_str(". Optional, pass \"\" to leave it out"),
+            }
+        }
+        text
     }
-    text
 }
 
-fn doc_text(text: &str) -> String {
-    text.split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .replace("*/", "* /")
+impl Method {
+    pub(crate) fn is_ai(&self) -> bool {
+        self.path.first().is_some_and(|group| group == "ai")
+    }
 }
 
 fn camel_case(parts: &[String]) -> String {
@@ -475,10 +363,8 @@ mod tests {
         assert_eq!(access("pr open"), None);
         assert_eq!(access("pr checks"), Some(Access::Read));
         assert_eq!(access("commit"), Some(Access::Write));
-    }
-
-    #[test]
-    fn documentation_text_cannot_close_the_block() {
-        assert_eq!(doc_text("a */ b\n  c"), "a * / b c");
+        assert_eq!(access("ai review"), Some(Access::Read));
+        assert_eq!(access("ai key"), None);
+        assert_eq!(access("mcp install"), None);
     }
 }
