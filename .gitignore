@@ -23,3 +23,5 @@ lcov.info
 mutants.out/
 mutants.out.old/
 *.cdx.json
+.pytest_cache/
+*.egg-info/
