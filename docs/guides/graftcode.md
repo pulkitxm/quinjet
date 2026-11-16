@@ -129,6 +129,15 @@ quinjet graft call agent investigate_pull_request --pr 42
 the MCP endpoint. `--token-env NAME` sends the value of that environment
 variable as a bearer token; the token itself is never stored.
 
+Gateways are reached over plain HTTP. Quinjet links no TLS library, which keeps
+it a single dependency-free binary on every platform, so a gateway on another
+machine is reached through an SSH tunnel:
+
+```bash
+ssh -N -L 7390:localhost:7390 build-box &
+quinjet graft add agent http://localhost:7390
+```
+
 `graft call` fills every parameter it recognizes and sends an empty string for
 the rest, because Graftcode binds arguments by position when one is missing.
 Explicit `--arg name=value` pairs always win, and `--no-context` sends only
@@ -191,8 +200,8 @@ Requests use `claude-opus-5-5` with server-side refusal fallbacks enabled.
 ## Security
 
 - `gg` listens on every interface and has no authentication of its own. Serve
-  read-only unless you trust the network, and put a TLS proxy with
-  authentication in front of anything reachable from elsewhere.
+  read-only unless you trust the network, and reach gateways on other machines
+  through an SSH tunnel rather than exposing them.
 - Read tools never take a confirmation. With `--allow-writes`, destructive
   commands still only preview until a caller passes `yes`.
 - Each served gateway is bound to one repository through the environment of

@@ -292,10 +292,10 @@ mod tests {
     fn run_selected(app: &mut App) -> u64 {
         let effects = app.handle_key(key(KeyCode::Enter), Instant::now());
         let Some(AppEffect::Git(command)) = effects.first() else {
-            panic!("Enter did not queue a gateway call: {effects:?}");
+            panic!("Enter did not queue a gateway call");
         };
         let WorkerCommand::CallGraft { generation, call } = command.as_ref() else {
-            panic!("Enter queued {command:?}");
+            panic!("Enter queued another worker command");
         };
         assert!(call.fill_context);
         assert_eq!(call.gateway.token_env.as_deref(), Some("AGENT_TOKEN"));

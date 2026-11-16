@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::Child;
 use std::time::{Duration, Instant};
 use std::{env, fs, thread};
 
@@ -52,21 +52,6 @@ impl ServePlan {
             arguments.push("--GSMU=0".into());
         }
         arguments
-    }
-
-    pub(crate) fn command(&self) -> Result<Command> {
-        let log = fs::File::create(self.log_file())
-            .with_context(|| format!("failed to create {}", self.log_file().display()))?;
-        let mut command = Command::new(&self.gateway);
-        let _ = command
-            .args(self.arguments())
-            .current_dir(&self.module_dir)
-            .env("QUINJET_GRAFT_BIN", &self.quinjet)
-            .env("QUINJET_GRAFT_REPO", &self.repository)
-            .stdin(Stdio::null())
-            .stdout(log.try_clone().context("failed to share the gateway log")?)
-            .stderr(log);
-        Ok(command)
     }
 
     pub(crate) fn base_url(&self) -> String {

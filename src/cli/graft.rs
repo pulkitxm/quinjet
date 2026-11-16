@@ -398,6 +398,7 @@ pub(super) fn plan(args: &ServeArgs, repository: &Repository) -> Result<ServePla
         gateway,
         module_dir: gateway::module_dir(args.allow_writes)?,
         repository: repository.root().to_path_buf(),
+        // nosemgrep: rust.lang.security.current-exe.current-exe
         quinjet: std::env::current_exe()
             .context("could not find the running Quinjet executable")?,
         port: args.port,
@@ -406,8 +407,16 @@ pub(super) fn plan(args: &ServeArgs, repository: &Repository) -> Result<ServePla
 }
 
 pub(super) fn spawn(plan: &ServePlan) -> Result<GatewayProcess> {
-    let child = plan
-        .command()?
+    let log = std::fs::File::create(plan.log_file())
+        .with_context(|| format!("failed to create {}", plan.log_file().display()))?;
+    let child = std::process::Command::new(&plan.gateway)
+        .args(plan.arguments())
+        .current_dir(&plan.module_dir)
+        .env("QUINJET_GRAFT_BIN", &plan.quinjet)
+        .env("QUINJET_GRAFT_REPO", &plan.repository)
+        .stdin(std::process::Stdio::null())
+        .stdout(log.try_clone().context("failed to share the gateway log")?)
+        .stderr(log)
         .spawn()
         .with_context(|| format!("failed to start {}", plan.gateway.display()))?;
     Ok(GatewayProcess(child))

@@ -66,11 +66,14 @@ pub(crate) fn validate_name(name: &str) -> Result<()> {
 
 pub(crate) fn endpoint(url: &str) -> Result<String> {
     let trimmed = url.trim().trim_end_matches('/');
-    let rest = trimmed
-        .strip_prefix("http://")
-        .or_else(|| trimmed.strip_prefix("https://"));
+    if trimmed.starts_with("https://") {
+        bail!(
+            "`{url}` uses TLS, which Quinjet does not link; reach a remote gateway through `ssh -L 7390:localhost:7390 <host>` and add http://localhost:7390"
+        );
+    }
+    let rest = trimmed.strip_prefix("http://");
     if rest.is_none_or(|rest| rest.is_empty() || rest.starts_with('/')) {
-        bail!("`{url}` is not an http:// or https:// gateway address");
+        bail!("`{url}` is not an http:// gateway address");
     }
     let base = trimmed
         .strip_suffix("/GV")
@@ -149,6 +152,8 @@ mod tests {
         }
         endpoint("ws://localhost:7381").unwrap_err();
         endpoint("https://").unwrap_err();
+        let remote = endpoint("https://gateway.example/mcp").unwrap_err().to_string();
+        assert!(remote.contains("ssh -L 7390:localhost:7390"), "{remote}");
         endpoint("localhost:7381").unwrap_err();
     }
 

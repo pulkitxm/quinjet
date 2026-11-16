@@ -16,4 +16,4 @@ PYTHONPATH="$packages${PYTHONPATH:+:$PYTHONPATH}"
 export HYPERTUBE_PYTHON_RUNTIME_PATH PYTHONPATH
 
 exec "$gateway" --runtime python --modules ./quinjet_agent/ --types quinjet_agent.agent.Agent \
-  --port "$port" --httpPort "$((port + 1))" --GSMU=0
+    --port "$port" --httpPort "$((port + 1))" --GSMU=0
