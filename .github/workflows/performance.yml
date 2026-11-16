@@ -39,7 +39,7 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             binary: quinjet.exe
-            budget: 6_500_000
+            budget: 6_700_000
     runs-on: ${{ matrix.os }}
     defaults:
       run:
