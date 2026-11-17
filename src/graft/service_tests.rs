@@ -152,6 +152,15 @@ fn only_the_owning_daemon_clears_a_stop_request() {
 }
 
 #[test]
+fn installs_hold_their_own_lock_until_dropped() {
+    let (_directory, paths) = paths();
+    let lock = StartLock::installing(&paths).unwrap();
+    assert!(paths.root.join("install.lock").exists());
+    drop(lock);
+    assert!(!paths.root.join("install.lock").exists());
+}
+
+#[test]
 fn ports_in_use_are_skipped() {
     let taken = TcpListener::bind(("0.0.0.0", 0)).unwrap();
     let port = taken.local_addr().unwrap().port();

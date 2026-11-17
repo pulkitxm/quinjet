@@ -27,10 +27,9 @@ pub(super) fn serve(out: &mut Emitter, repository: &Path, args: &ServeArgs) -> R
     gateway::write_module(&plan.module_dir, &receiver)?;
     out.start_progress("Starting the Graftcode gateway")?;
     let mut process = spawn(&plan)?;
-    gateway::wait_until_ready(
-        plan.port,
-        &mut process.0,
-        &plan.log,
+    super::diagnose::wait_until_ready(
+        &plan,
+        &mut process,
         Duration::from_secs(args.startup_timeout.max(1)),
     )?;
     let base = plan.base_url();

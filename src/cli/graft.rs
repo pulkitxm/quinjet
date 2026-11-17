@@ -15,6 +15,7 @@ use crate::graft::receiver::{Access, Receiver, ToolSummary};
 use crate::graft::registry::{self, Gateway};
 
 mod calls;
+mod diagnose;
 mod install;
 mod render_graft;
 mod serve;

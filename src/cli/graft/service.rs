@@ -149,7 +149,7 @@ fn supervise(paths: &ServicePaths, gateway: Option<&Path>) -> Result<u8> {
         log: paths.log(),
     };
     let mut process = spawn(&plan)?;
-    gateway::wait_until_ready(port, &mut process.0, &plan.log, START_LIMIT)?;
+    super::diagnose::wait_until_ready(&plan, &mut process, START_LIMIT)?;
     paths.write_state(&ServiceState {
         pid: std::process::id(),
         port,
@@ -272,8 +272,13 @@ pub(super) fn spawn(plan: &ServePlan) -> Result<GatewayProcess> {
             None => command.env_remove(name),
         };
     }
-    let child = command
-        .spawn()
-        .with_context(|| format!("failed to start {}", plan.gateway.display()))?;
+    let child = command.spawn().with_context(|| {
+        let mut message = format!("failed to start {}", plan.gateway.display());
+        if let Some(problem) = gateway::unsupported_libc() {
+            message.push_str(": ");
+            message.push_str(&problem);
+        }
+        message
+    })?;
     Ok(GatewayProcess(child))
 }

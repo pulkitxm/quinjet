@@ -15,6 +15,25 @@ const LOG_FILE: &str = "gateway.log";
 const LOG_TAIL_BYTES: usize = 4096;
 const POLL_INTERVAL: Duration = Duration::from_millis(400);
 
+pub(crate) const fn glibc_loader(os: &str, arch: &str) -> Option<&'static str> {
+    match (os.as_bytes(), arch.as_bytes()) {
+        (b"linux", b"x86_64") => Some("/lib64/ld-linux-x86-64.so.2"),
+        (b"linux", b"aarch64") => Some("/lib/ld-linux-aarch64.so.1"),
+        _ => None,
+    }
+}
+
+pub(crate) fn unsupported_libc() -> Option<String> {
+    let loader = glibc_loader(env::consts::OS, env::consts::ARCH)?;
+    (!Path::new(loader).exists()).then(|| {
+        format!(
+            "the Graftcode gateway needs glibc, and {loader} is missing; \
+             Graftcode publishes no build for musl systems such as Alpine, \
+             so install gcompat or use a glibc distribution"
+        )
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ServePlan {
     pub gateway: PathBuf,
@@ -237,6 +256,20 @@ impl Drop for GatewayProcess {
 )]
 mod tests {
     use super::*;
+
+    #[test]
+    fn linux_gateways_need_the_glibc_loader() {
+        assert_eq!(
+            glibc_loader("linux", "x86_64"),
+            Some("/lib64/ld-linux-x86-64.so.2")
+        );
+        assert_eq!(
+            glibc_loader("linux", "aarch64"),
+            Some("/lib/ld-linux-aarch64.so.1")
+        );
+        assert_eq!(glibc_loader("macos", "aarch64"), None);
+        assert_eq!(glibc_loader("windows", "x86_64"), None);
+    }
 
     fn plan(publish: bool) -> ServePlan {
         ServePlan {

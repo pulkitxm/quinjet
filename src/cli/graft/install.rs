@@ -7,12 +7,15 @@ use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 
 use super::super::update::Downloader;
-use crate::graft::gateway::{gateway_names, installed_gateway, installed_root};
+use super::super::{EXIT_FAILURE, Failure};
+use crate::graft::gateway::{gateway_names, installed_gateway, installed_root, unsupported_libc};
+use crate::graft::service::{ServicePaths, StartLock};
 
 const RELEASE_API: &str = "https://api.github.com/repos/grft-dev/graftcode-gateway/releases/latest";
 const RELEASE_LIMIT: usize = 1024 * 1024;
 const ARCHIVE_LIMIT: usize = 512 * 1024 * 1024;
 const ARCHIVE_TIMEOUT_SECONDS: u64 = 1800;
+pub(crate) const DOWNLOAD_HINT: &str = "download gg from https://github.com/grft-dev/graftcode-gateway/releases yourself and set QUINJET_GRAFTCODE_GATEWAY to its path, or pass --gateway";
 
 #[derive(Debug, Deserialize)]
 struct Release {
@@ -41,6 +44,27 @@ pub(crate) fn asset_name(os: &str, arch: &str) -> Option<&'static str> {
 }
 
 pub(crate) fn install(report: &mut dyn FnMut(&str)) -> Result<PathBuf> {
+    let _lock = StartLock::installing(&ServicePaths::locate()?)?;
+    if let Some(existing) = installed_root()
+        .ok()
+        .and_then(|root| installed_gateway(&root))
+    {
+        return Ok(existing);
+    }
+    download(report).map_err(|error| {
+        Failure::new(
+            EXIT_FAILURE,
+            format!("could not install the Graftcode gateway: {error:#}"),
+        )
+        .hint(DOWNLOAD_HINT)
+        .into()
+    })
+}
+
+fn download(report: &mut dyn FnMut(&str)) -> Result<PathBuf> {
+    if let Some(problem) = unsupported_libc() {
+        bail!(problem);
+    }
     let name = asset_name(std::env::consts::OS, std::env::consts::ARCH).with_context(|| {
         format!(
             "Graftcode publishes no gateway for {} {}",

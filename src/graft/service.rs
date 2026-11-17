@@ -15,6 +15,7 @@ pub(crate) const START_LIMIT: Duration = Duration::from_secs(180);
 const LEASE_FRESH: Duration = Duration::from_secs(90);
 const LEASE_TOUCH: Duration = Duration::from_secs(30);
 const LOCK_STALE: Duration = Duration::from_secs(240);
+const INSTALL_STALE: Duration = Duration::from_secs(1900);
 const STOP_LIMIT: Duration = Duration::from_secs(15);
 const POLL: Duration = Duration::from_millis(200);
 const PORT_ATTEMPTS: u16 = 40;
@@ -189,7 +190,7 @@ impl ServicePaths {
         if let Some(state) = self.running().filter(|state| state.current(module)) {
             return Ok(state);
         }
-        let _lock = StartLock::acquire(self, limit)?;
+        let _lock = StartLock::acquire(&self.root, &self.lock(), limit, LOCK_STALE)?;
         if let Some(state) = self.running() {
             if state.current(module) {
                 return Ok(state);
@@ -270,13 +271,21 @@ impl Drop for Lease {
     }
 }
 
-struct StartLock(PathBuf);
+pub(crate) struct StartLock(PathBuf);
 
 impl StartLock {
-    fn acquire(paths: &ServicePaths, limit: Duration) -> Result<Self> {
-        fs::create_dir_all(&paths.root)
-            .with_context(|| format!("failed to create {}", paths.root.display()))?;
-        let path = paths.lock();
+    pub(crate) fn installing(paths: &ServicePaths) -> Result<Self> {
+        Self::acquire(
+            &paths.root,
+            &paths.root.join("install.lock"),
+            INSTALL_STALE,
+            INSTALL_STALE,
+        )
+    }
+
+    fn acquire(root: &Path, path: &Path, limit: Duration, stale_after: Duration) -> Result<Self> {
+        fs::create_dir_all(root).with_context(|| format!("failed to create {}", root.display()))?;
+        let path = path.to_path_buf();
         let started = Instant::now();
         loop {
             match OpenOptions::new().write(true).create_new(true).open(&path) {
@@ -289,7 +298,7 @@ impl StartLock {
                         .and_then(|metadata| metadata.modified())
                         .ok()
                         .and_then(|modified| modified.elapsed().ok())
-                        .is_some_and(|age| age >= LOCK_STALE);
+                        .is_some_and(|age| age >= stale_after);
                     if stale {
                         drop(fs::remove_file(&path));
                         continue;

@@ -295,7 +295,7 @@ impl Downloader {
             if command_available("powershell", &["-NoProfile", "-Command", "exit 0"]) {
                 return Ok(Self::PowerShell);
             }
-            bail!("PowerShell is required to download a Quinjet update")
+            bail!("PowerShell is required to download files")
         }
         #[cfg(not(windows))]
         {
@@ -305,7 +305,7 @@ impl Downloader {
             if command_available("wget", &["--version"]) {
                 return Ok(Self::Wget);
             }
-            bail!("curl or wget is required to download a Quinjet update")
+            bail!("curl or wget is required to download files; install one of them")
         }
     }
 
