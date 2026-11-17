@@ -54,6 +54,7 @@ pub(crate) const HOST_ONLY_GROUPS: &[&str] = &["graft", "mcp"];
 
 pub(crate) const REPO_PARAM: &str = "repoPath";
 pub(crate) const TOKEN_PARAM: &str = "accessToken";
+pub(crate) const CONFIRM_PARAM: &str = "yes";
 
 const SKIPPED_ARGUMENTS: &[&str] = &[
     "help",
@@ -311,6 +312,10 @@ impl Method {
     pub(crate) fn is_ai(&self) -> bool {
         self.path.first().is_some_and(|group| group == "ai")
     }
+
+    pub(crate) fn confirms(&self) -> bool {
+        self.params.iter().any(|param| param.name == CONFIRM_PARAM)
+    }
 }
 
 fn camel_case(parts: &[String]) -> String {
@@ -354,6 +359,70 @@ mod tests {
             camel_case(&words(&["include_untracked"])),
             "includeUntracked"
         );
+    }
+
+    #[test]
+    fn parameter_names_are_valid_javascript_identifiers() {
+        const RESERVED: &[&str] = &[
+            "await",
+            "break",
+            "case",
+            "catch",
+            "class",
+            "const",
+            "continue",
+            "debugger",
+            "default",
+            "delete",
+            "do",
+            "else",
+            "enum",
+            "export",
+            "extends",
+            "false",
+            "finally",
+            "for",
+            "function",
+            "if",
+            "implements",
+            "import",
+            "in",
+            "instanceof",
+            "interface",
+            "let",
+            "new",
+            "null",
+            "package",
+            "private",
+            "protected",
+            "public",
+            "return",
+            "static",
+            "super",
+            "switch",
+            "this",
+            "throw",
+            "true",
+            "try",
+            "typeof",
+            "var",
+            "void",
+            "while",
+            "with",
+            "yield",
+            "arguments",
+            "eval",
+        ];
+        for method in crate::cli::graft_receiver(true).methods {
+            for param in &method.params {
+                assert!(
+                    !RESERVED.contains(&param.name.as_str()),
+                    "{}({}) is a JavaScript reserved word",
+                    method.name,
+                    param.name
+                );
+            }
+        }
     }
 
     #[test]

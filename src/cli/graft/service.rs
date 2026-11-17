@@ -44,7 +44,7 @@ impl ServiceDocument {
             gateway: state.map(|state| state.gateway.display().to_string()),
             log: state.map(|state| state.log.display().to_string()),
             clients: state.map_or(0, |_| paths.live_clients(SystemTime::now())),
-            tools: super::receiver(false).methods.len(),
+            tools: super::receiver(true).methods.len(),
         }
     }
 }
@@ -55,7 +55,7 @@ pub(crate) fn ensure_shared_gateway(
     report: &mut dyn FnMut(&str),
 ) -> Result<ServiceState> {
     let paths = ServicePaths::locate()?;
-    let module = gateway::module_digest(&super::receiver(false))?;
+    let module = gateway::module_digest(&super::receiver(true))?;
     let gateway = match locate_gateway(explicit) {
         Ok(path) => path,
         Err(_) if install_missing && !gateway::gateway_configured(explicit) => {
@@ -130,7 +130,7 @@ pub(super) fn daemon(gateway: Option<&Path>) -> Result<u8> {
 
 fn supervise(paths: &ServicePaths, gateway: Option<&Path>) -> Result<u8> {
     let gateway = locate_gateway(gateway)?;
-    let receiver = super::receiver(false);
+    let receiver = super::receiver(true);
     let module = gateway::module_digest(&receiver)?;
     gateway::write_module(&paths.module_dir(), &receiver)?;
     let port =

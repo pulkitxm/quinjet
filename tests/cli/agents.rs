@@ -146,8 +146,8 @@ fn nothing_staged_is_reported_before_any_request() -> Result<()> {
     Ok(())
 }
 
-fn exchange(lines: &[Value], scratch: &Scratch) -> Result<Vec<Value>> {
-    let mut command = scratch.quinjet_command(&["mcp"]);
+fn exchange(lines: &[Value], scratch: &Scratch, args: &[&str]) -> Result<Vec<Value>> {
+    let mut command = scratch.quinjet_command(args);
     command
         .env("QUINJET_GRAFTCODE_GATEWAY", scratch.path.join("missing-gg"))
         .stdin(Stdio::piped())
@@ -186,6 +186,7 @@ fn mcp_answers_agents_on_standard_io() -> Result<()> {
             json!({"jsonrpc": "2.0", "id": 6, "method": "sampling/createMessage"}),
         ],
         &scratch,
+        &["mcp"],
     )?;
     let initialized = &answers[0]["result"];
     ensure!(initialized["protocolVersion"] == "2025-03-26");
@@ -193,7 +194,14 @@ fn mcp_answers_agents_on_standard_io() -> Result<()> {
     let tools = answers[1]["result"]["tools"]
         .as_array()
         .context("no tools")?;
-    ensure!(tools.len() == 27, "{}", tools.len());
+    ensure!(tools.len() == 94, "{}", tools.len());
+    let merge = tools
+        .iter()
+        .find(|tool| tool["name"] == "prMerge")
+        .context("prMerge missing")?;
+    ensure!(merge["annotations"]["readOnlyHint"] == false);
+    ensure!(merge["annotations"]["destructiveHint"] == true);
+    ensure!(merge["inputSchema"]["properties"]["yes"]["type"] == "boolean");
     let checks = tools
         .iter()
         .find(|tool| tool["name"] == "prChecks")
@@ -216,6 +224,31 @@ fn mcp_answers_agents_on_standard_io() -> Result<()> {
     );
     ensure!(answers[4]["result"]["content"][0]["text"] == "Quinjet has no tool called `nope`");
     ensure!(answers[5]["error"]["code"] == -32601);
+    Ok(())
+}
+
+#[test]
+fn read_only_mcp_offers_and_runs_only_reads() -> Result<()> {
+    let scratch = Scratch::repository()?;
+    let answers = exchange(
+        &[
+            json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "commit", "arguments": {"message": "x"}}}),
+        ],
+        &scratch,
+        &["mcp", "--read-only"],
+    )?;
+    let tools = answers[0]["result"]["tools"]
+        .as_array()
+        .context("no tools")?;
+    ensure!(tools.len() == 27, "{}", tools.len());
+    ensure!(
+        tools
+            .iter()
+            .all(|tool| tool["annotations"]["readOnlyHint"] == true
+                || tool["name"].as_str().unwrap_or_default().starts_with("ai"))
+    );
+    ensure!(answers[1]["result"]["content"][0]["text"] == "Quinjet has no tool called `commit`");
     Ok(())
 }
 
@@ -256,6 +289,11 @@ fn installed_agents_get_quinjet_added_once() -> Result<()> {
         .success()?
         .json()?;
     ensure!(printed["mcpServers"]["quinjet"]["args"] == json!(["mcp"]));
+    let read_only = scratch
+        .quinjet(&["mcp", "install", "--print", "--read-only", "--json"])?
+        .success()?
+        .json()?;
+    ensure!(read_only["args"] == json!(["mcp", "--read-only"]));
     Ok(())
 }
 

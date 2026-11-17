@@ -1,6 +1,6 @@
 use serde_json::{Map, Value, json};
 
-use super::receiver::{Kind, Method};
+use super::receiver::{Access, Kind, Method};
 
 pub(crate) const REPOSITORY_PROPERTY: &str = "repository";
 
@@ -43,7 +43,8 @@ pub(crate) fn mcp_tool(method: &Method) -> Value {
         "description": describe(method),
         "inputSchema": input_schema(method, true),
         "annotations": {
-            "readOnlyHint": method.access == super::receiver::Access::Read && !method.is_ai(),
+            "readOnlyHint": method.access == Access::Read && !method.is_ai(),
+            "destructiveHint": method.access == Access::Write && method.confirms(),
             "openWorldHint": method.is_ai() || method.path.first().is_some_and(|group| group == "pr" || group == "stack"),
         },
     })
@@ -84,6 +85,14 @@ mod tests {
         );
         let tool = mcp_tool(receiver.find("status").unwrap());
         assert_eq!(tool["annotations"]["readOnlyHint"], true);
+        assert_eq!(tool["annotations"]["destructiveHint"], false);
+        let writes = crate::cli::graft_receiver(true);
+        let stage = mcp_tool(writes.find("stage").unwrap());
+        assert_eq!(stage["annotations"]["readOnlyHint"], false);
+        assert_eq!(stage["annotations"]["destructiveHint"], false);
+        let merge = mcp_tool(writes.find("prMerge").unwrap());
+        assert_eq!(merge["annotations"]["destructiveHint"], true);
+        assert_eq!(merge["annotations"]["openWorldHint"], true);
         assert!(
             tool["description"]
                 .as_str()

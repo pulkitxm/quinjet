@@ -20,9 +20,10 @@ mod agents;
 pub(crate) use agents::{connect_all as connect_agents, render as render_connections};
 
 const PROTOCOL_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
-const INSTRUCTIONS: &str = "Quinjet reads the Git repository and the GitHub pull requests of the folder you are working in. \
+const INSTRUCTIONS: &str = "Quinjet reads and changes the Git repository and the GitHub pull requests of the folder you are working in. \
 Every tool answers with the same JSON as the matching `quinjet <command> --json`. \
 Pass `repository` to use another checkout. \
+Tools that take `yes` only report what they would do until you call them again with `yes` set to true. \
 Tools whose names start with `ai` ask Quinjet's own Claude model and need an Anthropic API key, set with `quinjet ai key`.";
 
 #[derive(Debug, Args)]
@@ -32,6 +33,9 @@ pub(super) struct McpArgs {
     #[doc = " Path to the Graftcode gateway executable"]
     #[arg(long, value_name = "PATH", value_hint = ValueHint::ExecutablePath)]
     gateway: Option<PathBuf>,
+    #[doc = " Only offer the commands that read, never the ones that change anything"]
+    #[arg(long)]
+    read_only: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -43,7 +47,7 @@ enum McpVerb {
 pub(super) fn run(out: &Emitter, repository: &Path, args: McpArgs) -> Result<u8> {
     match args.command {
         Some(McpVerb::Install(install)) => agents::run(out, &install),
-        None => serve(repository, args.gateway),
+        None => serve(repository, args.gateway, args.read_only),
     }
 }
 
@@ -56,12 +60,12 @@ struct Bridge {
     stdout: Mutex<io::Stdout>,
 }
 
-fn serve(repository: &Path, gateway: Option<PathBuf>) -> Result<u8> {
+fn serve(repository: &Path, gateway: Option<PathBuf>, read_only: bool) -> Result<u8> {
     let folder = std::path::absolute(repository).unwrap_or_else(|_| repository.to_path_buf());
     let bridge = Arc::new(Bridge {
         folder,
         gateway,
-        receiver: graft::receiver(false),
+        receiver: graft::receiver(!read_only),
         service: Mutex::new(None),
         lease: Mutex::new(None),
         stdout: Mutex::new(io::stdout()),

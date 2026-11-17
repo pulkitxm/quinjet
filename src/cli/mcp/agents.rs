@@ -19,6 +19,9 @@ pub(crate) struct InstallArgs {
     #[doc = " Print the configuration instead of writing it"]
     #[arg(long)]
     print: bool,
+    #[doc = " Connect agents to `quinjet mcp --read-only`, which never changes anything"]
+    #[arg(long)]
+    read_only: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize)]
@@ -80,7 +83,7 @@ pub(crate) struct Launcher {
 }
 
 pub(super) fn run(out: &Emitter, args: &InstallArgs) -> Result<u8> {
-    let launcher = launcher()?;
+    let launcher = launcher(args.read_only)?;
     let home = home_dir().context("could not find the home directory")?;
     let agents: Vec<Agent> = if args.agents.is_empty() {
         Agent::ALL.to_vec()
@@ -111,7 +114,7 @@ pub(super) fn run(out: &Emitter, args: &InstallArgs) -> Result<u8> {
 }
 
 pub(crate) fn connect_all() -> Result<Vec<Connection>> {
-    let launcher = launcher()?;
+    let launcher = launcher(false)?;
     let home = home_dir().context("could not find the home directory")?;
     Ok(connect(&home, &launcher, &Agent::ALL, false))
 }
@@ -365,17 +368,18 @@ fn write(path: &Path, text: &str) -> Result<()> {
     fs::write(path, text).with_context(|| format!("failed to write {}", path.display()))
 }
 
-pub(crate) fn launcher() -> Result<Launcher> {
+pub(crate) fn launcher(read_only: bool) -> Result<Launcher> {
     // nosemgrep: rust.lang.security.current-exe.current-exe
     let running = std::env::current_exe().context("could not find the running Quinjet")?;
     let canonical = fs::canonicalize(&running).unwrap_or_else(|_| running.clone());
     let command = on_path("quinjet")
         .filter(|found| fs::canonicalize(found).is_ok_and(|found| found == canonical))
         .map_or_else(|| running.display().to_string(), |_| "quinjet".to_owned());
-    Ok(Launcher {
-        command,
-        args: vec!["mcp".to_owned()],
-    })
+    let mut args = vec!["mcp".to_owned()];
+    if read_only {
+        args.push("--read-only".to_owned());
+    }
+    Ok(Launcher { command, args })
 }
 
 fn on_path(program: &str) -> Option<PathBuf> {
