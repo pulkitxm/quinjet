@@ -85,6 +85,13 @@ impl App {
                     original_appearance: self.appearance,
                 });
             }
+            PaletteCommand::GraftTools => self.open_graft_tools(effects),
+            PaletteCommand::AiCommitMessage
+            | PaletteCommand::AiReview
+            | PaletteCommand::AiExplainCheck
+            | PaletteCommand::AiInvestigate
+            | PaletteCommand::ConnectAgents
+            | PaletteCommand::GraftGateway => self.run_ai_palette(command, effects, now),
             PaletteCommand::Help => {
                 self.modal = Some(Modal::Help {
                     selected: 0,

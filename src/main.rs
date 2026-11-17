@@ -4,6 +4,7 @@ mod convert;
 mod date_time;
 mod file_icons;
 mod git;
+mod graft;
 mod integration;
 mod onboarding;
 mod search;

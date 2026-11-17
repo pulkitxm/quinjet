@@ -105,6 +105,9 @@ two-face = { version = "0.5.2", default-features = false, features = ["syntect-f
 unicode-width = "0.2"
 wild = "2.2"
 
+[target.'cfg(unix)'.dependencies]
+signal-hook = "0.3"
+
 [target.'cfg(windows)'.dependencies]
 self-replace = "1.5"
 

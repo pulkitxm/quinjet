@@ -54,6 +54,11 @@ pub(super) fn identity(command: &WorkerCommand) -> (&'static str, u64) {
         WorkerCommand::Operate { id, .. } => ("operate", *id),
         WorkerCommand::OperatePullRequest { id, .. } => ("operate-pr", *id),
         WorkerCommand::Search { generation, .. } => ("search", *generation),
+        WorkerCommand::LoadGraftTools { generation } => ("graft-tools", *generation),
+        WorkerCommand::CallGraft { generation, .. } => ("graft-call", *generation),
+        WorkerCommand::EnsureGateway => ("ensure-gateway", 0),
+        WorkerCommand::RunAi { generation, .. } => ("run-ai", *generation),
+        WorkerCommand::ConnectAgents { generation } => ("connect-agents", *generation),
         WorkerCommand::LoadPullRequestCommits { generation, .. } => ("commits", *generation),
         WorkerCommand::Shutdown => ("shutdown", 0),
     }

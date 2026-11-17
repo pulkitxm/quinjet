@@ -46,6 +46,9 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 - Keyboard-first filtering, command palette, modal text editing, and accessibility help
 - Persistent collapse/expand preference while moving among changes, commits, PRs, and views
 - Coalesced background Git work, stale-result rejection, bounded output, and a private metadata cache
+- Every AI agent on the machine can use Quinjet through [Graftcode](https://graftcode.com): `quinjet mcp install` connects Claude Code, Codex, Cursor, VS Code, Windsurf, and Gemini CLI once, and from then on they start Quinjet themselves, with a shared gateway that downloads, starts, and stops on its own
+- Claude inside Quinjet: commit messages (`Ctrl+G` in the commit editor), reviews, failing-check explanations, and pull-request triage from the palette or `quinjet ai`
+- Typed npm, PyPI, NuGet, Maven, and RubyGems clients for Quinjet with `quinjet graft serve --publish`, and calls to other Graftcode gateways with repository context filled in
 
 ## Installation
 
@@ -274,6 +277,25 @@ Quinjet supports fork setups such as `origin` pointing to your fork and `upstrea
 Anything whose key already identifies it is cached permanently and can never go stale: a finished run's steps and log by job, the changed-file listing and each file's patch by the two commits they describe, the conversation by the stamp GitHub moves whenever the thread changes. A new commit or a new comment asks a different question instead of invalidating an old answer. Only genuinely time-varying reads keep a clock: repository identity for a day, PR metadata for five minutes, the check list for thirty seconds. A run still in progress is never cached, since re-reading it is what tails it. Opening a PR also warms every settled run's log in the background, so selecting any check is a disk read. The panel shows `⟳` while anything is refreshing and `cached` when what you see came from disk.
 
 The cache is bounded to 128 MiB / 2,048 entries, pruned oldest first, and never stores credentials. It lives under `$XDG_CACHE_HOME/quinjet/github` (or `~/.cache/quinjet/github`), `~/Library/Caches/quinjet/github` on macOS, and `%LOCALAPPDATA%\quinjet\cache\github` on Windows. Set `QUINJET_CACHE_DIR` to choose a different root. Cache directories/files use private permissions where supported; `r` bypasses fresh cache entries, while a stale entry can keep the view useful during a transient `gh` failure.
+
+### Graftcode gateways
+
+```bash
+quinjet mcp install
+quinjet ai key < key.txt
+quinjet ai commit-message
+quinjet ai investigate 42
+```
+
+`mcp install` adds `quinjet mcp` to the AI agents on this machine, or choose
+**Connect AI Agents to Quinjet** in the command palette. Agents then start it
+themselves in whatever repository they work in, and it serves 94 tools (status,
+diffs, history, staging and commits, branches and stashes, pull requests and
+review threads, checks and logs, stacks, and the Claude features) through one
+shared Graftcode gateway that Quinjet downloads, starts, and stops on its own.
+Commands that confirm only preview until the agent passes `yes`, and
+`--read-only` limits agents to the 27 reading tools. The palette's Claude entries and `Ctrl+G` in the commit editor use
+the same features. See the [Graftcode guide](docs/guides/graftcode.md).
 
 Branch rename is local and deliberately does not delete or create remote branches. Open the checkout branch picker with `b` outside History (or `B` anywhere), select a branch, and press `F2` or `Ctrl+R`; its existing upstream configuration is preserved by Git.
 

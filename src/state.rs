@@ -77,7 +77,7 @@ fn recent_projects_path() -> Option<PathBuf> {
     Some(state_root()?.join(RECENT_PROJECTS_FILE))
 }
 
-fn state_root() -> Option<PathBuf> {
+pub(crate) fn state_root() -> Option<PathBuf> {
     #[cfg(test)]
     {
         let override_root = STATE_ROOT_OVERRIDE.with(|cell| cell.borrow().clone());
@@ -104,6 +104,14 @@ fn state_root() -> Option<PathBuf> {
             .map_or_else(|| home.join(".local/state"), PathBuf::from)
             .join("quinjet"),
     )
+}
+
+#[cfg(test)]
+pub(crate) fn with_state_root<T>(root: &Path, run: impl FnOnce() -> T) -> T {
+    let previous = STATE_ROOT_OVERRIDE.with(|cell| cell.replace(Some(root.to_path_buf())));
+    let result = run();
+    drop(STATE_ROOT_OVERRIDE.with(|cell| cell.replace(previous)));
+    result
 }
 
 #[cfg(test)]

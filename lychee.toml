@@ -3,4 +3,4 @@ max_retries = 3
 timeout = 20
 accept = ["200..=206", "429"]
 exclude_path = ["target", "extras", "node_modules"]
-exclude = ["^http://127\\.0\\.0\\.1", "^http://localhost"]
+exclude = ["^http://127\\.0\\.0\\.1", "^http://localhost", "^https://github\\.com/pulkitxm/edith/"]

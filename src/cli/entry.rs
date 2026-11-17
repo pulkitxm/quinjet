@@ -59,6 +59,17 @@ pub(crate) fn dispatch() -> Result<Launch> {
         Some(Verb::Remote { command }) => {
             return remote::manage(&out, command).map(Launch::Finished);
         }
+        Some(Verb::Graft(args)) => {
+            return graft::run(&mut out, &cli.repository, args.command).map(Launch::Finished);
+        }
+        Some(Verb::Mcp(args)) => {
+            return mcp::run(&out, &cli.repository, args).map(Launch::Finished);
+        }
+        Some(Verb::Ai(args)) => {
+            let result = ai::run(&mut out, &cli.repository, args);
+            out.finish_progress();
+            return result.map(Launch::Finished);
+        }
         Some(Verb::Project { command }) => {
             return projects(&out, command).map(Launch::Finished);
         }
@@ -260,13 +271,13 @@ pub(super) fn collect_capabilities(
         groups,
         subcommands: command
             .get_subcommands()
-            .filter(|child| child.get_name() != "help")
+            .filter(|child| child.get_name() != "help" && !child.is_hide_set())
             .map(|child| child.get_name().to_owned())
             .collect(),
     });
     for child in command
         .get_subcommands()
-        .filter(|child| child.get_name() != "help")
+        .filter(|child| child.get_name() != "help" && !child.is_hide_set())
     {
         collect_capabilities(child, &path, commands);
     }
@@ -370,7 +381,7 @@ pub(super) fn write_pages(
     written.push(file.display().to_string());
     for child in command
         .get_subcommands()
-        .filter(|child| child.get_name() != "help")
+        .filter(|child| child.get_name() != "help" && !child.is_hide_set())
     {
         write_pages(
             child,

@@ -1,6 +1,10 @@
 mod account;
+pub(crate) mod ai;
 pub(crate) mod command;
 mod completion;
+mod graft;
+mod host_args;
+mod mcp;
 mod package_manager;
 mod pr_verbs;
 mod remote;
@@ -26,9 +30,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
-use clap_complete::Shell;
 use clap_mangen::Man;
 pub(crate) use command::{Command, Outcome};
+use host_args::{CompletionsArgs, ManArgs, UpdateArgs};
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use pr_verbs::*;
@@ -244,6 +248,12 @@ enum Verb {
         #[command(subcommand)]
         command: StackVerb,
     },
+    #[doc = " Graft Quinjet onto Graftcode gateways and call their tools"]
+    Graft(graft::GraftArgs),
+    #[doc = " Serve Quinjet to AI agents over MCP on standard input and output"]
+    Mcp(mcp::McpArgs),
+    #[doc = " Ask Claude about the staged changes or a pull request"]
+    Ai(ai::AiArgs),
     #[doc = " Print or install shell completions"]
     #[command(visible_alias = "completion")]
     Completions(CompletionsArgs),
@@ -263,6 +273,9 @@ impl Verb {
             | Self::Project { .. }
             | Self::Completions(_)
             | Self::Man(_)
+            | Self::Graft(_)
+            | Self::Mcp(_)
+            | Self::Ai(_)
             | Self::Capabilities => None,
             Self::Status(args) if args.watch => None,
             Self::Account { .. } => Some("Reading GitHub accounts"),
@@ -307,32 +320,6 @@ impl Verb {
             Self::Update(_) => Some("Checking for updates"),
         }
     }
-}
-
-#[derive(Debug, Args)]
-struct CompletionsArgs {
-    #[doc = " Shell to write or install a completion script for"]
-    #[arg(value_enum, required_unless_present = "install")]
-    shell: Option<Shell>,
-    #[doc = " Install completions and a q launcher on PATH"]
-    #[arg(long)]
-    install: bool,
-    #[arg(long, hide = true, requires = "install")]
-    automatic: bool,
-}
-
-#[derive(Debug, Args)]
-struct ManArgs {
-    #[doc = " Write one page per command into this directory instead of printing one"]
-    #[arg(long, value_name = "DIR", value_hint = ValueHint::DirPath)]
-    dir: Option<PathBuf>,
-}
-
-#[derive(Debug, Args)]
-struct UpdateArgs {
-    #[doc = " Check for a newer release without installing it"]
-    #[arg(long)]
-    check: bool,
 }
 
 #[derive(Debug, Args)]
@@ -471,11 +458,14 @@ pub(crate) mod support;
 mod verbs;
 
 pub(crate) use entry::dispatch;
+pub(crate) use graft::{ServiceDocument, ensure_shared_gateway, receiver as graft_receiver};
+pub(crate) use mcp::{connect_agents, render_connections};
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use output::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use pull_request::*;
 pub(crate) use remote::{begin_ssh_probe, local_ssh_context, run_selected_terminal};
+pub(crate) use render::check_log as render_check_log;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]
 use repository::*;
 #[cfg_attr(not(test), expect(clippy::wildcard_imports, reason = "shared"))]

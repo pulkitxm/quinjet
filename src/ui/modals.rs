@@ -27,6 +27,8 @@ pub(super) fn draw_modal_content(frame: &mut Frame<'_>, app: &mut App, theme: &T
     match app.modal.as_ref() {
         None | Some(Modal::Help { .. }) => {}
         Some(Modal::Accounts(picker)) => draw_accounts(frame, picker, &mut list, theme),
+        Some(Modal::Graft(picker)) => draw_graft_tools(frame, picker, &mut list, theme),
+        Some(Modal::GraftResult(view)) => draw_graft_result(frame, view, theme),
         Some(Modal::Commit { input, amend }) => {
             let (input, amend) = (input.clone(), *amend);
             draw_commit(
@@ -215,7 +217,14 @@ pub(super) fn draw_commit(
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.border_focus)),
+                    .border_style(Style::default().fg(theme.border_focus))
+                    .title_bottom(
+                        Line::from(Span::styled(
+                            " Ctrl+G draft with Claude ",
+                            Style::default().fg(theme.muted),
+                        ))
+                        .right_aligned(),
+                    ),
             ),
         input_area,
     );

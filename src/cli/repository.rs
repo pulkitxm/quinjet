@@ -18,6 +18,9 @@ pub(super) fn run(session: &mut Session, out: &Emitter, verb: Verb) -> Result<u8
         .into()),
         Verb::Remote { .. }
         | Verb::Project { .. }
+        | Verb::Graft(_)
+        | Verb::Mcp(_)
+        | Verb::Ai(_)
         | Verb::Completions(_)
         | Verb::Man(_)
         | Verb::Capabilities
@@ -214,9 +217,14 @@ pub(super) fn branch(session: &mut Session, out: &Emitter, command: BranchVerb) 
             };
             operate(session, out, GitOperation::CreateBranch { name, start })
         }
-        BranchVerb::Rename { old, new } => {
-            operate(session, out, GitOperation::RenameBranch { old, new })
-        }
+        BranchVerb::Rename { old_name, new_name } => operate(
+            session,
+            out,
+            GitOperation::RenameBranch {
+                old: old_name,
+                new: new_name,
+            },
+        ),
         BranchVerb::Delete { name, yes } => {
             if !yes {
                 out.message(&format!("Would delete `{name}`. Pass --yes to delete it."))?;

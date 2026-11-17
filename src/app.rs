@@ -128,9 +128,11 @@ fn updated_recent_pull_requests(
 }
 
 pub(crate) mod account_picker;
+pub(crate) mod ai_actions;
 mod changes;
 mod dialogs;
 mod geometry;
+pub(crate) mod graft_tools;
 mod initialization;
 mod interaction;
 mod keyboard;
@@ -152,6 +154,7 @@ pub(crate) use mouse_scroll::ScrollBurst;
 mod mouse_sidebar;
 mod operations;
 mod palette;
+mod palette_command;
 mod preview_layout;
 mod projects;
 mod pull_request_actions;
@@ -177,6 +180,7 @@ mod worker_stack;
 
 pub(crate) use geometry::*;
 pub(crate) use modal::*;
+pub(crate) use palette_command::PaletteCommand;
 use preview_layout::PreviewLayout;
 pub(crate) use projects::{ProjectOpenMode, ProjectRow};
 pub(crate) use pull_request_actions::*;
@@ -430,6 +434,8 @@ pub(crate) struct App {
     pub local_diff_pending_paths: VecDeque<PathBuf>,
     pub local_diff_single_loaded: bool,
     pub branch_generation: u64,
+    pub graft_generation: u64,
+    pub ai: ai_actions::AiState,
     pub history_branch_generation: u64,
     pub stash_generation: u64,
     pub worktree_generation: u64,

@@ -10,6 +10,7 @@ pub(crate) struct GitWorker {
     pull_request_preview_mailbox: Arc<SharedMailbox>,
     warm_mailbox: Arc<SharedMailbox>,
     stack_warm_mailbox: Arc<SharedMailbox>,
+    graft_mailbox: Arc<SharedMailbox>,
     warm_generation: Arc<AtomicU64>,
     stack_warm_generation: Arc<AtomicU64>,
     events: Receiver<WorkerEvent>,
@@ -33,6 +34,9 @@ impl GitWorker {
         let pull_request_preview_mailbox = new_mailbox();
         let warm_mailbox = new_mailbox();
         let stack_warm_mailbox = new_mailbox();
+        let graft_mailbox = new_mailbox();
+        let worker_graft_mailbox = Arc::clone(&graft_mailbox);
+        let graft_repository = repository.clone_for_worker();
         let warm_generation = Arc::new(AtomicU64::new(0));
         let stack_warm_generation = Arc::new(AtomicU64::new(0));
         let worker_warm_generation = Arc::clone(&warm_generation);
@@ -59,6 +63,15 @@ impl GitWorker {
         let local_preview_events = event_tx.clone();
         let pull_request_preview_events = event_tx.clone();
         let warm_events = event_tx.clone();
+        let graft_events = event_tx.clone();
+        drop(
+            thread::Builder::new()
+                .name("quinjet-graft".to_owned())
+                .spawn(move || {
+                    run_graft_worker(&graft_repository, &worker_graft_mailbox, &graft_events);
+                })
+                .expect("failed to start Graftcode worker"),
+        );
         drop(
             thread::Builder::new()
                 .name("quinjet-git".to_owned())
@@ -151,6 +164,7 @@ impl GitWorker {
             pull_request_preview_mailbox,
             warm_mailbox,
             stack_warm_mailbox,
+            graft_mailbox,
             warm_generation,
             stack_warm_generation,
             events: event_rx,
@@ -175,6 +189,7 @@ impl GitWorker {
             WorkerLane::PullRequestPreview => &self.pull_request_preview_mailbox,
             WorkerLane::Warm => &self.warm_mailbox,
             WorkerLane::StackWarm => &self.stack_warm_mailbox,
+            WorkerLane::Graft => &self.graft_mailbox,
             WorkerLane::Background => &self.mailbox,
         };
         let Ok(mut mailbox) = target.state.lock() else {
@@ -204,5 +219,6 @@ impl Drop for GitWorker {
         shutdown_mailbox(&self.pull_request_preview_mailbox);
         shutdown_mailbox(&self.warm_mailbox);
         shutdown_mailbox(&self.stack_warm_mailbox);
+        shutdown_mailbox(&self.graft_mailbox);
     }
 }

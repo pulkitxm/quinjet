@@ -31,15 +31,15 @@ jobs:
           - os: macos-15-intel
             target: x86_64-apple-darwin
             binary: quinjet
-            budget: 6_400_000
+            budget: 6_600_000
           - os: macos-15
             target: aarch64-apple-darwin
             binary: quinjet
-            budget: 5_500_000
+            budget: 5_700_000
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             binary: quinjet.exe
-            budget: 6_500_000
+            budget: 6_900_000
     runs-on: ${{ matrix.os }}
     defaults:
       run:

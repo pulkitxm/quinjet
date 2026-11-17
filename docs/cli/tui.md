@@ -86,6 +86,20 @@ closes the picker and restores the theme or appearance that was active when it
 opened. Picker lists wrap between their first and last entries. Use the launch
 flags to choose the initial settings for a later run.
 
+Quinjet starts the shared Graftcode gateway when it opens, if `gg` is
+installed, and the status bar shows `Graftcode ●` while it runs. The palette's
+Claude entries (`Draft Commit Message`, `Review Changes`, `Explain Failing
+Check`, and `Investigate Pull Request`, each `with Claude`) run
+[`quinjet ai`](./ai/README.md) on a dedicated worker lane and show the answer in
+a dialog; `Esc` cancels one that is still running, `c` copies an answer, and
+`Enter` opens a drafted message in the commit editor. Inside the commit editor,
+`Ctrl+G` drafts the message in place. `Connect AI Agents to Quinjet` runs
+[`quinjet mcp install`](./mcp/install.md), and `Show Graftcode Gateway` lists the
+gateway's addresses. `Run a Tool from Another Graftcode Gateway…` calls gateways
+registered with [`quinjet graft add`](./graft/add.md) the way
+[`quinjet graft call`](./graft/call.md) does, adding the pull request on screen
+and the log of the open check.
+
 `--appearance system` asks the operating system for its current preference once
 after Quinjet verifies that it owns an interactive terminal, and again when
 `System` is explicitly selected in the appearance picker. It does not watch for

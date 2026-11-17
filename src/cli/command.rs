@@ -14,6 +14,8 @@ use crate::git::status::RepoStatus;
 use crate::git::{
     Branch, GitOperation, HistoryBranch, LocalDiffRequest, ProjectGroup, Stash, Worktree,
 };
+use crate::graft::call::{GatewayTools, GraftCall, GraftReply};
+use crate::graft::registry::Gateway;
 use crate::search::{SearchHits, SearchRequest};
 
 #[derive(Debug)]
@@ -107,6 +109,8 @@ pub(crate) enum Command {
         operation: PullRequestReviewOperation,
     },
     Search(Box<SearchRequest>),
+    GraftTools(Vec<Gateway>),
+    GraftCall(Box<GraftCall>),
 }
 
 impl Command {
@@ -141,6 +145,8 @@ impl Command {
             Self::OperatePullRequest { operation, .. } => operation.label(),
             Self::OperatePullRequestReview { operation, .. } => operation.label(),
             Self::Search(_) => "Searching the repository",
+            Self::GraftTools(_) => "Listing gateway tools",
+            Self::GraftCall(_) => "Calling gateway tool",
         }
     }
 }
@@ -177,6 +183,8 @@ pub(crate) enum Outcome {
     CheckLog(Box<CheckRunLog>),
     Warmed,
     Search(Box<SearchHits>),
+    GraftTools(Vec<GatewayTools>),
+    GraftReply(Box<GraftReply>),
     Operation {
         label: String,
         changes_history: bool,
@@ -226,6 +234,8 @@ answers! {
     local_github_repository, LocalGitHubRepository -> Option<GitHubRepository>,
         |value: Option<Box<GitHubRepository>>| value.map(|repository| *repository);
     search, Search -> SearchHits, |value: Box<SearchHits>| *value;
+    graft_tools, GraftTools -> Vec<GatewayTools>, |value| value;
+    graft_reply, GraftReply -> GraftReply, |value: Box<GraftReply>| *value;
 }
 
 impl Outcome {

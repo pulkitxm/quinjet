@@ -45,6 +45,12 @@ impl Session {
     ) -> Result<Outcome> {
         match command {
             Command::Accounts => Ok(Outcome::Accounts(self.repository.accounts()?)),
+            Command::GraftTools(gateways) => Ok(Outcome::GraftTools(
+                crate::graft::call::list_tools(&gateways),
+            )),
+            Command::GraftCall(request) => Ok(Outcome::GraftReply(Box::new(
+                crate::graft::call::call(&self.repository, *request)?,
+            ))),
             Command::Status => Ok(Outcome::Status(Box::new(self.repository.status()?))),
             Command::History {
                 revision,

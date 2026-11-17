@@ -24,10 +24,10 @@ pub(super) enum BranchVerb {
     Rename {
         #[doc = " Existing branch name"]
         #[arg(value_name = "OLD", value_hint = ValueHint::Other)]
-        old: String,
+        old_name: String,
         #[doc = " New branch name"]
         #[arg(value_name = "NEW", value_hint = ValueHint::Other)]
-        new: String,
+        new_name: String,
     },
     #[doc = " Delete a branch"]
     Delete {
