@@ -60,6 +60,24 @@ Quinjet's terminal interface is open or not.
    repository. The gateway runs `quinjet <command> --json` there and answers
    with the same JSON the CLI prints.
 
+### What the machine needs
+
+Node.js and npm are not needed: `gg` carries its own Node runtime. The
+rest is already on most machines:
+
+| Platform | Needs |
+| --- | --- |
+| macOS (Apple silicon or Intel) | Nothing beyond Git |
+| Linux with glibc (Ubuntu, Debian, Fedora, and others), x86-64 or Arm64 | Git, `tar`, `curl` or `wget` with CA certificates for the first download, and `libatomic` (`libatomic1` on Debian and Ubuntu, `libatomic` on Fedora), which minimal container images leave out |
+| Linux with musl (Alpine) | Not supported by Graftcode; Quinjet says so before downloading anything |
+| Windows x86-64 or Arm64 | PowerShell and `tar`, both part of Windows 10 and later |
+
+The GitHub tools also need `gh`, signed in, as everywhere else in Quinjet, and
+the `ai` tools need `curl`. When something is missing, the tool's error names
+it and says how to fix it: no downloader, an unsupported C library, or a
+shared library the bundled Node runtime cannot find. Without network access,
+put `gg` anywhere and point `QUINJET_GRAFTCODE_GATEWAY` at it.
+
 A warm start takes about two seconds and later calls take tens of
 milliseconds. The gateway serves every repository and every agent session at
 once; calls run concurrently.
@@ -277,3 +295,6 @@ fill parameters such as `staged_diff`, `branch`, `pull_request`, and
 | `no Anthropic API key` | Run `quinjet ai key`, or set `ANTHROPIC_API_KEY`. |
 | `… is not inside a Git repository; pass repository` | The agent started outside a repository. Pass the `repository` argument. |
 | The status bar shows `Graftcode ○` | `gg` is not installed yet. Run **Connect AI Agents to Quinjet**. |
+| `curl or wget is required to download files` | Install one of them, or download `gg` yourself and set `QUINJET_GRAFTCODE_GATEWAY`. |
+| `bundled Node.js runtime needs libatomic.so.1` | Install `libatomic1` (Debian, Ubuntu) or `libatomic` (Fedora). Installing Node.js does not help. |
+| `the Graftcode gateway needs glibc` | Alpine and other musl systems cannot run `gg`. Use a glibc distribution, or install `gcompat`. |
