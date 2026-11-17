@@ -139,6 +139,19 @@ fn a_gateway_from_another_build_is_asked_to_stop_first() {
 }
 
 #[test]
+fn only_the_owning_daemon_clears_a_stop_request() {
+    let (_directory, paths) = paths();
+    paths.write_state(&state(1, "module")).unwrap();
+    fs::write(paths.stop(), "stop\n").unwrap();
+    paths.clear_state(8);
+    assert!(paths.stop_requested());
+    assert!(paths.read_state().is_some());
+    paths.clear_state(7);
+    assert!(!paths.stop_requested());
+    assert_eq!(paths.read_state(), None);
+}
+
+#[test]
 fn ports_in_use_are_skipped() {
     let taken = TcpListener::bind(("0.0.0.0", 0)).unwrap();
     let port = taken.local_addr().unwrap().port();

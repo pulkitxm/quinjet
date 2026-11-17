@@ -122,10 +122,10 @@ impl ServicePaths {
     }
 
     pub(crate) fn clear_state(&self, pid: u32) {
-        if self.read_state().is_some_and(|state| state.pid == pid) {
+        if self.read_state().is_none_or(|state| state.pid == pid) {
             drop(fs::remove_file(self.state()));
+            drop(fs::remove_file(self.stop()));
         }
-        drop(fs::remove_file(self.stop()));
     }
 
     pub(crate) fn running(&self) -> Option<ServiceState> {

@@ -198,14 +198,15 @@ pub(super) struct StackCheckoutArgs {
 #[derive(Debug, Args)]
 pub(super) struct StackModifyArgs {
     #[doc = "Abort the active modification and restore the stack"]
-    #[arg(
-        long,
-        conflicts_with = "continue",
-        required_unless_present = "continue"
-    )]
+    #[arg(long, conflicts_with = "resume", required_unless_present = "resume")]
     pub(super) abort: bool,
     #[doc = "Continue the active modification after resolving conflicts"]
-    #[arg(long, conflicts_with = "abort", required_unless_present = "abort")]
+    #[arg(
+        id = "resume",
+        long = "continue",
+        conflicts_with = "abort",
+        required_unless_present = "abort"
+    )]
     pub(super) r#continue: bool,
     #[doc = "Confirm; without it the command reports what it would do"]
     #[arg(long)]
@@ -278,13 +279,13 @@ pub(super) struct StackRemoteArgs {
 )]
 pub(super) struct StackRebaseArgs {
     #[doc = "Branch that bounds a directional rebase"]
-    #[arg(value_name = "BRANCH", conflicts_with_all = ["abort", "continue"], value_parser = non_empty)]
+    #[arg(value_name = "BRANCH", conflicts_with_all = ["abort", "resume"], value_parser = non_empty)]
     pub(super) branch: Option<String>,
     #[doc = "Abort the active rebase and restore every branch"]
-    #[arg(long, conflicts_with_all = ["continue", "branch", "downstack", "upstack", "no_trunk", "preserve_dates", "git_remote"])]
+    #[arg(long, conflicts_with_all = ["resume", "branch", "downstack", "upstack", "no_trunk", "preserve_dates", "git_remote"])]
     pub(super) abort: bool,
     #[doc = "Continue the active rebase after resolving conflicts"]
-    #[arg(long, conflicts_with_all = ["abort", "branch", "downstack", "upstack", "no_trunk", "preserve_dates", "git_remote"])]
+    #[arg(id = "resume", long = "continue", conflicts_with_all = ["abort", "branch", "downstack", "upstack", "no_trunk", "preserve_dates", "git_remote"])]
     pub(super) r#continue: bool,
     #[doc = "Rebase from the trunk through the selected branch"]
     #[arg(long, conflicts_with = "upstack")]

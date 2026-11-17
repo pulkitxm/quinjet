@@ -102,7 +102,7 @@ fn generated_methods_run_quinjet_against_the_bound_repository() -> Result<()> {
     let module = scratch.path.join("module");
     let module_path = module.to_string_lossy().into_owned();
     scratch
-        .quinjet(&["graft", "module", "--out", &module_path])?
+        .quinjet(&["graft", "module", "--out", &module_path, "--allow-writes"])?
         .success()?;
     let script = "const { Quinjet } = require(process.argv[1]); \
         (async () => { \
@@ -110,11 +110,13 @@ fn generated_methods_run_quinjet_against_the_bound_repository() -> Result<()> {
         const status = JSON.parse(await Quinjet.status()); \
         let refused = ''; \
         try { await Quinjet.show('no-such-revision', false); } catch (error) { refused = error.message; } \
+        await Quinjet.branchCreate('topic', ''); \
+        const renamed = JSON.parse(await Quinjet.branchRename('topic', 'renamed')); \
         let locked = ''; \
         process.env.QUINJET_GRAFT_TOKEN = 'secret'; \
         try { await Quinjet.status('', 'wrong'); } catch (error) { locked = error.message; } \
         const opened = JSON.parse(await Quinjet.status('', 'secret')); \
-        process.stdout.write(JSON.stringify({ subject: commits[0].subject, count: commits.length, head: status.branch.head, refused, locked, opened: opened.branch.head })); \
+        process.stdout.write(JSON.stringify({ subject: commits[0].subject, count: commits.length, head: status.branch.head, refused, renamed: renamed.message, locked, opened: opened.branch.head })); \
         })();";
     let mut command = ProcessCommand::new("node");
     command
@@ -134,7 +136,8 @@ fn generated_methods_run_quinjet_against_the_bound_repository() -> Result<()> {
     ensure!(refused.contains("quinjet show exited 3"), "{refused}");
     let locked = answer["locked"].as_str().unwrap_or_default();
     ensure!(locked.contains("connect through `quinjet mcp`"), "{locked}");
-    ensure!(answer["opened"] == "main", "{answer}");
+    ensure!(answer["renamed"].is_string(), "{answer}");
+    ensure!(answer["opened"] == "renamed", "{answer}");
     Ok(())
 }
 
