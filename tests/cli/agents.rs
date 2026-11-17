@@ -219,7 +219,8 @@ fn mcp_answers_agents_on_standard_io() -> Result<()> {
     ensure!(
         status["content"][0]["text"]
             .as_str()
-            .is_some_and(|text| text.contains("no Graftcode gateway at")),
+            .is_some_and(|text| text.contains("no Graftcode gateway at")
+                && text.contains("\nhint: run `quinjet graft install`")),
         "{status}"
     );
     ensure!(answers[4]["result"]["content"][0]["text"] == "Quinjet has no tool called `nope`");

@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use clap::{Args, Subcommand, ValueHint};
 use serde_json::{Map, Value, json};
 
-use super::{Emitter, graft};
+use super::{Emitter, Failure, graft};
 use crate::git::Repository;
 use crate::graft::call::CALL_TIMEOUT;
 use crate::graft::client::McpSession;
@@ -49,6 +49,19 @@ pub(super) fn run(out: &Emitter, repository: &Path, args: McpArgs) -> Result<u8>
         Some(McpVerb::Install(install)) => agents::run(out, &install),
         None => serve(repository, args.gateway, args.read_only),
     }
+}
+
+fn explain(error: &anyhow::Error) -> String {
+    let mut text = format!("{error:#}");
+    if let Some(hint) = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<Failure>())
+        .and_then(|failure| failure.hint.as_deref())
+    {
+        text.push_str("\nhint: ");
+        text.push_str(hint);
+    }
+    text
 }
 
 struct Bridge {
@@ -192,7 +205,7 @@ impl Bridge {
         match self.forward(params) {
             Ok(result) => result,
             Err(error) => json!({
-                "content": [{ "type": "text", "text": format!("{error:#}") }],
+                "content": [{ "type": "text", "text": explain(&error) }],
                 "isError": true,
             }),
         }
