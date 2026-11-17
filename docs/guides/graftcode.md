@@ -12,7 +12,7 @@ every agent on the machine, without anyone starting a server by hand.
           │ starts                                │
           ▼                                       ▼
    quinjet mcp  ──── MCP over HTTP ────►  shared Graftcode gateway (gg)
-   (stdio, one per agent session)         one per machine, 27 tools
+   (stdio, one per agent session)         one per machine, 94 tools
                                                   │
                                                   ▼
                                    quinjet <command> --json
@@ -66,18 +66,84 @@ once; calls run concurrently.
 
 ### The tools
 
-| Tools | Commands |
-| --- | --- |
-| `status`, `diff`, `log`, `show`, `search` | Working tree, patches, history, and search |
-| `branchList`, `branchCompare`, `stashList`, `stashShow`, `worktreeList` | Branches, stashes, and worktrees |
-| `repos`, `accountList` | GitHub repositories and accounts |
-| `prView`, `prFiles`, `prCommits`, `prDiff`, `prConversation`, `prChecks`, `prLogs`, `prReviewsShow` | Pull requests, checks, and check logs |
-| `stackView`, `stackFiles`, `stackDiff` | Stacked pull requests |
-| `aiCommitMessage`, `aiReview`, `aiExplainCheck`, `aiInvestigate` | Quinjet's own Claude features, described below |
+Every Quinjet command that works on a repository or a pull request is a tool,
+94 in all:
+
+| Area | Read | Change |
+| --- | --- | --- |
+| Working tree | `status`, `diff`, `show`, `log`, `search` | `stage`, `unstage`, `discard`, `remove`, `commit`, `cherryPick`, `revert`, `resolve` |
+| Remotes | `repos`, `accountList` | `fetch`, `pull`, `push`, `sync` |
+| Branches, stashes, worktrees | `branchList`, `branchCompare`, `stashList`, `stashShow`, `worktreeList` | `branchSwitch`, `branchCreate`, `branchRename`, `branchDelete`, `stashPush`, `stashApply`, `stashPop`, `stashDrop`, `stashClear` |
+| Pull requests | `prView`, `prFiles`, `prCommits`, `prDiff`, `prConversation`, `prChecks`, `prLogs` | `prMerge`, `prAutoMerge`, `prReady`, `prDraft`, `prReview`, `prComment`, `prEdit`, `prUpdateBranch`, `prClose`, `prReopen`, `prRevert`, and the rest of `quinjet pr` |
+| Review threads | `prReviewsShow` | `prReviewsComment`, `prReviewsReply`, `prReviewsEdit`, `prReviewsDelete`, `prReviewsSubmit`, `prReviewsDiscard`, `prReviewsResolve`, `prReviewsUnresolve` |
+| Stacks | `stackView`, `stackFiles`, `stackDiff` | `stackInit`, `stackAdd`, `stackSubmit`, `stackSync`, `stackRebase`, `stackMerge`, `stackUp`, `stackDown`, and the rest of `quinjet stack` |
+| Claude | `aiCommitMessage`, `aiReview`, `aiExplainCheck`, `aiInvestigate` | |
 
 Every tool takes an optional `repository` path, for agents that are not started
 inside the repository they mean. Descriptions come from each command's help
 text, so the tools cannot drift from the CLI.
+
+Changes are safe to hand to an agent:
+
+- Every command that confirms on the command line confirms here too. Called
+  without `yes`, `discard`, `branchDelete`, `prMerge`, `prClose`, `stackSync`
+  and the other 42 like them only answer with what they would do; the agent
+  calls again with `yes` set to `true` to go ahead.
+- Tools carry MCP annotations: `readOnlyHint` on the reads and
+  `destructiveHint` on the 47 tools that confirm, so an agent such as Claude
+  Code can run reads without asking and ask before the rest.
+- `quinjet mcp --read-only` (or `quinjet mcp install --read-only`) offers only
+  the 27 tools that read.
+
+## Why agents use Quinjet instead of `gh`
+
+An agent such as Claude Code can already run `git` and the GitHub CLI through
+its shell. Quinjet is built on the same credentials (it calls `gh` for
+authentication and for some requests), so it adds no new access. What it changes
+is how much work the agent does to get an answer, and how safely it can act.
+
+| Task | With `git` and `gh` in a shell | With Quinjet's tools |
+| --- | --- | --- |
+| Why did a check fail? | `gh pr checks`, read the job id out of the check URL, then `gh run view --job <id> --log` and search the whole job log | `prChecks`, then `prLogs` with the check's `link`: the job's steps, each with its own log lines |
+| What did reviewers say? | `gh pr view --comments` shows the conversation and review summaries but not the inline line comments; those need `gh api` | `prConversation`: the timeline and the inline review comments as one thread |
+| Answer a review thread | No `gh` command adds a line comment, replies to a thread, or resolves one; the agent writes GraphQL mutations for `gh api graphql` | `prReviewsShow` lists threads with their ids; `prReviewsComment`, `prReviewsReply`, `prReviewsSubmit`, `prReviewsResolve` |
+| Is this PR ready to merge? | `gh pr view --json` with field names the agent has to know, plus `gh pr checks` | `prView`: review decision, merge state, auto-merge, merge queue, and permissions from one query, then `prChecks` |
+| Review a stack of PRs | Needs the `gh-stack` extension, one PR at a time | `stackView`, and `stackDiff` / `stackFiles` across any range of the stack in one patch |
+| Commit and push the fix | `git add`, `git commit`, `git push`, each a separate shell call to approve | `stage`, `commit`, `push` as tools with typed arguments |
+
+What that adds up to:
+
+- **Answers instead of raw output.** Every tool returns the documented JSON of
+  `quinjet <command> --json`. The agent does not choose `--json` fields, parse
+  tables, or page through a whole job log to find one failing step.
+- **Fewer round trips.** One `prView` carries the review decision, merge
+  state, auto-merge, merge queue, permissions, and subscription from a single
+  GraphQL query. Pull-request patches come from the checkout when it already has the
+  commits, or from a disposable bare clone, so the agent never checks anything
+  out to read a diff. Repeated reads answer from Quinjet's cache until
+  `refresh` is set, and a stale answer says so on standard error.
+- **The parts of GitHub `gh` leaves to `gh api`.** Line comments, pending
+  reviews, thread replies, resolution, merge-queue removal, notification
+  subscriptions, fork maintainer edits, and stacked pull requests are all
+  ordinary tools.
+- **Local Git and GitHub in one place.** Status, diffs, history, staging,
+  commits, stashes, and branches sit next to pull requests, so the agent works
+  with one tool catalog instead of two command languages.
+- **Discoverable without trial and error.** Each tool has an input schema built
+  from the command's own flags and help text, with the required arguments
+  marked. The agent does not run `--help` or guess flag names.
+- **Safer permissions.** Reads are marked `readOnlyHint`, so they can run
+  without prompts, while the 47 tools that confirm are marked
+  `destructiveHint` and only preview until called with `yes`. In a shell,
+  `gh pr merge` and `git push --force` are just more text for the agent to
+  type, and a permission rule has to match the command line.
+- **Quinjet's own investigation.** `aiExplainCheck` and `aiInvestigate` hand a
+  failing pull request to a second Claude model with Quinjet's read tools, and
+  return a verdict with the evidence.
+
+`gh` is still the tool for what Quinjet does not cover: creating and listing
+pull requests, issues, releases, re-running workflows, and arbitrary API calls.
+Quinjet needs `gh` installed and signed in for its GitHub commands.
 
 ## Inside Quinjet
 
@@ -191,8 +257,11 @@ fill parameters such as `staged_diff`, `branch`, `pull_request`, and
   every start and lives in a file only your account can read. A call without it
   is refused, so other machines on the network can see the Vision page but
   cannot run a command.
-- The shared gateway exposes read commands and the four Claude features only.
-  Nothing it serves changes a repository or a pull request.
+- The shared gateway serves every repository and pull-request command, the
+  same ones the CLI runs with your Git and GitHub credentials. Agents reach it
+  only through `quinjet mcp`, and commands that confirm on the command line
+  wait for `yes` there too. Use `quinjet mcp --read-only` for an agent that
+  should never change anything.
 - `graft serve` has no token. Run it read-only unless you trust the network,
   and reach it from another machine through an SSH tunnel.
 - The Claude features send the patch or log they work on to the Anthropic API.

@@ -289,10 +289,12 @@ quinjet ai investigate 42
 
 `mcp install` adds `quinjet mcp` to the AI agents on this machine, or choose
 **Connect AI Agents to Quinjet** in the command palette. Agents then start it
-themselves in whatever repository they work in, and it serves 27 tools (status,
-diffs, history, pull requests, checks and logs, and the Claude features)
-through one shared Graftcode gateway that Quinjet downloads, starts, and stops
-on its own. The palette's Claude entries and `Ctrl+G` in the commit editor use
+themselves in whatever repository they work in, and it serves 94 tools (status,
+diffs, history, staging and commits, branches and stashes, pull requests and
+review threads, checks and logs, stacks, and the Claude features) through one
+shared Graftcode gateway that Quinjet downloads, starts, and stops on its own.
+Commands that confirm only preview until the agent passes `yes`, and
+`--read-only` limits agents to the 27 reading tools. The palette's Claude entries and `Ctrl+G` in the commit editor use
 the same features. See the [Graftcode guide](docs/guides/graftcode.md).
 
 Branch rename is local and deliberately does not delete or create remote branches. Open the checkout branch picker with `b` outside History (or `B` anywhere), select a branch, and press `F2` or `Ctrl+R`; its existing upstream configuration is preserved by Git.

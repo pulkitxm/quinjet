@@ -29,6 +29,29 @@ closes standard input.
 | Option | Effect |
 | --- | --- |
 | `--gateway <PATH>` | Uses this `gg` instead of `QUINJET_GRAFTCODE_GATEWAY`, `PATH`, or the download. |
+| `--read-only` | Lists and runs only the 27 tools that read: the 23 reading commands and the four `ai` tools. Nothing stages, commits, pushes, merges, or comments. |
+
+## The tools
+
+Every Quinjet command that works on a repository or a pull request is a tool:
+94 in all. The name is the command path in camel case (`pr checks` is
+`prChecks`, `pr reviews resolve` is `prReviewsResolve`), every flag and
+positional is a property of the input schema, and the answer is the command's
+`--json` document.
+
+Tools carry MCP annotations so agents can decide what needs a confirmation:
+
+| Annotation | Tools |
+| --- | --- |
+| `readOnlyHint: true` | The 23 reading commands: status, diffs, history, search, branches, stashes, worktrees, pull requests, checks, logs, review threads, and stacks |
+| `destructiveHint: true` | The 47 commands that take `yes`, such as `discard`, `branchDelete`, `stashClear`, `prMerge`, `prClose`, and `stackSync` |
+| Neither | Changes that are easy to undo, such as `stage`, `commit`, `branchCreate`, `prComment`, and `prReviewsComment`, and the four `ai` tools |
+
+A tool that takes `yes` never acts on the first call. Without `yes` it answers
+with what it would do, for example
+`Would delete feat/old. Pass --yes to delete it.`, and the agent calls it again
+with `yes` set to `true` to go ahead. Interactive commands such as
+`account switch`, `pr open`, and the terminal interface are never tools.
 
 Errors come back as tool results with `isError` set, never as a crash: a
 folder outside Git, a missing gateway, an unknown tool, or a command that

@@ -6,6 +6,7 @@ Adds `quinjet mcp` to every AI agent installed on this machine.
 quinjet mcp install
 quinjet mcp install --agent cursor --agent codex
 quinjet mcp install --print
+quinjet mcp install --read-only
 quinjet mcp install --json
 ```
 
@@ -35,3 +36,5 @@ hand.
 | `failed` | The reason follows; exit code 1. |
 
 `--print` prints the `mcpServers` entry instead of writing anything.
+`--read-only` writes `quinjet mcp --read-only` instead, so the agents only get
+the tools that read.
