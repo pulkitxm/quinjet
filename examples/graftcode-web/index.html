@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:,">
+    <title>Quinjet over Graftcode</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f7f7f5;
+        --panel: #ffffff;
+        --text: #1d1d1f;
+        --muted: #6b6b70;
+        --line: #e3e3e0;
+        --accent: #c2185b;
+        --code-bg: #f0efec;
+        --added: #2e7d32;
+        --modified: #b26a00;
+        --deleted: #c62828;
+        --renamed: #1565c0;
+        --untracked: #6a1b9a;
+        --mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #121214;
+          --panel: #1b1b1e;
+          --text: #ececee;
+          --muted: #9a9aa2;
+          --line: #2c2c31;
+          --accent: #f06292;
+          --code-bg: #232327;
+          --added: #81c784;
+          --modified: #ffb74d;
+          --deleted: #ef9a9a;
+          --renamed: #90caf9;
+          --untracked: #ce93d8;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      main {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 40px 16px 64px;
+      }
+      header {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 22px;
+        letter-spacing: -0.01em;
+      }
+      .subtitle {
+        margin: 4px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      #gateway { font-family: var(--mono); }
+      button {
+        font: inherit;
+        font-weight: 600;
+        padding: 8px 16px;
+        border: 0;
+        border-radius: 8px;
+        background: var(--accent);
+        color: #fff;
+        cursor: pointer;
+      }
+      button:disabled { opacity: 0.6; cursor: progress; }
+      kbd {
+        font-family: var(--mono);
+        font-size: 11px;
+        padding: 1px 5px;
+        margin-left: 6px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.25);
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      .call {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 14px 18px;
+        background: var(--code-bg);
+        border-bottom: 1px solid var(--line);
+        font-family: var(--mono);
+        font-size: 13px;
+      }
+      .call code { color: var(--text); }
+      .call .await { color: var(--accent); }
+      #call-result { color: var(--muted); }
+      #branch {
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--line);
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--muted);
+      }
+      #error {
+        margin: 0;
+        padding: 12px 18px;
+        color: var(--deleted);
+        font-family: var(--mono);
+        font-size: 13px;
+        white-space: pre-wrap;
+      }
+      .area + .area { border-top: 1px solid var(--line); }
+      .area-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0;
+        padding: 12px 18px 4px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+      }
+      .count {
+        padding: 0 7px;
+        border-radius: 999px;
+        background: var(--code-bg);
+        font-size: 11px;
+      }
+      .area-list {
+        list-style: none;
+        margin: 0;
+        padding: 0 0 8px;
+      }
+      .change {
+        display: grid;
+        grid-template-columns: 24px 1fr auto;
+        align-items: baseline;
+        gap: 10px;
+        padding: 5px 18px;
+        font-family: var(--mono);
+        font-size: 14px;
+      }
+      .code { font-weight: 700; text-align: center; }
+      .path { overflow-wrap: anywhere; }
+      .original { color: var(--muted); }
+      .kind { color: var(--muted); font-size: 12px; }
+      .status-added, .status-copied { color: var(--added); }
+      .status-modified, .status-type-changed { color: var(--modified); }
+      .status-deleted, .status-conflicted { color: var(--deleted); }
+      .status-renamed { color: var(--renamed); }
+      .status-untracked { color: var(--untracked); }
+      .clean {
+        margin: 0;
+        padding: 24px 18px;
+        color: var(--muted);
+        text-align: center;
+      }
+      @media (max-width: 520px) {
+        header { flex-direction: column; align-items: stretch; }
+        .kind { display: none; }
+        .change { grid-template-columns: 24px 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>Quinjet over Graftcode</h1>
+          <p class="subtitle">Changed files from the npm Graft, served by <span id="gateway"></span></p>
+        </div>
+        <button id="refresh" type="button">Refresh<kbd>r</kbd></button>
+      </header>
+      <div class="panel">
+        <div class="call">
+          <code><span class="await">await</span> Quinjet.status("", "")</code>
+          <span id="call-result">calling</span>
+        </div>
+        <div id="branch"></div>
+        <p id="error" hidden></p>
+        <div id="changes"></div>
+      </div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
