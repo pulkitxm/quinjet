@@ -48,7 +48,7 @@ Quinjet discovers the containing Git repository from any nested directory, watch
 - Coalesced background Git work, stale-result rejection, bounded output, and a private metadata cache
 - Every AI agent on the machine can use Quinjet through [Graftcode](https://graftcode.com): `quinjet mcp install` connects Claude Code, Codex, Cursor, VS Code, Windsurf, and Gemini CLI once, and from then on they start Quinjet themselves, with a shared gateway that downloads, starts, and stops on its own
 - Claude inside Quinjet: commit messages (`Ctrl+G` in the commit editor), reviews, failing-check explanations, and pull-request triage from the palette or `quinjet ai`
-- Typed npm, PyPI, NuGet, Maven, and RubyGems clients for Quinjet with `quinjet graft serve --publish`, and calls to other Graftcode gateways with repository context filled in
+- Typed npm, PyPI, NuGet, Maven, and RubyGems clients for Quinjet with `quinjet graft serve --publish`, shown end to end by a [browser frontend demo](docs/guides/graftcode-demo.md), and calls to other Graftcode gateways with repository context filled in
 
 ## Installation
 
@@ -296,6 +296,15 @@ shared Graftcode gateway that Quinjet downloads, starts, and stops on its own.
 Commands that confirm only preview until the agent passes `yes`, and
 `--read-only` limits agents to the 27 reading tools. The palette's Claude entries and `Ctrl+G` in the commit editor use
 the same features. See the [Graftcode guide](docs/guides/graftcode.md).
+
+The npm Graft also works in a browser. The [frontend demo](docs/guides/graftcode-demo.md)
+is a small TypeScript page in [`examples/graftcode-web`](examples/graftcode-web) that
+lists changed files with `Quinjet.status`: stage a file in Quinjet, refresh the page,
+and the new status appears.
+
+<p align="center">
+  <img src="assets/graftcode-demo.webp" alt="Staging two files with quinjet stage, then refreshing the browser page: both move to Staged Changes">
+</p>
 
 Branch rename is local and deliberately does not delete or create remote branches. Open the checkout branch picker with `b` outside History (or `B` anywhere), select a branch, and press `F2` or `Ctrl+R`; its existing upstream configuration is preserved by Git.
 

@@ -366,6 +366,7 @@ SUFFIX_SCANNERS = {
     ".rs": rust_comments,
     ".py": python_comments,
     ".json": json_comments,
+    ".ts": json_comments,
     ".md": html_comments,
     ".html": markup_comments,
     ".svg": markup_comments,
@@ -481,6 +482,9 @@ def selftest() -> int:
         (Path("file.rb"), "=begin\ngone\n=end\n", 1),
         (Path("file.md"), "text\n<!-- gone -->\n", 1),
         (Path("file.json"), '{"url":"https://example.com"}\n', 0),
+        (Path("file.ts"), 'const host = "ws://localhost:7381/ws";\n', 0),
+        (Path("file.ts"), "// plain\nconst x = 1;\n", 1),
+        (Path("file.ts"), "// @ts-expect-error\nconst x: number = 1;\n", 0),
         (Path("file.rs"), "// nosemgrep: rule\n", 0),
         (
             Path("Cargo.lock"),

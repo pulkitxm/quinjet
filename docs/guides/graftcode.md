@@ -262,6 +262,9 @@ Every method is asynchronous and takes two trailing optional arguments,
 `quinjet graft module --out <DIR>` writes the module without starting anything,
 for a container or another host.
 
+The same package runs in a browser. The [frontend demo](graftcode-demo.md)
+builds a page around `Quinjet.status` with Vite and TypeScript.
+
 ## Other gateways
 
 `quinjet graft add`, `tools`, and `call` work with any Graftcode gateway, and
