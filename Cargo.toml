@@ -1,6 +1,6 @@
 [package]
 name = "quinjet"
-version = "0.0.91"
+version = "0.0.92"
 edition = "2024"
 description = "A fast, live, keyboard-first Git source-control interface for the terminal"
 repository = "https://github.com/pulkitxm/quinjet"
@@ -106,7 +106,7 @@ unicode-width = "0.2"
 wild = "2.2"
 
 [target.'cfg(unix)'.dependencies]
-signal-hook = "0.4"
+signal-hook = "0.3"
 
 [target.'cfg(windows)'.dependencies]
 self-replace = "1.5"
