@@ -106,7 +106,7 @@ unicode-width = "0.2"
 wild = "2.2"
 
 [target.'cfg(unix)'.dependencies]
-signal-hook = "0.3"
+signal-hook = "0.4"
 
 [target.'cfg(windows)'.dependencies]
 self-replace = "1.5"
